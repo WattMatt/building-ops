@@ -20,7 +20,11 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { Loader2, Eye, FileText, ChevronRight, User, Building2, Calendar } from 'lucide-react';
+import { Loader2, Eye, FileText, User, Building2, Calendar, Download } from 'lucide-react';
+import { useOrganization } from '@/hooks/useOrganization';
+import { generateFilledFormPdf } from '@/lib/pdfGenerator';
+import { defaultFormFields } from '@/lib/formFields';
+import { toast } from 'sonner';
 
 interface FormTemplate {
   id: string;
@@ -51,6 +55,8 @@ export function FormSubmissionsDialog({
   onOpenChange,
 }: FormSubmissionsDialogProps) {
   const [selectedSubmission, setSelectedSubmission] = useState<SubmissionDetails | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const { organization } = useOrganization();
 
   const { data: submissions, isLoading } = useQuery({
     queryKey: ['form-submissions', form?.id],
@@ -145,6 +151,38 @@ export function FormSubmissionsDialog({
     }
   };
 
+  const handleDownloadPdf = async (submission: SubmissionDetails) => {
+    if (!form) return;
+    
+    setIsDownloading(true);
+    try {
+      const fields = defaultFormFields[form.id] || [];
+      const submitterName = profiles?.[submission.submitted_by] || 'Unknown';
+      
+      await generateFilledFormPdf(
+        { id: form.id, name: form.name, description: form.description, category: form.category },
+        fields,
+        submission.form_data,
+        {
+          name: organization?.name || 'FM Comply',
+          logoUrl: organization?.logo_url,
+          primaryColor: organization?.primary_color || '#2563eb',
+          address: organization?.address,
+          phone: organization?.phone,
+          email: organization?.email,
+        },
+        submitterName,
+        new Date(submission.created_at)
+      );
+      toast.success('PDF downloaded successfully');
+    } catch (error) {
+      console.error('PDF generation error:', error);
+      toast.error('Failed to generate PDF');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl max-h-[90vh] flex flex-col">
@@ -172,14 +210,27 @@ export function FormSubmissionsDialog({
           {selectedSubmission ? (
             // Submission Detail View
             <div className="space-y-6">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSelectedSubmission(null)}
-                className="mb-4"
-              >
-                ← Back to list
-              </Button>
+              <div className="flex items-center justify-between">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedSubmission(null)}
+                >
+                  ← Back to list
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => handleDownloadPdf(selectedSubmission)}
+                  disabled={isDownloading}
+                >
+                  {isDownloading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  Download PDF
+                </Button>
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <div className="flex items-center gap-2 text-sm">
@@ -212,9 +263,9 @@ export function FormSubmissionsDialog({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {Object.entries(selectedSubmission.form_data).map(([key, value]) => (
                     <div key={key} className="border rounded-lg p-3">
-                      <Label className="text-muted-foreground text-xs uppercase tracking-wide">
+                      <span className="text-muted-foreground text-xs uppercase tracking-wide">
                         {key}
-                      </Label>
+                      </span>
                       <p className="mt-1 text-sm break-words">
                         {typeof value === 'boolean' ? (value ? '✓ Yes' : '✗ No') : String(value) || '-'}
                       </p>
@@ -236,7 +287,7 @@ export function FormSubmissionsDialog({
                   <TableHead>Submitted By</TableHead>
                   <TableHead>Building</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="w-[100px]">Actions</TableHead>
+                  <TableHead className="w-[150px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -255,14 +306,24 @@ export function FormSubmissionsDialog({
                     </TableCell>
                     <TableCell>{getStatusBadge(submission.status)}</TableCell>
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setSelectedSubmission(submission)}
-                      >
-                        <Eye className="h-4 w-4 mr-1" />
-                        View
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSelectedSubmission(submission)}
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          View
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleDownloadPdf(submission)}
+                          disabled={isDownloading}
+                        >
+                          <Download className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -278,8 +339,4 @@ export function FormSubmissionsDialog({
       </DialogContent>
     </Dialog>
   );
-}
-
-function Label({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <span className={className}>{children}</span>;
 }
