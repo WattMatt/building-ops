@@ -489,6 +489,50 @@ export type Database = {
           },
         ]
       }
+      form_submissions: {
+        Row: {
+          building_id: string | null
+          created_at: string
+          form_data: Json
+          form_name: string
+          form_template_id: string
+          id: string
+          status: string
+          submitted_by: string
+          updated_at: string
+        }
+        Insert: {
+          building_id?: string | null
+          created_at?: string
+          form_data?: Json
+          form_name: string
+          form_template_id: string
+          id?: string
+          status?: string
+          submitted_by: string
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string | null
+          created_at?: string
+          form_data?: Json
+          form_name?: string
+          form_template_id?: string
+          id?: string
+          status?: string
+          submitted_by?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_submissions_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       issues: {
         Row: {
           assigned_to: string | null
