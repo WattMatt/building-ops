@@ -22,6 +22,7 @@ export default function MapView() {
   const navigate = useNavigate();
   const [mapStyle, setMapStyle] = useState<MapStyle>('satellite');
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
+  const [flyToLocation, setFlyToLocation] = useState<{ lng: number; lat: number } | null>(null);
 
   // Fetch buildings with coordinates
   const { data: buildings, isLoading, error } = useQuery({
@@ -45,7 +46,10 @@ export default function MapView() {
   }, [navigate]);
 
   const handleLocationSelect = useCallback((location: { lng: number; lat: number; name: string }) => {
-    // Find buildings near this location (within ~1km)
+    // Fly to the searched location
+    setFlyToLocation({ lng: location.lng, lat: location.lat });
+    
+    // Find buildings near this location (within ~1km) and select if found
     const nearbyBuilding = buildingsWithCoords.find((b) => {
       const distance = Math.sqrt(
         Math.pow((b.longitude - location.lng) * 111, 2) +
@@ -56,6 +60,8 @@ export default function MapView() {
 
     if (nearbyBuilding) {
       setSelectedBuildingId(nearbyBuilding.id);
+    } else {
+      setSelectedBuildingId(null);
     }
   }, [buildingsWithCoords]);
 
@@ -133,6 +139,7 @@ export default function MapView() {
           buildings={buildingsWithCoords}
           onBuildingClick={handleBuildingClick}
           selectedBuildingId={selectedBuildingId}
+          flyToLocation={flyToLocation}
           mapStyle={mapStyle}
           className="h-[600px]"
         />
