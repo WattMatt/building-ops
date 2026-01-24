@@ -756,6 +756,7 @@ export type Database = {
           id: string
           requires_photo: boolean | null
           requires_signature: boolean | null
+          responsible_party: string | null
           task_description: string | null
           task_name: string
           template_id: string
@@ -766,6 +767,7 @@ export type Database = {
           id?: string
           requires_photo?: boolean | null
           requires_signature?: boolean | null
+          responsible_party?: string | null
           task_description?: string | null
           task_name: string
           template_id: string
@@ -776,6 +778,7 @@ export type Database = {
           id?: string
           requires_photo?: boolean | null
           requires_signature?: boolean | null
+          responsible_party?: string | null
           task_description?: string | null
           task_name?: string
           template_id?: string
