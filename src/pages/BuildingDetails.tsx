@@ -12,6 +12,7 @@ import TenantsTab from '@/components/building/TenantsTab';
 import AssetsTab from '@/components/building/AssetsTab';
 import DocumentsTab from '@/components/building/DocumentsTab';
 import MaintenanceCalendarTab from '@/components/building/MaintenanceCalendarTab';
+import NotesTab from '@/components/building/NotesTab';
 
 interface Building {
   id: string;
@@ -108,6 +109,7 @@ export default function BuildingDetails() {
           <TabsTrigger value="assets">Assets</TabsTrigger>
           <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
+          <TabsTrigger value="notes">Notes</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6 mt-6">
@@ -222,6 +224,10 @@ export default function BuildingDetails() {
 
         <TabsContent value="documents" className="mt-6">
           <DocumentsTab buildingId={building.id} />
+        </TabsContent>
+
+        <TabsContent value="notes" className="mt-6">
+          <NotesTab buildingId={building.id} />
         </TabsContent>
       </Tabs>
     </div>
