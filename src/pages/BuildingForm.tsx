@@ -3,40 +3,53 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useOrganization } from '@/hooks/useOrganization';
+import type { Json } from '@/integrations/supabase/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Building2, User, Phone, Mail, Shield } from 'lucide-react';
+import { ArrowLeft, Building2, User, Shield, Zap, Landmark, Gauge } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
+import ContactSection, { ContactInfo } from '@/components/building/ContactSection';
+import ProfessionalTeamSection, { ProfessionalTeam, ProfessionalContact } from '@/components/building/ProfessionalTeamSection';
+import TariffSection, { UtilityTariffs, UtilityTariff } from '@/components/building/TariffSection';
+
+const contactSchema = z.object({
+  name: z.string().trim().max(100).optional(),
+  phone: z.string().trim().max(20).optional(),
+  email: z.string().trim().email('Invalid email').max(255).optional().or(z.literal('')),
+});
 
 const buildingSchema = z.object({
   name: z.string().trim().min(1, 'Building name is required').max(100, 'Name must be less than 100 characters'),
   address: z.string().trim().min(1, 'Address is required').max(255, 'Address must be less than 255 characters'),
-  assetManager: z.object({
-    name: z.string().trim().max(100).optional(),
-    phone: z.string().trim().max(20).optional(),
-    email: z.string().trim().email('Invalid email').max(255).optional().or(z.literal('')),
-  }),
-  centreManagement: z.object({
-    name: z.string().trim().max(100).optional(),
-    phone: z.string().trim().max(20).optional(),
-    email: z.string().trim().email('Invalid email').max(255).optional().or(z.literal('')),
-  }),
-  securityContact: z.object({
-    name: z.string().trim().max(100).optional(),
-    phone: z.string().trim().max(20).optional(),
-    email: z.string().trim().email('Invalid email').max(255).optional().or(z.literal('')),
-  }),
+  assetManager: contactSchema,
+  centreManagement: contactSchema,
+  securityContact: contactSchema,
+  electricalAuthority: contactSchema.extend({ account_number: z.string().trim().max(50).optional() }),
+  council: contactSchema.extend({ ward_number: z.string().trim().max(50).optional() }),
+  meterReading: contactSchema.extend({ contract_number: z.string().trim().max(50).optional() }),
 });
 
-interface ContactInfo {
-  name: string;
-  phone: string;
-  email: string;
-}
+const emptyContact: ContactInfo = { name: '', phone: '', email: '' };
+const emptyExtendedContact = { name: '', phone: '', email: '', account_number: '' };
+const emptyCouncilContact = { name: '', phone: '', email: '', ward_number: '' };
+const emptyMeterContact = { name: '', phone: '', email: '', contract_number: '' };
+const emptyProfessional: ProfessionalContact = { name: '', company: '', phone: '', email: '' };
+const emptyProfessionalTeam: ProfessionalTeam = {
+  architect: { ...emptyProfessional },
+  civil_engineer: { ...emptyProfessional },
+  structural_engineer: { ...emptyProfessional },
+  electrical_engineer: { ...emptyProfessional },
+  wet_services_engineer: { ...emptyProfessional },
+};
+const emptyTariff: UtilityTariff = { rate: '', unit: '', notes: '' };
+const emptyTariffs: UtilityTariffs = {
+  electricity: { ...emptyTariff },
+  water: { ...emptyTariff },
+};
 
 export default function BuildingForm() {
   const navigate = useNavigate();
@@ -51,9 +64,16 @@ export default function BuildingForm() {
   // Form state
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
-  const [assetManager, setAssetManager] = useState<ContactInfo>({ name: '', phone: '', email: '' });
-  const [centreManagement, setCentreManagement] = useState<ContactInfo>({ name: '', phone: '', email: '' });
-  const [securityContact, setSecurityContact] = useState<ContactInfo>({ name: '', phone: '', email: '' });
+  const [assetManager, setAssetManager] = useState<ContactInfo>({ ...emptyContact });
+  const [centreManagement, setCentreManagement] = useState<ContactInfo>({ ...emptyContact });
+  const [securityContact, setSecurityContact] = useState<ContactInfo>({ ...emptyContact });
+  
+  // New fields
+  const [electricalAuthority, setElectricalAuthority] = useState({ ...emptyExtendedContact });
+  const [council, setCouncil] = useState({ ...emptyCouncilContact });
+  const [meterReading, setMeterReading] = useState({ ...emptyMeterContact });
+  const [professionalTeam, setProfessionalTeam] = useState<ProfessionalTeam>({ ...emptyProfessionalTeam });
+  const [utilityTariffs, setUtilityTariffs] = useState<UtilityTariffs>({ ...emptyTariffs });
 
   useEffect(() => {
     if (isEditing && id) {
@@ -99,6 +119,56 @@ export default function BuildingForm() {
           });
         }
       }
+
+      // Parse new fields
+      const elecAuth = data.electrical_authority as Record<string, any> | null;
+      if (elecAuth) {
+        setElectricalAuthority({
+          name: elecAuth.name || '',
+          phone: elecAuth.phone || '',
+          email: elecAuth.email || '',
+          account_number: elecAuth.account_number || '',
+        });
+      }
+
+      const councilData = data.council_details as Record<string, any> | null;
+      if (councilData) {
+        setCouncil({
+          name: councilData.name || '',
+          phone: councilData.phone || '',
+          email: councilData.email || '',
+          ward_number: councilData.ward_number || '',
+        });
+      }
+
+      const meterData = data.meter_reading_company as Record<string, any> | null;
+      if (meterData) {
+        setMeterReading({
+          name: meterData.name || '',
+          phone: meterData.phone || '',
+          email: meterData.email || '',
+          contract_number: meterData.contract_number || '',
+        });
+      }
+
+      const teamData = data.professional_team as Record<string, any> | null;
+      if (teamData) {
+        setProfessionalTeam({
+          architect: teamData.architect || { ...emptyProfessional },
+          civil_engineer: teamData.civil_engineer || { ...emptyProfessional },
+          structural_engineer: teamData.structural_engineer || { ...emptyProfessional },
+          electrical_engineer: teamData.electrical_engineer || { ...emptyProfessional },
+          wet_services_engineer: teamData.wet_services_engineer || { ...emptyProfessional },
+        });
+      }
+
+      const tariffsData = data.utility_tariffs as Record<string, any> | null;
+      if (tariffsData) {
+        setUtilityTariffs({
+          electricity: tariffsData.electricity || { ...emptyTariff },
+          water: tariffsData.water || { ...emptyTariff },
+        });
+      }
     } catch (error) {
       console.error('Error fetching building:', error);
       toast.error('Failed to load building');
@@ -106,6 +176,12 @@ export default function BuildingForm() {
     } finally {
       setInitialLoading(false);
     }
+  };
+
+  const hasContent = (obj: Record<string, any>): boolean => {
+    return Object.values(obj).some(v => 
+      typeof v === 'string' ? v.trim() !== '' : (typeof v === 'object' ? hasContent(v) : Boolean(v))
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -118,6 +194,9 @@ export default function BuildingForm() {
       assetManager,
       centreManagement,
       securityContact,
+      electricalAuthority,
+      council,
+      meterReading,
     });
 
     if (!validation.success) {
@@ -134,9 +213,9 @@ export default function BuildingForm() {
     setLoading(true);
 
     try {
-      const hasAssetManager = assetManager.name || assetManager.phone || assetManager.email;
-      const hasCentreManagement = centreManagement.name || centreManagement.phone || centreManagement.email;
-      const hasSecurityContact = securityContact.name || securityContact.phone || securityContact.email;
+      const hasAssetManager = hasContent(assetManager);
+      const hasCentreManagement = hasContent(centreManagement);
+      const hasSecurityContact = hasContent(securityContact);
 
       const emergencyContacts: Record<string, any> = {};
       if (hasAssetManager) emergencyContacts.assetManager = assetManager;
@@ -147,7 +226,12 @@ export default function BuildingForm() {
         name: name.trim(),
         address: address.trim(),
         organization_id: organization.id,
-        emergency_contacts: Object.keys(emergencyContacts).length > 0 ? emergencyContacts : null,
+        emergency_contacts: Object.keys(emergencyContacts).length > 0 ? (emergencyContacts as Json) : null,
+        electrical_authority: hasContent(electricalAuthority) ? (electricalAuthority as Json) : null,
+        council_details: hasContent(council) ? (council as Json) : null,
+        meter_reading_company: hasContent(meterReading) ? (meterReading as Json) : null,
+        professional_team: hasContent(professionalTeam) ? (professionalTeam as unknown as Json) : null,
+        utility_tariffs: hasContent(utilityTariffs) ? (utilityTariffs as unknown as Json) : null,
       };
 
       if (isEditing && id) {
@@ -161,7 +245,7 @@ export default function BuildingForm() {
       } else {
         const { error } = await supabase
           .from('buildings')
-          .insert(buildingData);
+          .insert([buildingData]);
 
         if (error) throw error;
         toast.success('Building created successfully');
@@ -190,7 +274,7 @@ export default function BuildingForm() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" onClick={() => navigate('/buildings')}>
@@ -242,170 +326,236 @@ export default function BuildingForm() {
           </CardContent>
         </Card>
 
+        <Separator />
+        <h2 className="text-lg font-semibold text-muted-foreground">Management Contacts</h2>
+
         {/* Asset Manager */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <User className="h-5 w-5" />
-              Asset Manager
-            </CardTitle>
-            <CardDescription>
-              Contact details for the asset manager
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="am-name">Name</Label>
-              <Input
-                id="am-name"
-                placeholder="Asset manager name"
-                value={assetManager.name}
-                onChange={(e) => setAssetManager({ ...assetManager, name: e.target.value })}
-              />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="am-phone">Phone</Label>
-                <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="am-phone"
-                    type="tel"
-                    placeholder="+27 XX XXX XXXX"
-                    value={assetManager.phone}
-                    onChange={(e) => setAssetManager({ ...assetManager, phone: e.target.value })}
-                    className="pl-9"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="am-email">Email</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="am-email"
-                    type="email"
-                    placeholder="email@example.com"
-                    value={assetManager.email}
-                    onChange={(e) => setAssetManager({ ...assetManager, email: e.target.value })}
-                    className="pl-9"
-                  />
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <ContactSection
+          title="Asset Manager"
+          description="Contact details for the asset manager"
+          icon={<User className="h-5 w-5" />}
+          contact={assetManager}
+          onChange={setAssetManager}
+          idPrefix="am"
+          namePlaceholder="Asset manager name"
+        />
 
         {/* Centre Management */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <User className="h-5 w-5" />
-              Centre Management
-            </CardTitle>
-            <CardDescription>
-              Contact details for centre management
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="cm-name">Name</Label>
-              <Input
-                id="cm-name"
-                placeholder="Centre manager name"
-                value={centreManagement.name}
-                onChange={(e) => setCentreManagement({ ...centreManagement, name: e.target.value })}
-              />
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="cm-phone">Phone</Label>
-                <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="cm-phone"
-                    type="tel"
-                    placeholder="+27 XX XXX XXXX"
-                    value={centreManagement.phone}
-                    onChange={(e) => setCentreManagement({ ...centreManagement, phone: e.target.value })}
-                    className="pl-9"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="cm-email">Email</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="cm-email"
-                    type="email"
-                    placeholder="email@example.com"
-                    value={centreManagement.email}
-                    onChange={(e) => setCentreManagement({ ...centreManagement, email: e.target.value })}
-                    className="pl-9"
-                  />
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <ContactSection
+          title="Centre Management"
+          description="Contact details for centre management"
+          icon={<User className="h-5 w-5" />}
+          contact={centreManagement}
+          onChange={setCentreManagement}
+          idPrefix="cm"
+          namePlaceholder="Centre manager name"
+        />
 
         {/* Security Contact */}
+        <ContactSection
+          title="Security Contact"
+          description="Contact details for security"
+          icon={<Shield className="h-5 w-5" />}
+          contact={securityContact}
+          onChange={setSecurityContact}
+          idPrefix="sc"
+          namePlaceholder="Security contact name"
+        />
+
+        <Separator />
+        <h2 className="text-lg font-semibold text-muted-foreground">Utilities & Authorities</h2>
+
+        {/* Electrical Supply Authority */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Shield className="h-5 w-5" />
-              Security Contact
+              <Zap className="h-5 w-5" />
+              Electrical Supply Authority
             </CardTitle>
             <CardDescription>
-              Contact details for security
+              Contact details for your electrical utility provider
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="sc-name">Name</Label>
-              <Input
-                id="sc-name"
-                placeholder="Security contact name"
-                value={securityContact.name}
-                onChange={(e) => setSecurityContact({ ...securityContact, name: e.target.value })}
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="elec-name">Authority Name</Label>
+                <Input
+                  id="elec-name"
+                  placeholder="e.g., Eskom, City Power"
+                  value={electricalAuthority.name}
+                  onChange={(e) => setElectricalAuthority({ ...electricalAuthority, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="elec-account">Account Number</Label>
+                <Input
+                  id="elec-account"
+                  placeholder="Account number"
+                  value={electricalAuthority.account_number}
+                  onChange={(e) => setElectricalAuthority({ ...electricalAuthority, account_number: e.target.value })}
+                />
+              </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="sc-phone">Phone</Label>
-                <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="sc-phone"
-                    type="tel"
-                    placeholder="+27 XX XXX XXXX"
-                    value={securityContact.phone}
-                    onChange={(e) => setSecurityContact({ ...securityContact, phone: e.target.value })}
-                    className="pl-9"
-                  />
-                </div>
+                <Label htmlFor="elec-phone">Phone</Label>
+                <Input
+                  id="elec-phone"
+                  type="tel"
+                  placeholder="+27 XX XXX XXXX"
+                  value={electricalAuthority.phone}
+                  onChange={(e) => setElectricalAuthority({ ...electricalAuthority, phone: e.target.value })}
+                />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="sc-email">Email</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="sc-email"
-                    type="email"
-                    placeholder="email@example.com"
-                    value={securityContact.email}
-                    onChange={(e) => setSecurityContact({ ...securityContact, email: e.target.value })}
-                    className="pl-9"
-                  />
-                </div>
+                <Label htmlFor="elec-email">Email</Label>
+                <Input
+                  id="elec-email"
+                  type="email"
+                  placeholder="email@example.com"
+                  value={electricalAuthority.email}
+                  onChange={(e) => setElectricalAuthority({ ...electricalAuthority, email: e.target.value })}
+                />
               </div>
             </div>
           </CardContent>
         </Card>
 
+        {/* Council Details */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Landmark className="h-5 w-5" />
+              Council
+            </CardTitle>
+            <CardDescription>
+              Local council contact details
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="council-name">Council Name</Label>
+                <Input
+                  id="council-name"
+                  placeholder="e.g., City of Tshwane"
+                  value={council.name}
+                  onChange={(e) => setCouncil({ ...council, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="council-ward">Ward Number</Label>
+                <Input
+                  id="council-ward"
+                  placeholder="Ward number"
+                  value={council.ward_number}
+                  onChange={(e) => setCouncil({ ...council, ward_number: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="council-phone">Phone</Label>
+                <Input
+                  id="council-phone"
+                  type="tel"
+                  placeholder="+27 XX XXX XXXX"
+                  value={council.phone}
+                  onChange={(e) => setCouncil({ ...council, phone: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="council-email">Email</Label>
+                <Input
+                  id="council-email"
+                  type="email"
+                  placeholder="email@example.com"
+                  value={council.email}
+                  onChange={(e) => setCouncil({ ...council, email: e.target.value })}
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Meter Reading Company */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Gauge className="h-5 w-5" />
+              Meter Reading Company
+            </CardTitle>
+            <CardDescription>
+              Contact details for your meter reading service provider
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="meter-name">Company Name</Label>
+                <Input
+                  id="meter-name"
+                  placeholder="Company name"
+                  value={meterReading.name}
+                  onChange={(e) => setMeterReading({ ...meterReading, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="meter-contract">Contract Number</Label>
+                <Input
+                  id="meter-contract"
+                  placeholder="Contract number"
+                  value={meterReading.contract_number}
+                  onChange={(e) => setMeterReading({ ...meterReading, contract_number: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="meter-phone">Phone</Label>
+                <Input
+                  id="meter-phone"
+                  type="tel"
+                  placeholder="+27 XX XXX XXXX"
+                  value={meterReading.phone}
+                  onChange={(e) => setMeterReading({ ...meterReading, phone: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="meter-email">Email</Label>
+                <Input
+                  id="meter-email"
+                  type="email"
+                  placeholder="email@example.com"
+                  value={meterReading.email}
+                  onChange={(e) => setMeterReading({ ...meterReading, email: e.target.value })}
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Separator />
+        <h2 className="text-lg font-semibold text-muted-foreground">Professional Team</h2>
+
+        {/* Professional Team */}
+        <ProfessionalTeamSection
+          team={professionalTeam}
+          onChange={setProfessionalTeam}
+        />
+
+        <Separator />
+        <h2 className="text-lg font-semibold text-muted-foreground">Utility Tariffs</h2>
+
+        {/* Utility Tariffs */}
+        <TariffSection
+          tariffs={utilityTariffs}
+          onChange={setUtilityTariffs}
+        />
+
         {/* Actions */}
-        <div className="flex justify-end gap-4">
+        <div className="flex justify-end gap-4 pt-4">
           <Button
             type="button"
             variant="outline"
