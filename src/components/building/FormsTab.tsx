@@ -11,9 +11,19 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 import { supabase } from '@/integrations/supabase/client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/contexts/AuthContext';
 import { format } from 'date-fns';
 import {
   Key,
@@ -31,6 +41,9 @@ import {
   Loader2,
   Download,
   Image,
+  CheckCircle,
+  XCircle,
+  Clock,
 } from 'lucide-react';
 import { FormPreviewDialog } from '@/components/forms/FormPreviewDialog';
 import { FillableFormDialog } from '@/components/forms/FillableFormDialog';
@@ -61,6 +74,9 @@ interface SubmissionDetails {
   status: string;
   created_at: string;
   photo_urls?: string[];
+  reviewed_by?: string;
+  reviewed_at?: string;
+  review_notes?: string;
 }
 
 const formTemplates: FormTemplate[] = [
@@ -91,11 +107,17 @@ const categoryColors: Record<string, string> = {
 };
 
 export default function FormsTab({ buildingId, buildingName }: FormsTabProps) {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [selectedForm, setSelectedForm] = useState<FormTemplate | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [fillOpen, setFillOpen] = useState(false);
   const [selectedSubmission, setSelectedSubmission] = useState<SubmissionDetails | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [actionDialogOpen, setActionDialogOpen] = useState(false);
+  const [actionType, setActionType] = useState<'approve' | 'reject' | 'review' | null>(null);
+  const [actionNotes, setActionNotes] = useState('');
+  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
   const { organization } = useOrganization();
 
   // Fetch submissions for this building
@@ -104,7 +126,7 @@ export default function FormsTab({ buildingId, buildingName }: FormsTabProps) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('form_submissions')
-        .select('id, form_template_id, form_name, form_data, submitted_by, status, created_at, photo_urls')
+        .select('id, form_template_id, form_name, form_data, submitted_by, status, created_at, photo_urls, reviewed_by, reviewed_at, review_notes')
         .eq('building_id', buildingId)
         .order('created_at', { ascending: false });
 
@@ -182,28 +204,70 @@ export default function FormsTab({ buildingId, buildingName }: FormsTabProps) {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'submitted':
-        return <Badge variant="default">Submitted</Badge>;
+        return <Badge variant="outline" className="border-amber-500 text-amber-600"><Clock className="h-3 w-3 mr-1" />Pending</Badge>;
       case 'reviewed':
-        return <Badge variant="secondary">Reviewed</Badge>;
+        return <Badge variant="secondary"><Eye className="h-3 w-3 mr-1" />Reviewed</Badge>;
       case 'approved':
-        return <Badge className="bg-success text-success-foreground">Approved</Badge>;
+        return <Badge className="bg-green-600 text-white hover:bg-green-700"><CheckCircle className="h-3 w-3 mr-1" />Approved</Badge>;
       case 'rejected':
-        return <Badge variant="destructive">Rejected</Badge>;
+        return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Rejected</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
     }
   };
+
+  const handleOpenAction = (type: 'approve' | 'reject' | 'review') => {
+    setActionType(type);
+    setActionNotes('');
+    setActionDialogOpen(true);
+  };
+
+  const handleSubmitAction = async () => {
+    if (!selectedSubmission || !actionType || !user) return;
+
+    setIsSubmittingAction(true);
+    try {
+      const { error } = await supabase
+        .from('form_submissions')
+        .update({
+          status: actionType === 'review' ? 'reviewed' : actionType === 'approve' ? 'approved' : 'rejected',
+          reviewed_by: user.id,
+          reviewed_at: new Date().toISOString(),
+          review_notes: actionNotes || null,
+        })
+        .eq('id', selectedSubmission.id);
+
+      if (error) throw error;
+
+      toast.success(`Submission ${actionType === 'review' ? 'marked as reviewed' : actionType === 'approve' ? 'approved' : 'rejected'}`);
+      
+      setActionDialogOpen(false);
+      setSelectedSubmission(null);
+      refetch();
+      queryClient.invalidateQueries({ queryKey: ['building-form-submissions'] });
+    } catch (error: any) {
+      console.error('Action error:', error);
+      toast.error(error.message || 'Failed to update submission');
+    } finally {
+      setIsSubmittingAction(false);
+    }
+  };
+
+  const pendingCount = submissions?.filter(s => s.status === 'submitted').length || 0;
 
   return (
     <div className="space-y-6">
       <Tabs defaultValue="fill" className="w-full">
         <TabsList>
           <TabsTrigger value="fill">Fill Forms</TabsTrigger>
-          <TabsTrigger value="submissions">
+          <TabsTrigger value="submissions" className="flex items-center gap-2">
             Submissions
             {submissions && submissions.length > 0 && (
-              <Badge variant="secondary" className="ml-2">
-                {submissions.length}
+              <Badge variant="secondary">{submissions.length}</Badge>
+            )}
+            {pendingCount > 0 && (
+              <Badge variant="outline" className="border-amber-500 text-amber-600">
+                {pendingCount} pending
               </Badge>
             )}
           </TabsTrigger>
@@ -246,19 +310,20 @@ export default function FormsTab({ buildingId, buildingName }: FormsTabProps) {
             // Submission Detail View
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-4">
                   <div>
                     <CardTitle>{selectedSubmission.form_name}</CardTitle>
                     <p className="text-sm text-muted-foreground mt-1">
                       Submitted on {format(new Date(selectedSubmission.created_at), 'PPpp')}
                     </p>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 flex-wrap">
                     <Button variant="outline" size="sm" onClick={() => setSelectedSubmission(null)}>
                       ← Back
                     </Button>
                     <Button
                       size="sm"
+                      variant="outline"
                       onClick={() => handleDownloadPdf(selectedSubmission)}
                       disabled={isDownloading}
                     >
@@ -273,12 +338,92 @@ export default function FormsTab({ buildingId, buildingName }: FormsTabProps) {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="flex items-center gap-4 mb-6 text-sm">
+                <div className="flex items-center gap-4 mb-6 text-sm flex-wrap">
                   <span className="text-muted-foreground">By:</span>
                   <span className="font-medium">{profiles?.[selectedSubmission.submitted_by] || 'Unknown'}</span>
                   <span className="text-muted-foreground">Status:</span>
                   {getStatusBadge(selectedSubmission.status)}
                 </div>
+
+                {/* Review Info */}
+                {selectedSubmission.reviewed_by && (
+                  <div className="mb-6 p-4 rounded-lg bg-muted/50 border">
+                    <div className="flex items-center gap-2 text-sm mb-2">
+                      <span className="text-muted-foreground">Reviewed by:</span>
+                      <span className="font-medium">{profiles?.[selectedSubmission.reviewed_by] || 'Unknown'}</span>
+                      {selectedSubmission.reviewed_at && (
+                        <>
+                          <span className="text-muted-foreground">on</span>
+                          <span>{format(new Date(selectedSubmission.reviewed_at), 'PP p')}</span>
+                        </>
+                      )}
+                    </div>
+                    {selectedSubmission.review_notes && (
+                      <div className="text-sm">
+                        <span className="text-muted-foreground">Notes: </span>
+                        <span>{selectedSubmission.review_notes}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Action Buttons for Pending Submissions */}
+                {selectedSubmission.status === 'submitted' && (
+                  <div className="mb-6 p-4 rounded-lg border-2 border-dashed border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700">
+                    <p className="text-sm text-amber-800 dark:text-amber-200 mb-3 font-medium">This submission requires review</p>
+                    <div className="flex gap-2 flex-wrap">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleOpenAction('review')}
+                      >
+                        <Eye className="h-4 w-4 mr-1" />
+                        Mark as Reviewed
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                        onClick={() => handleOpenAction('approve')}
+                      >
+                        <CheckCircle className="h-4 w-4 mr-1" />
+                        Approve
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => handleOpenAction('reject')}
+                      >
+                        <XCircle className="h-4 w-4 mr-1" />
+                        Reject
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Action buttons for reviewed submissions */}
+                {selectedSubmission.status === 'reviewed' && (
+                  <div className="mb-6 p-4 rounded-lg border bg-muted/30">
+                    <p className="text-sm text-muted-foreground mb-3">Final decision required</p>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                        onClick={() => handleOpenAction('approve')}
+                      >
+                        <CheckCircle className="h-4 w-4 mr-1" />
+                        Approve
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => handleOpenAction('reject')}
+                      >
+                        <XCircle className="h-4 w-4 mr-1" />
+                        Reject
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {Object.entries(selectedSubmission.form_data).map(([key, value]) => {
@@ -395,6 +540,64 @@ export default function FormsTab({ buildingId, buildingName }: FormsTabProps) {
         preselectedBuildingName={buildingName}
         onSubmitSuccess={() => refetch()}
       />
+
+      {/* Action Confirmation Dialog */}
+      <Dialog open={actionDialogOpen} onOpenChange={setActionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {actionType === 'approve' && 'Approve Submission'}
+              {actionType === 'reject' && 'Reject Submission'}
+              {actionType === 'review' && 'Mark as Reviewed'}
+            </DialogTitle>
+            <DialogDescription>
+              {actionType === 'approve' && 'Confirm that this form submission meets all requirements.'}
+              {actionType === 'reject' && 'Please provide a reason for rejecting this submission.'}
+              {actionType === 'review' && 'Mark this submission as reviewed for further action.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            <Label htmlFor="notes">
+              {actionType === 'reject' ? 'Reason for Rejection *' : 'Notes (optional)'}
+            </Label>
+            <Textarea
+              id="notes"
+              placeholder={
+                actionType === 'reject' 
+                  ? 'Please explain why this submission is being rejected...'
+                  : 'Add any notes or comments...'
+              }
+              value={actionNotes}
+              onChange={(e) => setActionNotes(e.target.value)}
+              className="mt-2"
+              rows={4}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setActionDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmitAction}
+              disabled={isSubmittingAction || (actionType === 'reject' && !actionNotes.trim())}
+              className={
+                actionType === 'approve' 
+                  ? 'bg-green-600 hover:bg-green-700' 
+                  : actionType === 'reject' 
+                    ? 'bg-destructive hover:bg-destructive/90' 
+                    : ''
+              }
+            >
+              {isSubmittingAction && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {actionType === 'approve' && 'Approve'}
+              {actionType === 'reject' && 'Reject'}
+              {actionType === 'review' && 'Mark Reviewed'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -4,11 +4,15 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 import {
   Table,
   TableBody,
@@ -18,9 +22,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { supabase } from '@/integrations/supabase/client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/contexts/AuthContext';
 import { format } from 'date-fns';
-import { Loader2, Eye, FileText, User, Building2, Calendar, Download, Image } from 'lucide-react';
+import { Loader2, Eye, FileText, User, Building2, Calendar, Download, Image, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { useOrganization } from '@/hooks/useOrganization';
 import { generateFilledFormPdf } from '@/lib/pdfGenerator';
 import { defaultFormFields, FormField } from '@/lib/formFields';
@@ -48,6 +53,9 @@ interface SubmissionDetails {
   status: string;
   created_at: string;
   photo_urls?: string[];
+  reviewed_by?: string;
+  reviewed_at?: string;
+  review_notes?: string;
 }
 
 export function FormSubmissionsDialog({
@@ -55,11 +63,17 @@ export function FormSubmissionsDialog({
   open,
   onOpenChange,
 }: FormSubmissionsDialogProps) {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [selectedSubmission, setSelectedSubmission] = useState<SubmissionDetails | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [actionDialogOpen, setActionDialogOpen] = useState(false);
+  const [actionType, setActionType] = useState<'approve' | 'reject' | 'review' | null>(null);
+  const [actionNotes, setActionNotes] = useState('');
+  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
   const { organization } = useOrganization();
 
-  const { data: submissions, isLoading } = useQuery({
+  const { data: submissions, isLoading, refetch } = useQuery({
     queryKey: ['form-submissions', form?.id],
     queryFn: async () => {
       if (!form) return [];
@@ -72,7 +86,10 @@ export function FormSubmissionsDialog({
           building_id,
           status,
           created_at,
-          photo_urls
+          photo_urls,
+          reviewed_by,
+          reviewed_at,
+          review_notes
         `)
         .eq('form_template_id', form.id)
         .order('created_at', { ascending: false });
@@ -141,15 +158,52 @@ export function FormSubmissionsDialog({
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'submitted':
-        return <Badge variant="default">Submitted</Badge>;
+        return <Badge variant="outline" className="border-amber-500 text-amber-600"><Clock className="h-3 w-3 mr-1" />Pending</Badge>;
       case 'reviewed':
-        return <Badge variant="secondary">Reviewed</Badge>;
+        return <Badge variant="secondary"><Eye className="h-3 w-3 mr-1" />Reviewed</Badge>;
       case 'approved':
-        return <Badge className="bg-success text-success-foreground">Approved</Badge>;
+        return <Badge className="bg-green-600 text-white hover:bg-green-700"><CheckCircle className="h-3 w-3 mr-1" />Approved</Badge>;
       case 'rejected':
-        return <Badge variant="destructive">Rejected</Badge>;
+        return <Badge variant="destructive"><XCircle className="h-3 w-3 mr-1" />Rejected</Badge>;
       default:
         return <Badge variant="outline">{status}</Badge>;
+    }
+  };
+
+  const handleOpenAction = (type: 'approve' | 'reject' | 'review') => {
+    setActionType(type);
+    setActionNotes('');
+    setActionDialogOpen(true);
+  };
+
+  const handleSubmitAction = async () => {
+    if (!selectedSubmission || !actionType || !user) return;
+
+    setIsSubmittingAction(true);
+    try {
+      const { error } = await supabase
+        .from('form_submissions')
+        .update({
+          status: actionType === 'review' ? 'reviewed' : actionType === 'approve' ? 'approved' : 'rejected',
+          reviewed_by: user.id,
+          reviewed_at: new Date().toISOString(),
+          review_notes: actionNotes || null,
+        })
+        .eq('id', selectedSubmission.id);
+
+      if (error) throw error;
+
+      toast.success(`Submission ${actionType === 'review' ? 'marked as reviewed' : actionType === 'approve' ? 'approved' : 'rejected'}`);
+      
+      setActionDialogOpen(false);
+      setSelectedSubmission(null);
+      refetch();
+      queryClient.invalidateQueries({ queryKey: ['form-submissions'] });
+    } catch (error: any) {
+      console.error('Action error:', error);
+      toast.error(error.message || 'Failed to update submission');
+    } finally {
+      setIsSubmittingAction(false);
     }
   };
 
@@ -257,6 +311,86 @@ export function FormSubmissionsDialog({
                   {getStatusBadge(selectedSubmission.status)}
                 </div>
               </div>
+
+              {/* Review Info */}
+              {selectedSubmission.reviewed_by && (
+                <div className="p-4 rounded-lg bg-muted/50 border mb-4">
+                  <div className="flex items-center gap-2 text-sm mb-2">
+                    <span className="text-muted-foreground">Reviewed by:</span>
+                    <span className="font-medium">{profiles?.[selectedSubmission.reviewed_by] || 'Unknown'}</span>
+                    {selectedSubmission.reviewed_at && (
+                      <>
+                        <span className="text-muted-foreground">on</span>
+                        <span>{format(new Date(selectedSubmission.reviewed_at), 'PP p')}</span>
+                      </>
+                    )}
+                  </div>
+                  {selectedSubmission.review_notes && (
+                    <div className="text-sm">
+                      <span className="text-muted-foreground">Notes: </span>
+                      <span>{selectedSubmission.review_notes}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Action Buttons for Pending Submissions */}
+              {selectedSubmission.status === 'submitted' && (
+                <div className="p-4 rounded-lg border-2 border-dashed border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700 mb-4">
+                  <p className="text-sm text-amber-800 dark:text-amber-200 mb-3 font-medium">This submission requires review</p>
+                  <div className="flex gap-2 flex-wrap">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleOpenAction('review')}
+                    >
+                      <Eye className="h-4 w-4 mr-1" />
+                      Mark as Reviewed
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="bg-green-600 hover:bg-green-700 text-white"
+                      onClick={() => handleOpenAction('approve')}
+                    >
+                      <CheckCircle className="h-4 w-4 mr-1" />
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => handleOpenAction('reject')}
+                    >
+                      <XCircle className="h-4 w-4 mr-1" />
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Action buttons for reviewed submissions */}
+              {selectedSubmission.status === 'reviewed' && (
+                <div className="p-4 rounded-lg border bg-muted/30 mb-4">
+                  <p className="text-sm text-muted-foreground mb-3">Final decision required</p>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      className="bg-green-600 hover:bg-green-700 text-white"
+                      onClick={() => handleOpenAction('approve')}
+                    >
+                      <CheckCircle className="h-4 w-4 mr-1" />
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => handleOpenAction('reject')}
+                    >
+                      <XCircle className="h-4 w-4 mr-1" />
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               <Separator />
 
@@ -398,6 +532,64 @@ export function FormSubmissionsDialog({
           )}
         </ScrollArea>
       </DialogContent>
+
+      {/* Action Confirmation Dialog */}
+      <Dialog open={actionDialogOpen} onOpenChange={setActionDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {actionType === 'approve' && 'Approve Submission'}
+              {actionType === 'reject' && 'Reject Submission'}
+              {actionType === 'review' && 'Mark as Reviewed'}
+            </DialogTitle>
+            <DialogDescription>
+              {actionType === 'approve' && 'Confirm that this form submission meets all requirements.'}
+              {actionType === 'reject' && 'Please provide a reason for rejecting this submission.'}
+              {actionType === 'review' && 'Mark this submission as reviewed for further action.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4">
+            <Label htmlFor="action-notes">
+              {actionType === 'reject' ? 'Reason for Rejection *' : 'Notes (optional)'}
+            </Label>
+            <Textarea
+              id="action-notes"
+              placeholder={
+                actionType === 'reject' 
+                  ? 'Please explain why this submission is being rejected...'
+                  : 'Add any notes or comments...'
+              }
+              value={actionNotes}
+              onChange={(e) => setActionNotes(e.target.value)}
+              className="mt-2"
+              rows={4}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setActionDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmitAction}
+              disabled={isSubmittingAction || (actionType === 'reject' && !actionNotes.trim())}
+              className={
+                actionType === 'approve' 
+                  ? 'bg-green-600 hover:bg-green-700' 
+                  : actionType === 'reject' 
+                    ? 'bg-destructive hover:bg-destructive/90' 
+                    : ''
+              }
+            >
+              {isSubmittingAction && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {actionType === 'approve' && 'Approve'}
+              {actionType === 'reject' && 'Reject'}
+              {actionType === 'review' && 'Mark Reviewed'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }
