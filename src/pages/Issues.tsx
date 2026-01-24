@@ -18,12 +18,10 @@ import {
   Search,
   Building2,
   Clock,
-  User,
   Calendar,
-  Filter,
+  Loader2,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { toast } from 'sonner';
 import { format } from 'date-fns';
 
 type IssuePriority = 'low' | 'medium' | 'high' | 'critical';
@@ -39,50 +37,6 @@ interface Issue {
   created_at: string;
   building_name?: string;
 }
-
-// Mock data for now
-const mockIssues: Issue[] = [
-  {
-    id: '1',
-    title: 'HVAC not cooling properly in Zone A',
-    description: 'Air conditioning unit in the food court area is not maintaining temperature',
-    priority: 'high',
-    status: 'open',
-    deadline: '2024-01-25',
-    created_at: '2024-01-20T10:00:00Z',
-    building_name: 'Menlyn Mall',
-  },
-  {
-    id: '2',
-    title: 'Elevator maintenance overdue',
-    description: 'Main elevator has exceeded scheduled maintenance interval',
-    priority: 'critical',
-    status: 'escalated',
-    deadline: '2024-01-22',
-    created_at: '2024-01-18T14:30:00Z',
-    building_name: 'Brooklyn Mall',
-  },
-  {
-    id: '3',
-    title: 'Parking lot lighting issue',
-    description: 'Several lights in Section C are flickering or not working',
-    priority: 'medium',
-    status: 'in_progress',
-    deadline: '2024-01-26',
-    created_at: '2024-01-21T09:00:00Z',
-    building_name: 'Hatfield Square',
-  },
-  {
-    id: '4',
-    title: 'Water leak in restroom',
-    description: 'Minor leak detected under sink in ladies restroom, Level 2',
-    priority: 'medium',
-    status: 'resolved',
-    deadline: '2024-01-20',
-    created_at: '2024-01-19T11:00:00Z',
-    building_name: 'Centurion Mall',
-  },
-];
 
 const priorityColors: Record<IssuePriority, string> = {
   low: 'bg-muted text-muted-foreground',
@@ -107,11 +61,48 @@ const statusLabels: Record<IssueStatus, string> = {
 
 export default function Issues() {
   const { isAdminOrManager } = useAuth();
-  const [issues, setIssues] = useState<Issue[]>(mockIssues);
-  const [loading, setLoading] = useState(false);
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<IssueStatus | 'all'>('all');
   const [priorityFilter, setPriorityFilter] = useState<IssuePriority | 'all'>('all');
+
+  useEffect(() => {
+    fetchIssues();
+  }, []);
+
+  const fetchIssues = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('issues')
+        .select(`
+          id,
+          title,
+          description,
+          priority,
+          status,
+          deadline,
+          created_at,
+          building_id,
+          buildings (name)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const formattedIssues = (data || []).map(issue => ({
+        ...issue,
+        building_name: (issue.buildings as any)?.name || 'Unknown',
+      }));
+
+      setIssues(formattedIssues);
+    } catch (error) {
+      console.error('Error fetching issues:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filteredIssues = issues.filter((issue) => {
     const matchesSearch =
@@ -122,9 +113,6 @@ export default function Issues() {
     return matchesSearch && matchesStatus && matchesPriority;
   });
 
-  const openIssues = filteredIssues.filter((i) => i.status !== 'resolved');
-  const resolvedIssues = filteredIssues.filter((i) => i.status === 'resolved');
-
   const stats = {
     total: issues.length,
     open: issues.filter((i) => i.status === 'open').length,
@@ -132,6 +120,14 @@ export default function Issues() {
     escalated: issues.filter((i) => i.status === 'escalated').length,
     resolved: issues.filter((i) => i.status === 'resolved').length,
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
