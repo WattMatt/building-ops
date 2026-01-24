@@ -278,6 +278,29 @@ export function FillableFormDialog({
 
       if (error) throw error;
 
+      // Send email notification to managers (fire and forget)
+      if (selectedBuilding) {
+        const buildingName = preselectedBuildingName || 
+          buildings?.find(b => b.id === selectedBuilding)?.name || 
+          'Unknown Building';
+        
+        supabase.functions.invoke('notify-form-submission', {
+          body: {
+            formName: form.name,
+            buildingId: selectedBuilding,
+            buildingName,
+            submittedBy: user.email || 'Unknown User',
+            submittedAt: new Date().toISOString(),
+          }
+        }).then(({ error: notifyError }) => {
+          if (notifyError) {
+            console.error('Failed to send notification:', notifyError);
+          } else {
+            console.log('Manager notification sent');
+          }
+        });
+      }
+
       toast.success('Form submitted successfully');
       onOpenChange(false);
       onSubmitSuccess?.();

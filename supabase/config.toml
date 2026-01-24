@@ -1,1 +1,7 @@
 project_id = "fawfqyhhmvhfdtxzglki"
+
+[functions.delete-account]
+verify_jwt = false
+
+[functions.notify-form-submission]
+verify_jwt = false
