@@ -20,7 +20,7 @@ import { MAP_STYLES, MapStyle } from '@/lib/mapbox';
 
 export default function MapView() {
   const navigate = useNavigate();
-  const [mapStyle, setMapStyle] = useState<MapStyle>('streets');
+  const [mapStyle, setMapStyle] = useState<MapStyle>('satellite');
   const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
 
   // Fetch buildings with coordinates
