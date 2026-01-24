@@ -47,6 +47,221 @@ export type Database = {
         }
         Relationships: []
       }
+      building_assets: {
+        Row: {
+          building_id: string
+          category: string
+          created_at: string
+          id: string
+          installation_date: string | null
+          last_service_date: string | null
+          location: string | null
+          manufacturer: string | null
+          model: string | null
+          name: string
+          next_service_date: string | null
+          notes: string | null
+          serial_number: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          category: string
+          created_at?: string
+          id?: string
+          installation_date?: string | null
+          last_service_date?: string | null
+          location?: string | null
+          manufacturer?: string | null
+          model?: string | null
+          name: string
+          next_service_date?: string | null
+          notes?: string | null
+          serial_number?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          category?: string
+          created_at?: string
+          id?: string
+          installation_date?: string | null
+          last_service_date?: string | null
+          location?: string | null
+          manufacturer?: string | null
+          model?: string | null
+          name?: string
+          next_service_date?: string | null
+          notes?: string | null
+          serial_number?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "building_assets_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      building_checklist_items: {
+        Row: {
+          building_id: string
+          created_at: string
+          created_by: string | null
+          frequency: string
+          id: string
+          is_active: boolean | null
+          requires_photo: boolean | null
+          requires_signature: boolean | null
+          responsible_role: string
+          task_description: string | null
+          task_name: string
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          created_at?: string
+          created_by?: string | null
+          frequency?: string
+          id?: string
+          is_active?: boolean | null
+          requires_photo?: boolean | null
+          requires_signature?: boolean | null
+          responsible_role?: string
+          task_description?: string | null
+          task_name: string
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          created_at?: string
+          created_by?: string | null
+          frequency?: string
+          id?: string
+          is_active?: boolean | null
+          requires_photo?: boolean | null
+          requires_signature?: boolean | null
+          responsible_role?: string
+          task_description?: string | null
+          task_name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "building_checklist_items_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      building_documents: {
+        Row: {
+          building_id: string
+          created_at: string
+          document_type: string
+          expiry_date: string | null
+          file_url: string | null
+          id: string
+          issue_date: string | null
+          issuing_authority: string | null
+          name: string
+          notes: string | null
+          reference_number: string | null
+          updated_at: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          building_id: string
+          created_at?: string
+          document_type: string
+          expiry_date?: string | null
+          file_url?: string | null
+          id?: string
+          issue_date?: string | null
+          issuing_authority?: string | null
+          name: string
+          notes?: string | null
+          reference_number?: string | null
+          updated_at?: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          building_id?: string
+          created_at?: string
+          document_type?: string
+          expiry_date?: string | null
+          file_url?: string | null
+          id?: string
+          issue_date?: string | null
+          issuing_authority?: string | null
+          name?: string
+          notes?: string | null
+          reference_number?: string | null
+          updated_at?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "building_documents_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      building_notes: {
+        Row: {
+          building_id: string
+          category: string | null
+          content: string
+          created_at: string
+          created_by: string
+          id: string
+          is_pinned: boolean | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          category?: string | null
+          content: string
+          created_at?: string
+          created_by: string
+          id?: string
+          is_pinned?: boolean | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          category?: string | null
+          content?: string
+          created_at?: string
+          created_by?: string
+          id?: string
+          is_pinned?: boolean | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "building_notes_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       buildings: {
         Row: {
           address: string
