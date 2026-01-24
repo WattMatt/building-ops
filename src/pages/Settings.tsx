@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,6 +15,7 @@ import {
   Palette,
   Shield,
   Upload,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -24,6 +26,9 @@ export default function Settings() {
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [overdueAlerts, setOverdueAlerts] = useState(true);
   const [dailyDigest, setDailyDigest] = useState(false);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSaveOrg = () => {
     toast.success('Organization settings saved');
@@ -31,6 +36,57 @@ export default function Settings() {
 
   const handleSaveNotifications = () => {
     toast.success('Notification preferences saved');
+  };
+
+  const handleLogoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const validTypes = ['image/png', 'image/svg+xml', 'image/jpeg', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      toast.error('Please upload a PNG, SVG, JPEG, or WebP image');
+      return;
+    }
+
+    // Validate file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('File size must be less than 2MB');
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `org-logo-${Date.now()}.${fileExt}`;
+      const filePath = `logos/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('organization-logos')
+        .upload(filePath, file, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('organization-logos')
+        .getPublicUrl(filePath);
+
+      setLogoUrl(publicUrl);
+      toast.success('Logo uploaded successfully');
+    } catch (error) {
+      console.error('Upload error:', error);
+      toast.error('Failed to upload logo');
+    } finally {
+      setIsUploading(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const triggerFileUpload = () => {
+    fileInputRef.current?.click();
   };
 
   return (
@@ -188,12 +244,35 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label>Organization Logo</Label>
                     <div className="flex items-center gap-4">
-                      <div className="h-20 w-20 rounded-lg bg-muted flex items-center justify-center">
-                        <Building2 className="h-8 w-8 text-muted-foreground" />
+                      <div className="h-20 w-20 rounded-lg bg-muted flex items-center justify-center overflow-hidden">
+                        {logoUrl ? (
+                          <img 
+                            src={logoUrl} 
+                            alt="Organization logo" 
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <Building2 className="h-8 w-8 text-muted-foreground" />
+                        )}
                       </div>
-                      <Button variant="outline">
-                        <Upload className="h-4 w-4 mr-2" />
-                        Upload Logo
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/png,image/svg+xml,image/jpeg,image/webp"
+                        onChange={handleLogoUpload}
+                        className="hidden"
+                      />
+                      <Button 
+                        variant="outline" 
+                        onClick={triggerFileUpload}
+                        disabled={isUploading}
+                      >
+                        {isUploading ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Upload className="h-4 w-4 mr-2" />
+                        )}
+                        {isUploading ? 'Uploading...' : 'Upload Logo'}
                       </Button>
                     </div>
                     <p className="text-sm text-muted-foreground">
