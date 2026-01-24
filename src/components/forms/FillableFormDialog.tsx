@@ -1,7 +1,4 @@
 import { useState, useEffect } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import {
   Dialog,
   DialogContent,
@@ -26,8 +23,9 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
+import { useOrganization } from '@/hooks/useOrganization';
 import { toast } from 'sonner';
-import { Loader2, Send, Save, Building2 } from 'lucide-react';
+import { Loader2, Send, Building2, ClipboardCheck } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 
 interface FormField {
@@ -63,6 +61,7 @@ export function FillableFormDialog({
   onSubmitSuccess,
 }: FillableFormDialogProps) {
   const { user } = useAuth();
+  const { organization } = useOrganization();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [selectedBuilding, setSelectedBuilding] = useState<string>('');
@@ -279,10 +278,41 @@ export function FillableFormDialog({
     );
   };
 
+  const orgName = organization?.name || 'FM Comply';
+  const logoUrl = organization?.logo_url;
+  const primaryColor = organization?.primary_color || '#2563eb';
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
-        <DialogHeader className="flex-shrink-0">
+      <DialogContent className="max-w-4xl h-[90vh] flex flex-col overflow-hidden">
+        {/* Corporate Branding Header */}
+        <div className="flex-shrink-0 pb-3 border-b-4" style={{ borderColor: primaryColor }}>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {logoUrl ? (
+                <img src={logoUrl} alt={orgName} className="h-10 w-10 rounded-lg object-contain" />
+              ) : (
+                <div 
+                  className="h-10 w-10 rounded-lg flex items-center justify-center"
+                  style={{ backgroundColor: primaryColor }}
+                >
+                  <ClipboardCheck className="h-5 w-5 text-white" />
+                </div>
+              )}
+              <div>
+                <span className="font-semibold text-sm" style={{ color: primaryColor }}>
+                  {orgName}
+                </span>
+                <p className="text-xs text-muted-foreground">Digital Form Submission</p>
+              </div>
+            </div>
+            <Badge variant="outline" className="text-xs">
+              {form.category}
+            </Badge>
+          </div>
+        </div>
+
+        <DialogHeader className="flex-shrink-0 pt-4">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
               {form.icon}
@@ -294,10 +324,10 @@ export function FillableFormDialog({
           </div>
         </DialogHeader>
 
-        <Separator className="my-4" />
+        <Separator className="my-4 flex-shrink-0" />
 
-        <ScrollArea className="flex-1 pr-4">
-          <div className="space-y-6">
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="space-y-6 pr-4 pb-4">
             {/* Building Selection */}
             <div className="space-y-2">
               <Label className="flex items-center gap-2">
@@ -333,7 +363,7 @@ export function FillableFormDialog({
           </div>
         </ScrollArea>
 
-        <Separator className="my-4" />
+        <Separator className="my-4 flex-shrink-0" />
 
         <DialogFooter className="flex-shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
