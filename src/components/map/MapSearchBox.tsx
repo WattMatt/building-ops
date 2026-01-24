@@ -20,7 +20,7 @@ interface MapSearchBoxProps {
 
 export function MapSearchBox({
   onLocationSelect,
-  placeholder = 'Search streets, regions, landmarks...',
+  placeholder = 'Search locations...',
   className,
 }: MapSearchBoxProps) {
   const [query, setQuery] = useState('');
@@ -130,7 +130,7 @@ export function MapSearchBox({
   return (
     <div ref={containerRef} className={cn('relative', className)}>
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <Search className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           ref={inputRef}
           type="text"
@@ -138,19 +138,19 @@ export function MapSearchBox({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => results.length > 0 && setIsOpen(true)}
-          className="pl-9 pr-9"
+          className="pl-8 sm:pl-9 pr-8 sm:pr-9 h-9 sm:h-10 text-sm"
         />
         {isLoading ? (
-          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
+          <Loader2 className="absolute right-2.5 sm:right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
         ) : query ? (
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6"
+            className="absolute right-0.5 sm:right-1 top-1/2 -translate-y-1/2 h-7 w-7 sm:h-6 sm:w-6"
             onClick={clearSearch}
           >
-            <X className="h-3 w-3" />
+            <X className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
           </Button>
         ) : null}
       </div>

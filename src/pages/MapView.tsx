@@ -148,25 +148,25 @@ export default function MapView() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Map View</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-xl sm:text-2xl font-bold">Map View</h1>
+          <p className="text-sm text-muted-foreground">
             View your buildings on an interactive map
           </p>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
           <MapSearchBox
             onLocationSelect={handleLocationSelect}
-            className="w-full sm:w-80"
+            className="w-full sm:w-72 lg:w-80"
           />
 
           <Select value={mapStyle} onValueChange={(v) => setMapStyle(v as MapStyle)}>
-            <SelectTrigger className="w-40">
-              <Layers className="h-4 w-4 mr-2" />
+            <SelectTrigger className="w-full sm:w-36">
+              <Layers className="h-4 w-4 mr-2 shrink-0" />
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -181,13 +181,13 @@ export default function MapView() {
 
       {/* Pin drop mode banner */}
       {pinDropMode && buildingToPin && (
-        <div className="bg-primary text-primary-foreground px-4 py-3 rounded-lg flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <MousePointer className="h-5 w-5 animate-pulse" />
-            <div>
-              <p className="font-medium">Pin Drop Mode</p>
-              <p className="text-sm opacity-90">
-                Click on the map to set location for <strong>{buildingToPin.name}</strong>
+        <div className="bg-primary text-primary-foreground px-3 py-2.5 sm:px-4 sm:py-3 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-4">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <MousePointer className="h-4 w-4 sm:h-5 sm:w-5 animate-pulse shrink-0" />
+            <div className="min-w-0">
+              <p className="font-medium text-sm sm:text-base">Pin Drop Mode</p>
+              <p className="text-xs sm:text-sm opacity-90 truncate">
+                Tap map to set location for <strong className="font-semibold">{buildingToPin.name}</strong>
               </p>
             </div>
           </div>
@@ -195,7 +195,7 @@ export default function MapView() {
             variant="secondary"
             size="sm"
             onClick={cancelPinDropMode}
-            className="shrink-0"
+            className="shrink-0 self-end sm:self-auto"
           >
             <X className="h-4 w-4 mr-1" />
             Cancel
@@ -204,15 +204,15 @@ export default function MapView() {
       )}
 
       {/* Stats bar */}
-      <div className="flex flex-wrap items-center gap-4 text-sm">
-        <Badge variant="secondary" className="gap-1.5">
-          <Building2 className="h-3.5 w-3.5" />
-          {isLoading ? '...' : `${buildingsWithCoords.length} buildings mapped`}
+      <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm">
+        <Badge variant="secondary" className="gap-1 sm:gap-1.5">
+          <Building2 className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+          {isLoading ? '...' : `${buildingsWithCoords.length} mapped`}
         </Badge>
         {buildingsWithoutCoords.length > 0 && (
-          <Badge variant="outline" className="gap-1.5 text-muted-foreground">
-            <MapPin className="h-3.5 w-3.5" />
-            {buildingsWithoutCoords.length} without coordinates
+          <Badge variant="outline" className="gap-1 sm:gap-1.5 text-muted-foreground">
+            <MapPin className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+            {buildingsWithoutCoords.length} unset
           </Badge>
         )}
       </div>
@@ -220,7 +220,7 @@ export default function MapView() {
       {/* Map */}
       <Card className="overflow-hidden">
         {isLoading ? (
-          <Skeleton className="h-[600px] w-full" />
+          <Skeleton className="h-[50vh] sm:h-[60vh] lg:h-[600px] w-full" />
         ) : (
           <BuildingMap
             buildings={buildingsWithCoords}
@@ -230,7 +230,7 @@ export default function MapView() {
             mapStyle={mapStyle}
             pinDropMode={pinDropMode}
             onPinDrop={handlePinDrop}
-            className="h-[600px]"
+            className="h-[50vh] sm:h-[60vh] lg:h-[600px]"
           />
         )}
       </Card>
@@ -238,17 +238,17 @@ export default function MapView() {
       {/* Buildings without coordinates - clickable to set location */}
       {buildingsWithoutCoords.length > 0 && (
         <Card className="border-warning/50 bg-warning/5">
-          <CardContent className="py-4">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-warning shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <p className="font-medium text-sm mb-2">
-                  {buildingsWithoutCoords.length} building{buildingsWithoutCoords.length > 1 ? 's' : ''} missing coordinates
+          <CardContent className="py-3 sm:py-4 px-3 sm:px-6">
+            <div className="flex items-start gap-2 sm:gap-3">
+              <AlertCircle className="h-4 w-4 sm:h-5 sm:w-5 text-warning shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-xs sm:text-sm mb-1.5 sm:mb-2">
+                  {buildingsWithoutCoords.length} building{buildingsWithoutCoords.length > 1 ? 's' : ''} need location
                 </p>
-                <p className="text-sm text-muted-foreground mb-3">
-                  Click a building below, then click on the map to set its location:
+                <p className="text-xs sm:text-sm text-muted-foreground mb-2 sm:mb-3">
+                  Tap a building, then tap the map:
                 </p>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-1.5 sm:gap-2">
                   {buildingsWithoutCoords.map((building) => (
                     <Button
                       key={building.id}
@@ -256,10 +256,10 @@ export default function MapView() {
                       size="sm"
                       onClick={() => startPinDropMode({ id: building.id, name: building.name })}
                       disabled={pinDropMode && buildingToPin?.id !== building.id}
-                      className="gap-1.5"
+                      className="gap-1 sm:gap-1.5 text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3"
                     >
-                      <MapPin className="h-3.5 w-3.5" />
-                      {building.name}
+                      <MapPin className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                      <span className="truncate max-w-[120px] sm:max-w-none">{building.name}</span>
                     </Button>
                   ))}
                 </div>
