@@ -21,6 +21,7 @@ import AuditArchive from "./pages/AuditArchive";
 import FormsLibrary from "./pages/FormsLibrary";
 import UserManagement from "./pages/UserManagement";
 import Settings from "./pages/Settings";
+import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -86,6 +87,11 @@ const App = () => (
             <Route path="/settings" element={
               <ProtectedRoute allowedRoles={['admin', 'manager']}>
                 <DashboardLayout><Settings /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/profile" element={
+              <ProtectedRoute>
+                <DashboardLayout><Profile /></DashboardLayout>
               </ProtectedRoute>
             } />
             
