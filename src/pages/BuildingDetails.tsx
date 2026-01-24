@@ -13,6 +13,7 @@ import AssetsTab from '@/components/building/AssetsTab';
 import DocumentsTab from '@/components/building/DocumentsTab';
 import MaintenanceCalendarTab from '@/components/building/MaintenanceCalendarTab';
 import NotesTab from '@/components/building/NotesTab';
+import OverviewWidgets from '@/components/building/OverviewWidgets';
 
 interface Building {
   id: string;
@@ -29,6 +30,7 @@ export default function BuildingDetails() {
   const { isAdminOrManager } = useAuth();
   const [building, setBuilding] = useState<Building | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
     if (id) fetchBuilding(id);
@@ -102,7 +104,7 @@ export default function BuildingDetails() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="overview" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="tenants">Tenants</TabsTrigger>
@@ -113,6 +115,9 @@ export default function BuildingDetails() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6 mt-6">
+          {/* Alert Widgets */}
+          <OverviewWidgets buildingId={building.id} onTabChange={setActiveTab} />
+
           {/* Contacts Grid */}
           <div className="grid gap-4 md:grid-cols-3">
             {/* Asset Manager */}
