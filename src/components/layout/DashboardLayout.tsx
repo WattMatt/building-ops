@@ -1,6 +1,7 @@
 import { ReactNode } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useOrganization } from '@/hooks/useOrganization';
 import {
   Sidebar,
   SidebarContent,
@@ -115,8 +116,12 @@ interface DashboardLayoutProps {
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const { user, role, signOut } = useAuth();
+  const { organization } = useOrganization();
   const navigate = useNavigate();
   const location = useLocation();
+
+  const appName = organization?.name || 'FM Comply';
+  const logoUrl = organization?.logo_url;
 
   const handleSignOut = async () => {
     await signOut();
@@ -140,10 +145,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         <Sidebar>
           <SidebarHeader className="border-b border-sidebar-border p-4">
             <Link to="/" className="flex items-center gap-3">
-              <div className="w-8 h-8 bg-sidebar-primary rounded-lg flex items-center justify-center">
-                <ClipboardCheck className="w-5 h-5 text-sidebar-primary-foreground" />
-              </div>
-              <span className="font-bold text-lg">FM Comply</span>
+              {logoUrl ? (
+                <img src={logoUrl} alt={appName} className="w-8 h-8 rounded-lg object-cover" />
+              ) : (
+                <div className="w-8 h-8 bg-sidebar-primary rounded-lg flex items-center justify-center">
+                  <ClipboardCheck className="w-5 h-5 text-sidebar-primary-foreground" />
+                </div>
+              )}
+              <span className="font-bold text-lg">{appName}</span>
             </Link>
           </SidebarHeader>
 

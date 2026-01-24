@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { useOrganization } from '@/hooks/useOrganization';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,17 +22,51 @@ import { toast } from 'sonner';
 
 export default function Settings() {
   const { user, isAdmin, isAdminOrManager } = useAuth();
-  const [orgName, setOrgName] = useState('FM Comply Demo Organization');
-  const [orgEmail, setOrgEmail] = useState('contact@fmcomply.com');
+  const { organization, loading: orgLoading } = useOrganization();
+  const [orgName, setOrgName] = useState('');
+  const [orgEmail, setOrgEmail] = useState('');
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [overdueAlerts, setOverdueAlerts] = useState(true);
   const [dailyDigest, setDailyDigest] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleSaveOrg = () => {
-    toast.success('Organization settings saved');
+  // Load organization data
+  useEffect(() => {
+    if (organization) {
+      setOrgName(organization.name || '');
+      setOrgEmail(organization.email || '');
+      setLogoUrl(organization.logo_url);
+    }
+  }, [organization]);
+
+  const handleSaveOrg = async () => {
+    if (!organization) {
+      toast.error('No organization found');
+      return;
+    }
+    
+    setIsSaving(true);
+    try {
+      const { error } = await supabase
+        .from('organizations')
+        .update({ 
+          name: orgName, 
+          email: orgEmail,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', organization.id);
+
+      if (error) throw error;
+      toast.success('Organization settings saved');
+    } catch (error) {
+      console.error('Save error:', error);
+      toast.error('Failed to save organization settings');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleSaveNotifications = () => {
@@ -71,8 +106,18 @@ export default function Settings() {
         .from('organization-logos')
         .getPublicUrl(filePath);
 
+      // Update organization with new logo URL
+      if (organization) {
+        const { error: updateError } = await supabase
+          .from('organizations')
+          .update({ logo_url: publicUrl, updated_at: new Date().toISOString() })
+          .eq('id', organization.id);
+
+        if (updateError) throw updateError;
+      }
+
       setLogoUrl(publicUrl);
-      toast.success('Logo uploaded successfully');
+      toast.success('Logo uploaded and saved successfully');
     } catch (error) {
       console.error('Upload error:', error);
       toast.error('Failed to upload logo');
@@ -165,7 +210,9 @@ export default function Settings() {
               </div>
 
               {isAdminOrManager && (
-                <Button onClick={handleSaveOrg}>Save Changes</Button>
+                <Button onClick={handleSaveOrg} disabled={isSaving}>
+                  {isSaving ? 'Saving...' : 'Save Changes'}
+                </Button>
               )}
             </CardContent>
           </Card>
