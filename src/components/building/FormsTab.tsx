@@ -226,13 +226,16 @@ export default function FormsTab({ buildingId, buildingName }: FormsTabProps) {
     if (!selectedSubmission || !actionType || !user) return;
 
     setIsSubmittingAction(true);
+    const reviewedAt = new Date().toISOString();
+    const newStatus = actionType === 'review' ? 'reviewed' : actionType === 'approve' ? 'approved' : 'rejected';
+    
     try {
       const { error } = await supabase
         .from('form_submissions')
         .update({
-          status: actionType === 'review' ? 'reviewed' : actionType === 'approve' ? 'approved' : 'rejected',
+          status: newStatus,
           reviewed_by: user.id,
-          reviewed_at: new Date().toISOString(),
+          reviewed_at: reviewedAt,
           review_notes: actionNotes || null,
         })
         .eq('id', selectedSubmission.id);
@@ -240,6 +243,22 @@ export default function FormsTab({ buildingId, buildingName }: FormsTabProps) {
       if (error) throw error;
 
       toast.success(`Submission ${actionType === 'review' ? 'marked as reviewed' : actionType === 'approve' ? 'approved' : 'rejected'}`);
+      
+      // Send email notification for approve/reject (not for "reviewed")
+      if (actionType === 'approve' || actionType === 'reject') {
+        supabase.functions.invoke('notify-form-review', {
+          body: {
+            submissionId: selectedSubmission.id,
+            formName: selectedSubmission.form_name,
+            buildingName: buildingName,
+            submittedById: selectedSubmission.submitted_by,
+            status: newStatus,
+            reviewerName: user.email || 'Manager',
+            reviewNotes: actionNotes || undefined,
+            reviewedAt: reviewedAt,
+          }
+        }).catch(err => console.error('Failed to send review notification:', err));
+      }
       
       setActionDialogOpen(false);
       setSelectedSubmission(null);
