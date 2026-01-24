@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
+import GlobalAlertsWidget from '@/components/dashboard/GlobalAlertsWidget';
 
 interface DashboardStats {
   buildings: number;
@@ -299,6 +300,9 @@ export default function Dashboard() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Global Alerts for Admins/Managers */}
+      {isAdminOrManager && <GlobalAlertsWidget />}
 
       {/* Two Column Layout */}
       <div className="grid gap-6 lg:grid-cols-2">
