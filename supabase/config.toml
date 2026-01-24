@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.notify-form-submission]
 verify_jwt = false
+
+[functions.notify-form-review]
+verify_jwt = false
