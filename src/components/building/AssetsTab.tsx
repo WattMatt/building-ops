@@ -37,9 +37,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, MoreVertical, Edit, Trash2, Search, Wrench, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { Plus, MoreVertical, Edit, Trash2, Search, Wrench, AlertTriangle, CheckCircle, Clock, History } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import AssetServiceHistoryDialog from './AssetServiceHistoryDialog';
 
 interface Asset {
   id: string;
@@ -87,6 +88,7 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  const [serviceHistoryAsset, setServiceHistoryAsset] = useState<Asset | null>(null);
   const [saving, setSaving] = useState(false);
 
   // Form state
@@ -538,6 +540,10 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => setServiceHistoryAsset(asset)}>
+                            <History className="h-4 w-4 mr-2" />
+                            Service History
+                          </DropdownMenuItem>
                           {isAdminOrManager && (
                             <>
                               <DropdownMenuItem onClick={() => openEditDialog(asset)}>
@@ -562,6 +568,16 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
             </TableBody>
           </Table>
         </Card>
+      )}
+
+      {/* Service History Dialog */}
+      {serviceHistoryAsset && (
+        <AssetServiceHistoryDialog
+          asset={serviceHistoryAsset}
+          open={!!serviceHistoryAsset}
+          onOpenChange={(open) => !open && setServiceHistoryAsset(null)}
+          onServiceAdded={fetchAssets}
+        />
       )}
     </div>
   );

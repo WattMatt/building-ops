@@ -14,6 +14,59 @@ export type Database = {
   }
   public: {
     Tables: {
+      asset_service_history: {
+        Row: {
+          asset_id: string
+          cost: number | null
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          next_service_date: string | null
+          notes: string | null
+          performed_by: string | null
+          service_date: string
+          service_type: string
+          updated_at: string
+        }
+        Insert: {
+          asset_id: string
+          cost?: number | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          next_service_date?: string | null
+          notes?: string | null
+          performed_by?: string | null
+          service_date: string
+          service_type: string
+          updated_at?: string
+        }
+        Update: {
+          asset_id?: string
+          cost?: number | null
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          next_service_date?: string | null
+          notes?: string | null
+          performed_by?: string | null
+          service_date?: string
+          service_type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_service_history_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "building_assets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_logs: {
         Row: {
           action: string
