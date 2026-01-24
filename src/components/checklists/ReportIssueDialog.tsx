@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -19,7 +19,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Camera, Upload, X, AlertTriangle, Loader2 } from 'lucide-react';
+import { AlertTriangle, Loader2 } from 'lucide-react';
+import { PhotoCapture, PhotoFile } from '@/components/ui/photo-capture';
 import { toast } from 'sonner';
 
 interface ReportIssueDialogProps {
@@ -49,44 +50,10 @@ export default function ReportIssueDialog({
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<IssuePriority>('medium');
   const [correctiveAction, setCorrectiveAction] = useState('');
-  const [photos, setPhotos] = useState<File[]>([]);
-  const [photoPreviewUrls, setPhotoPreviewUrls] = useState<string[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [photos, setPhotos] = useState<PhotoFile[]>([]);
 
-  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length + photos.length > 4) {
-      toast.error('Maximum 4 photos allowed');
-      return;
-    }
-
-    const validFiles = files.filter((file) => {
-      if (!file.type.startsWith('image/')) {
-        toast.error(`${file.name} is not an image`);
-        return false;
-      }
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error(`${file.name} exceeds 5MB limit`);
-        return false;
-      }
-      return true;
-    });
-
-    setPhotos((prev) => [...prev, ...validFiles]);
-    
-    // Generate preview URLs
-    validFiles.forEach((file) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPhotoPreviewUrls((prev) => [...prev, reader.result as string]);
-      };
-      reader.readAsDataURL(file);
-    });
-  };
-
-  const removePhoto = (index: number) => {
-    setPhotos((prev) => prev.filter((_, i) => i !== index));
-    setPhotoPreviewUrls((prev) => prev.filter((_, i) => i !== index));
+  const handlePhotosChange = (newPhotos: PhotoFile[]) => {
+    setPhotos(newPhotos);
   };
 
   const resetForm = () => {
@@ -94,8 +61,9 @@ export default function ReportIssueDialog({
     setDescription('');
     setPriority('medium');
     setCorrectiveAction('');
+    // Clean up photo URLs
+    photos.forEach(p => URL.revokeObjectURL(p.preview));
     setPhotos([]);
-    setPhotoPreviewUrls([]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -122,10 +90,10 @@ export default function ReportIssueDialog({
       // Upload photos if any
       const photoUrls: string[] = [];
       for (const photo of photos) {
-        const fileName = `${user.id}/${Date.now()}-${photo.name}`;
+        const fileName = `${user.id}/${Date.now()}-${photo.file.name}`;
         const { error: uploadError } = await supabase.storage
           .from('tenant-documents')
-          .upload(fileName, photo);
+          .upload(fileName, photo.file);
 
         if (uploadError) {
           console.error('Photo upload error:', uploadError);
@@ -240,45 +208,14 @@ export default function ReportIssueDialog({
             />
           </div>
 
-          <div className="space-y-2">
-            <Label>Photos (optional, max 4)</Label>
-            <div className="flex flex-wrap gap-2">
-              {photoPreviewUrls.map((url, index) => (
-                <div key={index} className="relative group">
-                  <img
-                    src={url}
-                    alt={`Preview ${index + 1}`}
-                    className="h-20 w-20 object-cover rounded-lg border"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => removePhoto(index)}
-                    className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </div>
-              ))}
-              {photos.length < 4 && (
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="h-20 w-20 border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-1 text-muted-foreground hover:border-primary hover:text-primary transition-colors"
-                >
-                  <Camera className="h-5 w-5" />
-                  <span className="text-xs">Add</span>
-                </button>
-              )}
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handlePhotoSelect}
-              className="hidden"
-            />
-          </div>
+          <PhotoCapture
+            label="Photos (optional)"
+            maxPhotos={4}
+            maxSizeMB={5}
+            photos={photos}
+            onPhotosChange={handlePhotosChange}
+            size="md"
+          />
 
           <div className="flex justify-end gap-3 pt-4">
             <Button
