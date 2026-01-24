@@ -1,4 +1,5 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -14,7 +15,9 @@ import {
   Users,
   AlertTriangle,
   Flame,
+  Eye,
 } from 'lucide-react';
+import { FormPreviewDialog } from '@/components/forms/FormPreviewDialog';
 
 interface FormTemplate {
   id: string;
@@ -136,6 +139,14 @@ const categoryColors: Record<string, string> = {
 };
 
 export default function FormsLibrary() {
+  const [selectedForm, setSelectedForm] = useState<FormTemplate | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  const handlePreview = (form: FormTemplate) => {
+    setSelectedForm(form);
+    setPreviewOpen(true);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -174,11 +185,19 @@ export default function FormsLibrary() {
                 <Badge variant="secondary" className={categoryColors[form.category]}>
                   {form.category}
                 </Badge>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm">
+                <div className="flex items-center gap-1">
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={() => handlePreview(form)}
+                    title="Preview form"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="sm" title="Print form">
                     <Printer className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="sm">
+                  <Button variant="ghost" size="sm" title="Download form">
                     <Download className="h-4 w-4" />
                   </Button>
                 </div>
@@ -187,6 +206,13 @@ export default function FormsLibrary() {
           </Card>
         ))}
       </div>
+
+      {/* Form Preview Dialog */}
+      <FormPreviewDialog
+        form={selectedForm}
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+      />
     </div>
   );
 }
