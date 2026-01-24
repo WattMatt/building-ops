@@ -24,6 +24,10 @@ interface BuildingMapProps {
   flyToLocation?: { lng: number; lat: number } | null;
   className?: string;
   mapStyle?: MapStyle;
+  /** Enable pin drop mode - when true, clicking on map will call onPinDrop */
+  pinDropMode?: boolean;
+  /** Callback when user clicks on map in pin drop mode */
+  onPinDrop?: (coords: { lng: number; lat: number }) => void;
 }
 
 export function BuildingMap({
@@ -33,11 +37,14 @@ export function BuildingMap({
   flyToLocation,
   className,
   mapStyle = 'streets',
+  pinDropMode = false,
+  onPinDrop,
 }: BuildingMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
   const popupRef = useRef<mapboxgl.Popup | null>(null);
+  const pinDropMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
 
   // Initialize map
@@ -229,6 +236,62 @@ export function BuildingMap({
       });
     }
   }, [flyToLocation, mapLoaded]);
+
+  // Handle pin drop mode
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    const handleClick = (e: mapboxgl.MapMouseEvent) => {
+      if (!pinDropMode || !onPinDrop) return;
+
+      const { lng, lat } = e.lngLat;
+
+      // Remove existing pin drop marker
+      if (pinDropMarkerRef.current) {
+        pinDropMarkerRef.current.remove();
+      }
+
+      // Create new pin drop marker with distinct style
+      const el = document.createElement('div');
+      el.innerHTML = `
+        <div class="relative">
+          <div class="w-8 h-8 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center shadow-lg animate-bounce border-2 border-background">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
+              <circle cx="12" cy="10" r="3"/>
+            </svg>
+          </div>
+          <div class="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-destructive rotate-45"></div>
+        </div>
+      `;
+
+      pinDropMarkerRef.current = new mapboxgl.Marker(el)
+        .setLngLat([lng, lat])
+        .addTo(map.current!);
+
+      onPinDrop({ lng, lat });
+    };
+
+    map.current.on('click', handleClick);
+
+    // Update cursor based on pin drop mode
+    if (pinDropMode) {
+      map.current.getCanvas().style.cursor = 'crosshair';
+    } else {
+      map.current.getCanvas().style.cursor = '';
+      // Remove pin drop marker when exiting pin drop mode
+      if (pinDropMarkerRef.current) {
+        pinDropMarkerRef.current.remove();
+        pinDropMarkerRef.current = null;
+      }
+    }
+
+    return () => {
+      if (map.current) {
+        map.current.off('click', handleClick);
+      }
+    };
+  }, [pinDropMode, onPinDrop, mapLoaded]);
 
   return (
     <div ref={mapContainer} className={cn('w-full h-full min-h-[400px] rounded-lg', className)} />
