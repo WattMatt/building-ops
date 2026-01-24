@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import TenantsTab from '@/components/building/TenantsTab';
 import AssetsTab from '@/components/building/AssetsTab';
 import DocumentsTab from '@/components/building/DocumentsTab';
+import MaintenanceCalendarTab from '@/components/building/MaintenanceCalendarTab';
 
 interface Building {
   id: string;
@@ -105,6 +106,7 @@ export default function BuildingDetails() {
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="tenants">Tenants</TabsTrigger>
           <TabsTrigger value="assets">Assets</TabsTrigger>
+          <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
         </TabsList>
 
@@ -212,6 +214,10 @@ export default function BuildingDetails() {
 
         <TabsContent value="assets" className="mt-6">
           <AssetsTab buildingId={building.id} />
+        </TabsContent>
+
+        <TabsContent value="maintenance" className="mt-6">
+          <MaintenanceCalendarTab buildingId={building.id} />
         </TabsContent>
 
         <TabsContent value="documents" className="mt-6">
