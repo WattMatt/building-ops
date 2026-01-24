@@ -362,19 +362,32 @@ export default function Settings() {
                     <Label>Primary Color</Label>
                     <div className="flex items-center gap-4">
                       <div
-                        className="h-10 w-10 rounded-lg border"
+                        className="h-20 w-20 rounded-lg border flex items-center justify-center"
                         style={{ backgroundColor: primaryColor }}
                       />
-                      <Input
-                        type="color"
-                        value={primaryColor}
-                        onChange={(e) => setPrimaryColor(e.target.value)}
-                        className="w-20 h-10 p-1"
-                      />
-                      <span className="text-sm text-muted-foreground">
-                        {primaryColor}
-                      </span>
+                      <div className="flex flex-col gap-2">
+                        <label className="cursor-pointer">
+                          <input
+                            type="color"
+                            value={primaryColor}
+                            onChange={(e) => setPrimaryColor(e.target.value)}
+                            className="sr-only"
+                          />
+                          <Button variant="outline" asChild>
+                            <span>
+                              <Palette className="h-4 w-4 mr-2" />
+                              Choose Color
+                            </span>
+                          </Button>
+                        </label>
+                        <span className="text-sm text-muted-foreground">
+                          Current: {primaryColor}
+                        </span>
+                      </div>
                     </div>
+                    <p className="text-sm text-muted-foreground">
+                      Used for buttons and accent elements
+                    </p>
                   </div>
                 </div>
 
