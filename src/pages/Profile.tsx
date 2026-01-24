@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { DEFAULT_AVATARS, generateRandomAvatar } from '@/lib/avatars';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,7 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
-import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare } from 'lucide-react';
+import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare, Upload, Shuffle, Check } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ProfileData {
@@ -186,6 +187,37 @@ export default function Profile() {
     }
   };
 
+  const handleSelectDefaultAvatar = async (url: string | null) => {
+    if (!user) return;
+
+    setIsUploading(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ 
+          avatar_url: url, 
+          updated_at: new Date().toISOString() 
+        })
+        .eq('id', user.id);
+
+      if (error) throw error;
+
+      setAvatarUrl(url);
+      toast.success(url ? 'Avatar updated' : 'Avatar removed');
+    } catch (error) {
+      console.error('Error updating avatar:', error);
+      toast.error('Failed to update avatar');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleGenerateRandom = async () => {
+    if (!user) return;
+    const randomUrl = generateRandomAvatar(user.id + Date.now());
+    await handleSelectDefaultAvatar(randomUrl);
+  };
+
   const triggerFileUpload = () => {
     fileInputRef.current?.click();
   };
@@ -222,40 +254,99 @@ export default function Profile() {
         </CardHeader>
         <CardContent className="space-y-6">
           {/* Avatar Section */}
-          <div className="flex items-center gap-6">
-            <div className="relative">
-              <Avatar className="h-24 w-24">
-                <AvatarImage src={avatarUrl || undefined} alt="Profile avatar" />
-                <AvatarFallback className="bg-primary text-primary-foreground text-xl">
-                  {userInitials}
-                </AvatarFallback>
-              </Avatar>
-              <button
-                onClick={triggerFileUpload}
-                disabled={isUploading}
-                className="absolute bottom-0 right-0 h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
-              >
-                {isUploading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Camera className="h-4 w-4" />
-                )}
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif"
-                onChange={handleAvatarUpload}
-                className="hidden"
-              />
+          <div className="space-y-4">
+            <div className="flex items-center gap-6">
+              <div className="relative">
+                <Avatar className="h-24 w-24">
+                  <AvatarImage src={avatarUrl || undefined} alt="Profile avatar" />
+                  <AvatarFallback className="bg-primary text-primary-foreground text-xl">
+                    {userInitials}
+                  </AvatarFallback>
+                </Avatar>
+                <button
+                  onClick={triggerFileUpload}
+                  disabled={isUploading}
+                  className="absolute bottom-0 right-0 h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+                >
+                  {isUploading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Camera className="h-4 w-4" />
+                  )}
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  onChange={handleAvatarUpload}
+                  className="hidden"
+                />
+              </div>
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Profile Photo</p>
+                <p className="text-sm text-muted-foreground">
+                  Upload your own photo or choose from avatars below
+                </p>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={triggerFileUpload}
+                    disabled={isUploading}
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={handleGenerateRandom}
+                    disabled={isUploading}
+                  >
+                    <Shuffle className="h-4 w-4 mr-2" />
+                    Random
+                  </Button>
+                </div>
+              </div>
             </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Profile Photo</p>
-              <p className="text-sm text-muted-foreground">
-                Click the camera icon to upload a new photo
-              </p>
+
+            {/* Default Avatar Options */}
+            <div className="space-y-2">
+              <Label className="text-sm">Choose an Avatar</Label>
+              <div className="grid grid-cols-5 gap-3">
+                {DEFAULT_AVATARS.map((avatar) => {
+                  const isSelected = avatar.url === avatarUrl || (!avatar.url && !avatarUrl);
+                  return (
+                    <button
+                      key={avatar.id}
+                      onClick={() => handleSelectDefaultAvatar(avatar.url)}
+                      disabled={isUploading}
+                      className={`relative rounded-lg p-1 transition-all hover:scale-105 ${
+                        isSelected 
+                          ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' 
+                          : 'hover:ring-2 hover:ring-muted-foreground/30'
+                      }`}
+                      title={avatar.name}
+                    >
+                      <Avatar className="h-12 w-12">
+                        {avatar.url ? (
+                          <AvatarImage src={avatar.url} alt={avatar.name} />
+                        ) : null}
+                        <AvatarFallback className="bg-muted text-muted-foreground text-sm">
+                          {userInitials}
+                        </AvatarFallback>
+                      </Avatar>
+                      {isSelected && (
+                        <div className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-primary flex items-center justify-center">
+                          <Check className="h-3 w-3 text-primary-foreground" />
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
               <p className="text-xs text-muted-foreground">
-                JPG, PNG, WebP or GIF. Max 2MB.
+                First option uses your initials. Other options are pre-made avatars.
               </p>
             </div>
           </div>

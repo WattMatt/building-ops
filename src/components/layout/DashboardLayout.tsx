@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrganization } from '@/hooks/useOrganization';
+import { useUserProfile } from '@/hooks/useUserProfile';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import {
   Sidebar,
@@ -18,7 +19,7 @@ import {
   SidebarTrigger,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -119,11 +120,13 @@ interface DashboardLayoutProps {
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const { user, role, signOut } = useAuth();
   const { organization } = useOrganization();
+  const { profile } = useUserProfile();
   const navigate = useNavigate();
   const location = useLocation();
 
   const appName = organization?.name || 'FM Comply';
   const logoUrl = organization?.logo_url;
+  const avatarUrl = profile?.avatar_url;
 
   const handleSignOut = async () => {
     await signOut();
@@ -131,10 +134,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     navigate('/auth');
   };
 
-  const userInitials = user?.email
-    ?.split('@')[0]
-    .slice(0, 2)
-    .toUpperCase() ?? 'U';
+  const displayName = profile?.full_name || user?.email?.split('@')[0] || 'User';
+  const userInitials = displayName
+    .split(' ')
+    .map(n => n[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
 
   const canAccessItem = (item: NavItem) => {
     if (!item.roles) return true;
@@ -231,13 +237,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   className="w-full justify-start gap-3 px-2"
                 >
                   <Avatar className="h-8 w-8">
+                    {avatarUrl && (
+                      <AvatarImage src={avatarUrl} alt={displayName} />
+                    )}
                     <AvatarFallback className="bg-sidebar-primary text-sidebar-primary-foreground text-xs">
                       {userInitials}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col items-start text-left flex-1 min-w-0">
                     <span className="text-sm font-medium truncate w-full">
-                      {user?.email}
+                      {displayName}
                     </span>
                     <span className="text-xs text-sidebar-foreground/60 capitalize">
                       {role ?? 'User'}
