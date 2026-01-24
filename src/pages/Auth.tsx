@@ -119,14 +119,14 @@ export default function Auth() {
   return (
     <div className="flex min-h-screen">
       {/* Left side - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-sidebar text-sidebar-foreground p-12 flex-col justify-between">
+      <div className="hidden lg:flex lg:w-1/2 bg-background text-foreground p-12 flex-col justify-between border-t-4 border-[hsl(36,74%,43%)]">
         <div>
           <div className="flex items-center gap-3 mb-8">
             {logoUrl ? (
               <img src={logoUrl} alt={appName} className="w-10 h-10 rounded-lg object-cover" />
             ) : (
-              <div className="w-10 h-10 bg-sidebar-primary rounded-lg flex items-center justify-center">
-                <ClipboardCheck className="w-6 h-6 text-sidebar-primary-foreground" />
+              <div className="w-10 h-10 bg-[hsl(36,74%,43%)] rounded-lg flex items-center justify-center">
+                <ClipboardCheck className="w-6 h-6 text-white" />
               </div>
             )}
             <span className="text-xl font-bold">{appName}</span>
@@ -135,46 +135,46 @@ export default function Auth() {
           <h1 className="text-4xl font-bold mb-6">
             Facilities Management
             <br />
-            <span className="text-sidebar-primary">Compliance Made Simple</span>
+            <span className="text-[hsl(36,74%,43%)]">Compliance Made Simple</span>
           </h1>
           
-          <p className="text-sidebar-foreground/80 text-lg mb-12">
+          <p className="text-muted-foreground text-lg mb-12">
             Streamline your building maintenance checklists, audits, and compliance tracking across your entire portfolio.
           </p>
         </div>
 
         <div className="space-y-6">
           <div className="flex items-start gap-4">
-            <div className="w-10 h-10 bg-sidebar-accent rounded-lg flex items-center justify-center shrink-0">
-              <Building2 className="w-5 h-5" />
+            <div className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center shrink-0">
+              <Building2 className="w-5 h-5 text-[hsl(36,74%,43%)]" />
             </div>
             <div>
               <h3 className="font-semibold mb-1">Portfolio Management</h3>
-              <p className="text-sm text-sidebar-foreground/70">
+              <p className="text-sm text-muted-foreground">
                 Manage multiple buildings with role-based access and centralized dashboards.
               </p>
             </div>
           </div>
 
           <div className="flex items-start gap-4">
-            <div className="w-10 h-10 bg-sidebar-accent rounded-lg flex items-center justify-center shrink-0">
-              <Shield className="w-5 h-5" />
+            <div className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center shrink-0">
+              <Shield className="w-5 h-5 text-[hsl(36,74%,43%)]" />
             </div>
             <div>
               <h3 className="font-semibold mb-1">Audit-Ready</h3>
-              <p className="text-sm text-sidebar-foreground/70">
+              <p className="text-sm text-muted-foreground">
                 Digital sign-offs, photo evidence, and exportable compliance packs for regulators.
               </p>
             </div>
           </div>
 
           <div className="flex items-start gap-4">
-            <div className="w-10 h-10 bg-sidebar-accent rounded-lg flex items-center justify-center shrink-0">
-              <ClipboardCheck className="w-5 h-5" />
+            <div className="w-10 h-10 bg-muted rounded-lg flex items-center justify-center shrink-0">
+              <ClipboardCheck className="w-5 h-5 text-[hsl(36,74%,43%)]" />
             </div>
             <div>
               <h3 className="font-semibold mb-1">Smart Checklists</h3>
-              <p className="text-sm text-sidebar-foreground/70">
+              <p className="text-sm text-muted-foreground">
                 Daily, weekly, and monthly templates with automatic task generation.
               </p>
             </div>
@@ -190,8 +190,8 @@ export default function Auth() {
               {logoUrl ? (
                 <img src={logoUrl} alt={appName} className="w-8 h-8 rounded-lg object-cover" />
               ) : (
-                <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                  <ClipboardCheck className="w-5 h-5 text-primary-foreground" />
+                <div className="w-8 h-8 bg-[hsl(36,74%,43%)] rounded-lg flex items-center justify-center">
+                  <ClipboardCheck className="w-5 h-5 text-white" />
                 </div>
               )}
               <span className="text-lg font-bold">{appName}</span>
