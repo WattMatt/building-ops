@@ -498,6 +498,9 @@ export type Database = {
           form_template_id: string
           id: string
           photo_urls: string[] | null
+          review_notes: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
           status: string
           submitted_by: string
           updated_at: string
@@ -510,6 +513,9 @@ export type Database = {
           form_template_id: string
           id?: string
           photo_urls?: string[] | null
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           status?: string
           submitted_by: string
           updated_at?: string
@@ -522,6 +528,9 @@ export type Database = {
           form_template_id?: string
           id?: string
           photo_urls?: string[] | null
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           status?: string
           submitted_by?: string
           updated_at?: string
