@@ -29,8 +29,10 @@ export default function Settings() {
   const [overdueAlerts, setOverdueAlerts] = useState(true);
   const [dailyDigest, setDailyDigest] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [primaryColor, setPrimaryColor] = useState('#2563eb');
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingBranding, setIsSavingBranding] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load organization data
@@ -39,6 +41,7 @@ export default function Settings() {
       setOrgName(organization.name || '');
       setOrgEmail(organization.email || '');
       setLogoUrl(organization.logo_url);
+      setPrimaryColor(organization.primary_color || '#2563eb');
     }
   }, [organization]);
 
@@ -71,6 +74,32 @@ export default function Settings() {
 
   const handleSaveNotifications = () => {
     toast.success('Notification preferences saved');
+  };
+
+  const handleSaveBranding = async () => {
+    if (!organization) {
+      toast.error('No organization found');
+      return;
+    }
+    
+    setIsSavingBranding(true);
+    try {
+      const { error } = await supabase
+        .from('organizations')
+        .update({ 
+          primary_color: primaryColor,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', organization.id);
+
+      if (error) throw error;
+      toast.success('Branding settings saved');
+    } catch (error) {
+      console.error('Save error:', error);
+      toast.error('Failed to save branding settings');
+    } finally {
+      setIsSavingBranding(false);
+    }
   };
 
   const handleLogoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -333,22 +362,25 @@ export default function Settings() {
                     <Label>Primary Color</Label>
                     <div className="flex items-center gap-4">
                       <div
-                        className="h-10 w-10 rounded-lg"
-                        style={{ backgroundColor: 'hsl(217, 91%, 50%)' }}
+                        className="h-10 w-10 rounded-lg border"
+                        style={{ backgroundColor: primaryColor }}
                       />
                       <Input
                         type="color"
-                        defaultValue="#2563eb"
+                        value={primaryColor}
+                        onChange={(e) => setPrimaryColor(e.target.value)}
                         className="w-20 h-10 p-1"
                       />
                       <span className="text-sm text-muted-foreground">
-                        #2563eb
+                        {primaryColor}
                       </span>
                     </div>
                   </div>
                 </div>
 
-                <Button>Save Branding</Button>
+                <Button onClick={handleSaveBranding} disabled={isSavingBranding}>
+                  {isSavingBranding ? 'Saving...' : 'Save Branding'}
+                </Button>
               </CardContent>
             </Card>
           </TabsContent>
