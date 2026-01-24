@@ -10,6 +10,7 @@ import { ArrowLeft, Building2, MapPin, Edit, Users, Phone, Mail, User, Shield } 
 import { toast } from 'sonner';
 import TenantsTab from '@/components/building/TenantsTab';
 import AssetsTab from '@/components/building/AssetsTab';
+import DocumentsTab from '@/components/building/DocumentsTab';
 
 interface Building {
   id: string;
@@ -214,11 +215,7 @@ export default function BuildingDetails() {
         </TabsContent>
 
         <TabsContent value="documents" className="mt-6">
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <p className="text-muted-foreground">Documents management coming soon</p>
-            </CardContent>
-          </Card>
+          <DocumentsTab buildingId={building.id} />
         </TabsContent>
       </Tabs>
     </div>
