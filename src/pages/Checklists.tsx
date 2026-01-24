@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Camera,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -40,71 +41,13 @@ interface TaskInstance {
   requires_photo: boolean;
   requires_signature: boolean;
   building_id: string;
+  building_name?: string;
 }
 
 interface Building {
   id: string;
   name: string;
 }
-
-// Mock data for now - will be replaced with real data
-const mockTasks: TaskInstance[] = [
-  {
-    id: '1',
-    task_name: 'Restroom Consumables Restock',
-    task_description: 'Restock toilet paper, soap, paper towels in all restrooms',
-    frequency: 'daily',
-    status: 'pending',
-    due_date: format(new Date(), 'yyyy-MM-dd'),
-    requires_photo: false,
-    requires_signature: true,
-    building_id: '1',
-  },
-  {
-    id: '2',
-    task_name: 'Restroom Cleaning & Sanitise',
-    task_description: 'Clean and sanitise restrooms and touchpoints',
-    frequency: 'daily',
-    status: 'pending',
-    due_date: format(new Date(), 'yyyy-MM-dd'),
-    requires_photo: true,
-    requires_signature: true,
-    building_id: '1',
-  },
-  {
-    id: '3',
-    task_name: 'HVAC Filters Inspection',
-    task_description: 'Check and replace HVAC filters as needed',
-    frequency: 'weekly',
-    status: 'pending',
-    due_date: format(new Date(), 'yyyy-MM-dd'),
-    requires_photo: true,
-    requires_signature: true,
-    building_id: '1',
-  },
-  {
-    id: '4',
-    task_name: 'Fire Extinguisher Visual Check',
-    task_description: 'Visual inspection of all fire extinguishers for tampering or damage',
-    frequency: 'daily',
-    status: 'completed',
-    due_date: format(new Date(), 'yyyy-MM-dd'),
-    requires_photo: false,
-    requires_signature: true,
-    building_id: '1',
-  },
-  {
-    id: '5',
-    task_name: 'Emergency Exit Inspection',
-    task_description: 'Check signage illumination and clear routes',
-    frequency: 'daily',
-    status: 'pending',
-    due_date: format(new Date(), 'yyyy-MM-dd'),
-    requires_photo: false,
-    requires_signature: true,
-    building_id: '1',
-  },
-];
 
 const frequencyLabels: Record<TaskFrequency, string> = {
   daily: 'Daily',
@@ -123,9 +66,9 @@ const statusColors: Record<TaskStatus, string> = {
 
 export default function Checklists() {
   const { user } = useAuth();
-  const [tasks, setTasks] = useState<TaskInstance[]>(mockTasks);
+  const [tasks, setTasks] = useState<TaskInstance[]>([]);
   const [buildings, setBuildings] = useState<Building[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBuilding, setSelectedBuilding] = useState<string>('all');
   const [selectedFrequency, setSelectedFrequency] = useState<TaskFrequency>('daily');
@@ -133,6 +76,7 @@ export default function Checklists() {
 
   useEffect(() => {
     fetchBuildings();
+    fetchTasks();
   }, []);
 
   const fetchBuildings = async () => {
@@ -149,6 +93,40 @@ export default function Checklists() {
     }
   };
 
+  const fetchTasks = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('task_instances')
+        .select(`
+          id,
+          task_name,
+          task_description,
+          frequency,
+          status,
+          due_date,
+          requires_photo,
+          requires_signature,
+          building_id,
+          buildings (name)
+        `)
+        .order('due_date');
+
+      if (error) throw error;
+      
+      const formattedTasks = (data || []).map(task => ({
+        ...task,
+        building_name: (task.buildings as any)?.name || 'Unknown',
+      }));
+      
+      setTasks(formattedTasks);
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const filteredTasks = tasks.filter((task) => {
     const matchesSearch = task.task_name.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesFrequency = task.frequency === selectedFrequency;
@@ -159,22 +137,47 @@ export default function Checklists() {
   const pendingTasks = filteredTasks.filter((t) => t.status === 'pending' && !completedTasks.has(t.id));
   const completedTasksList = filteredTasks.filter((t) => t.status === 'completed' || completedTasks.has(t.id));
 
-  const handleToggleTask = (taskId: string) => {
-    setCompletedTasks((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(taskId)) {
+  const handleToggleTask = async (taskId: string) => {
+    if (completedTasks.has(taskId)) {
+      setCompletedTasks((prev) => {
+        const newSet = new Set(prev);
         newSet.delete(taskId);
-      } else {
+        return newSet;
+      });
+    } else {
+      setCompletedTasks((prev) => {
+        const newSet = new Set(prev);
         newSet.add(taskId);
+        return newSet;
+      });
+
+      // Update task status in database
+      try {
+        const { error } = await supabase
+          .from('task_instances')
+          .update({ status: 'completed' })
+          .eq('id', taskId);
+
+        if (error) throw error;
         toast.success('Task marked as complete');
+      } catch (error) {
+        console.error('Error updating task:', error);
+        toast.error('Failed to update task');
       }
-      return newSet;
-    });
+    }
   };
 
   const handleReportIssue = (taskId: string) => {
     toast.info('Issue reporting coming soon');
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -279,6 +282,9 @@ export default function Checklists() {
                                   {task.task_description}
                                 </p>
                               )}
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {task.building_name}
+                              </p>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
                               {task.requires_photo && (
@@ -330,7 +336,7 @@ export default function Checklists() {
                             {task.task_name}
                           </h3>
                           <p className="text-xs text-muted-foreground mt-1">
-                            Completed today
+                            {task.building_name}
                           </p>
                         </div>
                         <Badge variant="secondary" className={statusColors.completed}>
@@ -351,7 +357,7 @@ export default function Checklists() {
                 <ClipboardCheck className="h-12 w-12 text-muted-foreground mb-4" />
                 <h3 className="text-lg font-semibold mb-2">No tasks found</h3>
                 <p className="text-muted-foreground text-center">
-                  No {frequencyLabels[selectedFrequency].toLowerCase()} tasks scheduled for today.
+                  No {frequencyLabels[selectedFrequency].toLowerCase()} tasks scheduled.
                 </p>
               </CardContent>
             </Card>

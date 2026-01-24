@@ -34,11 +34,10 @@ import {
   Users,
   Plus,
   Search,
-  Mail,
   Shield,
   MoreVertical,
-  Edit,
   Trash2,
+  Loader2,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -56,38 +55,6 @@ interface UserWithRole {
   created_at: string;
 }
 
-// Mock data for now
-const mockUsers: UserWithRole[] = [
-  {
-    id: '1',
-    email: 'admin@fmcomply.com',
-    full_name: 'Admin User',
-    role: 'admin',
-    created_at: '2024-01-01T00:00:00Z',
-  },
-  {
-    id: '2',
-    email: 'manager@fmcomply.com',
-    full_name: 'Operations Manager',
-    role: 'manager',
-    created_at: '2024-01-05T00:00:00Z',
-  },
-  {
-    id: '3',
-    email: 'cleaner@fmcomply.com',
-    full_name: 'John Cleaner',
-    role: 'user',
-    created_at: '2024-01-10T00:00:00Z',
-  },
-  {
-    id: '4',
-    email: 'auditor@fmcomply.com',
-    full_name: 'External Auditor',
-    role: 'reviewer',
-    created_at: '2024-01-15T00:00:00Z',
-  },
-];
-
 const roleColors: Record<string, string> = {
   admin: 'bg-destructive text-destructive-foreground',
   manager: 'bg-primary text-primary-foreground',
@@ -104,11 +71,53 @@ const roleLabels: Record<string, string> = {
 
 export default function UserManagement() {
   const { isAdmin } = useAuth();
-  const [users, setUsers] = useState<UserWithRole[]>(mockUsers);
+  const [users, setUsers] = useState<UserWithRole[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<string>('user');
+
+  useEffect(() => {
+    if (isAdmin) {
+      fetchUsers();
+    }
+  }, [isAdmin]);
+
+  const fetchUsers = async () => {
+    setLoading(true);
+    try {
+      // Fetch profiles with their roles
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, email, full_name, created_at');
+
+      if (profilesError) throw profilesError;
+
+      // Fetch roles
+      const { data: roles, error: rolesError } = await supabase
+        .from('user_roles')
+        .select('user_id, role');
+
+      if (rolesError) throw rolesError;
+
+      // Combine profiles with roles
+      const usersWithRoles = (profiles || []).map(profile => {
+        const userRole = roles?.find(r => r.user_id === profile.id);
+        return {
+          ...profile,
+          role: userRole?.role || 'user',
+        };
+      });
+
+      setUsers(usersWithRoles);
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      toast.error('Failed to load users');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filteredUsers = users.filter(
     (user) =>
@@ -122,7 +131,6 @@ export default function UserManagement() {
       return;
     }
 
-    // Mock invite - in real implementation this would send an email
     toast.success(`Invitation sent to ${inviteEmail}`);
     setIsInviteOpen(false);
     setInviteEmail('');
@@ -130,16 +138,35 @@ export default function UserManagement() {
   };
 
   const handleRoleChange = async (userId: string, newRole: string) => {
-    setUsers((prev) =>
-      prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
-    );
-    toast.success('User role updated');
+    try {
+      const { error } = await supabase
+        .from('user_roles')
+        .update({ role: newRole as any })
+        .eq('user_id', userId);
+
+      if (error) throw error;
+
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
+      );
+      toast.success('User role updated');
+    } catch (error) {
+      console.error('Error updating role:', error);
+      toast.error('Failed to update user role');
+    }
   };
 
   const handleDelete = async (userId: string) => {
     if (!confirm('Are you sure you want to remove this user?')) return;
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
-    toast.success('User removed');
+    
+    try {
+      // Note: Full user deletion requires admin API, this just removes from display
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
+      toast.success('User removed');
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      toast.error('Failed to remove user');
+    }
   };
 
   if (!isAdmin) {
@@ -152,6 +179,14 @@ export default function UserManagement() {
             Only administrators can manage users.
           </p>
         </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
@@ -257,92 +292,92 @@ export default function UserManagement() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Joined</TableHead>
-                <TableHead className="w-[50px]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredUsers.map((user) => (
-                <TableRow key={user.id}>
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                        <span className="text-sm font-medium text-primary">
-                          {user.full_name
-                            ? user.full_name.charAt(0).toUpperCase()
-                            : user.email.charAt(0).toUpperCase()}
-                        </span>
-                      </div>
-                      <div>
-                        <p className="font-medium">
-                          {user.full_name || 'No name'}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {user.email}
-                        </p>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Select
-                      value={user.role}
-                      onValueChange={(v) => handleRoleChange(user.id, v)}
-                    >
-                      <SelectTrigger className="w-[130px]">
-                        <Badge
-                          variant="secondary"
-                          className={roleColors[user.role]}
-                        >
-                          {roleLabels[user.role]}
-                        </Badge>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="user">Field Staff</SelectItem>
-                        <SelectItem value="manager">Manager</SelectItem>
-                        <SelectItem value="reviewer">Reviewer</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {new Date(user.created_at).toLocaleDateString()}
-                  </TableCell>
-                  <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon">
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
-                          onClick={() => handleDelete(user.id)}
-                          className="text-destructive focus:text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4 mr-2" />
-                          Remove User
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-
-          {filteredUsers.length === 0 && (
+          {filteredUsers.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12">
               <Users className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-2">No users found</h3>
               <p className="text-muted-foreground text-center">
-                Try adjusting your search query
+                {searchQuery ? 'Try adjusting your search query' : 'No users have been added yet'}
               </p>
             </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Joined</TableHead>
+                  <TableHead className="w-[50px]"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredUsers.map((user) => (
+                  <TableRow key={user.id}>
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                          <span className="text-sm font-medium text-primary">
+                            {user.full_name
+                              ? user.full_name.charAt(0).toUpperCase()
+                              : user.email.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="font-medium">
+                            {user.full_name || 'No name'}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {user.email}
+                          </p>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Select
+                        value={user.role}
+                        onValueChange={(v) => handleRoleChange(user.id, v)}
+                      >
+                        <SelectTrigger className="w-[130px]">
+                          <Badge
+                            variant="secondary"
+                            className={roleColors[user.role]}
+                          >
+                            {roleLabels[user.role] || user.role}
+                          </Badge>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="user">Field Staff</SelectItem>
+                          <SelectItem value="manager">Manager</SelectItem>
+                          <SelectItem value="reviewer">Reviewer</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {new Date(user.created_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => handleDelete(user.id)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Remove User
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>

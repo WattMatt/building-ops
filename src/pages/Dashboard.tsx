@@ -1,4 +1,6 @@
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -13,32 +15,36 @@ import {
   Calendar,
   ArrowRight,
   Plus,
+  Loader2,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { format } from 'date-fns';
 
-// Mock data for the dashboard - will be replaced with real data
-const stats = {
-  buildings: 8,
-  pendingTasks: 24,
-  completedToday: 18,
-  openIssues: 5,
-  complianceRate: 87,
-};
+interface DashboardStats {
+  buildings: number;
+  pendingTasks: number;
+  completedToday: number;
+  openIssues: number;
+  complianceRate: number;
+}
 
-const upcomingTasks = [
-  { id: 1, name: 'Restroom Consumables Restock', building: 'Menlyn Mall', due: 'Today', priority: 'daily' },
-  { id: 2, name: 'HVAC Filters Inspection', building: 'Hatfield Square', due: 'Today', priority: 'weekly' },
-  { id: 3, name: 'Fire Extinguisher Check', building: 'Brooklyn Mall', due: 'Tomorrow', priority: 'daily' },
-  { id: 4, name: 'Emergency Exit Inspection', building: 'Centurion Mall', due: 'Tomorrow', priority: 'weekly' },
-];
+interface UpcomingTask {
+  id: string;
+  task_name: string;
+  building_name: string;
+  due_date: string;
+  frequency: string;
+}
 
-const recentIssues = [
-  { id: 1, title: 'HVAC not cooling properly', building: 'Menlyn Mall', priority: 'high', status: 'open' },
-  { id: 2, title: 'Elevator maintenance overdue', building: 'Brooklyn Mall', priority: 'critical', status: 'escalated' },
-  { id: 3, title: 'Parking lot lighting issue', building: 'Hatfield Square', priority: 'medium', status: 'in_progress' },
-];
+interface RecentIssue {
+  id: string;
+  title: string;
+  building_name: string;
+  priority: string;
+  status: string;
+}
 
-const priorityColors = {
+const priorityColors: Record<string, string> = {
   daily: 'bg-info text-info-foreground',
   weekly: 'bg-accent text-accent-foreground',
   monthly: 'bg-warning text-warning-foreground',
@@ -48,7 +54,7 @@ const priorityColors = {
   critical: 'bg-destructive text-destructive-foreground',
 };
 
-const statusColors = {
+const statusColors: Record<string, string> = {
   open: 'bg-warning text-warning-foreground',
   in_progress: 'bg-info text-info-foreground',
   escalated: 'bg-destructive text-destructive-foreground',
@@ -57,6 +63,135 @@ const statusColors = {
 
 export default function Dashboard() {
   const { user, role, isAdminOrManager } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<DashboardStats>({
+    buildings: 0,
+    pendingTasks: 0,
+    completedToday: 0,
+    openIssues: 0,
+    complianceRate: 0,
+  });
+  const [upcomingTasks, setUpcomingTasks] = useState<UpcomingTask[]>([]);
+  const [recentIssues, setRecentIssues] = useState<RecentIssue[]>([]);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, []);
+
+  const fetchDashboardData = async () => {
+    setLoading(true);
+    try {
+      // Fetch buildings count
+      const { count: buildingsCount } = await supabase
+        .from('buildings')
+        .select('*', { count: 'exact', head: true });
+
+      // Fetch pending tasks (due today or overdue)
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const { count: pendingCount } = await supabase
+        .from('task_instances')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending')
+        .lte('due_date', today);
+
+      // Fetch completed today
+      const { count: completedCount } = await supabase
+        .from('task_instances')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'completed')
+        .eq('due_date', today);
+
+      // Fetch open issues
+      const { count: openIssuesCount } = await supabase
+        .from('issues')
+        .select('*', { count: 'exact', head: true })
+        .neq('status', 'resolved');
+
+      // Calculate compliance rate
+      const totalTasks = (pendingCount || 0) + (completedCount || 0);
+      const complianceRate = totalTasks > 0 
+        ? Math.round(((completedCount || 0) / totalTasks) * 100) 
+        : 0;
+
+      setStats({
+        buildings: buildingsCount || 0,
+        pendingTasks: pendingCount || 0,
+        completedToday: completedCount || 0,
+        openIssues: openIssuesCount || 0,
+        complianceRate,
+      });
+
+      // Fetch upcoming tasks with building names
+      const { data: tasksData } = await supabase
+        .from('task_instances')
+        .select(`
+          id,
+          task_name,
+          due_date,
+          frequency,
+          building_id,
+          buildings (name)
+        `)
+        .eq('status', 'pending')
+        .order('due_date')
+        .limit(4);
+
+      if (tasksData) {
+        setUpcomingTasks(tasksData.map(task => ({
+          id: task.id,
+          task_name: task.task_name,
+          building_name: (task.buildings as any)?.name || 'Unknown',
+          due_date: task.due_date,
+          frequency: task.frequency,
+        })));
+      }
+
+      // Fetch recent issues with building names
+      const { data: issuesData } = await supabase
+        .from('issues')
+        .select(`
+          id,
+          title,
+          priority,
+          status,
+          building_id,
+          buildings (name)
+        `)
+        .neq('status', 'resolved')
+        .order('created_at', { ascending: false })
+        .limit(3);
+
+      if (issuesData) {
+        setRecentIssues(issuesData.map(issue => ({
+          id: issue.id,
+          title: issue.title,
+          building_name: (issue.buildings as any)?.name || 'Unknown',
+          priority: issue.priority,
+          status: issue.status,
+        })));
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatDueDate = (dateStr: string) => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const tomorrow = format(new Date(Date.now() + 86400000), 'yyyy-MM-dd');
+    if (dateStr === today) return 'Today';
+    if (dateStr === tomorrow) return 'Tomorrow';
+    return format(new Date(dateStr), 'MMM d');
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -149,10 +284,12 @@ export default function Dashboard() {
               <CardTitle>Overall Compliance Score</CardTitle>
               <CardDescription>Based on task completion across all buildings</CardDescription>
             </div>
-            <div className="flex items-center gap-2 text-success">
-              <TrendingUp className="h-4 w-4" />
-              <span className="text-sm font-medium">+5% this week</span>
-            </div>
+            {stats.complianceRate > 0 && (
+              <div className="flex items-center gap-2 text-success">
+                <TrendingUp className="h-4 w-4" />
+                <span className="text-sm font-medium">Today's progress</span>
+              </div>
+            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -180,33 +317,42 @@ export default function Dashboard() {
             </Button>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {upcomingTasks.map((task) => (
-                <div
-                  key={task.id}
-                  className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
-                >
-                  <div className="flex items-start gap-3">
-                    <ClipboardCheck className="h-5 w-5 text-muted-foreground mt-0.5" />
-                    <div>
-                      <p className="font-medium text-sm">{task.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {task.building}
-                      </p>
+            {upcomingTasks.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <CheckCircle2 className="h-10 w-10 text-success mb-2" />
+                <p className="text-sm text-muted-foreground">All caught up! No pending tasks.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {upcomingTasks.map((task) => (
+                  <div
+                    key={task.id}
+                    className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
+                  >
+                    <div className="flex items-start gap-3">
+                      <ClipboardCheck className="h-5 w-5 text-muted-foreground mt-0.5" />
+                      <div>
+                        <p className="font-medium text-sm">{task.task_name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {task.building_name}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant="secondary"
+                        className={priorityColors[task.frequency] || 'bg-muted'}
+                      >
+                        {task.frequency}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {formatDueDate(task.due_date)}
+                      </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant="secondary"
-                      className={priorityColors[task.priority as keyof typeof priorityColors]}
-                    >
-                      {task.priority}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground">{task.due}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -225,38 +371,45 @@ export default function Dashboard() {
             </Button>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {recentIssues.map((issue) => (
-                <div
-                  key={issue.id}
-                  className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
-                >
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle className="h-5 w-5 text-warning mt-0.5" />
-                    <div>
-                      <p className="font-medium text-sm">{issue.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {issue.building}
-                      </p>
+            {recentIssues.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <CheckCircle2 className="h-10 w-10 text-success mb-2" />
+                <p className="text-sm text-muted-foreground">No open issues. Great job!</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {recentIssues.map((issue) => (
+                  <div
+                    key={issue.id}
+                    className="flex items-center justify-between p-3 rounded-lg bg-muted/50"
+                  >
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="h-5 w-5 text-warning mt-0.5" />
+                      <div>
+                        <p className="font-medium text-sm">{issue.title}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {issue.building_name}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant="secondary"
+                        className={priorityColors[issue.priority] || 'bg-muted'}
+                      >
+                        {issue.priority}
+                      </Badge>
+                      <Badge
+                        variant="secondary"
+                        className={statusColors[issue.status] || 'bg-muted'}
+                      >
+                        {issue.status.replace('_', ' ')}
+                      </Badge>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant="secondary"
-                      className={priorityColors[issue.priority as keyof typeof priorityColors]}
-                    >
-                      {issue.priority}
-                    </Badge>
-                    <Badge
-                      variant="secondary"
-                      className={statusColors[issue.status as keyof typeof statusColors]}
-                    >
-                      {issue.status.replace('_', ' ')}
-                    </Badge>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
