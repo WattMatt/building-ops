@@ -279,12 +279,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </SidebarFooter>
         </Sidebar>
 
-        <main className="flex-1 flex flex-col">
-          <header className="h-14 border-b bg-card flex items-center justify-between px-4">
+        <main className="flex-1 flex flex-col min-w-0">
+          <header className="h-12 sm:h-14 border-b bg-card flex items-center justify-between px-3 sm:px-4 shrink-0">
             <SidebarTrigger />
             <ThemeToggle />
           </header>
-          <div className="flex-1 p-6 overflow-auto">
+          <div className="flex-1 p-3 sm:p-4 lg:p-6 overflow-auto">
             {children}
           </div>
         </main>

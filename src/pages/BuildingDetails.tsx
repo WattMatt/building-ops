@@ -75,47 +75,59 @@ export default function BuildingDetails() {
   const contacts = building.emergency_contacts || {};
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/buildings')}>
+      <div className="flex flex-col gap-3 sm:gap-4">
+        <div className="flex items-start sm:items-center gap-2 sm:gap-4">
+          <Button variant="ghost" size="icon" onClick={() => navigate('/buildings')} className="shrink-0 h-8 w-8 sm:h-10 sm:w-10">
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center">
-              <Building2 className="h-6 w-6 text-primary" />
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-primary/10 rounded-lg flex items-center justify-center shrink-0">
+              <Building2 className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
             </div>
-            <div>
-              <h1 className="text-2xl font-bold">{building.name}</h1>
-              <p className="text-muted-foreground flex items-center gap-1">
-                <MapPin className="h-3 w-3" />
-                {building.address}, {building.city}
+            <div className="min-w-0 flex-1">
+              <h1 className="text-lg sm:text-2xl font-bold truncate">{building.name}</h1>
+              <p className="text-xs sm:text-sm text-muted-foreground flex items-center gap-1 truncate">
+                <MapPin className="h-3 w-3 shrink-0" />
+                <span className="truncate">{building.address}, {building.city}</span>
               </p>
             </div>
           </div>
         </div>
         {isAdminOrManager && (
-          <Button asChild>
+          <Button asChild size="sm" className="self-start ml-10 sm:ml-14">
             <Link to={`/buildings/${building.id}/edit`}>
-              <Edit className="w-4 h-4 mr-2" />
-              Edit Building
+              <Edit className="w-4 h-4 mr-1.5" />
+              Edit
             </Link>
           </Button>
         )}
       </div>
 
-      {/* Tabs */}
+      {/* Tabs - Mobile optimized with icons */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="flex-wrap h-auto gap-1">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="checklists">Checklists</TabsTrigger>
-          <TabsTrigger value="forms">Forms</TabsTrigger>
-          <TabsTrigger value="tenants">Tenants</TabsTrigger>
-          <TabsTrigger value="assets">Assets</TabsTrigger>
-          <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
-          <TabsTrigger value="documents">Documents</TabsTrigger>
-          <TabsTrigger value="notes">Notes</TabsTrigger>
+        <TabsList className="w-full">
+          <TabsTrigger value="overview" className="flex-1 sm:flex-none">
+            <span className="hidden sm:inline">Overview</span>
+            <span className="sm:hidden">Info</span>
+          </TabsTrigger>
+          <TabsTrigger value="checklists" className="flex-1 sm:flex-none">
+            <span className="hidden sm:inline">Checklists</span>
+            <span className="sm:hidden">Tasks</span>
+          </TabsTrigger>
+          <TabsTrigger value="forms" className="flex-1 sm:flex-none">Forms</TabsTrigger>
+          <TabsTrigger value="tenants" className="flex-1 sm:flex-none">Tenants</TabsTrigger>
+          <TabsTrigger value="assets" className="flex-1 sm:flex-none">Assets</TabsTrigger>
+          <TabsTrigger value="maintenance" className="flex-1 sm:flex-none">
+            <span className="hidden sm:inline">Maintenance</span>
+            <span className="sm:hidden">Maint.</span>
+          </TabsTrigger>
+          <TabsTrigger value="documents" className="flex-1 sm:flex-none">
+            <span className="hidden sm:inline">Documents</span>
+            <span className="sm:hidden">Docs</span>
+          </TabsTrigger>
+          <TabsTrigger value="notes" className="flex-1 sm:flex-none">Notes</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6 mt-6">
@@ -123,7 +135,7 @@ export default function BuildingDetails() {
           <OverviewWidgets buildingId={building.id} onTabChange={setActiveTab} />
 
           {/* Contacts Grid */}
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
             {/* Asset Manager */}
             <Card>
               <CardHeader className="pb-3">
