@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { useOrganization } from '@/hooks/useOrganization';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -16,6 +17,10 @@ const passwordSchema = z.string().min(6, 'Password must be at least 6 characters
 export default function Auth() {
   const navigate = useNavigate();
   const { user, signIn, signUp, loading } = useAuth();
+  const { organization } = useOrganization();
+
+  const appName = organization?.name || 'FM Comply';
+  const logoUrl = organization?.logo_url;
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loginEmail, setLoginEmail] = useState('');
@@ -117,10 +122,14 @@ export default function Auth() {
       <div className="hidden lg:flex lg:w-1/2 bg-sidebar text-sidebar-foreground p-12 flex-col justify-between">
         <div>
           <div className="flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 bg-sidebar-primary rounded-lg flex items-center justify-center">
-              <ClipboardCheck className="w-6 h-6 text-sidebar-primary-foreground" />
-            </div>
-            <span className="text-xl font-bold">FM Comply</span>
+            {logoUrl ? (
+              <img src={logoUrl} alt={appName} className="w-10 h-10 rounded-lg object-cover" />
+            ) : (
+              <div className="w-10 h-10 bg-sidebar-primary rounded-lg flex items-center justify-center">
+                <ClipboardCheck className="w-6 h-6 text-sidebar-primary-foreground" />
+              </div>
+            )}
+            <span className="text-xl font-bold">{appName}</span>
           </div>
           
           <h1 className="text-4xl font-bold mb-6">
@@ -178,10 +187,14 @@ export default function Auth() {
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <div className="lg:hidden flex items-center justify-center gap-2 mb-4">
-              <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-                <ClipboardCheck className="w-5 h-5 text-primary-foreground" />
-              </div>
-              <span className="text-lg font-bold">FM Comply</span>
+              {logoUrl ? (
+                <img src={logoUrl} alt={appName} className="w-8 h-8 rounded-lg object-cover" />
+              ) : (
+                <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
+                  <ClipboardCheck className="w-5 h-5 text-primary-foreground" />
+                </div>
+              )}
+              <span className="text-lg font-bold">{appName}</span>
             </div>
             <CardTitle>Welcome</CardTitle>
             <CardDescription>
