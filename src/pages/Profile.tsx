@@ -5,9 +5,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
-import { User, Upload, Loader2, Mail, Phone, Camera } from 'lucide-react';
+import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ProfileData {
@@ -15,6 +16,11 @@ interface ProfileData {
   avatar_url: string | null;
   phone: string | null;
   email: string;
+  email_notifications: boolean | null;
+  overdue_alerts: boolean | null;
+  daily_digest: boolean | null;
+  issue_updates: boolean | null;
+  task_reminders: boolean | null;
 }
 
 export default function Profile() {
@@ -23,8 +29,14 @@ export default function Profile() {
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [emailNotifications, setEmailNotifications] = useState(true);
+  const [overdueAlerts, setOverdueAlerts] = useState(true);
+  const [dailyDigest, setDailyDigest] = useState(false);
+  const [issueUpdates, setIssueUpdates] = useState(true);
+  const [taskReminders, setTaskReminders] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingNotifications, setIsSavingNotifications] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -41,7 +53,7 @@ export default function Profile() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('full_name, avatar_url, phone, email')
+        .select('full_name, avatar_url, phone, email, email_notifications, overdue_alerts, daily_digest, issue_updates, task_reminders')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -52,6 +64,11 @@ export default function Profile() {
         setFullName(data.full_name || '');
         setPhone(data.phone || '');
         setAvatarUrl(data.avatar_url);
+        setEmailNotifications(data.email_notifications ?? true);
+        setOverdueAlerts(data.overdue_alerts ?? true);
+        setDailyDigest(data.daily_digest ?? false);
+        setIssueUpdates(data.issue_updates ?? true);
+        setTaskReminders(data.task_reminders ?? true);
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
@@ -82,6 +99,33 @@ export default function Profile() {
       toast.error('Failed to save profile');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSaveNotifications = async () => {
+    if (!user) return;
+
+    setIsSavingNotifications(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          email_notifications: emailNotifications,
+          overdue_alerts: overdueAlerts,
+          daily_digest: dailyDigest,
+          issue_updates: issueUpdates,
+          task_reminders: taskReminders,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id);
+
+      if (error) throw error;
+      toast.success('Notification preferences saved');
+    } catch (error) {
+      console.error('Error saving notifications:', error);
+      toast.error('Failed to save notification preferences');
+    } finally {
+      setIsSavingNotifications(false);
     }
   };
 
@@ -276,6 +320,123 @@ export default function Profile() {
                 </>
               ) : (
                 'Save Changes'
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Notification Preferences Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Bell className="h-5 w-5" />
+            Notification Preferences
+          </CardTitle>
+          <CardDescription>
+            Choose how and when you want to be notified
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="flex items-center gap-2">
+                  <Mail className="h-4 w-4" />
+                  Email Notifications
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Receive notifications via email
+                </p>
+              </div>
+              <Switch
+                checked={emailNotifications}
+                onCheckedChange={setEmailNotifications}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4" />
+                  Overdue Task Alerts
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Get alerted when tasks become overdue
+                </p>
+              </div>
+              <Switch
+                checked={overdueAlerts}
+                onCheckedChange={setOverdueAlerts}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4" />
+                  Daily Digest
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Receive a daily summary of pending tasks
+                </p>
+              </div>
+              <Switch
+                checked={dailyDigest}
+                onCheckedChange={setDailyDigest}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4" />
+                  Issue Updates
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Get notified when issues you reported or are assigned to are updated
+                </p>
+              </div>
+              <Switch
+                checked={issueUpdates}
+                onCheckedChange={setIssueUpdates}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label className="flex items-center gap-2">
+                  <CheckSquare className="h-4 w-4" />
+                  Task Reminders
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Receive reminders for upcoming task deadlines
+                </p>
+              </div>
+              <Switch
+                checked={taskReminders}
+                onCheckedChange={setTaskReminders}
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={handleSaveNotifications} disabled={isSavingNotifications}>
+              {isSavingNotifications ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Preferences'
               )}
             </Button>
           </div>
