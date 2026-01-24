@@ -2,7 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { DEFAULT_AVATARS, generateRandomAvatar } from '@/lib/avatars';
+import { DEFAULT_AVATARS, CARTOON_AVATARS, AVATAR_CATEGORIES, generateRandomAvatar } from '@/lib/avatars';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -308,7 +310,10 @@ export default function Profile() {
 
   const handleGenerateRandom = async () => {
     if (!user) return;
-    const randomUrl = generateRandomAvatar(user.id + Date.now());
+    // Randomly select a style from available cartoon styles
+    const styles: Array<'adventurer' | 'lorelei' | 'notionists' | 'fun-emoji'> = ['adventurer', 'lorelei', 'notionists', 'fun-emoji'];
+    const randomStyle = styles[Math.floor(Math.random() * styles.length)];
+    const randomUrl = generateRandomAvatar(user.id + Date.now(), randomStyle);
     await handleSelectDefaultAvatar(randomUrl);
   };
 
@@ -404,44 +409,80 @@ export default function Profile() {
               </div>
             </div>
 
-            {/* Default Avatar Options */}
-            <div className="space-y-2">
-              <Label className="text-sm">Choose an Avatar</Label>
-              <div className="grid grid-cols-5 gap-3">
-                {DEFAULT_AVATARS.map((avatar) => {
-                  const isSelected = avatar.url === avatarUrl || (!avatar.url && !avatarUrl);
-                  return (
-                    <button
-                      key={avatar.id}
-                      onClick={() => handleSelectDefaultAvatar(avatar.url)}
-                      disabled={isUploading}
-                      className={`relative rounded-lg p-1 transition-all hover:scale-105 ${
-                        isSelected 
-                          ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' 
-                          : 'hover:ring-2 hover:ring-muted-foreground/30'
-                      }`}
-                      title={avatar.name}
+            {/* Avatar Library */}
+            <div className="space-y-3">
+              <Label className="text-sm font-medium">Choose an Avatar</Label>
+              <Tabs defaultValue="adventurer" className="w-full">
+                <TabsList className="grid w-full grid-cols-4 h-auto">
+                  {(Object.keys(AVATAR_CATEGORIES) as Array<keyof typeof AVATAR_CATEGORIES>).map((category) => (
+                    <TabsTrigger
+                      key={category}
+                      value={category}
+                      className="text-xs py-2 px-1"
                     >
-                      <Avatar className="h-12 w-12">
-                        {avatar.url ? (
-                          <AvatarImage src={avatar.url} alt={avatar.name} />
-                        ) : null}
-                        <AvatarFallback className="bg-muted text-muted-foreground text-sm">
-                          {userInitials}
-                        </AvatarFallback>
-                      </Avatar>
-                      {isSelected && (
-                        <div className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-primary flex items-center justify-center">
-                          <Check className="h-3 w-3 text-primary-foreground" />
-                        </div>
-                      )}
-                    </button>
-                  );
-                })}
+                      {AVATAR_CATEGORIES[category].label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+                {(Object.keys(AVATAR_CATEGORIES) as Array<keyof typeof AVATAR_CATEGORIES>).map((category) => (
+                  <TabsContent key={category} value={category} className="mt-3">
+                    <p className="text-xs text-muted-foreground mb-3">
+                      {AVATAR_CATEGORIES[category].description}
+                    </p>
+                    <div className="grid grid-cols-6 gap-2">
+                      {CARTOON_AVATARS.filter(a => a.category === category).map((avatar) => {
+                        const isSelected = avatar.url === avatarUrl;
+                        return (
+                          <button
+                            key={avatar.id}
+                            onClick={() => handleSelectDefaultAvatar(avatar.url)}
+                            disabled={isUploading}
+                            className={`relative rounded-lg p-1 transition-all hover:scale-105 ${
+                              isSelected 
+                                ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' 
+                                : 'hover:ring-2 hover:ring-muted-foreground/30'
+                            }`}
+                            title={avatar.name}
+                          >
+                            <Avatar className="h-12 w-12">
+                              <AvatarImage src={avatar.url || undefined} alt={avatar.name} />
+                              <AvatarFallback className="bg-muted text-muted-foreground text-sm">
+                                {avatar.name.slice(0, 2)}
+                              </AvatarFallback>
+                            </Avatar>
+                            {isSelected && (
+                              <div className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-primary flex items-center justify-center">
+                                <Check className="h-3 w-3 text-primary-foreground" />
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </TabsContent>
+                ))}
+              </Tabs>
+              
+              {/* Use Initials Option */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  onClick={() => handleSelectDefaultAvatar(null)}
+                  disabled={isUploading}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
+                    !avatarUrl 
+                      ? 'border-primary bg-primary/10 text-primary' 
+                      : 'border-muted hover:border-muted-foreground/50'
+                  }`}
+                >
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback className="bg-muted text-muted-foreground text-sm">
+                      {userInitials}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="text-sm">Use my initials</span>
+                  {!avatarUrl && <Check className="h-4 w-4" />}
+                </button>
               </div>
-              <p className="text-xs text-muted-foreground">
-                First option uses your initials. Other options are pre-made avatars.
-              </p>
             </div>
           </div>
 
