@@ -21,6 +21,7 @@ interface BuildingMapProps {
   buildings: BuildingMarker[];
   onBuildingClick?: (buildingId: string) => void;
   selectedBuildingId?: string | null;
+  flyToLocation?: { lng: number; lat: number } | null;
   className?: string;
   mapStyle?: MapStyle;
 }
@@ -29,6 +30,7 @@ export function BuildingMap({
   buildings,
   onBuildingClick,
   selectedBuildingId,
+  flyToLocation,
   className,
   mapStyle = 'streets',
 }: BuildingMapProps) {
@@ -216,6 +218,17 @@ export function BuildingMap({
       }
     }
   }, [selectedBuildingId, buildings]);
+
+  // Fly to searched location
+  useEffect(() => {
+    if (flyToLocation && map.current && mapLoaded) {
+      map.current.flyTo({
+        center: [flyToLocation.lng, flyToLocation.lat],
+        zoom: 14,
+        duration: 1500,
+      });
+    }
+  }, [flyToLocation, mapLoaded]);
 
   return (
     <div ref={mapContainer} className={cn('w-full h-full min-h-[400px] rounded-lg', className)} />
