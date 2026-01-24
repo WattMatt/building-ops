@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ThemeProvider } from "@/components/ThemeProvider";
 import { OrganizationThemeProvider } from "@/components/OrganizationThemeProvider";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
@@ -26,14 +27,15 @@ const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <AuthProvider>
-          <OrganizationThemeProvider>
-          <Routes>
-            <Route path="/auth" element={<Auth />} />
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <AuthProvider>
+            <OrganizationThemeProvider>
+            <Routes>
+              <Route path="/auth" element={<Auth />} />
             
             {/* Protected Routes with Dashboard Layout */}
             <Route path="/" element={
@@ -88,11 +90,12 @@ const App = () => (
             } />
             
             <Route path="*" element={<NotFound />} />
-          </Routes>
-          </OrganizationThemeProvider>
-        </AuthProvider>
-      </BrowserRouter>
-    </TooltipProvider>
+            </Routes>
+            </OrganizationThemeProvider>
+          </AuthProvider>
+        </BrowserRouter>
+      </TooltipProvider>
+    </ThemeProvider>
   </QueryClientProvider>
 );
 

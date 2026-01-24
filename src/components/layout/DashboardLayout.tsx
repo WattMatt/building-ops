@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrganization } from '@/hooks/useOrganization';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import {
   Sidebar,
   SidebarContent,
@@ -265,8 +266,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         </Sidebar>
 
         <main className="flex-1 flex flex-col">
-          <header className="h-14 border-b bg-card flex items-center px-4 gap-4">
+          <header className="h-14 border-b bg-card flex items-center justify-between px-4">
             <SidebarTrigger />
+            <ThemeToggle />
           </header>
           <div className="flex-1 p-6 overflow-auto">
             {children}
