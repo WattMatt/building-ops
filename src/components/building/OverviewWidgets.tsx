@@ -4,8 +4,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, FileText, Wrench, ArrowRight, Clock, CheckCircle } from 'lucide-react';
-import { format, differenceInDays, isPast, isSameDay } from 'date-fns';
+import { AlertTriangle, FileText, Wrench, ArrowRight, Clock, CheckCircle, ClipboardList } from 'lucide-react';
+import { format, differenceInDays, isPast, isSameDay, subDays } from 'date-fns';
 
 interface OverviewWidgetsProps {
   buildingId: string;
@@ -24,6 +24,13 @@ interface OverdueAsset {
   name: string;
   category: string;
   next_service_date: string;
+}
+
+interface FormSubmission {
+  id: string;
+  form_name: string;
+  status: string;
+  created_at: string;
 }
 
 const DOCUMENT_TYPE_LABELS: Record<string, string> = {
@@ -52,11 +59,21 @@ const ASSET_CATEGORY_LABELS: Record<string, string> = {
   other: 'Other',
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  submitted: 'Pending Review',
+  reviewed: 'Reviewed',
+  approved: 'Approved',
+  rejected: 'Rejected',
+};
+
 export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWidgetsProps) {
   const [expiringDocs, setExpiringDocs] = useState<ExpiringDocument[]>([]);
   const [expiredDocs, setExpiredDocs] = useState<ExpiringDocument[]>([]);
   const [overdueAssets, setOverdueAssets] = useState<OverdueAsset[]>([]);
   const [upcomingAssets, setUpcomingAssets] = useState<OverdueAsset[]>([]);
+  const [recentSubmissions, setRecentSubmissions] = useState<FormSubmission[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [totalThisWeek, setTotalThisWeek] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -123,6 +140,23 @@ export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWid
 
       setOverdueAssets(overdue);
       setUpcomingAssets(upcoming);
+
+      // Fetch form submissions for this building
+      const sevenDaysAgo = subDays(today, 7);
+      const { data: submissions, error: submissionsError } = await supabase
+        .from('form_submissions')
+        .select('id, form_name, status, created_at')
+        .eq('building_id', buildingId)
+        .gte('created_at', sevenDaysAgo.toISOString())
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (submissionsError) throw submissionsError;
+
+      setRecentSubmissions(submissions || []);
+      setTotalThisWeek((submissions || []).length);
+      setPendingCount((submissions || []).filter(s => s.status === 'submitted').length);
+
     } catch (error) {
       console.error('Error fetching overview data:', error);
     } finally {
@@ -162,25 +196,34 @@ export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWid
     }
   };
 
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'submitted':
+        return <Badge variant="outline" className="text-xs border-amber-500 text-amber-600">Pending</Badge>;
+      case 'reviewed':
+        return <Badge variant="outline" className="text-xs border-blue-500 text-blue-600">Reviewed</Badge>;
+      case 'approved':
+        return <Badge variant="outline" className="text-xs border-green-500 text-green-600">Approved</Badge>;
+      case 'rejected':
+        return <Badge variant="destructive" className="text-xs">Rejected</Badge>;
+      default:
+        return <Badge variant="secondary" className="text-xs">{status}</Badge>;
+    }
+  };
+
   if (loading) {
     return (
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card className="animate-pulse">
-          <CardHeader className="pb-3">
-            <div className="h-5 w-32 bg-muted rounded" />
-          </CardHeader>
-          <CardContent>
-            <div className="h-20 bg-muted rounded" />
-          </CardContent>
-        </Card>
-        <Card className="animate-pulse">
-          <CardHeader className="pb-3">
-            <div className="h-5 w-32 bg-muted rounded" />
-          </CardHeader>
-          <CardContent>
-            <div className="h-20 bg-muted rounded" />
-          </CardContent>
-        </Card>
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {[1, 2, 3].map((i) => (
+          <Card key={i} className="animate-pulse">
+            <CardHeader className="pb-3">
+              <div className="h-5 w-32 bg-muted rounded" />
+            </CardHeader>
+            <CardContent>
+              <div className="h-20 bg-muted rounded" />
+            </CardContent>
+          </Card>
+        ))}
       </div>
     );
   }
@@ -189,7 +232,7 @@ export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWid
   const totalAssetAlerts = overdueAssets.length + upcomingAssets.length;
 
   return (
-    <div className="grid gap-4 md:grid-cols-2">
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
       {/* Documents Widget */}
       <Card className={expiredDocs.length > 0 ? 'border-destructive' : ''}>
         <CardHeader className="pb-3">
@@ -222,7 +265,6 @@ export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWid
             </div>
           ) : (
             <div className="space-y-3 max-h-[200px] overflow-y-auto">
-              {/* Expired documents first */}
               {expiredDocs.map((doc) => (
                 <div
                   key={doc.id}
@@ -237,7 +279,6 @@ export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWid
                   {getExpiryBadge(doc.expiry_date)}
                 </div>
               ))}
-              {/* Expiring soon */}
               {expiringDocs.map((doc) => (
                 <div
                   key={doc.id}
@@ -289,7 +330,6 @@ export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWid
             </div>
           ) : (
             <div className="space-y-3 max-h-[200px] overflow-y-auto">
-              {/* Overdue assets first */}
               {overdueAssets.map((asset) => (
                 <div
                   key={asset.id}
@@ -304,7 +344,6 @@ export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWid
                   {getExpiryBadge(asset.next_service_date)}
                 </div>
               ))}
-              {/* Upcoming maintenance */}
               {upcomingAssets.map((asset) => (
                 <div
                   key={asset.id}
@@ -319,6 +358,63 @@ export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWid
                   {getExpiryBadge(asset.next_service_date)}
                 </div>
               ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Form Submissions Widget */}
+      <Card className={pendingCount > 0 ? 'border-amber-500' : ''}>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base flex items-center gap-2">
+              <ClipboardList className="h-4 w-4" />
+              Form Activity
+              {pendingCount > 0 && (
+                <Badge variant="outline" className="border-amber-500 text-amber-600">
+                  {pendingCount} pending
+                </Badge>
+              )}
+            </CardTitle>
+            {recentSubmissions.length > 0 && (
+              <Button variant="ghost" size="sm" onClick={() => onTabChange?.('forms')}>
+                View All
+                <ArrowRight className="h-3 w-3 ml-1" />
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {recentSubmissions.length === 0 ? (
+            <div className="flex items-center gap-3 py-2">
+              <ClipboardList className="h-8 w-8 text-muted-foreground" />
+              <div>
+                <p className="font-medium text-sm">No recent submissions</p>
+                <p className="text-xs text-muted-foreground">No forms submitted in the last 7 days</p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">This week:</span>
+                <span className="font-medium">{totalThisWeek} submission{totalThisWeek !== 1 ? 's' : ''}</span>
+              </div>
+              <div className="space-y-2 max-h-[160px] overflow-y-auto">
+                {recentSubmissions.map((submission) => (
+                  <div
+                    key={submission.id}
+                    className="flex items-center justify-between p-2 rounded-lg bg-muted/50"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-sm truncate">{submission.form_name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {format(new Date(submission.created_at), 'MMM d, h:mm a')}
+                      </p>
+                    </div>
+                    {getStatusBadge(submission.status)}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </CardContent>
