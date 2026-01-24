@@ -29,6 +29,9 @@ import {
   startOfQuarter,
   startOfYear,
   endOfWeek,
+  endOfMonth,
+  endOfQuarter,
+  endOfYear,
   addDays,
   addMonths,
   subMonths,
@@ -38,7 +41,9 @@ import {
   isSameDay,
   isSameMonth,
   isToday,
-  isPast,
+  isWithinInterval,
+  isBefore,
+  isAfter,
 } from 'date-fns';
 import ReportIssueDialog from '@/components/checklists/ReportIssueDialog';
 import CompleteTaskDialog from '@/components/checklists/CompleteTaskDialog';
@@ -123,6 +128,28 @@ function getPeriodLabel(frequency: TaskFrequency): string {
   }
 }
 
+// Get the current period range for a frequency
+function getCurrentPeriodRange(frequency: TaskFrequency): { start: Date; end: Date } {
+  const now = new Date();
+  switch (frequency) {
+    case 'daily':
+      return { start: startOfDay(now), end: startOfDay(now) };
+    case 'weekly':
+      return { 
+        start: startOfWeek(now, { weekStartsOn: 1 }), 
+        end: addDays(startOfWeek(now, { weekStartsOn: 1 }), 6) 
+      };
+    case 'monthly':
+      return { start: startOfMonth(now), end: endOfMonth(now) };
+    case 'quarterly':
+      return { start: startOfQuarter(now), end: endOfQuarter(now) };
+    case 'annually':
+      return { start: startOfYear(now), end: endOfYear(now) };
+    default:
+      return { start: now, end: now };
+  }
+}
+
 export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTabProps) {
   const { user, isAdminOrManager } = useAuth();
   const [tasks, setTasks] = useState<TaskInstance[]>([]);
@@ -130,7 +157,6 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
   const [generating, setGenerating] = useState(false);
   const [selectedFrequency, setSelectedFrequency] = useState<TaskFrequency>('daily');
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
 
   // Dialog states
   const [issueDialogOpen, setIssueDialogOpen] = useState(false);
@@ -323,7 +349,7 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
     setIssueDialogOpen(true);
   };
 
-  // Filter tasks by frequency
+  // Filter tasks by frequency - show ALL tasks for this frequency
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => task.frequency === selectedFrequency);
   }, [tasks, selectedFrequency]);
@@ -339,6 +365,11 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
     return byDate;
   }, [filteredTasks]);
 
+  // Get current period range for highlighting
+  const currentPeriodRange = useMemo(() => {
+    return getCurrentPeriodRange(selectedFrequency);
+  }, [selectedFrequency]);
+
   // Calendar days
   const calendarDays = useMemo(() => {
     const monthStart = startOfMonth(currentMonth);
@@ -348,12 +379,15 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
     return eachDayOfInterval({ start: calendarStart, end: calendarEnd });
   }, [currentMonth]);
 
-  // Tasks for selected date
-  const selectedDateTasks = useMemo(() => {
-    if (!selectedDate) return [];
-    const dateKey = format(selectedDate, 'yyyy-MM-dd');
-    return tasksByDate[dateKey] || [];
-  }, [selectedDate, tasksByDate]);
+  // Check if a day is in the current period
+  const isDayInCurrentPeriod = (day: Date): boolean => {
+    return isWithinInterval(day, { start: currentPeriodRange.start, end: currentPeriodRange.end });
+  };
+
+  // Check if a day is in a future period (for next occurrences)
+  const isDayInFuturePeriod = (day: Date): boolean => {
+    return isAfter(day, currentPeriodRange.end);
+  };
 
   // Calculate progress
   const pendingTasks = filteredTasks.filter(t => t.status === 'pending');
@@ -401,11 +435,19 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
       {/* Frequency Tabs */}
       <Tabs value={selectedFrequency} onValueChange={v => setSelectedFrequency(v as TaskFrequency)}>
         <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="daily">Daily</TabsTrigger>
-          <TabsTrigger value="weekly">Weekly</TabsTrigger>
-          <TabsTrigger value="monthly">Monthly</TabsTrigger>
-          <TabsTrigger value="quarterly">Quarterly</TabsTrigger>
-          <TabsTrigger value="annually">Annual</TabsTrigger>
+          {(['daily', 'weekly', 'monthly', 'quarterly', 'annually'] as TaskFrequency[]).map(freq => {
+            const count = tasks.filter(t => t.frequency === freq).length;
+            return (
+              <TabsTrigger key={freq} value={freq} className="relative">
+                {frequencyLabels[freq]}
+                {count > 0 && (
+                  <Badge variant="secondary" className="ml-1 h-5 min-w-[20px] text-xs">
+                    {count}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            );
+          })}
         </TabsList>
 
         <TabsContent value={selectedFrequency} className="mt-6 space-y-6">
@@ -414,6 +456,7 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
             <div className="flex items-center gap-2">
               <Calendar className="h-5 w-5 text-muted-foreground" />
               <span className="font-medium">{getPeriodLabel(selectedFrequency)}</span>
+              <Badge variant="outline" className="text-xs">Current Period</Badge>
             </div>
             {isAdminOrManager && (
               <Button
@@ -497,6 +540,18 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
                 </div>
               </CardHeader>
               <CardContent>
+                {/* Legend */}
+                <div className="flex items-center gap-3 mb-3 text-xs">
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-primary/20 border border-primary" />
+                    <span>Current</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded bg-muted" />
+                    <span>Future</span>
+                  </div>
+                </div>
+
                 {/* Weekday headers */}
                 <div className="grid grid-cols-7 gap-1 mb-1">
                   {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
@@ -514,19 +569,19 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
                     const hasCompleted = dayTasks.some(t => t.status === 'completed');
                     const hasPending = dayTasks.some(t => t.status === 'pending');
                     const hasIssue = dayTasks.some(t => t.status === 'issue_logged');
-                    const isSelected = selectedDate && isSameDay(day, selectedDate);
                     const isCurrentMonth = isSameMonth(day, currentMonth);
+                    const inCurrentPeriod = isDayInCurrentPeriod(day);
+                    const inFuturePeriod = isDayInFuturePeriod(day);
 
                     return (
-                      <button
+                      <div
                         key={day.toISOString()}
-                        onClick={() => setSelectedDate(day)}
                         className={`
-                          relative h-8 w-full rounded text-sm transition-colors
+                          relative h-8 w-full rounded text-sm flex items-center justify-center transition-colors
                           ${!isCurrentMonth ? 'text-muted-foreground/40' : ''}
                           ${isToday(day) ? 'bg-primary text-primary-foreground font-bold' : ''}
-                          ${isSelected && !isToday(day) ? 'ring-2 ring-primary' : ''}
-                          ${dayTasks.length > 0 && !isToday(day) ? 'hover:bg-accent' : ''}
+                          ${inCurrentPeriod && !isToday(day) ? 'bg-primary/20 border border-primary/40' : ''}
+                          ${inFuturePeriod && dayTasks.length > 0 ? 'bg-muted' : ''}
                         `}
                       >
                         {format(day, 'd')}
@@ -537,61 +592,52 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
                             {hasIssue && <div className="w-1 h-1 rounded-full bg-destructive" />}
                           </div>
                         )}
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
               </CardContent>
             </Card>
 
-            {/* Tasks List */}
+            {/* Tasks List - Show ALL tasks for this frequency */}
             <Card className="lg:col-span-2">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base flex items-center gap-2">
-                  {selectedDate ? format(selectedDate, 'EEEE, MMMM d') : 'All Tasks'}
-                  {selectedDateTasks.length > 0 && (
-                    <Badge variant="secondary">{selectedDateTasks.length}</Badge>
-                  )}
+                  {frequencyLabels[selectedFrequency]} Tasks
+                  <Badge variant="secondary">{filteredTasks.length}</Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {selectedDate ? (
-                  <TasksList
-                    tasks={selectedDateTasks}
-                    onComplete={handleCompleteTask}
-                    onReportIssue={handleReportIssue}
-                    emptyMessage={`No ${frequencyLabels[selectedFrequency].toLowerCase()} tasks for this date`}
-                  />
-                ) : (
-                  <TasksList
-                    tasks={filteredTasks}
-                    onComplete={handleCompleteTask}
-                    onReportIssue={handleReportIssue}
-                    emptyMessage={`No ${frequencyLabels[selectedFrequency].toLowerCase()} tasks scheduled`}
-                  />
-                )}
+                <TasksList
+                  tasks={filteredTasks}
+                  onComplete={handleCompleteTask}
+                  onReportIssue={handleReportIssue}
+                  emptyMessage={`No ${frequencyLabels[selectedFrequency].toLowerCase()} tasks scheduled. Click "Generate ${frequencyLabels[selectedFrequency]}" to create tasks.`}
+                  showDueDate
+                />
               </CardContent>
             </Card>
           </div>
 
-          {/* All Tasks Summary (collapsible sections) */}
-          {selectedDate === null && (
-            <>
-              {issueTasks.length > 0 && (
-                <div className="space-y-3">
-                  <h3 className="text-base font-medium flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 text-destructive" />
-                    Issues Logged ({issueTasks.length})
-                  </h3>
-                  <TasksList
-                    tasks={issueTasks}
-                    onComplete={handleCompleteTask}
-                    onReportIssue={handleReportIssue}
-                    variant="issue"
-                  />
-                </div>
-              )}
-            </>
+          {/* Issues Summary */}
+          {issueTasks.length > 0 && (
+            <Card className="border-destructive/50">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2 text-destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  Issues Logged ({issueTasks.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TasksList
+                  tasks={issueTasks}
+                  onComplete={handleCompleteTask}
+                  onReportIssue={handleReportIssue}
+                  variant="issue"
+                  showDueDate
+                />
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
       </Tabs>
@@ -631,9 +677,10 @@ interface TasksListProps {
   onReportIssue: (task: TaskInstance) => void;
   emptyMessage?: string;
   variant?: 'default' | 'issue';
+  showDueDate?: boolean;
 }
 
-function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, variant = 'default' }: TasksListProps) {
+function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, variant = 'default', showDueDate = false }: TasksListProps) {
   if (tasks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -676,6 +723,12 @@ function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, variant = '
                   </p>
                   {task.task_description && (
                     <p className="text-xs text-muted-foreground mt-0.5">{task.task_description}</p>
+                  )}
+                  {showDueDate && (
+                    <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                      <Calendar className="h-3 w-3" />
+                      Due: {format(new Date(task.due_date), 'MMM d, yyyy')}
+                    </p>
                   )}
                 </div>
                 <Badge
