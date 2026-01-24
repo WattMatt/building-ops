@@ -2,9 +2,9 @@
 // This is a publishable token - safe to include in client-side code
 export const MAPBOX_ACCESS_TOKEN = 'pk.eyJ1IjoiYXJub21hdHQiLCJhIjoiY21pbmI5MXhjMTVuZTNncjFxZmQ1ZG1hbCJ9.-h3l7pr8faTRwcbnQDfmHw';
 
-// Default map center (Pretoria/Tshwane, South Africa)
-export const DEFAULT_CENTER: [number, number] = [28.1881, -25.7461];
-export const DEFAULT_ZOOM = 11;
+// Default map center (South Africa)
+export const DEFAULT_CENTER: [number, number] = [25.0, -29.0];
+export const DEFAULT_ZOOM = 5;
 
 // Map styles
 export const MAP_STYLES = {
