@@ -378,47 +378,62 @@ export type Database = {
         Row: {
           address: string
           city: string
+          council_details: Json | null
           created_at: string
+          electrical_authority: Json | null
           emergency_contacts: Json | null
           id: string
           latitude: number | null
           logo_url: string | null
           longitude: number | null
+          meter_reading_company: Json | null
           name: string
           organization_id: string
+          professional_team: Json | null
           statutory_certificates: Json | null
           timezone: string
           updated_at: string
+          utility_tariffs: Json | null
         }
         Insert: {
           address: string
           city?: string
+          council_details?: Json | null
           created_at?: string
+          electrical_authority?: Json | null
           emergency_contacts?: Json | null
           id?: string
           latitude?: number | null
           logo_url?: string | null
           longitude?: number | null
+          meter_reading_company?: Json | null
           name: string
           organization_id: string
+          professional_team?: Json | null
           statutory_certificates?: Json | null
           timezone?: string
           updated_at?: string
+          utility_tariffs?: Json | null
         }
         Update: {
           address?: string
           city?: string
+          council_details?: Json | null
           created_at?: string
+          electrical_authority?: Json | null
           emergency_contacts?: Json | null
           id?: string
           latitude?: number | null
           logo_url?: string | null
           longitude?: number | null
+          meter_reading_company?: Json | null
           name?: string
           organization_id?: string
+          professional_team?: Json | null
           statutory_certificates?: Json | null
           timezone?: string
           updated_at?: string
+          utility_tariffs?: Json | null
         }
         Relationships: [
           {
