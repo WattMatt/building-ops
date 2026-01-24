@@ -126,31 +126,17 @@ export default function MapView() {
 
       {/* Map */}
       <Card className="overflow-hidden">
-        {isLoading ? (
-          <Skeleton className="h-[600px] w-full" />
-        ) : buildingsWithCoords.length === 0 ? (
-          <CardContent className="flex flex-col items-center justify-center py-24">
-            <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center mb-6">
-              <MapPin className="h-10 w-10 text-muted-foreground" />
-            </div>
-            <h3 className="text-xl font-semibold mb-2">No Buildings with Coordinates</h3>
-            <p className="text-muted-foreground text-center max-w-md mb-6">
-              Add latitude and longitude coordinates to your buildings to see them on the map.
-            </p>
-            <Button onClick={() => navigate('/buildings')}>
-              <Building2 className="h-4 w-4 mr-2" />
-              Manage Buildings
-            </Button>
-          </CardContent>
-        ) : (
-          <BuildingMap
-            buildings={buildingsWithCoords}
-            onBuildingClick={handleBuildingClick}
-            selectedBuildingId={selectedBuildingId}
-            mapStyle={mapStyle}
-            className="h-[600px]"
-          />
-        )}
+      {isLoading ? (
+        <Skeleton className="h-[600px] w-full" />
+      ) : (
+        <BuildingMap
+          buildings={buildingsWithCoords}
+          onBuildingClick={handleBuildingClick}
+          selectedBuildingId={selectedBuildingId}
+          mapStyle={mapStyle}
+          className="h-[600px]"
+        />
+      )}
       </Card>
 
       {/* Buildings without coordinates warning */}
