@@ -14,6 +14,7 @@ import Auth from "./pages/Auth";
 import Dashboard from "./pages/Dashboard";
 import Buildings from "./pages/Buildings";
 import BuildingForm from "./pages/BuildingForm";
+import BuildingDetails from "./pages/BuildingDetails";
 import Checklists from "./pages/Checklists";
 import Issues from "./pages/Issues";
 import MapView from "./pages/MapView";
@@ -58,6 +59,11 @@ const App = () => (
             <Route path="/buildings/:id/edit" element={
               <ProtectedRoute allowedRoles={['admin', 'manager']}>
                 <DashboardLayout><BuildingForm /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/buildings/:id" element={
+              <ProtectedRoute>
+                <DashboardLayout><BuildingDetails /></DashboardLayout>
               </ProtectedRoute>
             } />
             <Route path="/checklists" element={

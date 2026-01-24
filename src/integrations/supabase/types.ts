@@ -262,6 +262,65 @@ export type Database = {
           },
         ]
       }
+      building_tenants: {
+        Row: {
+          area: string | null
+          building_id: string
+          contact_email: string | null
+          contact_name: string | null
+          contact_phone: string | null
+          created_at: string
+          id: string
+          is_active: boolean | null
+          lease_end_date: string | null
+          lease_start_date: string | null
+          notes: string | null
+          shop_name: string
+          shop_number: string
+          updated_at: string
+        }
+        Insert: {
+          area?: string | null
+          building_id: string
+          contact_email?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          lease_end_date?: string | null
+          lease_start_date?: string | null
+          notes?: string | null
+          shop_name: string
+          shop_number: string
+          updated_at?: string
+        }
+        Update: {
+          area?: string | null
+          building_id?: string
+          contact_email?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          lease_end_date?: string | null
+          lease_start_date?: string | null
+          notes?: string | null
+          shop_name?: string
+          shop_number?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "building_tenants_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       buildings: {
         Row: {
           address: string
@@ -663,6 +722,62 @@ export type Database = {
           },
         ]
       }
+      tenant_documents: {
+        Row: {
+          created_at: string
+          document_type: string
+          expiry_date: string | null
+          file_name: string
+          file_size: number | null
+          file_url: string
+          id: string
+          issue_date: string | null
+          name: string
+          notes: string | null
+          tenant_id: string
+          updated_at: string
+          uploaded_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          document_type: string
+          expiry_date?: string | null
+          file_name: string
+          file_size?: number | null
+          file_url: string
+          id?: string
+          issue_date?: string | null
+          name: string
+          notes?: string | null
+          tenant_id: string
+          updated_at?: string
+          uploaded_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          document_type?: string
+          expiry_date?: string | null
+          file_name?: string
+          file_size?: number | null
+          file_url?: string
+          id?: string
+          issue_date?: string | null
+          name?: string
+          notes?: string | null
+          tenant_id?: string
+          updated_at?: string
+          uploaded_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_documents_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "building_tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_building_assignments: {
         Row: {
           building_id: string
@@ -731,6 +846,10 @@ export type Database = {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
         }
+        Returns: boolean
+      }
+      has_tenant_access: {
+        Args: { _tenant_id: string; _user_id: string }
         Returns: boolean
       }
       is_admin_or_manager: { Args: { _user_id: string }; Returns: boolean }
