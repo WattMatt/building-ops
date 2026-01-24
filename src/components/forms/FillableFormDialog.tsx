@@ -49,6 +49,8 @@ interface FillableFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmitSuccess?: () => void;
+  preselectedBuildingId?: string;
+  preselectedBuildingName?: string;
 }
 
 export function FillableFormDialog({
@@ -57,6 +59,8 @@ export function FillableFormDialog({
   open,
   onOpenChange,
   onSubmitSuccess,
+  preselectedBuildingId,
+  preselectedBuildingName,
 }: FillableFormDialogProps) {
   const { user } = useAuth();
   const { organization } = useOrganization();
@@ -83,15 +87,16 @@ export function FillableFormDialog({
   });
 
   // Reset form when dialog opens
+  // Reset form when dialog opens, pre-select building if provided
   useEffect(() => {
     if (open) {
       setFormData({});
-      setSelectedBuilding('');
+      setSelectedBuilding(preselectedBuildingId || '');
       setSignatureConfirmed({});
       setPhotoUploads({});
       setUploadingPhotos({});
     }
-  }, [open]);
+  }, [open, preselectedBuildingId]);
 
   // Cleanup previews on unmount
   useEffect(() => {
@@ -502,20 +507,26 @@ export function FillableFormDialog({
             <div className="space-y-2">
               <Label className="flex items-center gap-2">
                 <Building2 className="h-4 w-4" />
-                Associated Building (Optional)
+                {preselectedBuildingId ? 'Building' : 'Associated Building (Optional)'}
               </Label>
-              <Select value={selectedBuilding} onValueChange={setSelectedBuilding}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a building (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  {buildings?.map((building) => (
-                    <SelectItem key={building.id} value={building.id}>
-                      {building.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {preselectedBuildingId ? (
+                <div className="h-10 px-3 border rounded-md bg-muted flex items-center">
+                  <span className="text-sm font-medium">{preselectedBuildingName || 'Selected Building'}</span>
+                </div>
+              ) : (
+                <Select value={selectedBuilding} onValueChange={setSelectedBuilding}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a building (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {buildings?.map((building) => (
+                      <SelectItem key={building.id} value={building.id}>
+                        {building.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
 
             <Separator />
