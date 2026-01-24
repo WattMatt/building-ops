@@ -14,6 +14,7 @@ import DocumentsTab from '@/components/building/DocumentsTab';
 import MaintenanceCalendarTab from '@/components/building/MaintenanceCalendarTab';
 import NotesTab from '@/components/building/NotesTab';
 import OverviewWidgets from '@/components/building/OverviewWidgets';
+import ChecklistsTab from '@/components/building/ChecklistsTab';
 
 interface Building {
   id: string;
@@ -105,8 +106,9 @@ export default function BuildingDetails() {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList>
+        <TabsList className="flex-wrap h-auto gap-1">
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="checklists">Checklists</TabsTrigger>
           <TabsTrigger value="tenants">Tenants</TabsTrigger>
           <TabsTrigger value="assets">Assets</TabsTrigger>
           <TabsTrigger value="maintenance">Maintenance</TabsTrigger>
@@ -213,6 +215,10 @@ export default function BuildingDetails() {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        <TabsContent value="checklists" className="mt-6">
+          <ChecklistsTab buildingId={building.id} buildingName={building.name} />
         </TabsContent>
 
         <TabsContent value="tenants" className="mt-6">
