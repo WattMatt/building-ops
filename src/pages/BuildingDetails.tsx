@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Building2, MapPin, Edit, Users, Phone, Mail, User, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import TenantsTab from '@/components/building/TenantsTab';
+import AssetsTab from '@/components/building/AssetsTab';
 
 interface Building {
   id: string;
@@ -209,11 +210,7 @@ export default function BuildingDetails() {
         </TabsContent>
 
         <TabsContent value="assets" className="mt-6">
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <p className="text-muted-foreground">Assets management coming soon</p>
-            </CardContent>
-          </Card>
+          <AssetsTab buildingId={building.id} />
         </TabsContent>
 
         <TabsContent value="documents" className="mt-6">
