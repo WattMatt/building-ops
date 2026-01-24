@@ -144,15 +144,15 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       <div className="min-h-screen flex w-full">
         <Sidebar>
           <SidebarHeader className="border-b border-sidebar-border p-4">
-            <Link to="/" className="flex items-center gap-3">
+            <Link to="/" className="flex flex-col items-center gap-2">
               {logoUrl ? (
-                <img src={logoUrl} alt={appName} className="w-8 h-8 rounded-lg object-cover" />
+                <img src={logoUrl} alt={appName} className="w-16 h-16 rounded-lg object-contain" />
               ) : (
-                <div className="w-8 h-8 bg-sidebar-primary rounded-lg flex items-center justify-center">
-                  <ClipboardCheck className="w-5 h-5 text-sidebar-primary-foreground" />
+                <div className="w-16 h-16 bg-sidebar-primary rounded-lg flex items-center justify-center">
+                  <ClipboardCheck className="w-8 h-8 text-sidebar-primary-foreground" />
                 </div>
               )}
-              <span className="font-bold text-lg">{appName}</span>
+              <span className="font-bold text-sm text-center">{appName}</span>
             </Link>
           </SidebarHeader>
 
