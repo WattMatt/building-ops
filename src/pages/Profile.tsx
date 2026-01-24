@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { DEFAULT_AVATARS, generateRandomAvatar } from '@/lib/avatars';
@@ -9,7 +10,18 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
-import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare, Upload, Shuffle, Check, Lock, Eye, EyeOff } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare, Upload, Shuffle, Check, Lock, Eye, EyeOff, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ProfileData {
@@ -25,7 +37,8 @@ interface ProfileData {
 }
 
 export default function Profile() {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
@@ -46,6 +59,8 @@ export default function Profile() {
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -169,6 +184,43 @@ export default function Profile() {
       toast.error(error.message || 'Failed to update password');
     } finally {
       setIsChangingPassword(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText !== 'DELETE') {
+      toast.error('Please type DELETE to confirm');
+      return;
+    }
+
+    setIsDeletingAccount(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        toast.error('You must be logged in to delete your account');
+        return;
+      }
+
+      const response = await supabase.functions.invoke('delete-account', {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || 'Failed to delete account');
+      }
+
+      toast.success('Your account has been deleted');
+      await signOut();
+      navigate('/auth');
+    } catch (error: any) {
+      console.error('Error deleting account:', error);
+      toast.error(error.message || 'Failed to delete account');
+    } finally {
+      setIsDeletingAccount(false);
+      setDeleteConfirmText('');
     }
   };
 
@@ -681,6 +733,86 @@ export default function Profile() {
                   : 'N/A'}
               </p>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Danger Zone Card */}
+      <Card className="border-destructive/50">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-destructive">
+            <Trash2 className="h-5 w-5" />
+            Danger Zone
+          </CardTitle>
+          <CardDescription>
+            Irreversible actions that affect your account
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between p-4 rounded-lg border border-destructive/30 bg-destructive/5">
+            <div className="space-y-1">
+              <p className="font-medium">Delete Account</p>
+              <p className="text-sm text-muted-foreground">
+                Permanently delete your account and all associated data. This action cannot be undone.
+              </p>
+            </div>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive">
+                  Delete Account
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle className="flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-destructive" />
+                    Delete Your Account?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription className="space-y-3">
+                    <p>
+                      This action is <strong>permanent and irreversible</strong>. Deleting your account will:
+                    </p>
+                    <ul className="list-disc list-inside space-y-1 text-sm">
+                      <li>Remove all your personal data</li>
+                      <li>Delete your profile and preferences</li>
+                      <li>Remove you from all building assignments</li>
+                      <li>Log you out immediately</li>
+                    </ul>
+                    <div className="pt-2">
+                      <Label htmlFor="delete-confirm" className="text-sm font-medium text-foreground">
+                        Type <strong>DELETE</strong> to confirm:
+                      </Label>
+                      <Input
+                        id="delete-confirm"
+                        value={deleteConfirmText}
+                        onChange={(e) => setDeleteConfirmText(e.target.value)}
+                        placeholder="DELETE"
+                        className="mt-2"
+                      />
+                    </div>
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel onClick={() => setDeleteConfirmText('')}>
+                    Cancel
+                  </AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleDeleteAccount}
+                    disabled={deleteConfirmText !== 'DELETE' || isDeletingAccount}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    {isDeletingAccount ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Deleting...
+                      </>
+                    ) : (
+                      'Delete My Account'
+                    )}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </CardContent>
       </Card>
