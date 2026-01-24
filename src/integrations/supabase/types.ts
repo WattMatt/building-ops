@@ -259,30 +259,45 @@ export type Database = {
         Row: {
           avatar_url: string | null
           created_at: string
+          daily_digest: boolean | null
           email: string
+          email_notifications: boolean | null
           full_name: string | null
           id: string
+          issue_updates: boolean | null
+          overdue_alerts: boolean | null
           phone: string | null
+          task_reminders: boolean | null
           theme_preference: string | null
           updated_at: string
         }
         Insert: {
           avatar_url?: string | null
           created_at?: string
+          daily_digest?: boolean | null
           email: string
+          email_notifications?: boolean | null
           full_name?: string | null
           id: string
+          issue_updates?: boolean | null
+          overdue_alerts?: boolean | null
           phone?: string | null
+          task_reminders?: boolean | null
           theme_preference?: string | null
           updated_at?: string
         }
         Update: {
           avatar_url?: string | null
           created_at?: string
+          daily_digest?: boolean | null
           email?: string
+          email_notifications?: boolean | null
           full_name?: string | null
           id?: string
+          issue_updates?: boolean | null
+          overdue_alerts?: boolean | null
           phone?: string | null
+          task_reminders?: boolean | null
           theme_preference?: string | null
           updated_at?: string
         }
