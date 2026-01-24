@@ -20,10 +20,10 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
-import { Loader2, Eye, FileText, User, Building2, Calendar, Download } from 'lucide-react';
+import { Loader2, Eye, FileText, User, Building2, Calendar, Download, Image } from 'lucide-react';
 import { useOrganization } from '@/hooks/useOrganization';
 import { generateFilledFormPdf } from '@/lib/pdfGenerator';
-import { defaultFormFields } from '@/lib/formFields';
+import { defaultFormFields, FormField } from '@/lib/formFields';
 import { toast } from 'sonner';
 
 interface FormTemplate {
@@ -47,6 +47,7 @@ interface SubmissionDetails {
   building_id: string | null;
   status: string;
   created_at: string;
+  photo_urls?: string[];
 }
 
 export function FormSubmissionsDialog({
@@ -70,7 +71,8 @@ export function FormSubmissionsDialog({
           submitted_by,
           building_id,
           status,
-          created_at
+          created_at,
+          photo_urls
         `)
         .eq('form_template_id', form.id)
         .order('created_at', { ascending: false });
@@ -261,18 +263,77 @@ export function FormSubmissionsDialog({
               <div className="space-y-4">
                 <h4 className="font-semibold">Form Data</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {Object.entries(selectedSubmission.form_data).map(([key, value]) => (
-                    <div key={key} className="border rounded-lg p-3">
-                      <span className="text-muted-foreground text-xs uppercase tracking-wide">
-                        {key}
-                      </span>
-                      <p className="mt-1 text-sm break-words">
-                        {typeof value === 'boolean' ? (value ? '✓ Yes' : '✗ No') : String(value) || '-'}
-                      </p>
-                    </div>
-                  ))}
+                  {Object.entries(selectedSubmission.form_data).map(([key, value]) => {
+                    // Check if this is a photo field
+                    const isPhotoField = Array.isArray(value) && value.length > 0 && 
+                      typeof value[0] === 'string' && value[0].includes('http');
+                    
+                    return (
+                      <div key={key} className={`border rounded-lg p-3 ${isPhotoField ? 'md:col-span-2' : ''}`}>
+                        <span className="text-muted-foreground text-xs uppercase tracking-wide">
+                          {key}
+                        </span>
+                        {isPhotoField ? (
+                          <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                            {(value as string[]).map((url, photoIndex) => (
+                              <a
+                                key={photoIndex}
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="relative aspect-square rounded-lg overflow-hidden border hover:border-primary transition-colors group"
+                              >
+                                <img
+                                  src={url}
+                                  alt={`Photo ${photoIndex + 1}`}
+                                  className="w-full h-full object-cover"
+                                />
+                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                  <Eye className="h-5 w-5 text-white" />
+                                </div>
+                              </a>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="mt-1 text-sm break-words">
+                            {typeof value === 'boolean' ? (value ? '✓ Yes' : '✗ No') : String(value) || '-'}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
+
+              {/* Display standalone photo_urls if any */}
+              {selectedSubmission.photo_urls && selectedSubmission.photo_urls.length > 0 && (
+                <div className="space-y-4">
+                  <h4 className="font-semibold flex items-center gap-2">
+                    <Image className="h-4 w-4" />
+                    Attached Photos ({selectedSubmission.photo_urls.length})
+                  </h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                    {selectedSubmission.photo_urls.map((url, index) => (
+                      <a
+                        key={index}
+                        href={url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="relative aspect-square rounded-lg overflow-hidden border hover:border-primary transition-colors group"
+                      >
+                        <img
+                          src={url}
+                          alt={`Evidence photo ${index + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                          <Eye className="h-5 w-5 text-white" />
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           ) : isLoading ? (
             <div className="flex items-center justify-center py-12">

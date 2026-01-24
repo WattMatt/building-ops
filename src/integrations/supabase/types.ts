@@ -497,6 +497,7 @@ export type Database = {
           form_name: string
           form_template_id: string
           id: string
+          photo_urls: string[] | null
           status: string
           submitted_by: string
           updated_at: string
@@ -508,6 +509,7 @@ export type Database = {
           form_name: string
           form_template_id: string
           id?: string
+          photo_urls?: string[] | null
           status?: string
           submitted_by: string
           updated_at?: string
@@ -519,6 +521,7 @@ export type Database = {
           form_name?: string
           form_template_id?: string
           id?: string
+          photo_urls?: string[] | null
           status?: string
           submitted_by?: string
           updated_at?: string

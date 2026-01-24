@@ -1,9 +1,10 @@
 export interface FormField {
   label: string;
-  type: 'text' | 'date' | 'time' | 'signature' | 'checkbox' | 'textarea' | 'select';
+  type: 'text' | 'date' | 'time' | 'signature' | 'checkbox' | 'textarea' | 'select' | 'photo';
   required?: boolean;
   options?: string[];
   width?: 'full' | 'half';
+  maxPhotos?: number;
 }
 
 export const defaultFormFields: Record<string, FormField[]> = {
@@ -64,7 +65,7 @@ export const defaultFormFields: Record<string, FormField[]> = {
     { label: 'Next Service Due', type: 'date', width: 'half' },
     { label: 'Findings / Observations', type: 'textarea', required: true },
     { label: 'Recommended Actions', type: 'textarea' },
-    { label: 'Photos Attached', type: 'checkbox' },
+    { label: 'Evidence Photos', type: 'photo', maxPhotos: 5 },
     { label: 'Inspector Signature', type: 'signature', required: true },
   ],
   '5': [ // Cleaning & Hygiene Log
@@ -130,7 +131,7 @@ export const defaultFormFields: Record<string, FormField[]> = {
     { label: 'Immediate Actions Taken', type: 'textarea', required: true },
     { label: 'Root Cause Analysis', type: 'textarea' },
     { label: 'Corrective Actions Required', type: 'textarea', required: true },
-    { label: 'Photos Attached', type: 'checkbox' },
+    { label: 'Incident Photos', type: 'photo', required: true, maxPhotos: 10 },
     { label: 'First Aid Administered', type: 'checkbox' },
     { label: 'Emergency Services Called', type: 'checkbox' },
     { label: 'Reporter Name', type: 'text', required: true },
@@ -220,7 +221,7 @@ export const defaultFormFields: Record<string, FormField[]> = {
     { label: 'Actions Taken', type: 'textarea', required: true },
     { label: 'Tow Company Called', type: 'checkbox' },
     { label: 'Tow Company Name', type: 'text' },
-    { label: 'Photos Attached', type: 'checkbox' },
+    { label: 'Incident Photos', type: 'photo', maxPhotos: 5 },
     { label: 'Police Report Number', type: 'text' },
     { label: 'Reporting Officer', type: 'text', required: true },
     { label: 'Officer Signature', type: 'signature', required: true },

@@ -146,6 +146,37 @@ function generateFieldContent(fields: FormField[], primaryColor: string): any[] 
         ],
         margin: [0, 0, 0, 10],
       };
+    } else if (field.type === 'photo') {
+      fieldContent = {
+        stack: [
+          { text: field.label + requiredMark, style: 'fieldLabel' },
+          {
+            table: {
+              widths: ['*'],
+              body: [
+                [
+                  {
+                    text: `[Photo upload - max ${field.maxPhotos || 5} images]`,
+                    alignment: 'center',
+                    color: '#9ca3af',
+                    margin: [0, 15, 0, 15],
+                    italics: true,
+                  },
+                ],
+              ],
+            },
+            layout: {
+              hLineWidth: () => 1,
+              vLineWidth: () => 1,
+              hLineColor: () => '#d1d5db',
+              vLineColor: () => '#d1d5db',
+              hLineStyle: () => ({ dash: { length: 4, space: 2 } }),
+              vLineStyle: () => ({ dash: { length: 4, space: 2 } }),
+            },
+          },
+        ],
+        margin: [0, 0, 0, 10],
+      };
     } else {
       // text, date, time fields
       const placeholder = field.type === 'date' ? 'DD / MM / YYYY' : field.type === 'time' ? 'HH : MM' : '';
@@ -504,6 +535,11 @@ export async function generateFilledFormPdf(
       displayValue = value ? '✓ Yes' : '✗ No';
     } else if (field.type === 'signature') {
       displayValue = value ? '✓ Digitally Signed' : 'Not signed';
+    } else if (field.type === 'photo') {
+      const photoUrls = Array.isArray(value) ? value : [];
+      displayValue = photoUrls.length > 0 
+        ? `${photoUrls.length} photo(s) attached` 
+        : 'No photos attached';
     } else {
       displayValue = value?.toString() || '-';
     }

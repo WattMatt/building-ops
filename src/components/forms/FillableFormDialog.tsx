@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -25,16 +25,9 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrganization } from '@/hooks/useOrganization';
 import { toast } from 'sonner';
-import { Loader2, Send, Building2, ClipboardCheck } from 'lucide-react';
+import { Loader2, Send, Building2, ClipboardCheck, Camera, X, ImagePlus } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-
-interface FormField {
-  label: string;
-  type: 'text' | 'date' | 'time' | 'signature' | 'checkbox' | 'textarea' | 'select';
-  required?: boolean;
-  options?: string[];
-  width?: 'full' | 'half';
-}
+import { FormField } from '@/lib/formFields';
 
 interface FormTemplate {
   id: string;
@@ -43,6 +36,11 @@ interface FormTemplate {
   category: string;
   icon: React.ReactNode;
   fields?: FormField[];
+}
+
+interface PhotoUpload {
+  file: File;
+  preview: string;
 }
 
 interface FillableFormDialogProps {
@@ -66,6 +64,9 @@ export function FillableFormDialog({
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [selectedBuilding, setSelectedBuilding] = useState<string>('');
   const [signatureConfirmed, setSignatureConfirmed] = useState<Record<string, boolean>>({});
+  const [photoUploads, setPhotoUploads] = useState<Record<string, PhotoUpload[]>>({});
+  const [uploadingPhotos, setUploadingPhotos] = useState<Record<string, boolean>>({});
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   // Fetch buildings for selection
   const { data: buildings } = useQuery({
@@ -87,8 +88,17 @@ export function FillableFormDialog({
       setFormData({});
       setSelectedBuilding('');
       setSignatureConfirmed({});
+      setPhotoUploads({});
+      setUploadingPhotos({});
     }
   }, [open]);
+
+  // Cleanup previews on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(photoUploads).flat().forEach(p => URL.revokeObjectURL(p.preview));
+    };
+  }, [photoUploads]);
 
   if (!form) return null;
 
@@ -111,6 +121,54 @@ export function FillableFormDialog({
     }
   };
 
+  const handlePhotoAdd = (fieldLabel: string, files: FileList | null, maxPhotos: number = 5) => {
+    if (!files || files.length === 0) return;
+    
+    const currentPhotos = photoUploads[fieldLabel] || [];
+    const remainingSlots = maxPhotos - currentPhotos.length;
+    
+    if (remainingSlots <= 0) {
+      toast.error(`Maximum ${maxPhotos} photos allowed for ${fieldLabel}`);
+      return;
+    }
+
+    const newPhotos: PhotoUpload[] = [];
+    const filesToAdd = Array.from(files).slice(0, remainingSlots);
+    
+    for (const file of filesToAdd) {
+      if (!file.type.startsWith('image/')) {
+        toast.error(`${file.name} is not an image file`);
+        continue;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error(`${file.name} is too large (max 10MB)`);
+        continue;
+      }
+      newPhotos.push({
+        file,
+        preview: URL.createObjectURL(file),
+      });
+    }
+
+    if (newPhotos.length > 0) {
+      setPhotoUploads(prev => ({
+        ...prev,
+        [fieldLabel]: [...currentPhotos, ...newPhotos],
+      }));
+    }
+  };
+
+  const handlePhotoRemove = (fieldLabel: string, index: number) => {
+    setPhotoUploads(prev => {
+      const photos = prev[fieldLabel] || [];
+      URL.revokeObjectURL(photos[index]?.preview);
+      return {
+        ...prev,
+        [fieldLabel]: photos.filter((_, i) => i !== index),
+      };
+    });
+  };
+
   const validateForm = (): boolean => {
     for (const field of fields) {
       if (field.required) {
@@ -125,6 +183,12 @@ export function FillableFormDialog({
             toast.error(`Please confirm signature for: ${field.label}`);
             return false;
           }
+        } else if (field.type === 'photo') {
+          const photos = photoUploads[field.label] || [];
+          if (photos.length === 0) {
+            toast.error(`Please add at least one photo for: ${field.label}`);
+            return false;
+          }
         } else {
           if (!value || (typeof value === 'string' && !value.trim())) {
             toast.error(`Please fill in: ${field.label}`);
@@ -134,6 +198,36 @@ export function FillableFormDialog({
       }
     }
     return true;
+  };
+
+  const uploadPhotosToStorage = async (): Promise<string[]> => {
+    const allUrls: string[] = [];
+    
+    for (const [fieldLabel, photos] of Object.entries(photoUploads)) {
+      for (const photo of photos) {
+        const fileName = `form-submissions/${user?.id}/${Date.now()}-${photo.file.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from('tenant-documents')
+          .upload(fileName, photo.file);
+
+        if (uploadError) {
+          console.error('Photo upload error:', uploadError);
+          continue;
+        }
+
+        const { data: urlData } = supabase.storage
+          .from('tenant-documents')
+          .getPublicUrl(fileName);
+
+        if (urlData) {
+          allUrls.push(urlData.publicUrl);
+          // Also store in form data for reference
+          handleFieldChange(fieldLabel, [...(formData[fieldLabel] || []), urlData.publicUrl]);
+        }
+      }
+    }
+    
+    return allUrls;
   };
 
   const handleSubmit = async () => {
@@ -146,12 +240,34 @@ export function FillableFormDialog({
 
     setIsSubmitting(true);
     try {
+      // Upload photos first
+      const photoUrls = await uploadPhotosToStorage();
+
+      // Prepare form data with photo URLs
+      const finalFormData = { ...formData };
+      for (const [fieldLabel, photos] of Object.entries(photoUploads)) {
+        if (photos.length > 0) {
+          finalFormData[fieldLabel] = photoUrls.filter((_, i) => {
+            // Map URLs back to their fields based on upload order
+            let count = 0;
+            for (const [label, labelPhotos] of Object.entries(photoUploads)) {
+              if (label === fieldLabel) {
+                return i >= count && i < count + labelPhotos.length;
+              }
+              count += labelPhotos.length;
+            }
+            return false;
+          });
+        }
+      }
+
       const { error } = await supabase.from('form_submissions').insert({
         form_template_id: form.id,
         form_name: form.name,
         building_id: selectedBuilding || null,
         submitted_by: user.id,
-        form_data: formData,
+        form_data: finalFormData,
+        photo_urls: photoUrls,
         status: 'submitted',
       });
 
@@ -272,6 +388,60 @@ export function FillableFormDialog({
                 I confirm this is my digital signature
               </Label>
             </div>
+          </div>
+        )}
+
+        {field.type === 'photo' && (
+          <div className="space-y-3">
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              ref={(el) => (fileInputRefs.current[field.label] = el)}
+              onChange={(e) => handlePhotoAdd(field.label, e.target.files, field.maxPhotos || 5)}
+            />
+            
+            {/* Photo grid */}
+            {(photoUploads[field.label]?.length || 0) > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                {photoUploads[field.label]?.map((photo, photoIndex) => (
+                  <div key={photoIndex} className="relative group aspect-square">
+                    <img
+                      src={photo.preview}
+                      alt={`Photo ${photoIndex + 1}`}
+                      className="w-full h-full object-cover rounded-lg border"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handlePhotoRemove(field.label, photoIndex)}
+                      className="absolute -top-2 -right-2 h-6 w-6 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            
+            {/* Upload button */}
+            {(photoUploads[field.label]?.length || 0) < (field.maxPhotos || 5) && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => fileInputRefs.current[field.label]?.click()}
+                className="w-full h-24 border-2 border-dashed flex flex-col items-center justify-center gap-2 hover:border-primary hover:bg-primary/5"
+              >
+                <ImagePlus className="h-6 w-6 text-muted-foreground" />
+                <span className="text-sm text-muted-foreground">
+                  Add photos ({photoUploads[field.label]?.length || 0}/{field.maxPhotos || 5})
+                </span>
+              </Button>
+            )}
+            
+            <p className="text-xs text-muted-foreground">
+              Max {field.maxPhotos || 5} photos, 10MB each. Supported: JPG, PNG, WebP
+            </p>
           </div>
         )}
       </div>
