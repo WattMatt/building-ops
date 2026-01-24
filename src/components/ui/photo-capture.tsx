@@ -12,7 +12,7 @@ export interface PhotoFile {
 interface PhotoCaptureProps {
   /** Maximum number of photos allowed */
   maxPhotos?: number;
-  /** Maximum file size in MB */
+  /** Maximum file size in MB (after compression) */
   maxSizeMB?: number;
   /** Current photos */
   photos: PhotoFile[];
@@ -32,6 +32,12 @@ interface PhotoCaptureProps {
   required?: boolean;
   /** Accepted image types */
   acceptedTypes?: string[];
+  /** Enable image compression (default: true) */
+  enableCompression?: boolean;
+  /** Target max dimension for compression (default: 1920) */
+  maxDimension?: number;
+  /** JPEG quality for compression (0-1, default: 0.8) */
+  compressionQuality?: number;
 }
 
 /**
@@ -53,6 +59,9 @@ export function PhotoCapture({
   label,
   required = false,
   acceptedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'],
+  enableCompression = true,
+  maxDimension = 1920,
+  compressionQuality = 0.8,
 }: PhotoCaptureProps) {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
@@ -79,6 +88,85 @@ export function PhotoCapture({
   const remainingSlots = maxPhotos - photos.length;
   const canAddMore = remainingSlots > 0 && !disabled;
 
+  /**
+   * Compress an image using Canvas API
+   */
+  const compressImage = useCallback(async (file: File): Promise<File> => {
+    // Skip compression for small files (< 500KB) or if disabled
+    if (!enableCompression || file.size < 500 * 1024) {
+      return file;
+    }
+
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+
+      img.onload = () => {
+        try {
+          let { width, height } = img;
+
+          // Calculate new dimensions while maintaining aspect ratio
+          if (width > maxDimension || height > maxDimension) {
+            if (width > height) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            } else {
+              width = Math.round((width * maxDimension) / height);
+              height = maxDimension;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+
+          if (!ctx) {
+            resolve(file); // Fallback to original if context unavailable
+            return;
+          }
+
+          // Draw image with white background (for transparent PNGs)
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Convert to blob
+          canvas.toBlob(
+            (blob) => {
+              if (blob && blob.size < file.size) {
+                // Only use compressed version if it's smaller
+                const compressedFile = new File([blob], file.name, {
+                  type: 'image/jpeg',
+                  lastModified: Date.now(),
+                });
+                console.log(
+                  `Compressed ${file.name}: ${(file.size / 1024).toFixed(0)}KB → ${(compressedFile.size / 1024).toFixed(0)}KB`
+                );
+                resolve(compressedFile);
+              } else {
+                // Original is smaller, use it
+                resolve(file);
+              }
+            },
+            'image/jpeg',
+            compressionQuality
+          );
+        } catch (error) {
+          console.error('Compression error:', error);
+          resolve(file); // Fallback to original on error
+        }
+      };
+
+      img.onerror = () => {
+        console.error('Failed to load image for compression');
+        resolve(file); // Fallback to original on error
+      };
+
+      // Load image from file
+      img.src = URL.createObjectURL(file);
+    });
+  }, [enableCompression, maxDimension, compressionQuality]);
+
   const validateAndProcessFile = useCallback(async (file: File): Promise<PhotoFile | null> => {
     // Validate file type
     const isValidType = acceptedTypes.some(type => {
@@ -93,18 +181,21 @@ export function PhotoCapture({
       return null;
     }
 
-    // Validate file size
+    // Compress the image first
+    const processedFile = await compressImage(file);
+
+    // Validate file size after compression
     const maxBytes = maxSizeMB * 1024 * 1024;
-    if (file.size > maxBytes) {
-      toast.error(`${file.name} exceeds ${maxSizeMB}MB limit`);
+    if (processedFile.size > maxBytes) {
+      toast.error(`${file.name} exceeds ${maxSizeMB}MB limit even after compression`);
       return null;
     }
 
     // Create preview URL
-    const preview = URL.createObjectURL(file);
+    const preview = URL.createObjectURL(processedFile);
 
-    return { file, preview };
-  }, [acceptedTypes, maxSizeMB]);
+    return { file: processedFile, preview };
+  }, [acceptedTypes, maxSizeMB, compressImage]);
 
   const handleFilesSelected = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0 || !canAddMore) return;
@@ -341,6 +432,12 @@ interface SinglePhotoCaptureProps {
   maxSizeMB?: number;
   /** Custom class name */
   className?: string;
+  /** Enable image compression (default: true) */
+  enableCompression?: boolean;
+  /** Target max dimension for compression (default: 512 for avatars) */
+  maxDimension?: number;
+  /** JPEG quality for compression (0-1, default: 0.85) */
+  compressionQuality?: number;
 }
 
 export function SinglePhotoCapture({
@@ -354,9 +451,13 @@ export function SinglePhotoCapture({
   acceptedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
   maxSizeMB = 2,
   className,
+  enableCompression = true,
+  maxDimension = 512,
+  compressionQuality = 0.85,
 }: SinglePhotoCaptureProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isMobile, setIsMobile] = useState(false);
+  const [isCompressing, setIsCompressing] = useState(false);
 
   useEffect(() => {
     const checkMobile = () => {
@@ -372,7 +473,73 @@ export function SinglePhotoCapture({
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const compressImage = useCallback(async (file: File): Promise<File> => {
+    // Skip compression for small files or if disabled
+    if (!enableCompression || file.size < 100 * 1024) {
+      return file;
+    }
+
+    return new Promise((resolve) => {
+      const img = new Image();
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+
+      img.onload = () => {
+        try {
+          let { width, height } = img;
+
+          // Calculate new dimensions while maintaining aspect ratio
+          if (width > maxDimension || height > maxDimension) {
+            if (width > height) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            } else {
+              width = Math.round((width * maxDimension) / height);
+              height = maxDimension;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+
+          if (!ctx) {
+            resolve(file);
+            return;
+          }
+
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+
+          canvas.toBlob(
+            (blob) => {
+              if (blob && blob.size < file.size) {
+                const compressedFile = new File([blob], file.name, {
+                  type: 'image/jpeg',
+                  lastModified: Date.now(),
+                });
+                console.log(
+                  `Compressed avatar: ${(file.size / 1024).toFixed(0)}KB → ${(compressedFile.size / 1024).toFixed(0)}KB`
+                );
+                resolve(compressedFile);
+              } else {
+                resolve(file);
+              }
+            },
+            'image/jpeg',
+            compressionQuality
+          );
+        } catch {
+          resolve(file);
+        }
+      };
+
+      img.onerror = () => resolve(file);
+      img.src = URL.createObjectURL(file);
+    });
+  }, [enableCompression, maxDimension, compressionQuality]);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -382,17 +549,25 @@ export function SinglePhotoCapture({
       return;
     }
 
-    // Validate size
-    if (file.size > maxSizeMB * 1024 * 1024) {
-      toast.error(`File size must be less than ${maxSizeMB}MB`);
-      return;
-    }
-
-    onPhotoSelect(file);
+    setIsCompressing(true);
     
-    // Reset input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+    try {
+      // Compress the image
+      const processedFile = await compressImage(file);
+
+      // Validate size after compression
+      if (processedFile.size > maxSizeMB * 1024 * 1024) {
+        toast.error(`File size must be less than ${maxSizeMB}MB`);
+        return;
+      }
+
+      onPhotoSelect(processedFile);
+    } finally {
+      setIsCompressing(false);
+      // Reset input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
 
@@ -438,7 +613,7 @@ export function SinglePhotoCapture({
       <button
         type="button"
         onClick={() => fileInputRef.current?.click()}
-        disabled={disabled || isUploading}
+        disabled={disabled || isUploading || isCompressing}
         className={cn(
           buttonSizeClasses[size],
           'absolute -bottom-1 -right-1',
@@ -447,11 +622,11 @@ export function SinglePhotoCapture({
           'hover:bg-primary/90 transition-colors',
           'focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2',
           'shadow-md',
-          (disabled || isUploading) && 'opacity-50 cursor-not-allowed'
+          (disabled || isUploading || isCompressing) && 'opacity-50 cursor-not-allowed'
         )}
         aria-label="Change photo"
       >
-        {isUploading ? (
+        {isUploading || isCompressing ? (
           <Loader2 className="h-4 w-4 animate-spin" />
         ) : (
           <Camera className="h-4 w-4" />
