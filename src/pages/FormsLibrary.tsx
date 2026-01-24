@@ -16,8 +16,13 @@ import {
   AlertTriangle,
   Flame,
   Eye,
+  PenLine,
+  History,
 } from 'lucide-react';
 import { FormPreviewDialog } from '@/components/forms/FormPreviewDialog';
+import { FillableFormDialog } from '@/components/forms/FillableFormDialog';
+import { FormSubmissionsDialog } from '@/components/forms/FormSubmissionsDialog';
+import { defaultFormFields } from '@/lib/formFields';
 
 interface FormTemplate {
   id: string;
@@ -141,10 +146,22 @@ const categoryColors: Record<string, string> = {
 export default function FormsLibrary() {
   const [selectedForm, setSelectedForm] = useState<FormTemplate | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [fillOpen, setFillOpen] = useState(false);
+  const [submissionsOpen, setSubmissionsOpen] = useState(false);
 
   const handlePreview = (form: FormTemplate) => {
     setSelectedForm(form);
     setPreviewOpen(true);
+  };
+
+  const handleFill = (form: FormTemplate) => {
+    setSelectedForm(form);
+    setFillOpen(true);
+  };
+
+  const handleViewSubmissions = (form: FormTemplate) => {
+    setSelectedForm(form);
+    setSubmissionsOpen(true);
   };
 
   return (
@@ -186,6 +203,15 @@ export default function FormsLibrary() {
                   {form.category}
                 </Badge>
                 <div className="flex items-center gap-1">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => handleFill(form)}
+                    title="Fill form digitally"
+                  >
+                    <PenLine className="h-4 w-4 mr-1" />
+                    Fill
+                  </Button>
                   <Button 
                     variant="ghost" 
                     size="sm"
@@ -194,11 +220,13 @@ export default function FormsLibrary() {
                   >
                     <Eye className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="sm" title="Print form">
-                    <Printer className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="sm" title="Download form">
-                    <Download className="h-4 w-4" />
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={() => handleViewSubmissions(form)}
+                    title="View submissions"
+                  >
+                    <History className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
@@ -212,6 +240,21 @@ export default function FormsLibrary() {
         form={selectedForm}
         open={previewOpen}
         onOpenChange={setPreviewOpen}
+      />
+
+      {/* Fillable Form Dialog */}
+      <FillableFormDialog
+        form={selectedForm}
+        fields={selectedForm ? defaultFormFields[selectedForm.id] || [] : []}
+        open={fillOpen}
+        onOpenChange={setFillOpen}
+      />
+
+      {/* Form Submissions Dialog */}
+      <FormSubmissionsDialog
+        form={selectedForm}
+        open={submissionsOpen}
+        onOpenChange={setSubmissionsOpen}
       />
     </div>
   );
