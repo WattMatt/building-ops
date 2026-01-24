@@ -22,7 +22,7 @@ import {
 import { FormPreviewDialog } from '@/components/forms/FormPreviewDialog';
 import { FillableFormDialog } from '@/components/forms/FillableFormDialog';
 import { FormSubmissionsDialog } from '@/components/forms/FormSubmissionsDialog';
-import { defaultFormFields } from '@/lib/formFields';
+import { defaultFormFields, FormField } from '@/lib/formFields';
 
 interface FormTemplate {
   id: string;

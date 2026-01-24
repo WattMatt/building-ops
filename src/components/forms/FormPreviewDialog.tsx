@@ -8,7 +8,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Download, Printer, FileText, Maximize2, Minimize2, FileDown, Loader2 } from 'lucide-react';
+import { Download, Printer, FileText, Maximize2, Minimize2, FileDown, Loader2, Camera } from 'lucide-react';
 import { defaultFormFields, FormField } from '@/lib/formFields';
 import { generateFormPdf } from '@/lib/pdfGenerator';
 import { useOrganization } from '@/hooks/useOrganization';
@@ -133,6 +133,9 @@ export function FormPreviewDialog({ form, open, onOpenChange }: FormPreviewDialo
       if (field.type === 'select') {
         return `<div class="field ${widthClass}"><label>${field.label} ${requiredMark}</label><select><option value="">Select...</option>${(field.options || []).map(opt => `<option value="${opt}">${opt}</option>`).join('')}</select></div>`;
       }
+      if (field.type === 'photo') {
+        return `<div class="field ${widthClass}"><label>${field.label} ${requiredMark}</label><div class="field signature" style="height: 100px;">Photo upload (max ${field.maxPhotos || 5})</div></div>`;
+      }
       return `<div class="field ${widthClass}"><label>${field.label} ${requiredMark}</label><input type="${field.type}" /></div>`;
     }).join('')}
   </div>
@@ -167,6 +170,11 @@ export function FormPreviewDialog({ form, open, onOpenChange }: FormPreviewDialo
         ) : field.type === 'select' ? (
           <div className="h-10 border border-input rounded-md bg-background px-3 flex items-center text-muted-foreground text-sm">
             Select {field.label.toLowerCase()}...
+          </div>
+        ) : field.type === 'photo' ? (
+          <div className="h-24 border-2 border-dashed border-muted-foreground/30 rounded-md flex flex-col items-center justify-center text-muted-foreground text-sm gap-2">
+            <Camera className="h-6 w-6 opacity-50" />
+            <span>Photo upload (max {field.maxPhotos || 5})</span>
           </div>
         ) : (
           <div className="h-10 border border-input rounded-md bg-background" />
