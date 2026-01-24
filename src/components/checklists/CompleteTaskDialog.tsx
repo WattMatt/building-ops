@@ -13,7 +13,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { CheckCircle2, Camera, Loader2, PenLine } from 'lucide-react';
+import { CheckCircle2, Loader2, PenLine } from 'lucide-react';
+import { PhotoCapture, PhotoFile } from '@/components/ui/photo-capture';
 import { toast } from 'sonner';
 
 interface CompleteTaskDialogProps {
@@ -41,44 +42,18 @@ export default function CompleteTaskDialog({
   const [loading, setLoading] = useState(false);
   const [notes, setNotes] = useState('');
   const [signatureConfirmed, setSignatureConfirmed] = useState(false);
-  const [photos, setPhotos] = useState<File[]>([]);
-  const [photoPreviewUrls, setPhotoPreviewUrls] = useState<string[]>([]);
+  const [photos, setPhotos] = useState<PhotoFile[]>([]);
 
-  const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length + photos.length > 2) {
-      toast.error('Maximum 2 photos allowed');
-      return;
-    }
-
-    const validFiles = files.filter((file) => {
-      if (!file.type.startsWith('image/')) {
-        toast.error(`${file.name} is not an image`);
-        return false;
-      }
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error(`${file.name} exceeds 5MB limit`);
-        return false;
-      }
-      return true;
-    });
-
-    setPhotos((prev) => [...prev, ...validFiles]);
-    
-    validFiles.forEach((file) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setPhotoPreviewUrls((prev) => [...prev, reader.result as string]);
-      };
-      reader.readAsDataURL(file);
-    });
+  const handlePhotosChange = (newPhotos: PhotoFile[]) => {
+    setPhotos(newPhotos);
   };
 
   const resetForm = () => {
     setNotes('');
     setSignatureConfirmed(false);
+    // Clean up photo URLs
+    photos.forEach(p => URL.revokeObjectURL(p.preview));
     setPhotos([]);
-    setPhotoPreviewUrls([]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -105,10 +80,10 @@ export default function CompleteTaskDialog({
       // Upload photos if any
       const photoUrls: string[] = [];
       for (const photo of photos) {
-        const fileName = `completions/${user.id}/${Date.now()}-${photo.name}`;
+        const fileName = `completions/${user.id}/${Date.now()}-${photo.file.name}`;
         const { error: uploadError } = await supabase.storage
           .from('tenant-documents')
-          .upload(fileName, photo);
+          .upload(fileName, photo.file);
 
         if (uploadError) {
           console.error('Photo upload error:', uploadError);
@@ -173,34 +148,15 @@ export default function CompleteTaskDialog({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {requiresPhoto && (
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <Camera className="h-4 w-4" />
-                Photo Evidence *
-              </Label>
-              <div className="flex flex-wrap gap-2">
-                {photoPreviewUrls.map((url, index) => (
-                  <img
-                    key={index}
-                    src={url}
-                    alt={`Preview ${index + 1}`}
-                    className="h-16 w-16 object-cover rounded-lg border"
-                  />
-                ))}
-                {photos.length < 2 && (
-                  <label className="h-16 w-16 border-2 border-dashed rounded-lg flex flex-col items-center justify-center gap-1 text-muted-foreground hover:border-primary hover:text-primary cursor-pointer transition-colors">
-                    <Camera className="h-4 w-4" />
-                    <span className="text-xs">Add</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handlePhotoSelect}
-                      className="hidden"
-                    />
-                  </label>
-                )}
-              </div>
-            </div>
+            <PhotoCapture
+              label="Photo Evidence"
+              required
+              maxPhotos={2}
+              maxSizeMB={5}
+              photos={photos}
+              onPhotosChange={handlePhotosChange}
+              size="sm"
+            />
           )}
 
           <div className="space-y-2">

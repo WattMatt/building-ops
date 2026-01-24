@@ -25,7 +25,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrganization } from '@/hooks/useOrganization';
 import { toast } from 'sonner';
-import { Loader2, Send, Building2, ClipboardCheck, Camera, X, ImagePlus } from 'lucide-react';
+import { Loader2, Send, Building2, ClipboardCheck } from 'lucide-react';
+import { PhotoCapture, PhotoFile } from '@/components/ui/photo-capture';
 import { useQuery } from '@tanstack/react-query';
 import { FormField } from '@/lib/formFields';
 
@@ -38,10 +39,7 @@ interface FormTemplate {
   fields?: FormField[];
 }
 
-interface PhotoUpload {
-  file: File;
-  preview: string;
-}
+// PhotoFile type is imported from photo-capture component
 
 interface FillableFormDialogProps {
   form: FormTemplate | null;
@@ -68,9 +66,7 @@ export function FillableFormDialog({
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [selectedBuilding, setSelectedBuilding] = useState<string>('');
   const [signatureConfirmed, setSignatureConfirmed] = useState<Record<string, boolean>>({});
-  const [photoUploads, setPhotoUploads] = useState<Record<string, PhotoUpload[]>>({});
-  const [uploadingPhotos, setUploadingPhotos] = useState<Record<string, boolean>>({});
-  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [photoUploads, setPhotoUploads] = useState<Record<string, PhotoFile[]>>({});
 
   // Fetch buildings for selection
   const { data: buildings } = useQuery({
@@ -86,7 +82,6 @@ export function FillableFormDialog({
     enabled: open,
   });
 
-  // Reset form when dialog opens
   // Reset form when dialog opens, pre-select building if provided
   useEffect(() => {
     if (open) {
@@ -94,7 +89,6 @@ export function FillableFormDialog({
       setSelectedBuilding(preselectedBuildingId || '');
       setSignatureConfirmed({});
       setPhotoUploads({});
-      setUploadingPhotos({});
     }
   }, [open, preselectedBuildingId]);
 
@@ -124,54 +118,6 @@ export function FillableFormDialog({
     } else {
       handleFieldChange(fieldLabel, '');
     }
-  };
-
-  const handlePhotoAdd = (fieldLabel: string, files: FileList | null, maxPhotos: number = 5) => {
-    if (!files || files.length === 0) return;
-    
-    const currentPhotos = photoUploads[fieldLabel] || [];
-    const remainingSlots = maxPhotos - currentPhotos.length;
-    
-    if (remainingSlots <= 0) {
-      toast.error(`Maximum ${maxPhotos} photos allowed for ${fieldLabel}`);
-      return;
-    }
-
-    const newPhotos: PhotoUpload[] = [];
-    const filesToAdd = Array.from(files).slice(0, remainingSlots);
-    
-    for (const file of filesToAdd) {
-      if (!file.type.startsWith('image/')) {
-        toast.error(`${file.name} is not an image file`);
-        continue;
-      }
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error(`${file.name} is too large (max 10MB)`);
-        continue;
-      }
-      newPhotos.push({
-        file,
-        preview: URL.createObjectURL(file),
-      });
-    }
-
-    if (newPhotos.length > 0) {
-      setPhotoUploads(prev => ({
-        ...prev,
-        [fieldLabel]: [...currentPhotos, ...newPhotos],
-      }));
-    }
-  };
-
-  const handlePhotoRemove = (fieldLabel: string, index: number) => {
-    setPhotoUploads(prev => {
-      const photos = prev[fieldLabel] || [];
-      URL.revokeObjectURL(photos[index]?.preview);
-      return {
-        ...prev,
-        [fieldLabel]: photos.filter((_, i) => i !== index),
-      };
-    });
   };
 
   const validateForm = (): boolean => {
@@ -420,57 +366,15 @@ export function FillableFormDialog({
         )}
 
         {field.type === 'photo' && (
-          <div className="space-y-3">
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              ref={(el) => (fileInputRefs.current[field.label] = el)}
-              onChange={(e) => handlePhotoAdd(field.label, e.target.files, field.maxPhotos || 5)}
-            />
-            
-            {/* Photo grid */}
-            {(photoUploads[field.label]?.length || 0) > 0 && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                {photoUploads[field.label]?.map((photo, photoIndex) => (
-                  <div key={photoIndex} className="relative group aspect-square">
-                    <img
-                      src={photo.preview}
-                      alt={`Photo ${photoIndex + 1}`}
-                      className="w-full h-full object-cover rounded-lg border"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handlePhotoRemove(field.label, photoIndex)}
-                      className="absolute -top-2 -right-2 h-6 w-6 bg-destructive text-destructive-foreground rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            {/* Upload button */}
-            {(photoUploads[field.label]?.length || 0) < (field.maxPhotos || 5) && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => fileInputRefs.current[field.label]?.click()}
-                className="w-full h-24 border-2 border-dashed flex flex-col items-center justify-center gap-2 hover:border-primary hover:bg-primary/5"
-              >
-                <ImagePlus className="h-6 w-6 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground">
-                  Add photos ({photoUploads[field.label]?.length || 0}/{field.maxPhotos || 5})
-                </span>
-              </Button>
-            )}
-            
-            <p className="text-xs text-muted-foreground">
-              Max {field.maxPhotos || 5} photos, 10MB each. Supported: JPG, PNG, WebP
-            </p>
-          </div>
+          <PhotoCapture
+            label={field.label}
+            required={field.required}
+            maxPhotos={field.maxPhotos || 5}
+            maxSizeMB={10}
+            photos={photoUploads[field.label] || []}
+            onPhotosChange={(photos) => setPhotoUploads(prev => ({ ...prev, [field.label]: photos }))}
+            size="md"
+          />
         )}
       </div>
     );
