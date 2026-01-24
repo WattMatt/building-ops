@@ -3,7 +3,59 @@ import { Camera, Upload, X, ImagePlus, Loader2, Smartphone, Monitor } from 'luci
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import heic2any from 'heic2any';
 
+/**
+ * Check if a file is HEIC/HEIF format
+ */
+const isHeicFile = (file: File): boolean => {
+  const heicTypes = ['image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence'];
+  if (heicTypes.includes(file.type.toLowerCase())) {
+    return true;
+  }
+  // Also check file extension as some browsers don't set the correct MIME type
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  return extension === 'heic' || extension === 'heif';
+};
+
+/**
+ * Convert HEIC/HEIF file to JPEG
+ */
+const convertHeicToJpeg = async (file: File): Promise<File> => {
+  if (!isHeicFile(file)) {
+    return file;
+  }
+
+  console.log(`Converting HEIC file: ${file.name}`);
+  
+  try {
+    const blob = await heic2any({
+      blob: file,
+      toType: 'image/jpeg',
+      quality: 0.9,
+    });
+
+    // heic2any can return a single blob or an array
+    const resultBlob = Array.isArray(blob) ? blob[0] : blob;
+    
+    // Create a new file with .jpg extension
+    const newFileName = file.name.replace(/\.(heic|heif)$/i, '.jpg');
+    const convertedFile = new File([resultBlob], newFileName, {
+      type: 'image/jpeg',
+      lastModified: Date.now(),
+    });
+
+    console.log(
+      `HEIC conversion complete: ${file.name} (${(file.size / 1024).toFixed(0)}KB) → ${newFileName} (${(convertedFile.size / 1024).toFixed(0)}KB)`
+    );
+
+    return convertedFile;
+  } catch (error) {
+    console.error('HEIC conversion failed:', error);
+    toast.error('Failed to convert HEIC image. Please try a different format.');
+    throw error;
+  }
+};
 export interface PhotoFile {
   file: File;
   preview: string;
@@ -168,8 +220,9 @@ export function PhotoCapture({
   }, [enableCompression, maxDimension, compressionQuality]);
 
   const validateAndProcessFile = useCallback(async (file: File): Promise<PhotoFile | null> => {
-    // Validate file type
-    const isValidType = acceptedTypes.some(type => {
+    // Validate file type (including HEIC)
+    const isHeic = isHeicFile(file);
+    const isValidType = isHeic || acceptedTypes.some(type => {
       if (type.includes('*')) {
         return file.type.startsWith(type.replace('*', ''));
       }
@@ -181,20 +234,31 @@ export function PhotoCapture({
       return null;
     }
 
-    // Compress the image first
-    const processedFile = await compressImage(file);
+    try {
+      // Convert HEIC to JPEG first if needed
+      let fileToProcess = file;
+      if (isHeic) {
+        fileToProcess = await convertHeicToJpeg(file);
+      }
 
-    // Validate file size after compression
-    const maxBytes = maxSizeMB * 1024 * 1024;
-    if (processedFile.size > maxBytes) {
-      toast.error(`${file.name} exceeds ${maxSizeMB}MB limit even after compression`);
+      // Compress the image
+      const processedFile = await compressImage(fileToProcess);
+
+      // Validate file size after processing
+      const maxBytes = maxSizeMB * 1024 * 1024;
+      if (processedFile.size > maxBytes) {
+        toast.error(`${file.name} exceeds ${maxSizeMB}MB limit even after processing`);
+        return null;
+      }
+
+      // Create preview URL
+      const preview = URL.createObjectURL(processedFile);
+
+      return { file: processedFile, preview };
+    } catch (error) {
+      console.error('Error processing file:', error);
       return null;
     }
-
-    // Create preview URL
-    const preview = URL.createObjectURL(processedFile);
-
-    return { file: processedFile, preview };
   }, [acceptedTypes, maxSizeMB, compressImage]);
 
   const handleFilesSelected = useCallback(async (files: FileList | null) => {
@@ -543,8 +607,11 @@ export function SinglePhotoCapture({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate type
-    if (!acceptedTypes.some(type => file.type === type || file.type.startsWith('image/'))) {
+    // Check if HEIC or valid type
+    const isHeic = isHeicFile(file);
+    const isValidType = isHeic || acceptedTypes.some(type => file.type === type || file.type.startsWith('image/'));
+    
+    if (!isValidType) {
       toast.error('Please select a valid image file');
       return;
     }
@@ -552,16 +619,25 @@ export function SinglePhotoCapture({
     setIsCompressing(true);
     
     try {
-      // Compress the image
-      const processedFile = await compressImage(file);
+      // Convert HEIC to JPEG first if needed
+      let fileToProcess = file;
+      if (isHeic) {
+        fileToProcess = await convertHeicToJpeg(file);
+      }
 
-      // Validate size after compression
+      // Compress the image
+      const processedFile = await compressImage(fileToProcess);
+
+      // Validate size after processing
       if (processedFile.size > maxSizeMB * 1024 * 1024) {
         toast.error(`File size must be less than ${maxSizeMB}MB`);
         return;
       }
 
       onPhotoSelect(processedFile);
+    } catch (error) {
+      console.error('Error processing file:', error);
+      toast.error('Failed to process image');
     } finally {
       setIsCompressing(false);
       // Reset input
