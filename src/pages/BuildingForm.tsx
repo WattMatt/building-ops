@@ -9,12 +9,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
-import { ArrowLeft, Building2, User, Shield, Zap, Landmark, Gauge } from 'lucide-react';
+import { ArrowLeft, Building2, User, Shield, Zap, Landmark, Gauge, ImagePlus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { z } from 'zod';
 import ContactSection, { ContactInfo } from '@/components/building/ContactSection';
 import ProfessionalTeamSection, { ProfessionalTeam, ProfessionalContact } from '@/components/building/ProfessionalTeamSection';
 import TariffSection, { UtilityTariffs, UtilityTariff } from '@/components/building/TariffSection';
+import { SinglePhotoCapture } from '@/components/ui/photo-capture';
 
 const contactSchema = z.object({
   name: z.string().trim().max(100).optional(),
@@ -64,6 +65,9 @@ export default function BuildingForm() {
   // Form state
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [assetManager, setAssetManager] = useState<ContactInfo>({ ...emptyContact });
   const [centreManagement, setCentreManagement] = useState<ContactInfo>({ ...emptyContact });
   const [securityContact, setSecurityContact] = useState<ContactInfo>({ ...emptyContact });
@@ -93,6 +97,7 @@ export default function BuildingForm() {
 
       setName(data.name);
       setAddress(data.address);
+      setLogoUrl(data.logo_url);
 
       // Parse emergency_contacts for our contact fields
       const contacts = data.emergency_contacts as Record<string, any> | null;
@@ -184,6 +189,41 @@ export default function BuildingForm() {
     );
   };
 
+  const uploadLogo = async (buildingId: string): Promise<string | null> => {
+    if (!logoFile) return logoUrl;
+
+    const fileExt = logoFile.name.split('.').pop()?.toLowerCase() || 'jpg';
+    const filePath = `${buildingId}/logo.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('building-logos')
+      .upload(filePath, logoFile, { upsert: true });
+
+    if (uploadError) {
+      console.error('Logo upload error:', uploadError);
+      toast.error('Failed to upload logo');
+      return logoUrl;
+    }
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('building-logos')
+      .getPublicUrl(filePath);
+
+    return publicUrl;
+  };
+
+  const handleLogoSelect = (file: File) => {
+    setLogoFile(file);
+    // Create a preview URL
+    const previewUrl = URL.createObjectURL(file);
+    setLogoUrl(previewUrl);
+  };
+
+  const handleRemoveLogo = () => {
+    setLogoFile(null);
+    setLogoUrl(null);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -222,7 +262,8 @@ export default function BuildingForm() {
       if (hasCentreManagement) emergencyContacts.centreManagement = centreManagement;
       if (hasSecurityContact) emergencyContacts.securityContact = securityContact;
 
-      const buildingData = {
+      // Build initial data without logo_url
+      const buildingData: Record<string, any> = {
         name: name.trim(),
         address: address.trim(),
         organization_id: organization.id,
@@ -235,6 +276,10 @@ export default function BuildingForm() {
       };
 
       if (isEditing && id) {
+        // Upload logo if changed
+        const finalLogoUrl = await uploadLogo(id);
+        buildingData.logo_url = finalLogoUrl;
+
         const { error } = await supabase
           .from('buildings')
           .update(buildingData)
@@ -243,11 +288,36 @@ export default function BuildingForm() {
         if (error) throw error;
         toast.success('Building updated successfully');
       } else {
-        const { error } = await supabase
+        // For new buildings, first insert to get the ID, then upload logo
+        const insertData = {
+          name: name.trim(),
+          address: address.trim(),
+          organization_id: organization.id,
+          emergency_contacts: Object.keys(emergencyContacts).length > 0 ? (emergencyContacts as Json) : null,
+          electrical_authority: hasContent(electricalAuthority) ? (electricalAuthority as Json) : null,
+          council_details: hasContent(council) ? (council as Json) : null,
+          meter_reading_company: hasContent(meterReading) ? (meterReading as Json) : null,
+          professional_team: hasContent(professionalTeam) ? (professionalTeam as unknown as Json) : null,
+          utility_tariffs: hasContent(utilityTariffs) ? (utilityTariffs as unknown as Json) : null,
+        };
+        
+        const { data: newBuilding, error } = await supabase
           .from('buildings')
-          .insert([buildingData]);
+          .insert([insertData])
+          .select('id')
+          .single();
 
         if (error) throw error;
+
+        // Now upload logo with the new building ID
+        if (logoFile && newBuilding?.id) {
+          const finalLogoUrl = await uploadLogo(newBuilding.id);
+          await supabase
+            .from('buildings')
+            .update({ logo_url: finalLogoUrl })
+            .eq('id', newBuilding.id);
+        }
+
         toast.success('Building created successfully');
       }
 
@@ -303,6 +373,52 @@ export default function BuildingForm() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Building Logo */}
+            <div className="space-y-2">
+              <Label>Building Logo</Label>
+              <div className="flex items-start gap-4">
+                {logoUrl ? (
+                  <div className="relative">
+                    <img
+                      src={logoUrl}
+                      alt="Building logo"
+                      className="w-24 h-24 sm:w-32 sm:h-32 object-contain rounded-lg border bg-muted"
+                    />
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="icon"
+                      className="absolute -top-2 -right-2 h-6 w-6"
+                      onClick={handleRemoveLogo}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ) : (
+                  <SinglePhotoCapture
+                    onPhotoSelect={handleLogoSelect}
+                    placeholder={
+                      <div className="flex flex-col items-center gap-1 text-muted-foreground">
+                        <ImagePlus className="h-6 w-6" />
+                        <span className="text-xs">Upload Logo</span>
+                      </div>
+                    }
+                    shape="rounded"
+                    size="lg"
+                    acceptedTypes={['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']}
+                    maxSizeMB={5}
+                    maxDimension={512}
+                    className="w-24 h-24 sm:w-32 sm:h-32"
+                  />
+                )}
+                <div className="text-xs text-muted-foreground">
+                  <p>Recommended: Square image, at least 256x256px</p>
+                  <p>Formats: JPG, PNG, WebP</p>
+                  <p>Max size: 5MB</p>
+                </div>
+              </div>
+            </div>
+            
             <div className="space-y-2">
               <Label htmlFor="name">Building Name *</Label>
               <Input
