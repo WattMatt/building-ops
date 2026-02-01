@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { useBuildings } from '@/hooks/useBuildings';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,50 +25,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Link } from 'react-router-dom';
-import { toast } from 'sonner';
 import { BuildingAvatar } from '@/components/building/BuildingAvatar';
 import BuildingImportDialog from '@/components/building/BuildingImportDialog';
 
-interface Building {
-  id: string;
-  name: string;
-  address: string;
-  city: string;
-  latitude: number | null;
-  longitude: number | null;
-  logo_url: string | null;
-  logo_position: string | null;
-  avatar_color: string | null;
-  created_at: string;
-}
-
 export default function Buildings() {
   const { isAdminOrManager } = useAuth();
-  const [buildings, setBuildings] = useState<Building[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { buildings, loading, refetch, deleteBuilding } = useBuildings();
   const [searchQuery, setSearchQuery] = useState('');
   const [importDialogOpen, setImportDialogOpen] = useState(false);
-
-  useEffect(() => {
-    fetchBuildings();
-  }, []);
-
-  const fetchBuildings = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('buildings')
-        .select('id, name, address, city, latitude, longitude, logo_url, logo_position, avatar_color, created_at')
-        .order('name');
-
-      if (error) throw error;
-      setBuildings(data || []);
-    } catch (error) {
-      console.error('Error fetching buildings:', error);
-      toast.error('Failed to load buildings');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const filteredBuildings = buildings.filter(
     (building) =>
@@ -79,17 +43,7 @@ export default function Buildings() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this building?')) return;
-
-    try {
-      const { error } = await supabase.from('buildings').delete().eq('id', id);
-      if (error) throw error;
-      
-      setBuildings(buildings.filter((b) => b.id !== id));
-      toast.success('Building deleted successfully');
-    } catch (error) {
-      console.error('Error deleting building:', error);
-      toast.error('Failed to delete building');
-    }
+    await deleteBuilding(id);
   };
 
   if (loading) {
@@ -278,7 +232,7 @@ export default function Buildings() {
       <BuildingImportDialog
         open={importDialogOpen}
         onOpenChange={setImportDialogOpen}
-        onImportComplete={fetchBuildings}
+        onImportComplete={refetch}
       />
     </div>
   );
