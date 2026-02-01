@@ -14,6 +14,7 @@ import {
   Edit,
   Trash2,
   Eye,
+  Upload,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -24,6 +25,7 @@ import {
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { BuildingAvatar } from '@/components/building/BuildingAvatar';
+import BuildingImportDialog from '@/components/building/BuildingImportDialog';
 
 interface Building {
   id: string;
@@ -42,6 +44,7 @@ export default function Buildings() {
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
 
   useEffect(() => {
     fetchBuildings();
@@ -105,12 +108,18 @@ export default function Buildings() {
           </p>
         </div>
         {isAdminOrManager && (
-          <Button asChild>
-            <Link to="/buildings/new">
-              <Plus className="w-4 h-4 mr-2" />
-              Add Building
-            </Link>
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
+              <Upload className="w-4 h-4 mr-2" />
+              Import
+            </Button>
+            <Button asChild>
+              <Link to="/buildings/new">
+                <Plus className="w-4 h-4 mr-2" />
+                Add Building
+              </Link>
+            </Button>
+          </div>
         )}
       </div>
 
@@ -238,6 +247,13 @@ export default function Buildings() {
           })}
         </div>
       )}
+
+      {/* Import Dialog */}
+      <BuildingImportDialog
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        onImportComplete={fetchBuildings}
+      />
     </div>
   );
 }
