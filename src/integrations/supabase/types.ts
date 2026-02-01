@@ -384,6 +384,7 @@ export type Database = {
           emergency_contacts: Json | null
           id: string
           latitude: number | null
+          logo_position: string | null
           logo_url: string | null
           longitude: number | null
           meter_reading_company: Json | null
@@ -404,6 +405,7 @@ export type Database = {
           emergency_contacts?: Json | null
           id?: string
           latitude?: number | null
+          logo_position?: string | null
           logo_url?: string | null
           longitude?: number | null
           meter_reading_company?: Json | null
@@ -424,6 +426,7 @@ export type Database = {
           emergency_contacts?: Json | null
           id?: string
           latitude?: number | null
+          logo_position?: string | null
           logo_url?: string | null
           longitude?: number | null
           meter_reading_company?: Json | null
