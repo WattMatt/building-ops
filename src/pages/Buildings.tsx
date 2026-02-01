@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
+import { BuildingAvatar } from '@/components/building/BuildingAvatar';
 
 interface Building {
   id: string;
@@ -149,35 +150,22 @@ export default function Buildings() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredBuildings.map((building) => {
             const position = building.logo_position || 'top-left';
-            const logoElement = building.logo_url ? (
-              <img
-                src={building.logo_url}
-                alt={`${building.name} logo`}
-                className="w-10 h-10 rounded-lg object-cover border border-border"
-              />
-            ) : (
-              <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
-                <Building2 className="h-5 w-5 text-primary" />
-              </div>
-            );
 
             return (
               <Card key={building.id} className="group hover:shadow-md transition-shadow relative overflow-hidden">
                 {/* Top-center logo banner */}
-                {building.logo_url && position === 'top-center' && (
+                {position === 'top-center' && (
                   <div className="flex justify-center pt-4 pb-2">
-                    <img
-                      src={building.logo_url}
-                      alt={`${building.name} logo`}
-                      className="w-16 h-16 rounded-lg object-cover border border-border"
-                    />
+                    <BuildingAvatar name={building.name} logoUrl={building.logo_url} size="lg" />
                   </div>
                 )}
                 
                 <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
-                  {/* Left side: logo (if top-left) + text */}
+                  {/* Left side: avatar (if top-left) + text */}
                   <div className="flex items-start gap-3">
-                    {position === 'top-left' && logoElement}
+                    {position === 'top-left' && (
+                      <BuildingAvatar name={building.name} logoUrl={building.logo_url} size="md" />
+                    )}
                     <div>
                       <CardTitle className="text-base">{building.name}</CardTitle>
                       <CardDescription className="flex items-center gap-1 mt-1">
@@ -187,14 +175,10 @@ export default function Buildings() {
                     </div>
                   </div>
                   
-                  {/* Right side: logo (if top-right) + menu */}
+                  {/* Right side: avatar (if top-right) + menu */}
                   <div className="flex items-start gap-2">
-                    {position === 'top-right' && building.logo_url && (
-                      <img
-                        src={building.logo_url}
-                        alt={`${building.name} logo`}
-                        className="w-10 h-10 rounded-lg object-cover border border-border"
-                      />
+                    {position === 'top-right' && (
+                      <BuildingAvatar name={building.name} logoUrl={building.logo_url} size="md" />
                     )}
                     {isAdminOrManager && (
                   <DropdownMenu>

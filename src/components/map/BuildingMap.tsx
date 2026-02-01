@@ -3,6 +3,7 @@ import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { MAPBOX_ACCESS_TOKEN, DEFAULT_CENTER, DEFAULT_ZOOM, MAP_STYLES, MapStyle } from '@/lib/mapbox';
 import { cn } from '@/lib/utils';
+import { getBuildingAvatarHtml } from '@/components/building/BuildingAvatar';
 
 // Set the access token
 mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
@@ -153,9 +154,7 @@ export function BuildingMap({
             popupRef.current.remove();
           }
 
-          const logoHtml = building.logoUrl 
-            ? `<img src="${building.logoUrl}" alt="${building.name}" class="w-12 h-12 rounded-lg object-cover border border-border mb-2" />`
-            : '';
+          const avatarHtml = getBuildingAvatarHtml(building.name, building.logoUrl, 'md');
           
           popupRef.current = new mapboxgl.Popup({
             offset: 25,
@@ -166,7 +165,7 @@ export function BuildingMap({
             .setLngLat([building.longitude, building.latitude])
             .setHTML(`
               <div class="p-2 min-w-[200px]">
-                ${logoHtml}
+                <div class="mb-2">${avatarHtml}</div>
                 <h3 class="font-semibold text-sm mb-1">${building.name}</h3>
                 <p class="text-xs text-muted-foreground mb-2">${building.address}</p>
                 <p class="text-xs text-muted-foreground">${building.city}</p>
