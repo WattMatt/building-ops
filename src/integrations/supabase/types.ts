@@ -377,6 +377,7 @@ export type Database = {
       buildings: {
         Row: {
           address: string
+          avatar_color: string | null
           city: string
           council_details: Json | null
           created_at: string
@@ -398,6 +399,7 @@ export type Database = {
         }
         Insert: {
           address: string
+          avatar_color?: string | null
           city?: string
           council_details?: Json | null
           created_at?: string
@@ -419,6 +421,7 @@ export type Database = {
         }
         Update: {
           address?: string
+          avatar_color?: string | null
           city?: string
           council_details?: Json | null
           created_at?: string

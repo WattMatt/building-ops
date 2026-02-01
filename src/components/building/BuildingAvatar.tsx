@@ -1,12 +1,28 @@
-import { Building2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface BuildingAvatarProps {
   name: string;
   logoUrl?: string | null;
+  avatarColor?: string | null;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
 }
+
+// Available avatar colors with their Tailwind classes and hex values
+export const AVATAR_COLORS = [
+  { name: 'Blue', class: 'bg-blue-500', hex: '#3b82f6' },
+  { name: 'Green', class: 'bg-green-500', hex: '#22c55e' },
+  { name: 'Purple', class: 'bg-purple-500', hex: '#a855f7' },
+  { name: 'Orange', class: 'bg-orange-500', hex: '#f97316' },
+  { name: 'Pink', class: 'bg-pink-500', hex: '#ec4899' },
+  { name: 'Teal', class: 'bg-teal-500', hex: '#14b8a6' },
+  { name: 'Indigo', class: 'bg-indigo-500', hex: '#6366f1' },
+  { name: 'Cyan', class: 'bg-cyan-500', hex: '#06b6d4' },
+  { name: 'Rose', class: 'bg-rose-500', hex: '#f43f5e' },
+  { name: 'Amber', class: 'bg-amber-500', hex: '#f59e0b' },
+  { name: 'Emerald', class: 'bg-emerald-500', hex: '#10b981' },
+  { name: 'Slate', class: 'bg-slate-500', hex: '#64748b' },
+];
 
 // Generate initials from building name (max 2 characters)
 function getInitials(name: string): string {
@@ -18,26 +34,25 @@ function getInitials(name: string): string {
 }
 
 // Generate a consistent color based on the building name
-function getColorFromName(name: string): string {
-  const colors = [
-    'bg-blue-500',
-    'bg-green-500',
-    'bg-purple-500',
-    'bg-orange-500',
-    'bg-pink-500',
-    'bg-teal-500',
-    'bg-indigo-500',
-    'bg-cyan-500',
-    'bg-rose-500',
-    'bg-amber-500',
-  ];
-  
+function getColorFromName(name: string): { class: string; hex: string } {
   let hash = 0;
   for (let i = 0; i < name.length; i++) {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
-  
-  return colors[Math.abs(hash) % colors.length];
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+// Get color by hex value or fall back to name-based color
+function getAvatarColor(name: string, customColor?: string | null): { class: string; hex: string } {
+  if (customColor) {
+    const found = AVATAR_COLORS.find(c => c.hex === customColor);
+    if (found) return found;
+    // If it's a valid hex color, use it directly
+    if (/^#[0-9A-Fa-f]{6}$/.test(customColor)) {
+      return { class: '', hex: customColor };
+    }
+  }
+  return getColorFromName(name);
 }
 
 const sizeClasses = {
@@ -46,7 +61,7 @@ const sizeClasses = {
   lg: 'w-16 h-16 text-xl',
 };
 
-export function BuildingAvatar({ name, logoUrl, size = 'md', className }: BuildingAvatarProps) {
+export function BuildingAvatar({ name, logoUrl, avatarColor, size = 'md', className }: BuildingAvatarProps) {
   if (logoUrl) {
     return (
       <img
@@ -62,16 +77,20 @@ export function BuildingAvatar({ name, logoUrl, size = 'md', className }: Buildi
   }
 
   const initials = getInitials(name);
-  const bgColor = getColorFromName(name);
+  const color = getAvatarColor(name, avatarColor);
+
+  // Use inline style for custom colors, Tailwind class for predefined ones
+  const style = color.class ? undefined : { backgroundColor: color.hex };
 
   return (
     <div
       className={cn(
         'rounded-lg flex items-center justify-center font-semibold text-white',
-        bgColor,
+        color.class,
         sizeClasses[size],
         className
       )}
+      style={style}
       title={name}
     >
       {initials}
@@ -80,7 +99,12 @@ export function BuildingAvatar({ name, logoUrl, size = 'md', className }: Buildi
 }
 
 // Export utility for use in map popups (HTML string)
-export function getBuildingAvatarHtml(name: string, logoUrl?: string | null, size: 'sm' | 'md' | 'lg' = 'md'): string {
+export function getBuildingAvatarHtml(
+  name: string, 
+  logoUrl?: string | null, 
+  avatarColor?: string | null,
+  size: 'sm' | 'md' | 'lg' = 'md'
+): string {
   const sizeStyles = {
     sm: 'width: 32px; height: 32px; font-size: 12px;',
     md: 'width: 40px; height: 40px; font-size: 14px;',
@@ -92,16 +116,7 @@ export function getBuildingAvatarHtml(name: string, logoUrl?: string | null, siz
   }
 
   const initials = getInitials(name);
-  const colors = [
-    '#3b82f6', '#22c55e', '#a855f7', '#f97316', '#ec4899',
-    '#14b8a6', '#6366f1', '#06b6d4', '#f43f5e', '#f59e0b',
-  ];
-  
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const bgColor = colors[Math.abs(hash) % colors.length];
+  const color = getAvatarColor(name, avatarColor);
 
-  return `<div style="${sizeStyles[size]} background-color: ${bgColor}; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 600; color: white;" title="${name}">${initials}</div>`;
+  return `<div style="${sizeStyles[size]} background-color: ${color.hex}; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 600; color: white;" title="${name}">${initials}</div>`;
 }

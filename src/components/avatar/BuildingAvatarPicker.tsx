@@ -1,5 +1,5 @@
 /**
- * Building-specific avatar picker with geometric patterns
+ * Building-specific avatar picker with geometric patterns and color customization
  */
 
 import { useState } from 'react';
@@ -10,22 +10,26 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { 
   getBuildingAvatars,
   AVATAR_BACKGROUNDS,
-  generateCustomAvatar,
   AvatarOption,
 } from '@/lib/avatars';
+import { AVATAR_COLORS } from '@/components/building/BuildingAvatar';
 import { Check, Shuffle, Building2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface BuildingAvatarPickerProps {
   selectedUrl: string | null;
+  selectedColor: string | null;
   onSelect: (url: string | null) => void;
+  onColorChange: (color: string | null) => void;
   buildingName?: string;
   disabled?: boolean;
 }
 
 export function BuildingAvatarPicker({
   selectedUrl,
+  selectedColor,
   onSelect,
+  onColorChange,
   buildingName = 'Building',
   disabled = false,
 }: BuildingAvatarPickerProps) {
@@ -53,6 +57,14 @@ export function BuildingAvatarPicker({
     const url = `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(buildingName)}&backgroundColor=${randomBg}`;
     onSelect(url);
   };
+
+  const handleUseInitials = () => {
+    onSelect(null);
+  };
+
+  // Get current color for preview
+  const currentColor = selectedColor || AVATAR_COLORS[0].hex;
+  const previewColor = AVATAR_COLORS.find(c => c.hex === selectedColor)?.hex || '#3b82f6';
 
   return (
     <div className="space-y-4">
@@ -119,24 +131,58 @@ export function BuildingAvatarPicker({
         </ScrollArea>
       </div>
 
-      {/* Use Initials Option */}
-      <div className="flex items-center gap-3 pt-2 border-t">
-        <button
-          onClick={() => onSelect(null)}
-          disabled={disabled}
-          className={cn(
-            'flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors',
-            !selectedUrl
-              ? 'border-primary bg-primary/10 text-primary'
-              : 'border-muted hover:border-muted-foreground/50'
-          )}
-        >
-          <div className="h-8 w-8 rounded-lg bg-primary/20 text-primary flex items-center justify-center text-sm font-semibold">
-            {initials}
+      {/* Use Initials Option with Color Picker */}
+      <div className="space-y-3 pt-2 border-t">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleUseInitials}
+            disabled={disabled}
+            className={cn(
+              'flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors',
+              !selectedUrl
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-muted hover:border-muted-foreground/50'
+            )}
+          >
+            <div 
+              className="h-8 w-8 rounded-lg flex items-center justify-center text-sm font-semibold text-white"
+              style={{ backgroundColor: previewColor }}
+            >
+              {initials}
+            </div>
+            <span className="text-sm">Use initials</span>
+            {!selectedUrl && <Check className="h-4 w-4" />}
+          </button>
+        </div>
+
+        {/* Color Picker - Only show when using initials */}
+        {!selectedUrl && (
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Avatar Color</Label>
+            <div className="flex flex-wrap gap-2">
+              {AVATAR_COLORS.map((color) => {
+                const isSelected = selectedColor === color.hex;
+                return (
+                  <button
+                    key={color.hex}
+                    onClick={() => onColorChange(color.hex)}
+                    disabled={disabled}
+                    className={cn(
+                      'w-8 h-8 rounded-full transition-all hover:scale-110',
+                      isSelected && 'ring-2 ring-offset-2 ring-offset-background ring-primary'
+                    )}
+                    style={{ backgroundColor: color.hex }}
+                    title={color.name}
+                  >
+                    {isSelected && (
+                      <Check className="h-4 w-4 text-white mx-auto" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <span className="text-sm">Use initials</span>
-          {!selectedUrl && <Check className="h-4 w-4" />}
-        </button>
+        )}
       </div>
     </div>
   );

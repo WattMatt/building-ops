@@ -24,6 +24,7 @@ interface Building {
   address: string;
   city: string;
   logo_url: string | null;
+  avatar_color: string | null;
   emergency_contacts: any;
   created_at: string;
 }
@@ -88,6 +89,7 @@ export default function BuildingDetails() {
             <BuildingAvatar 
               name={building.name} 
               logoUrl={building.logo_url} 
+              avatarColor={building.avatar_color}
               size="lg" 
               className="w-10 h-10 sm:w-12 sm:h-12 shrink-0"
             />
