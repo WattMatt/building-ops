@@ -71,6 +71,7 @@ export default function BuildingForm() {
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPosition, setLogoPosition] = useState<string>('top-left');
+  const [avatarColor, setAvatarColor] = useState<string | null>(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [assetManager, setAssetManager] = useState<ContactInfo>({ ...emptyContact });
   const [centreManagement, setCentreManagement] = useState<ContactInfo>({ ...emptyContact });
@@ -103,6 +104,7 @@ export default function BuildingForm() {
       setAddress(data.address);
       setLogoUrl(data.logo_url);
       setLogoPosition(data.logo_position || 'top-left');
+      setAvatarColor(data.avatar_color || null);
 
       // Parse emergency_contacts for our contact fields
       const contacts = data.emergency_contacts as Record<string, any> | null;
@@ -273,6 +275,7 @@ export default function BuildingForm() {
         address: address.trim(),
         organization_id: organization.id,
         logo_position: logoPosition,
+        avatar_color: avatarColor,
         emergency_contacts: Object.keys(emergencyContacts).length > 0 ? (emergencyContacts as Json) : null,
         electrical_authority: hasContent(electricalAuthority) ? (electricalAuthority as Json) : null,
         council_details: hasContent(council) ? (council as Json) : null,
@@ -300,6 +303,7 @@ export default function BuildingForm() {
           address: address.trim(),
           organization_id: organization.id,
           logo_position: logoPosition,
+          avatar_color: avatarColor,
           emergency_contacts: Object.keys(emergencyContacts).length > 0 ? (emergencyContacts as Json) : null,
           electrical_authority: hasContent(electricalAuthority) ? (electricalAuthority as Json) : null,
           council_details: hasContent(council) ? (council as Json) : null,
@@ -436,10 +440,12 @@ export default function BuildingForm() {
                 <TabsContent value="pattern" className="mt-4">
                   <BuildingAvatarPicker
                     selectedUrl={logoUrl?.includes('dicebear') ? logoUrl : null}
+                    selectedColor={avatarColor}
                     onSelect={(url) => {
                       setLogoUrl(url);
                       setLogoFile(null);
                     }}
+                    onColorChange={setAvatarColor}
                     buildingName={name}
                     disabled={uploadingLogo}
                   />

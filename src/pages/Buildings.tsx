@@ -36,6 +36,7 @@ interface Building {
   longitude: number | null;
   logo_url: string | null;
   logo_position: string | null;
+  avatar_color: string | null;
   created_at: string;
 }
 
@@ -54,7 +55,7 @@ export default function Buildings() {
     try {
       const { data, error } = await supabase
         .from('buildings')
-        .select('id, name, address, city, latitude, longitude, logo_url, logo_position, created_at')
+        .select('id, name, address, city, latitude, longitude, logo_url, logo_position, avatar_color, created_at')
         .order('name');
 
       if (error) throw error;
@@ -165,7 +166,7 @@ export default function Buildings() {
                 {/* Top-center logo banner */}
                 {position === 'top-center' && (
                   <div className="flex justify-center pt-4 pb-2">
-                    <BuildingAvatar name={building.name} logoUrl={building.logo_url} size="lg" />
+                    <BuildingAvatar name={building.name} logoUrl={building.logo_url} avatarColor={building.avatar_color} size="lg" />
                   </div>
                 )}
                 
@@ -173,7 +174,7 @@ export default function Buildings() {
                   {/* Left side: avatar (if top-left) + text */}
                   <div className="flex items-start gap-3">
                     {position === 'top-left' && (
-                      <BuildingAvatar name={building.name} logoUrl={building.logo_url} size="md" />
+                      <BuildingAvatar name={building.name} logoUrl={building.logo_url} avatarColor={building.avatar_color} size="md" />
                     )}
                     <div>
                       <CardTitle className="text-base">{building.name}</CardTitle>
@@ -187,7 +188,7 @@ export default function Buildings() {
                   {/* Right side: avatar (if top-right) + menu */}
                   <div className="flex items-start gap-2">
                     {position === 'top-right' && (
-                      <BuildingAvatar name={building.name} logoUrl={building.logo_url} size="md" />
+                      <BuildingAvatar name={building.name} logoUrl={building.logo_url} avatarColor={building.avatar_color} size="md" />
                     )}
                     {isAdminOrManager && (
                   <DropdownMenu>
