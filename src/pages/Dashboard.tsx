@@ -21,6 +21,7 @@ import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import GlobalAlertsWidget from '@/components/dashboard/GlobalAlertsWidget';
 import PendingSubmissionsWidget from '@/components/dashboard/PendingSubmissionsWidget';
+import BuildingAlertsWidget from '@/components/dashboard/BuildingAlertsWidget';
 
 interface DashboardStats {
   buildings: number;
@@ -304,6 +305,9 @@ export default function Dashboard() {
 
       {/* Global Alerts for Admins/Managers */}
       {isAdminOrManager && <GlobalAlertsWidget />}
+
+      {/* Building Health Widget */}
+      {isAdminOrManager && <BuildingAlertsWidget />}
 
       {/* Pending Form Submissions for Managers */}
       {isAdminOrManager && <PendingSubmissionsWidget />}
