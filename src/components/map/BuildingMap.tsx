@@ -17,6 +17,7 @@ export interface BuildingMarker {
   longitude: number;
   logoUrl?: string | null;
   logoPosition?: string | null;
+  avatarColor?: string | null;
 }
 
 interface BuildingMapProps {
@@ -155,21 +156,22 @@ export function BuildingMap({
             popupRef.current.remove();
           }
 
-          const avatarHtml = getBuildingAvatarHtml(building.name, building.logoUrl, 'md');
+          const avatarHtml = getBuildingAvatarHtml(building.name, building.logoUrl, building.avatarColor, 'md');
           const logoPosition = building.logoPosition || 'top-left';
           
           // Determine logo position styles for popup
           const logoPositionStyles: Record<string, string> = {
-            'top-left': 'left: 4px;',
+            'top-left': 'left: 8px;',
             'top-center': 'left: 50%; transform: translateX(-50%);',
-            'top-right': 'right: 4px;',
+            'top-right': 'right: 8px;',
           };
           const logoStyle = logoPositionStyles[logoPosition] || logoPositionStyles['top-left'];
           
-          // Build logo HTML if logo exists
-          const logoHtml = building.logoUrl 
-            ? `<div style="position: absolute; top: 4px; ${logoStyle} z-index: 10;">
-                <img src="${building.logoUrl}" alt="Logo" style="width: 32px; height: 32px; object-fit: contain; border-radius: 6px; background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.1); box-shadow: 0 1px 2px rgba(0,0,0,0.1);" />
+          // Build logo HTML if logo exists (and not a dicebear pattern)
+          const hasCustomLogo = building.logoUrl && !building.logoUrl.includes('dicebear');
+          const logoHtml = hasCustomLogo 
+            ? `<div style="position: absolute; top: 8px; ${logoStyle} z-index: 10;">
+                <img src="${building.logoUrl}" alt="Logo" style="width: 28px; height: 28px; object-fit: contain; border-radius: 6px; background: rgba(255,255,255,0.95); border: 1px solid rgba(0,0,0,0.08); box-shadow: 0 1px 3px rgba(0,0,0,0.1);" />
               </div>`
             : '';
           
@@ -178,17 +180,52 @@ export function BuildingMap({
             closeButton: true,
             closeOnClick: false,
             className: 'building-popup',
+            maxWidth: '280px',
           })
             .setLngLat([building.longitude, building.latitude])
             .setHTML(`
-              <div class="p-2 min-w-[200px]" style="position: relative;">
+              <div class="building-popup-content" style="position: relative; padding: 12px; min-width: 220px;">
                 ${logoHtml}
-                <div style="padding-top: ${building.logoUrl ? '36px' : '0'};">
-                  <div class="mb-2">${avatarHtml}</div>
-                  <h3 class="font-semibold text-sm mb-1">${building.name}</h3>
-                  <p class="text-xs text-muted-foreground mb-2">${building.address}</p>
-                  <p class="text-xs text-muted-foreground">${building.city}</p>
-                  ${onBuildingClick ? `<button class="mt-2 text-xs text-primary hover:underline view-building-btn" data-id="${building.id}">View Details →</button>` : ''}
+                <div style="padding-top: ${hasCustomLogo ? '32px' : '0'};">
+                  <div style="display: flex; align-items: flex-start; gap: 10px;">
+                    ${avatarHtml}
+                    <div style="flex: 1; min-width: 0;">
+                      <h3 style="font-weight: 600; font-size: 14px; margin: 0 0 4px 0; color: var(--foreground, #1a1a1a);">${building.name}</h3>
+                      <p style="font-size: 12px; margin: 0; color: var(--muted-foreground, #6b7280); display: flex; align-items: center; gap: 4px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
+                          <circle cx="12" cy="10" r="3"/>
+                        </svg>
+                        ${building.city}
+                      </p>
+                    </div>
+                  </div>
+                  <p style="font-size: 11px; color: var(--muted-foreground, #6b7280); margin: 8px 0 0 0; line-height: 1.4;">${building.address}</p>
+                  ${onBuildingClick ? `
+                    <button class="view-building-btn" data-id="${building.id}" style="
+                      margin-top: 10px;
+                      width: 100%;
+                      padding: 6px 12px;
+                      font-size: 12px;
+                      font-weight: 500;
+                      color: var(--primary-foreground, #fff);
+                      background: var(--primary, #2563eb);
+                      border: none;
+                      border-radius: 6px;
+                      cursor: pointer;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      gap: 4px;
+                      transition: opacity 0.15s;
+                    " onmouseover="this.style.opacity='0.9'" onmouseout="this.style.opacity='1'">
+                      View Details
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M5 12h14"/>
+                        <path d="m12 5 7 7-7 7"/>
+                      </svg>
+                    </button>
+                  ` : ''}
                 </div>
               </div>
             `)
