@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { useIssues } from '@/hooks/useIssues';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,20 +23,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
-
-type IssuePriority = 'low' | 'medium' | 'high' | 'critical';
-type IssueStatus = 'open' | 'in_progress' | 'resolved' | 'escalated';
-
-interface Issue {
-  id: string;
-  title: string;
-  description: string;
-  priority: IssuePriority;
-  status: IssueStatus;
-  deadline: string | null;
-  created_at: string;
-  building_name?: string;
-}
+import type { IssuePriority, IssueStatus } from '@/lib/constants';
 
 const priorityColors: Record<IssuePriority, string> = {
   low: 'bg-muted text-muted-foreground',
@@ -61,48 +48,10 @@ const statusLabels: Record<IssueStatus, string> = {
 
 export default function Issues() {
   const { isAdminOrManager } = useAuth();
-  const [issues, setIssues] = useState<Issue[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { issues, stats, loading } = useIssues();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<IssueStatus | 'all'>('all');
   const [priorityFilter, setPriorityFilter] = useState<IssuePriority | 'all'>('all');
-
-  useEffect(() => {
-    fetchIssues();
-  }, []);
-
-  const fetchIssues = async () => {
-    setLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('issues')
-        .select(`
-          id,
-          title,
-          description,
-          priority,
-          status,
-          deadline,
-          created_at,
-          building_id,
-          buildings (name)
-        `)
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      const formattedIssues = (data || []).map(issue => ({
-        ...issue,
-        building_name: (issue.buildings as any)?.name || 'Unknown',
-      }));
-
-      setIssues(formattedIssues);
-    } catch (error) {
-      console.error('Error fetching issues:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const filteredIssues = issues.filter((issue) => {
     const matchesSearch =
@@ -112,14 +61,6 @@ export default function Issues() {
     const matchesPriority = priorityFilter === 'all' || issue.priority === priorityFilter;
     return matchesSearch && matchesStatus && matchesPriority;
   });
-
-  const stats = {
-    total: issues.length,
-    open: issues.filter((i) => i.status === 'open').length,
-    inProgress: issues.filter((i) => i.status === 'in_progress').length,
-    escalated: issues.filter((i) => i.status === 'escalated').length,
-    resolved: issues.filter((i) => i.status === 'resolved').length,
-  };
 
   if (loading) {
     return (
