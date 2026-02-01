@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { ArrowLeft, Building2, MapPin, Edit, Users, Phone, Mail, User, Shield } from 'lucide-react';
+import { ArrowLeft, Building2, MapPin, Edit, Users, Phone, Mail, User, Shield, Camera } from 'lucide-react';
 import { toast } from 'sonner';
 import TenantsTab from '@/components/building/TenantsTab';
 import AssetsTab from '@/components/building/AssetsTab';
@@ -17,6 +17,7 @@ import OverviewWidgets from '@/components/building/OverviewWidgets';
 import ChecklistsTab from '@/components/building/ChecklistsTab';
 import FormsTab from '@/components/building/FormsTab';
 import { BuildingAvatar } from '@/components/building/BuildingAvatar';
+import { BuildingAvatarDialog } from '@/components/building/BuildingAvatarDialog';
 
 interface Building {
   id: string;
@@ -36,6 +37,7 @@ export default function BuildingDetails() {
   const [building, setBuilding] = useState<Building | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
+  const [avatarDialogOpen, setAvatarDialogOpen] = useState(false);
 
   useEffect(() => {
     if (id) fetchBuilding(id);
@@ -86,13 +88,25 @@ export default function BuildingDetails() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-            <BuildingAvatar 
-              name={building.name} 
-              logoUrl={building.logo_url} 
-              avatarColor={building.avatar_color}
-              size="lg" 
-              className="w-10 h-10 sm:w-12 sm:h-12 shrink-0"
-            />
+            {/* Avatar with edit overlay for admins/managers */}
+            <div className="relative group shrink-0">
+              <BuildingAvatar 
+                name={building.name} 
+                logoUrl={building.logo_url} 
+                avatarColor={building.avatar_color}
+                size="lg" 
+                className="w-10 h-10 sm:w-12 sm:h-12"
+              />
+              {isAdminOrManager && (
+                <button
+                  onClick={() => setAvatarDialogOpen(true)}
+                  className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg cursor-pointer"
+                  title="Change avatar"
+                >
+                  <Camera className="h-4 w-4 text-white" />
+                </button>
+              )}
+            </div>
             <div className="min-w-0 flex-1">
               <h1 className="text-lg sm:text-2xl font-bold truncate">{building.name}</h1>
               <p className="text-xs sm:text-sm text-muted-foreground flex items-center gap-1 truncate">
@@ -266,6 +280,19 @@ export default function BuildingDetails() {
           <NotesTab buildingId={building.id} />
         </TabsContent>
       </Tabs>
+
+      {/* Avatar Change Dialog */}
+      {isAdminOrManager && (
+        <BuildingAvatarDialog
+          open={avatarDialogOpen}
+          onOpenChange={setAvatarDialogOpen}
+          buildingId={building.id}
+          buildingName={building.name}
+          currentLogoUrl={building.logo_url}
+          currentAvatarColor={building.avatar_color}
+          onSuccess={() => id && fetchBuilding(id)}
+        />
+      )}
     </div>
   );
 }
