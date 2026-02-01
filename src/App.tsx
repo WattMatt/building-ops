@@ -17,6 +17,7 @@ import BuildingForm from "./pages/BuildingForm";
 import BuildingDetails from "./pages/BuildingDetails";
 import Checklists from "./pages/Checklists";
 import Issues from "./pages/Issues";
+import NewIssue from "./pages/NewIssue";
 import MapView from "./pages/MapView";
 import Reports from "./pages/Reports";
 import AuditArchive from "./pages/AuditArchive";
@@ -74,6 +75,11 @@ const App = () => (
             <Route path="/issues" element={
               <ProtectedRoute>
                 <DashboardLayout><Issues /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/issues/new" element={
+              <ProtectedRoute>
+                <DashboardLayout><NewIssue /></DashboardLayout>
               </ProtectedRoute>
             } />
             <Route path="/map" element={
