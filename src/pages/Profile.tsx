@@ -2,9 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { DEFAULT_AVATARS, CARTOON_AVATARS, AVATAR_CATEGORIES, generateRandomAvatar } from '@/lib/avatars';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { generateRandomAvatar } from '@/lib/avatars';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,7 +21,9 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare, Upload, Shuffle, Check, Lock, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { AvatarPicker } from '@/components/avatar/AvatarPicker';
+import { ImageCropper } from '@/components/avatar/ImageCropper';
+import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare, Upload, Lock, Eye, EyeOff, Trash2, Crop } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ProfileData {
@@ -63,6 +63,8 @@ export default function Profile() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [cropperOpen, setCropperOpen] = useState(false);
+  const [imageToCrop, setImageToCrop] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -226,9 +228,9 @@ export default function Profile() {
     }
   };
 
-  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file || !user) return;
+    if (!file) return;
 
     // Validate file type
     const validTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
@@ -237,21 +239,37 @@ export default function Profile() {
       return;
     }
 
-    // Validate file size (max 2MB)
-    if (file.size > 2 * 1024 * 1024) {
-      toast.error('File size must be less than 2MB');
+    // Validate file size (max 5MB for cropping)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('File size must be less than 5MB');
       return;
     }
 
+    // Create object URL for cropper
+    const url = URL.createObjectURL(file);
+    setImageToCrop(url);
+    setCropperOpen(true);
+
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleCropComplete = async (croppedBlob: Blob) => {
+    if (!user) return;
+
     setIsUploading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `avatar-${Date.now()}.${fileExt}`;
+      const fileName = `avatar-${Date.now()}.jpg`;
       const filePath = `${user.id}/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from('avatars')
-        .upload(filePath, file, { upsert: true });
+        .upload(filePath, croppedBlob, { 
+          upsert: true,
+          contentType: 'image/jpeg',
+        });
 
       if (uploadError) throw uploadError;
 
@@ -277,8 +295,10 @@ export default function Profile() {
       toast.error('Failed to upload avatar');
     } finally {
       setIsUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      // Clean up object URL
+      if (imageToCrop) {
+        URL.revokeObjectURL(imageToCrop);
+        setImageToCrop(null);
       }
     }
   };
@@ -377,7 +397,7 @@ export default function Profile() {
                   ref={fileInputRef}
                   type="file"
                   accept="image/png,image/jpeg,image/webp,image/gif"
-                  onChange={handleAvatarUpload}
+                  onChange={handleFileSelect}
                   className="hidden"
                 />
               </div>
@@ -396,95 +416,35 @@ export default function Profile() {
                     <Upload className="h-4 w-4 mr-2" />
                     Upload
                   </Button>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={handleGenerateRandom}
-                    disabled={isUploading}
-                  >
-                    <Shuffle className="h-4 w-4 mr-2" />
-                    Random
-                  </Button>
                 </div>
               </div>
             </div>
 
-            {/* Avatar Library */}
+            {/* Avatar Library with new component */}
             <div className="space-y-3">
               <Label className="text-sm font-medium">Choose an Avatar</Label>
-              <Tabs defaultValue="adventurer" className="w-full">
-                <TabsList className="grid w-full grid-cols-4 h-auto">
-                  {(Object.keys(AVATAR_CATEGORIES) as Array<keyof typeof AVATAR_CATEGORIES>).map((category) => (
-                    <TabsTrigger
-                      key={category}
-                      value={category}
-                      className="text-xs py-2 px-1"
-                    >
-                      {AVATAR_CATEGORIES[category].label}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-                {(Object.keys(AVATAR_CATEGORIES) as Array<keyof typeof AVATAR_CATEGORIES>).map((category) => (
-                  <TabsContent key={category} value={category} className="mt-3">
-                    <p className="text-xs text-muted-foreground mb-3">
-                      {AVATAR_CATEGORIES[category].description}
-                    </p>
-                    <div className="grid grid-cols-6 gap-2">
-                      {CARTOON_AVATARS.filter(a => a.category === category).map((avatar) => {
-                        const isSelected = avatar.url === avatarUrl;
-                        return (
-                          <button
-                            key={avatar.id}
-                            onClick={() => handleSelectDefaultAvatar(avatar.url)}
-                            disabled={isUploading}
-                            className={`relative rounded-lg p-1 transition-all hover:scale-105 ${
-                              isSelected 
-                                ? 'ring-2 ring-primary ring-offset-2 ring-offset-background' 
-                                : 'hover:ring-2 hover:ring-muted-foreground/30'
-                            }`}
-                            title={avatar.name}
-                          >
-                            <Avatar className="h-12 w-12">
-                              <AvatarImage src={avatar.url || undefined} alt={avatar.name} />
-                              <AvatarFallback className="bg-muted text-muted-foreground text-sm">
-                                {avatar.name.slice(0, 2)}
-                              </AvatarFallback>
-                            </Avatar>
-                            {isSelected && (
-                              <div className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-primary flex items-center justify-center">
-                                <Check className="h-3 w-3 text-primary-foreground" />
-                              </div>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </TabsContent>
-                ))}
-              </Tabs>
-              
-              {/* Use Initials Option */}
-              <div className="flex items-center gap-3 pt-2">
-                <button
-                  onClick={() => handleSelectDefaultAvatar(null)}
-                  disabled={isUploading}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
-                    !avatarUrl 
-                      ? 'border-primary bg-primary/10 text-primary' 
-                      : 'border-muted hover:border-muted-foreground/50'
-                  }`}
-                >
-                  <Avatar className="h-8 w-8">
-                    <AvatarFallback className="bg-muted text-muted-foreground text-sm">
-                      {userInitials}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="text-sm">Use my initials</span>
-                  {!avatarUrl && <Check className="h-4 w-4" />}
-                </button>
-              </div>
+              <AvatarPicker
+                selectedUrl={avatarUrl}
+                onSelect={handleSelectDefaultAvatar}
+                userInitials={userInitials}
+                disabled={isUploading}
+                showInitialsOption={true}
+                showCustomization={true}
+              />
             </div>
           </div>
+
+          {/* Image Cropper Dialog */}
+          {imageToCrop && (
+            <ImageCropper
+              open={cropperOpen}
+              onOpenChange={setCropperOpen}
+              imageSrc={imageToCrop}
+              onCropComplete={handleCropComplete}
+              aspectRatio={1}
+              circularCrop={true}
+            />
+          )}
 
           <Separator />
 
