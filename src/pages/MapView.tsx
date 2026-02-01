@@ -52,7 +52,15 @@ export default function MapView() {
         .order('name');
 
       if (error) throw error;
-      return data as BuildingMarker[];
+      return data.map((b) => ({
+        id: b.id,
+        name: b.name,
+        address: b.address,
+        city: b.city,
+        latitude: b.latitude!,
+        longitude: b.longitude!,
+        logoUrl: b.logo_url,
+      })) as BuildingMarker[];
     },
   });
 

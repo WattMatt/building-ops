@@ -31,6 +31,7 @@ interface Building {
   city: string;
   latitude: number | null;
   longitude: number | null;
+  logo_url: string | null;
   created_at: string;
 }
 
@@ -149,9 +150,17 @@ export default function Buildings() {
             <Card key={building.id} className="group hover:shadow-md transition-shadow">
               <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
                 <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
-                    <Building2 className="h-5 w-5 text-primary" />
-                  </div>
+                  {building.logo_url ? (
+                    <img
+                      src={building.logo_url}
+                      alt={`${building.name} logo`}
+                      className="w-10 h-10 rounded-lg object-cover border border-border"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
+                      <Building2 className="h-5 w-5 text-primary" />
+                    </div>
+                  )}
                   <div>
                     <CardTitle className="text-base">{building.name}</CardTitle>
                     <CardDescription className="flex items-center gap-1 mt-1">
