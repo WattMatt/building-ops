@@ -17,6 +17,8 @@ import ProfessionalTeamSection, { ProfessionalTeam, ProfessionalContact } from '
 import TariffSection, { UtilityTariffs, UtilityTariff } from '@/components/building/TariffSection';
 import { SinglePhotoCapture } from '@/components/ui/photo-capture';
 import { BuildingCardPreview } from '@/components/building/BuildingCardPreview';
+import { BuildingAvatarPicker } from '@/components/avatar/BuildingAvatarPicker';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const contactSchema = z.object({
   name: z.string().trim().max(100).optional(),
@@ -378,50 +380,71 @@ export default function BuildingForm() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Building Logo */}
+            {/* Building Logo / Avatar */}
             <div className="space-y-3">
-              <Label>Building Logo</Label>
-              <div className="flex items-start gap-4">
-                {logoUrl ? (
-                  <div className="relative">
-                    <img
-                      src={logoUrl}
-                      alt="Building logo"
-                      className="w-24 h-24 sm:w-32 sm:h-32 object-contain rounded-lg border bg-muted"
-                    />
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="icon"
-                      className="absolute -top-2 -right-2 h-6 w-6"
-                      onClick={handleRemoveLogo}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ) : (
-                  <SinglePhotoCapture
-                    onPhotoSelect={handleLogoSelect}
-                    placeholder={
-                      <div className="flex flex-col items-center gap-1 text-muted-foreground">
-                        <ImagePlus className="h-6 w-6" />
-                        <span className="text-xs">Upload Logo</span>
+              <Label>Building Identity</Label>
+              <Tabs defaultValue="upload" className="w-full">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="upload">Upload Logo</TabsTrigger>
+                  <TabsTrigger value="pattern">Use Pattern</TabsTrigger>
+                </TabsList>
+                
+                <TabsContent value="upload" className="mt-4">
+                  <div className="flex items-start gap-4">
+                    {logoUrl && !logoUrl.includes('dicebear') ? (
+                      <div className="relative">
+                        <img
+                          src={logoUrl}
+                          alt="Building logo"
+                          className="w-24 h-24 sm:w-32 sm:h-32 object-contain rounded-lg border bg-muted"
+                        />
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="icon"
+                          className="absolute -top-2 -right-2 h-6 w-6"
+                          onClick={handleRemoveLogo}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
                       </div>
-                    }
-                    shape="rounded"
-                    size="lg"
-                    acceptedTypes={['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']}
-                    maxSizeMB={5}
-                    maxDimension={512}
-                    className="w-24 h-24 sm:w-32 sm:h-32"
+                    ) : (
+                      <SinglePhotoCapture
+                        onPhotoSelect={handleLogoSelect}
+                        placeholder={
+                          <div className="flex flex-col items-center gap-1 text-muted-foreground">
+                            <ImagePlus className="h-6 w-6" />
+                            <span className="text-xs">Upload Logo</span>
+                          </div>
+                        }
+                        shape="rounded"
+                        size="lg"
+                        acceptedTypes={['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif']}
+                        maxSizeMB={5}
+                        maxDimension={512}
+                        className="w-24 h-24 sm:w-32 sm:h-32"
+                      />
+                    )}
+                    <div className="text-xs text-muted-foreground">
+                      <p>Recommended: Square image, at least 256x256px</p>
+                      <p>Formats: JPG, PNG, WebP</p>
+                      <p>Max size: 5MB</p>
+                    </div>
+                  </div>
+                </TabsContent>
+                
+                <TabsContent value="pattern" className="mt-4">
+                  <BuildingAvatarPicker
+                    selectedUrl={logoUrl?.includes('dicebear') ? logoUrl : null}
+                    onSelect={(url) => {
+                      setLogoUrl(url);
+                      setLogoFile(null);
+                    }}
+                    buildingName={name}
+                    disabled={uploadingLogo}
                   />
-                )}
-                <div className="text-xs text-muted-foreground">
-                  <p>Recommended: Square image, at least 256x256px</p>
-                  <p>Formats: JPG, PNG, WebP</p>
-                  <p>Max size: 5MB</p>
-                </div>
-              </div>
+                </TabsContent>
+              </Tabs>
               
               {/* Logo Position Selector with Live Preview */}
               {logoUrl && (
