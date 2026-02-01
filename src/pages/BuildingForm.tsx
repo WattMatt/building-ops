@@ -67,6 +67,7 @@ export default function BuildingForm() {
   const [address, setAddress] = useState('');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPosition, setLogoPosition] = useState<string>('top-left');
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [assetManager, setAssetManager] = useState<ContactInfo>({ ...emptyContact });
   const [centreManagement, setCentreManagement] = useState<ContactInfo>({ ...emptyContact });
@@ -98,6 +99,7 @@ export default function BuildingForm() {
       setName(data.name);
       setAddress(data.address);
       setLogoUrl(data.logo_url);
+      setLogoPosition(data.logo_position || 'top-left');
 
       // Parse emergency_contacts for our contact fields
       const contacts = data.emergency_contacts as Record<string, any> | null;
@@ -267,6 +269,7 @@ export default function BuildingForm() {
         name: name.trim(),
         address: address.trim(),
         organization_id: organization.id,
+        logo_position: logoPosition,
         emergency_contacts: Object.keys(emergencyContacts).length > 0 ? (emergencyContacts as Json) : null,
         electrical_authority: hasContent(electricalAuthority) ? (electricalAuthority as Json) : null,
         council_details: hasContent(council) ? (council as Json) : null,
@@ -293,6 +296,7 @@ export default function BuildingForm() {
           name: name.trim(),
           address: address.trim(),
           organization_id: organization.id,
+          logo_position: logoPosition,
           emergency_contacts: Object.keys(emergencyContacts).length > 0 ? (emergencyContacts as Json) : null,
           electrical_authority: hasContent(electricalAuthority) ? (electricalAuthority as Json) : null,
           council_details: hasContent(council) ? (council as Json) : null,
@@ -374,7 +378,7 @@ export default function BuildingForm() {
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Building Logo */}
-            <div className="space-y-2">
+            <div className="space-y-3">
               <Label>Building Logo</Label>
               <div className="flex items-start gap-4">
                 {logoUrl ? (
@@ -417,6 +421,34 @@ export default function BuildingForm() {
                   <p>Max size: 5MB</p>
                 </div>
               </div>
+              
+              {/* Logo Position Selector */}
+              {logoUrl && (
+                <div className="space-y-2">
+                  <Label className="text-sm">Logo Position in Card</Label>
+                  <div className="grid grid-cols-3 gap-2 max-w-xs">
+                    {[
+                      { value: 'top-left', label: 'Top Left' },
+                      { value: 'top-center', label: 'Top Center' },
+                      { value: 'top-right', label: 'Top Right' },
+                    ].map((pos) => (
+                      <Button
+                        key={pos.value}
+                        type="button"
+                        variant={logoPosition === pos.value ? 'default' : 'outline'}
+                        size="sm"
+                        className="text-xs h-8"
+                        onClick={() => setLogoPosition(pos.value)}
+                      >
+                        {pos.label}
+                      </Button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Choose where the logo appears on building cards
+                  </p>
+                </div>
+              )}
             </div>
             
             <div className="space-y-2">

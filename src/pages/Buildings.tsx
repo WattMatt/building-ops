@@ -32,6 +32,7 @@ interface Building {
   latitude: number | null;
   longitude: number | null;
   logo_url: string | null;
+  logo_position: string | null;
   created_at: string;
 }
 
@@ -49,7 +50,7 @@ export default function Buildings() {
     try {
       const { data, error } = await supabase
         .from('buildings')
-        .select('*')
+        .select('id, name, address, city, latitude, longitude, logo_url, logo_position, created_at')
         .order('name');
 
       if (error) throw error;
@@ -146,30 +147,56 @@ export default function Buildings() {
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {filteredBuildings.map((building) => (
-            <Card key={building.id} className="group hover:shadow-md transition-shadow">
-              <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
-                <div className="flex items-start gap-3">
-                  {building.logo_url ? (
+          {filteredBuildings.map((building) => {
+            const position = building.logo_position || 'top-left';
+            const logoElement = building.logo_url ? (
+              <img
+                src={building.logo_url}
+                alt={`${building.name} logo`}
+                className="w-10 h-10 rounded-lg object-cover border border-border"
+              />
+            ) : (
+              <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
+                <Building2 className="h-5 w-5 text-primary" />
+              </div>
+            );
+
+            return (
+              <Card key={building.id} className="group hover:shadow-md transition-shadow relative overflow-hidden">
+                {/* Top-center logo banner */}
+                {building.logo_url && position === 'top-center' && (
+                  <div className="flex justify-center pt-4 pb-2">
                     <img
                       src={building.logo_url}
                       alt={`${building.name} logo`}
-                      className="w-10 h-10 rounded-lg object-cover border border-border"
+                      className="w-16 h-16 rounded-lg object-cover border border-border"
                     />
-                  ) : (
-                    <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
-                      <Building2 className="h-5 w-5 text-primary" />
-                    </div>
-                  )}
-                  <div>
-                    <CardTitle className="text-base">{building.name}</CardTitle>
-                    <CardDescription className="flex items-center gap-1 mt-1">
-                      <MapPin className="h-3 w-3" />
-                      {building.city}
-                    </CardDescription>
                   </div>
-                </div>
-                {isAdminOrManager && (
+                )}
+                
+                <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+                  {/* Left side: logo (if top-left) + text */}
+                  <div className="flex items-start gap-3">
+                    {position === 'top-left' && logoElement}
+                    <div>
+                      <CardTitle className="text-base">{building.name}</CardTitle>
+                      <CardDescription className="flex items-center gap-1 mt-1">
+                        <MapPin className="h-3 w-3" />
+                        {building.city}
+                      </CardDescription>
+                    </div>
+                  </div>
+                  
+                  {/* Right side: logo (if top-right) + menu */}
+                  <div className="flex items-start gap-2">
+                    {position === 'top-right' && building.logo_url && (
+                      <img
+                        src={building.logo_url}
+                        alt={`${building.name} logo`}
+                        className="w-10 h-10 rounded-lg object-cover border border-border"
+                      />
+                    )}
+                    {isAdminOrManager && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -202,27 +229,29 @@ export default function Buildings() {
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                )}
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
-                  {building.address}
-                </p>
-                <div className="flex items-center justify-between">
-                  <Badge variant="secondary">
-                    {building.latitude && building.longitude
-                      ? 'Location set'
-                      : 'No location'}
-                  </Badge>
-                  <Button variant="ghost" size="sm" asChild>
-                    <Link to={`/buildings/${building.id}`}>
-                      View
-                    </Link>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
+                    {building.address}
+                  </p>
+                  <div className="flex items-center justify-between">
+                    <Badge variant="secondary">
+                      {building.latitude && building.longitude
+                        ? 'Location set'
+                        : 'No location'}
+                    </Badge>
+                    <Button variant="ghost" size="sm" asChild>
+                      <Link to={`/buildings/${building.id}`}>
+                        View
+                      </Link>
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>
