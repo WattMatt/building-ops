@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/integrations/supabase/client';
+import { useDashboardStats } from '@/hooks/useDashboardStats';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,30 +22,6 @@ import GlobalAlertsWidget from '@/components/dashboard/GlobalAlertsWidget';
 import PendingSubmissionsWidget from '@/components/dashboard/PendingSubmissionsWidget';
 import BuildingAlertsWidget from '@/components/dashboard/BuildingAlertsWidget';
 
-interface DashboardStats {
-  buildings: number;
-  pendingTasks: number;
-  completedToday: number;
-  openIssues: number;
-  complianceRate: number;
-}
-
-interface UpcomingTask {
-  id: string;
-  task_name: string;
-  building_name: string;
-  due_date: string;
-  frequency: string;
-}
-
-interface RecentIssue {
-  id: string;
-  title: string;
-  building_name: string;
-  priority: string;
-  status: string;
-}
-
 const priorityColors: Record<string, string> = {
   daily: 'bg-info text-info-foreground',
   weekly: 'bg-accent text-accent-foreground',
@@ -65,120 +40,8 @@ const statusColors: Record<string, string> = {
 };
 
 export default function Dashboard() {
-  const { user, role, isAdminOrManager } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState<DashboardStats>({
-    buildings: 0,
-    pendingTasks: 0,
-    completedToday: 0,
-    openIssues: 0,
-    complianceRate: 0,
-  });
-  const [upcomingTasks, setUpcomingTasks] = useState<UpcomingTask[]>([]);
-  const [recentIssues, setRecentIssues] = useState<RecentIssue[]>([]);
-
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
-  const fetchDashboardData = async () => {
-    setLoading(true);
-    try {
-      // Fetch buildings count
-      const { count: buildingsCount } = await supabase
-        .from('buildings')
-        .select('*', { count: 'exact', head: true });
-
-      // Fetch pending tasks (due today or overdue)
-      const today = format(new Date(), 'yyyy-MM-dd');
-      const { count: pendingCount } = await supabase
-        .from('task_instances')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'pending')
-        .lte('due_date', today);
-
-      // Fetch completed today
-      const { count: completedCount } = await supabase
-        .from('task_instances')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'completed')
-        .eq('due_date', today);
-
-      // Fetch open issues
-      const { count: openIssuesCount } = await supabase
-        .from('issues')
-        .select('*', { count: 'exact', head: true })
-        .neq('status', 'resolved');
-
-      // Calculate compliance rate
-      const totalTasks = (pendingCount || 0) + (completedCount || 0);
-      const complianceRate = totalTasks > 0 
-        ? Math.round(((completedCount || 0) / totalTasks) * 100) 
-        : 0;
-
-      setStats({
-        buildings: buildingsCount || 0,
-        pendingTasks: pendingCount || 0,
-        completedToday: completedCount || 0,
-        openIssues: openIssuesCount || 0,
-        complianceRate,
-      });
-
-      // Fetch upcoming tasks with building names
-      const { data: tasksData } = await supabase
-        .from('task_instances')
-        .select(`
-          id,
-          task_name,
-          due_date,
-          frequency,
-          building_id,
-          buildings (name)
-        `)
-        .eq('status', 'pending')
-        .order('due_date')
-        .limit(4);
-
-      if (tasksData) {
-        setUpcomingTasks(tasksData.map(task => ({
-          id: task.id,
-          task_name: task.task_name,
-          building_name: (task.buildings as any)?.name || 'Unknown',
-          due_date: task.due_date,
-          frequency: task.frequency,
-        })));
-      }
-
-      // Fetch recent issues with building names
-      const { data: issuesData } = await supabase
-        .from('issues')
-        .select(`
-          id,
-          title,
-          priority,
-          status,
-          building_id,
-          buildings (name)
-        `)
-        .neq('status', 'resolved')
-        .order('created_at', { ascending: false })
-        .limit(3);
-
-      if (issuesData) {
-        setRecentIssues(issuesData.map(issue => ({
-          id: issue.id,
-          title: issue.title,
-          building_name: (issue.buildings as any)?.name || 'Unknown',
-          priority: issue.priority,
-          status: issue.status,
-        })));
-      }
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const { role, isAdminOrManager } = useAuth();
+  const { stats, upcomingTasks, recentIssues, loading } = useDashboardStats();
 
   const formatDueDate = (dateStr: string) => {
     const today = format(new Date(), 'yyyy-MM-dd');
