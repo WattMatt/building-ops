@@ -16,6 +16,7 @@ export interface BuildingMarker {
   latitude: number;
   longitude: number;
   logoUrl?: string | null;
+  logoPosition?: string | null;
 }
 
 interface BuildingMapProps {
@@ -155,6 +156,22 @@ export function BuildingMap({
           }
 
           const avatarHtml = getBuildingAvatarHtml(building.name, building.logoUrl, 'md');
+          const logoPosition = building.logoPosition || 'top-left';
+          
+          // Determine logo position styles for popup
+          const logoPositionStyles: Record<string, string> = {
+            'top-left': 'left: 4px;',
+            'top-center': 'left: 50%; transform: translateX(-50%);',
+            'top-right': 'right: 4px;',
+          };
+          const logoStyle = logoPositionStyles[logoPosition] || logoPositionStyles['top-left'];
+          
+          // Build logo HTML if logo exists
+          const logoHtml = building.logoUrl 
+            ? `<div style="position: absolute; top: 4px; ${logoStyle} z-index: 10;">
+                <img src="${building.logoUrl}" alt="Logo" style="width: 32px; height: 32px; object-fit: contain; border-radius: 6px; background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.1); box-shadow: 0 1px 2px rgba(0,0,0,0.1);" />
+              </div>`
+            : '';
           
           popupRef.current = new mapboxgl.Popup({
             offset: 25,
@@ -164,12 +181,15 @@ export function BuildingMap({
           })
             .setLngLat([building.longitude, building.latitude])
             .setHTML(`
-              <div class="p-2 min-w-[200px]">
-                <div class="mb-2">${avatarHtml}</div>
-                <h3 class="font-semibold text-sm mb-1">${building.name}</h3>
-                <p class="text-xs text-muted-foreground mb-2">${building.address}</p>
-                <p class="text-xs text-muted-foreground">${building.city}</p>
-                ${onBuildingClick ? `<button class="mt-2 text-xs text-primary hover:underline view-building-btn" data-id="${building.id}">View Details →</button>` : ''}
+              <div class="p-2 min-w-[200px]" style="position: relative;">
+                ${logoHtml}
+                <div style="padding-top: ${building.logoUrl ? '36px' : '0'};">
+                  <div class="mb-2">${avatarHtml}</div>
+                  <h3 class="font-semibold text-sm mb-1">${building.name}</h3>
+                  <p class="text-xs text-muted-foreground mb-2">${building.address}</p>
+                  <p class="text-xs text-muted-foreground">${building.city}</p>
+                  ${onBuildingClick ? `<button class="mt-2 text-xs text-primary hover:underline view-building-btn" data-id="${building.id}">View Details →</button>` : ''}
+                </div>
               </div>
             `)
             .addTo(map.current!);

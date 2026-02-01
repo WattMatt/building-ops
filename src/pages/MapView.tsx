@@ -48,7 +48,7 @@ export default function MapView() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('buildings')
-        .select('id, name, address, city, latitude, longitude, logo_url')
+        .select('id, name, address, city, latitude, longitude, logo_url, logo_position')
         .order('name');
 
       if (error) throw error;
@@ -60,6 +60,7 @@ export default function MapView() {
         latitude: b.latitude!,
         longitude: b.longitude!,
         logoUrl: b.logo_url,
+        logoPosition: b.logo_position,
       })) as BuildingMarker[];
     },
   });
