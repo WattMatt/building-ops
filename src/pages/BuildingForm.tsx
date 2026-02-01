@@ -16,6 +16,7 @@ import ContactSection, { ContactInfo } from '@/components/building/ContactSectio
 import ProfessionalTeamSection, { ProfessionalTeam, ProfessionalContact } from '@/components/building/ProfessionalTeamSection';
 import TariffSection, { UtilityTariffs, UtilityTariff } from '@/components/building/TariffSection';
 import { SinglePhotoCapture } from '@/components/ui/photo-capture';
+import { BuildingCardPreview } from '@/components/building/BuildingCardPreview';
 
 const contactSchema = z.object({
   name: z.string().trim().max(100).optional(),
@@ -422,31 +423,41 @@ export default function BuildingForm() {
                 </div>
               </div>
               
-              {/* Logo Position Selector */}
+              {/* Logo Position Selector with Live Preview */}
               {logoUrl && (
-                <div className="space-y-2">
-                  <Label className="text-sm">Logo Position in Card</Label>
-                  <div className="grid grid-cols-3 gap-2 max-w-xs">
-                    {[
-                      { value: 'top-left', label: 'Top Left' },
-                      { value: 'top-center', label: 'Top Center' },
-                      { value: 'top-right', label: 'Top Right' },
-                    ].map((pos) => (
-                      <Button
-                        key={pos.value}
-                        type="button"
-                        variant={logoPosition === pos.value ? 'default' : 'outline'}
-                        size="sm"
-                        className="text-xs h-8"
-                        onClick={() => setLogoPosition(pos.value)}
-                      >
-                        {pos.label}
-                      </Button>
-                    ))}
+                <div className="flex flex-col sm:flex-row gap-6">
+                  <div className="space-y-2">
+                    <Label className="text-sm">Logo Position in Card</Label>
+                    <div className="grid grid-cols-3 gap-2 max-w-xs">
+                      {[
+                        { value: 'top-left', label: 'Top Left' },
+                        { value: 'top-center', label: 'Top Center' },
+                        { value: 'top-right', label: 'Top Right' },
+                      ].map((pos) => (
+                        <Button
+                          key={pos.value}
+                          type="button"
+                          variant={logoPosition === pos.value ? 'default' : 'outline'}
+                          size="sm"
+                          className="text-xs h-8"
+                          onClick={() => setLogoPosition(pos.value)}
+                        >
+                          {pos.label}
+                        </Button>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Choose where the logo appears on building cards
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Choose where the logo appears on building cards
-                  </p>
+                  
+                  {/* Live Card Preview */}
+                  <BuildingCardPreview
+                    name={name}
+                    address={address}
+                    logoUrl={logoUrl}
+                    logoPosition={logoPosition}
+                  />
                 </div>
               )}
             </div>
