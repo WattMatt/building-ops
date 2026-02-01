@@ -486,6 +486,7 @@ export default function BuildingForm() {
                     address={address}
                     logoUrl={logoUrl}
                     logoPosition={logoPosition}
+                    avatarColor={avatarColor}
                   />
                 </div>
               )}

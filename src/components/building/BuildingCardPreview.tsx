@@ -11,6 +11,7 @@ interface BuildingCardPreviewProps {
   address: string;
   logoUrl: string | null;
   logoPosition: string;
+  avatarColor?: string | null;
 }
 
 export function BuildingCardPreview({
@@ -18,6 +19,7 @@ export function BuildingCardPreview({
   address,
   logoUrl,
   logoPosition,
+  avatarColor,
 }: BuildingCardPreviewProps) {
   const displayName = name.trim() || 'Building Name';
   const displayAddress = address.trim() || '123 Example Street, City';
@@ -47,7 +49,7 @@ export function BuildingCardPreview({
         {/* Card Content */}
         <div className="p-4 pt-14">
           <div className="flex items-start gap-3">
-            <BuildingAvatar name={displayName} size="md" />
+            <BuildingAvatar name={displayName} logoUrl={logoUrl} avatarColor={avatarColor} size="md" />
             <div className="flex-1 min-w-0">
               <h3 className="font-semibold text-sm truncate">{displayName}</h3>
               <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
