@@ -16,12 +16,14 @@ import NotesTab from '@/components/building/NotesTab';
 import OverviewWidgets from '@/components/building/OverviewWidgets';
 import ChecklistsTab from '@/components/building/ChecklistsTab';
 import FormsTab from '@/components/building/FormsTab';
+import { BuildingAvatar } from '@/components/building/BuildingAvatar';
 
 interface Building {
   id: string;
   name: string;
   address: string;
   city: string;
+  logo_url: string | null;
   emergency_contacts: any;
   created_at: string;
 }
@@ -83,9 +85,12 @@ export default function BuildingDetails() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-            <div className="w-10 h-10 sm:w-12 sm:h-12 bg-primary/10 rounded-lg flex items-center justify-center shrink-0">
-              <Building2 className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-            </div>
+            <BuildingAvatar 
+              name={building.name} 
+              logoUrl={building.logo_url} 
+              size="lg" 
+              className="w-10 h-10 sm:w-12 sm:h-12 shrink-0"
+            />
             <div className="min-w-0 flex-1">
               <h1 className="text-lg sm:text-2xl font-bold truncate">{building.name}</h1>
               <p className="text-xs sm:text-sm text-muted-foreground flex items-center gap-1 truncate">
