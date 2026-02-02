@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.notify-form-review]
 verify_jwt = false
+
+[functions.notify-expiring-alerts]
+verify_jwt = false
