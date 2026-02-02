@@ -48,7 +48,7 @@ const statusLabels: Record<IssueStatus, string> = {
 
 export default function Issues() {
   const { isAdminOrManager } = useAuth();
-  const { issues, stats, loading } = useIssues();
+  const { issues, stats, loading, error, refetch } = useIssues();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<IssueStatus | 'all'>('all');
   const [priorityFilter, setPriorityFilter] = useState<IssuePriority | 'all'>('all');
@@ -66,6 +66,31 @@ export default function Issues() {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Issues</h1>
+          <p className="text-muted-foreground">Track and resolve maintenance issues</p>
+        </div>
+        <Card className="border-destructive/50">
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <div className="h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
+              <AlertTriangle className="h-6 w-6 text-destructive" />
+            </div>
+            <h3 className="text-lg font-semibold mb-2">Failed to load issues</h3>
+            <p className="text-muted-foreground text-center mb-4 max-w-md">
+              {error.message || 'An unexpected error occurred while fetching issues.'}
+            </p>
+            <Button onClick={() => refetch()} variant="outline">
+              Try Again
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
