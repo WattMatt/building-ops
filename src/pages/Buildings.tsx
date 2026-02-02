@@ -34,7 +34,7 @@ import * as XLSX from 'xlsx';
 
 export default function Buildings() {
   const { isAdminOrManager } = useAuth();
-  const { buildings, loading, refetch, deleteBuilding } = useBuildings();
+  const { buildings, loading, error, refetch, deleteBuilding } = useBuildings();
   const [searchQuery, setSearchQuery] = useState('');
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [avatarDialogBuilding, setAvatarDialogBuilding] = useState<{
@@ -81,6 +81,31 @@ export default function Buildings() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Buildings</h1>
+          <p className="text-muted-foreground">Manage your building portfolio</p>
+        </div>
+        <Card className="border-destructive/50">
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <div className="h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
+              <Building2 className="h-6 w-6 text-destructive" />
+            </div>
+            <h3 className="text-lg font-semibold mb-2">Failed to load buildings</h3>
+            <p className="text-muted-foreground text-center mb-4 max-w-md">
+              {error.message || 'An unexpected error occurred while fetching buildings.'}
+            </p>
+            <Button onClick={() => refetch()} variant="outline">
+              Try Again
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
