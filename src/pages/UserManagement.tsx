@@ -46,11 +46,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { AvatarPicker } from '@/components/avatar/AvatarPicker';
 
 interface UserWithRole {
   id: string;
   email: string;
   full_name: string | null;
+  avatar_url: string | null;
   role: string;
   created_at: string;
 }
@@ -77,6 +80,9 @@ export default function UserManagement() {
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<string>('user');
+  const [avatarDialogUser, setAvatarDialogUser] = useState<UserWithRole | null>(null);
+  const [selectedAvatarUrl, setSelectedAvatarUrl] = useState<string | null>(null);
+  const [savingAvatar, setSavingAvatar] = useState(false);
 
   useEffect(() => {
     if (isAdmin) {
@@ -90,7 +96,7 @@ export default function UserManagement() {
       // Fetch profiles with their roles
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
-        .select('id, email, full_name, created_at');
+        .select('id, email, full_name, avatar_url, created_at');
 
       if (profilesError) throw profilesError;
 
@@ -167,6 +173,50 @@ export default function UserManagement() {
       console.error('Error deleting user:', error);
       toast.error('Failed to remove user');
     }
+  };
+
+  const handleOpenAvatarDialog = (user: UserWithRole) => {
+    setAvatarDialogUser(user);
+    setSelectedAvatarUrl(user.avatar_url);
+  };
+
+  const handleSaveAvatar = async () => {
+    if (!avatarDialogUser) return;
+
+    setSavingAvatar(true);
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ avatar_url: selectedAvatarUrl })
+        .eq('id', avatarDialogUser.id);
+
+      if (error) throw error;
+
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === avatarDialogUser.id ? { ...u, avatar_url: selectedAvatarUrl } : u
+        )
+      );
+      toast.success('User avatar updated');
+      setAvatarDialogUser(null);
+    } catch (error) {
+      console.error('Error updating avatar:', error);
+      toast.error('Failed to update user avatar');
+    } finally {
+      setSavingAvatar(false);
+    }
+  };
+
+  const getUserInitials = (user: UserWithRole) => {
+    if (user.full_name) {
+      return user.full_name
+        .split(' ')
+        .map((n) => n[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2);
+    }
+    return user.email.charAt(0).toUpperCase();
   };
 
   if (!isAdmin) {
@@ -315,13 +365,25 @@ export default function UserManagement() {
                   <TableRow key={user.id}>
                     <TableCell>
                       <div className="flex items-center gap-3">
-                        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                          <span className="text-sm font-medium text-primary">
-                            {user.full_name
-                              ? user.full_name.charAt(0).toUpperCase()
-                              : user.email.charAt(0).toUpperCase()}
-                          </span>
-                        </div>
+                        <button
+                          onClick={() => handleOpenAvatarDialog(user)}
+                          className="relative group"
+                          title="Click to change avatar"
+                        >
+                          <Avatar className="h-10 w-10 transition-opacity group-hover:opacity-75">
+                            <AvatarImage src={user.avatar_url || undefined} alt={user.full_name || user.email} />
+                            <AvatarFallback className="bg-primary/10 text-primary">
+                              {getUserInitials(user)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="bg-background/80 rounded-full p-1">
+                              <svg className="h-4 w-4 text-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                              </svg>
+                            </div>
+                          </div>
+                        </button>
                         <div>
                           <p className="font-medium">
                             {user.full_name || 'No name'}
@@ -381,6 +443,35 @@ export default function UserManagement() {
           )}
         </CardContent>
       </Card>
+
+      {/* Avatar Selection Dialog */}
+      <Dialog open={!!avatarDialogUser} onOpenChange={(open) => !open && setAvatarDialogUser(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change User Avatar</DialogTitle>
+            <DialogDescription>
+              Select an avatar for {avatarDialogUser?.full_name || avatarDialogUser?.email}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <AvatarPicker
+              selectedUrl={selectedAvatarUrl}
+              onSelect={setSelectedAvatarUrl}
+              userInitials={avatarDialogUser ? getUserInitials(avatarDialogUser) : 'U'}
+              showCustomization={true}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAvatarDialogUser(null)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveAvatar} disabled={savingAvatar}>
+              {savingAvatar && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Save Avatar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
