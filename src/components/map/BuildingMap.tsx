@@ -207,7 +207,10 @@ export function BuildingMap({
                   
                   <!-- Stats row -->
                   <div style="display: flex; align-items: center; gap: 12px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border, #e5e7eb);">
-                    <div style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted-foreground, #6b7280);">
+                    <div 
+                      title="${(building.taskCount ?? 0) === 0 ? 'No pending tasks - all caught up!' : `${building.taskCount} pending task${(building.taskCount ?? 0) === 1 ? '' : 's'} requiring attention`}"
+                      style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted-foreground, #6b7280); cursor: help;"
+                    >
                       <div style="width: 6px; height: 6px; border-radius: 50%; background: ${
                         (building.taskCount ?? 0) === 0 
                           ? '#22c55e' 
@@ -224,7 +227,10 @@ export function BuildingMap({
                       };">${building.taskCount ?? 0}</span>
                       <span>Tasks</span>
                     </div>
-                    <div style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted-foreground, #6b7280);">
+                    <div 
+                      title="${(building.issueCount ?? 0) === 0 ? 'No open issues - building is running smoothly!' : `${building.issueCount} open issue${(building.issueCount ?? 0) === 1 ? '' : 's'} to resolve`}"
+                      style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted-foreground, #6b7280); cursor: help;"
+                    >
                       <div style="width: 6px; height: 6px; border-radius: 50%; background: ${
                         (building.issueCount ?? 0) === 0 
                           ? '#22c55e' 
