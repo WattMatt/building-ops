@@ -18,6 +18,9 @@ export interface BuildingMarker {
   logoUrl?: string | null;
   logoPosition?: string | null;
   avatarColor?: string | null;
+  // Stats
+  taskCount?: number;
+  issueCount?: number;
 }
 
 interface BuildingMapProps {
@@ -201,6 +204,21 @@ export function BuildingMap({
                     </div>
                   </div>
                   <p style="font-size: 11px; color: var(--muted-foreground, #6b7280); margin: 8px 0 0 0; line-height: 1.4;">${building.address}</p>
+                  
+                  <!-- Stats row -->
+                  <div style="display: flex; align-items: center; gap: 12px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border, #e5e7eb);">
+                    <div style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted-foreground, #6b7280);">
+                      <div style="width: 6px; height: 6px; border-radius: 50%; background: var(--primary, #2563eb);"></div>
+                      <span style="font-weight: 500; color: var(--foreground, #1a1a1a);">${building.taskCount ?? 0}</span>
+                      <span>Tasks</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted-foreground, #6b7280);">
+                      <div style="width: 6px; height: 6px; border-radius: 50%; background: var(--warning, #f59e0b);"></div>
+                      <span style="font-weight: 500; color: var(--foreground, #1a1a1a);">${building.issueCount ?? 0}</span>
+                      <span>Issues</span>
+                    </div>
+                  </div>
+                  
                   ${onBuildingClick ? `
                     <button class="view-building-btn" data-id="${building.id}" style="
                       margin-top: 10px;

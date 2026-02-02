@@ -42,17 +42,43 @@ export default function MapView() {
   const [droppedCoords, setDroppedCoords] = useState<{ lng: number; lat: number } | null>(null);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
 
-  // Fetch buildings with coordinates
+  // Fetch buildings with coordinates and stats
   const { data: buildings, isLoading, error } = useQuery({
     queryKey: ['buildings-map'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Fetch buildings
+      const { data: buildingsData, error: buildingsError } = await supabase
         .from('buildings')
         .select('id, name, address, city, latitude, longitude, logo_url, logo_position, avatar_color')
         .order('name');
 
-      if (error) throw error;
-      return data.map((b) => ({
+      if (buildingsError) throw buildingsError;
+
+      // Fetch task counts per building (pending tasks only)
+      const { data: taskCounts } = await supabase
+        .from('task_instances')
+        .select('building_id')
+        .eq('status', 'pending');
+
+      // Fetch issue counts per building (non-resolved issues)
+      const { data: issueCounts } = await supabase
+        .from('issues')
+        .select('building_id')
+        .neq('status', 'resolved');
+
+      // Aggregate counts
+      const taskCountMap = new Map<string, number>();
+      const issueCountMap = new Map<string, number>();
+
+      taskCounts?.forEach((t) => {
+        taskCountMap.set(t.building_id, (taskCountMap.get(t.building_id) || 0) + 1);
+      });
+
+      issueCounts?.forEach((i) => {
+        issueCountMap.set(i.building_id, (issueCountMap.get(i.building_id) || 0) + 1);
+      });
+
+      return buildingsData.map((b) => ({
         id: b.id,
         name: b.name,
         address: b.address,
@@ -62,6 +88,8 @@ export default function MapView() {
         logoUrl: b.logo_url,
         logoPosition: b.logo_position,
         avatarColor: b.avatar_color,
+        taskCount: taskCountMap.get(b.id) || 0,
+        issueCount: issueCountMap.get(b.id) || 0,
       })) as BuildingMarker[];
     },
   });
