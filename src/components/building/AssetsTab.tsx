@@ -37,8 +37,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, MoreVertical, Edit, Trash2, Search, Wrench, AlertTriangle, CheckCircle, Clock, History, Upload } from 'lucide-react';
+import { Plus, MoreVertical, Edit, Trash2, Search, Wrench, AlertTriangle, CheckCircle, Clock, History, Upload, Download } from 'lucide-react';
 import { toast } from 'sonner';
+import * as XLSX from 'xlsx';
 import { format } from 'date-fns';
 import AssetServiceHistoryDialog from './AssetServiceHistoryDialog';
 import { AssetImportDialog } from '@/components/import';
@@ -231,6 +232,38 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
     }
   };
 
+  const handleExport = (exportFormat: 'csv' | 'xlsx') => {
+    if (assets.length === 0) {
+      toast.error('No assets to export');
+      return;
+    }
+
+    const exportData = assets.map((asset) => ({
+      'Name': asset.name,
+      'Category': getCategoryLabel(asset.category),
+      'Location': asset.location || '',
+      'Manufacturer': asset.manufacturer || '',
+      'Model': asset.model || '',
+      'Serial Number': asset.serial_number || '',
+      'Installation Date': asset.installation_date || '',
+      'Last Service Date': asset.last_service_date || '',
+      'Next Service Date': asset.next_service_date || '',
+      'Status': getStatusInfo(asset.status).label,
+      'Notes': asset.notes || '',
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Assets');
+
+    if (exportFormat === 'csv') {
+      XLSX.writeFile(wb, 'assets_export.csv', { bookType: 'csv' });
+    } else {
+      XLSX.writeFile(wb, 'assets_export.xlsx');
+    }
+    toast.success(`Exported ${assets.length} assets`);
+  };
+
   const filteredAssets = assets.filter((asset) => {
     const matchesSearch =
       asset.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -301,6 +334,22 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
         </div>
         {isAdminOrManager && (
           <div className="flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline">
+                  <Download className="w-4 h-4 mr-2" />
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleExport('xlsx')}>
+                  Export as Excel (.xlsx)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('csv')}>
+                  Export as CSV
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
               <Upload className="w-4 h-4 mr-2" />
               Import

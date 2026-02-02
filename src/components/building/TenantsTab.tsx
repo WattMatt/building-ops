@@ -29,8 +29,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, MoreVertical, Edit, Trash2, FileText, Store, Search, Upload } from 'lucide-react';
+import { Plus, MoreVertical, Edit, Trash2, FileText, Store, Search, Upload, Download } from 'lucide-react';
 import { toast } from 'sonner';
+import * as XLSX from 'xlsx';
 import TenantDocumentsDialog from './TenantDocumentsDialog';
 import { TenantImportDialog } from '@/components/import';
 
@@ -179,6 +180,34 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
     }
   };
 
+  const handleExport = (format: 'csv' | 'xlsx') => {
+    if (tenants.length === 0) {
+      toast.error('No tenants to export');
+      return;
+    }
+
+    const exportData = tenants.map((tenant) => ({
+      'Shop Number': tenant.shop_number,
+      'Shop Name': tenant.shop_name,
+      'Area': tenant.area || '',
+      'Contact Name': tenant.contact_name || '',
+      'Contact Phone': tenant.contact_phone || '',
+      'Contact Email': tenant.contact_email || '',
+      'Status': tenant.is_active ? 'Active' : 'Inactive',
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Tenants');
+
+    if (format === 'csv') {
+      XLSX.writeFile(wb, 'tenants_export.csv', { bookType: 'csv' });
+    } else {
+      XLSX.writeFile(wb, 'tenants_export.xlsx');
+    }
+    toast.success(`Exported ${tenants.length} tenants`);
+  };
+
   const filteredTenants = tenants.filter(
     (tenant) =>
       tenant.shop_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -209,6 +238,22 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
         </div>
         {isAdminOrManager && (
           <div className="flex items-center gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline">
+                  <Download className="w-4 h-4 mr-2" />
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleExport('xlsx')}>
+                  Export as Excel (.xlsx)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('csv')}>
+                  Export as CSV
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
               <Upload className="w-4 h-4 mr-2" />
               Import
