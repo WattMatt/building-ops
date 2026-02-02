@@ -29,9 +29,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, MoreVertical, Edit, Trash2, FileText, Store, Search } from 'lucide-react';
+import { Plus, MoreVertical, Edit, Trash2, FileText, Store, Search, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import TenantDocumentsDialog from './TenantDocumentsDialog';
+import { TenantImportDialog } from '@/components/import';
 
 interface Tenant {
   id: string;
@@ -55,6 +56,7 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
   const [documentsDialogTenant, setDocumentsDialogTenant] = useState<Tenant | null>(null);
   const [saving, setSaving] = useState(false);
@@ -206,16 +208,21 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
           />
         </div>
         {isAdminOrManager && (
-          <Dialog open={isDialogOpen} onOpenChange={(open) => {
-            setIsDialogOpen(open);
-            if (!open) resetForm();
-          }}>
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="w-4 h-4 mr-2" />
-                Add Tenant
-              </Button>
-            </DialogTrigger>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
+              <Upload className="w-4 h-4 mr-2" />
+              Import
+            </Button>
+            <Dialog open={isDialogOpen} onOpenChange={(open) => {
+              setIsDialogOpen(open);
+              if (!open) resetForm();
+            }}>
+              <DialogTrigger asChild>
+                <Button>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Tenant
+                </Button>
+              </DialogTrigger>
             <DialogContent className="max-w-lg">
               <DialogHeader>
                 <DialogTitle>{editingTenant ? 'Edit Tenant' : 'Add Tenant'}</DialogTitle>
@@ -297,6 +304,7 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
               </form>
             </DialogContent>
           </Dialog>
+          </div>
         )}
       </div>
 
@@ -392,6 +400,14 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
           onOpenChange={(open) => !open && setDocumentsDialogTenant(null)}
         />
       )}
+
+      {/* Import Dialog */}
+      <TenantImportDialog
+        open={isImportDialogOpen}
+        onOpenChange={setIsImportDialogOpen}
+        buildingId={buildingId}
+        onImportComplete={fetchTenants}
+      />
     </div>
   );
 }

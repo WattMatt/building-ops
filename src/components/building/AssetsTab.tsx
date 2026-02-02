@@ -37,10 +37,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, MoreVertical, Edit, Trash2, Search, Wrench, AlertTriangle, CheckCircle, Clock, History } from 'lucide-react';
+import { Plus, MoreVertical, Edit, Trash2, Search, Wrench, AlertTriangle, CheckCircle, Clock, History, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import AssetServiceHistoryDialog from './AssetServiceHistoryDialog';
+import { AssetImportDialog } from '@/components/import';
 
 interface Asset {
   id: string;
@@ -87,6 +88,7 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [serviceHistoryAsset, setServiceHistoryAsset] = useState<Asset | null>(null);
   const [saving, setSaving] = useState(false);
@@ -298,19 +300,24 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
           </Select>
         </div>
         {isAdminOrManager && (
-          <Dialog
-            open={isDialogOpen}
-            onOpenChange={(open) => {
-              setIsDialogOpen(open);
-              if (!open) resetForm();
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="w-4 h-4 mr-2" />
-                Add Asset
-              </Button>
-            </DialogTrigger>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
+              <Upload className="w-4 h-4 mr-2" />
+              Import
+            </Button>
+            <Dialog
+              open={isDialogOpen}
+              onOpenChange={(open) => {
+                setIsDialogOpen(open);
+                if (!open) resetForm();
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Asset
+                </Button>
+              </DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>{editingAsset ? 'Edit Asset' : 'Add Asset'}</DialogTitle>
@@ -456,6 +463,7 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
               </form>
             </DialogContent>
           </Dialog>
+          </div>
         )}
       </div>
 
@@ -579,6 +587,14 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
           onServiceAdded={fetchAssets}
         />
       )}
+
+      {/* Import Dialog */}
+      <AssetImportDialog
+        open={isImportDialogOpen}
+        onOpenChange={setIsImportDialogOpen}
+        buildingId={buildingId}
+        onImportComplete={fetchAssets}
+      />
     </div>
   );
 }
