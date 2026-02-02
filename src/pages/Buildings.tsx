@@ -15,6 +15,7 @@ import {
   Trash2,
   Eye,
   Upload,
+  Download,
   ImageIcon,
   Type,
 } from 'lucide-react';
@@ -27,12 +28,34 @@ import {
 import { Link } from 'react-router-dom';
 import { BuildingAvatar } from '@/components/building/BuildingAvatar';
 import BuildingImportDialog from '@/components/building/BuildingImportDialog';
+import * as XLSX from 'xlsx';
 
 export default function Buildings() {
   const { isAdminOrManager } = useAuth();
   const { buildings, loading, refetch, deleteBuilding } = useBuildings();
   const [searchQuery, setSearchQuery] = useState('');
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+
+  const handleExport = (format: 'csv' | 'xlsx') => {
+    const exportData = buildings.map((building) => ({
+      Name: building.name,
+      Address: building.address,
+      City: building.city,
+      Latitude: building.latitude || '',
+      Longitude: building.longitude || '',
+      Timezone: building.timezone,
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Buildings');
+
+    if (format === 'csv') {
+      XLSX.writeFile(wb, 'buildings_export.csv', { bookType: 'csv' });
+    } else {
+      XLSX.writeFile(wb, 'buildings_export.xlsx');
+    }
+  };
 
   const filteredBuildings = buildings.filter(
     (building) =>
@@ -66,6 +89,22 @@ export default function Buildings() {
         </div>
         {isAdminOrManager && (
           <div className="flex gap-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" disabled={buildings.length === 0}>
+                  <Download className="w-4 h-4 mr-2" />
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onClick={() => handleExport('xlsx')}>
+                  Export as Excel (.xlsx)
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('csv')}>
+                  Export as CSV
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
               <Upload className="w-4 h-4 mr-2" />
               Import
