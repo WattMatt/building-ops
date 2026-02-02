@@ -18,6 +18,7 @@ import {
   Download,
   ImageIcon,
   Type,
+  Camera,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -27,6 +28,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Link } from 'react-router-dom';
 import { BuildingAvatar } from '@/components/building/BuildingAvatar';
+import { BuildingAvatarDialog } from '@/components/building/BuildingAvatarDialog';
 import BuildingImportDialog from '@/components/building/BuildingImportDialog';
 import * as XLSX from 'xlsx';
 
@@ -35,6 +37,12 @@ export default function Buildings() {
   const { buildings, loading, refetch, deleteBuilding } = useBuildings();
   const [searchQuery, setSearchQuery] = useState('');
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [avatarDialogBuilding, setAvatarDialogBuilding] = useState<{
+    id: string;
+    name: string;
+    logo_url: string | null;
+    avatar_color: string | null;
+  } | null>(null);
 
   const handleExport = (format: 'csv' | 'xlsx') => {
     const exportData = buildings.map((building) => ({
@@ -184,7 +192,27 @@ export default function Buildings() {
                 {/* Top-center logo banner */}
                 {position === 'top-center' && (
                   <div className="flex justify-center pt-4 pb-2">
-                    <BuildingAvatar name={building.name} logoUrl={building.logo_url} avatarColor={building.avatar_color} size="lg" />
+                    <div className="relative group/avatar">
+                      <BuildingAvatar name={building.name} logoUrl={building.logo_url} avatarColor={building.avatar_color} size="lg" />
+                      {isAdminOrManager && (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setAvatarDialogBuilding({
+                              id: building.id,
+                              name: building.name,
+                              logo_url: building.logo_url,
+                              avatar_color: building.avatar_color,
+                            });
+                          }}
+                          className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover/avatar:opacity-100 transition-opacity rounded-lg cursor-pointer"
+                          title="Change avatar"
+                        >
+                          <Camera className="h-4 w-4 text-white" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
                 
@@ -192,7 +220,27 @@ export default function Buildings() {
                   {/* Left side: avatar (if top-left) + text */}
                   <div className="flex items-start gap-3">
                     {position === 'top-left' && (
-                      <BuildingAvatar name={building.name} logoUrl={building.logo_url} avatarColor={building.avatar_color} size="md" />
+                      <div className="relative group/avatar">
+                        <BuildingAvatar name={building.name} logoUrl={building.logo_url} avatarColor={building.avatar_color} size="md" />
+                        {isAdminOrManager && (
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setAvatarDialogBuilding({
+                                id: building.id,
+                                name: building.name,
+                                logo_url: building.logo_url,
+                                avatar_color: building.avatar_color,
+                              });
+                            }}
+                            className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover/avatar:opacity-100 transition-opacity rounded-lg cursor-pointer"
+                            title="Change avatar"
+                          >
+                            <Camera className="h-3 w-3 text-white" />
+                          </button>
+                        )}
+                      </div>
                     )}
                     <div>
                       <CardTitle className="text-base">{building.name}</CardTitle>
@@ -206,7 +254,27 @@ export default function Buildings() {
                   {/* Right side: avatar (if top-right) + menu */}
                   <div className="flex items-start gap-2">
                     {position === 'top-right' && (
-                      <BuildingAvatar name={building.name} logoUrl={building.logo_url} avatarColor={building.avatar_color} size="md" />
+                      <div className="relative group/avatar">
+                        <BuildingAvatar name={building.name} logoUrl={building.logo_url} avatarColor={building.avatar_color} size="md" />
+                        {isAdminOrManager && (
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setAvatarDialogBuilding({
+                                id: building.id,
+                                name: building.name,
+                                logo_url: building.logo_url,
+                                avatar_color: building.avatar_color,
+                              });
+                            }}
+                            className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover/avatar:opacity-100 transition-opacity rounded-lg cursor-pointer"
+                            title="Change avatar"
+                          >
+                            <Camera className="h-3 w-3 text-white" />
+                          </button>
+                        )}
+                      </div>
                     )}
                     {isAdminOrManager && (
                   <DropdownMenu>
@@ -273,6 +341,22 @@ export default function Buildings() {
         onOpenChange={setImportDialogOpen}
         onImportComplete={refetch}
       />
+
+      {/* Avatar Edit Dialog */}
+      {avatarDialogBuilding && (
+        <BuildingAvatarDialog
+          open={!!avatarDialogBuilding}
+          onOpenChange={(open) => !open && setAvatarDialogBuilding(null)}
+          buildingId={avatarDialogBuilding.id}
+          buildingName={avatarDialogBuilding.name}
+          currentLogoUrl={avatarDialogBuilding.logo_url}
+          currentAvatarColor={avatarDialogBuilding.avatar_color}
+          onSuccess={() => {
+            setAvatarDialogBuilding(null);
+            refetch();
+          }}
+        />
+      )}
     </div>
   );
 }
