@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, Building2, MapPin, Edit, Users, Phone, Mail, User, Shield, Camera } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import TenantsTab from '@/components/building/TenantsTab';
 import AssetsTab from '@/components/building/AssetsTab';
@@ -25,6 +26,7 @@ interface Building {
   address: string;
   city: string;
   logo_url: string | null;
+  logo_position: string | null;
   avatar_color: string | null;
   emergency_contacts: any;
   created_at: string;
@@ -78,12 +80,32 @@ export default function BuildingDetails() {
   if (!building) return null;
 
   const contacts = building.emergency_contacts || {};
+  const hasCustomLogo = building.logo_url && !building.logo_url.includes('dicebear');
+  const logoPosition = building.logo_position || 'top-left';
 
   return (
     <div className="space-y-4 sm:space-y-6">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:gap-4">
-        <div className="flex items-start sm:items-center gap-2 sm:gap-4">
+        <div className="relative flex items-start sm:items-center gap-2 sm:gap-4">
+          {/* Positioned Logo Overlay */}
+          {hasCustomLogo && (
+            <div
+              className={cn(
+                'absolute z-10',
+                logoPosition === 'top-left' && 'top-0 left-10 sm:left-12',
+                logoPosition === 'top-center' && 'top-0 left-1/2 -translate-x-1/2',
+                logoPosition === 'top-right' && 'top-0 right-0'
+              )}
+            >
+              <img
+                src={building.logo_url!}
+                alt="Building logo"
+                className="w-8 h-8 sm:w-10 sm:h-10 object-contain rounded-md bg-background/95 backdrop-blur-sm border shadow-sm"
+              />
+            </div>
+          )}
+          
           <Button variant="ghost" size="icon" onClick={() => navigate('/buildings')} className="shrink-0 h-8 w-8 sm:h-10 sm:w-10">
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -107,7 +129,7 @@ export default function BuildingDetails() {
                 </button>
               )}
             </div>
-            <div className="min-w-0 flex-1">
+            <div className={cn("min-w-0 flex-1", hasCustomLogo && logoPosition === 'top-center' && "pt-10 sm:pt-12")}>
               <h1 className="text-lg sm:text-2xl font-bold truncate">{building.name}</h1>
               <p className="text-xs sm:text-sm text-muted-foreground flex items-center gap-1 truncate">
                 <MapPin className="h-3 w-3 shrink-0" />
