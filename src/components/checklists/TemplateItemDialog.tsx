@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/select';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { COMPLIANCE_CATEGORIES } from '@/lib/compliance';
 
 type TaskFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually';
 
@@ -34,6 +35,7 @@ interface TemplateItem {
   requires_signature: boolean;
   display_order: number;
   template_id: string;
+  category: string | null;
   template?: {
     id: string;
     name: string;
@@ -91,6 +93,7 @@ export default function TemplateItemDialog({
     requires_photo: false,
     requires_signature: true,
     template_id: defaultTemplateId || '',
+    category: '',
   });
 
   useEffect(() => {
@@ -102,6 +105,7 @@ export default function TemplateItemDialog({
         requires_photo: item.requires_photo || false,
         requires_signature: item.requires_signature ?? true,
         template_id: item.template_id,
+        category: item.category || '',
       });
     } else {
       setFormData({
@@ -111,6 +115,7 @@ export default function TemplateItemDialog({
         requires_photo: false,
         requires_signature: true,
         template_id: defaultTemplateId || templates[0]?.id || '',
+        category: '',
       });
     }
   }, [item, defaultTemplateId, templates, open]);
@@ -135,6 +140,7 @@ export default function TemplateItemDialog({
             requires_photo: formData.requires_photo,
             requires_signature: formData.requires_signature,
             template_id: formData.template_id,
+            category: formData.category || null,
           })
           .eq('id', item.id);
 
@@ -162,6 +168,7 @@ export default function TemplateItemDialog({
           requires_signature: formData.requires_signature,
           template_id: formData.template_id,
           display_order: nextOrder,
+          category: formData.category || null,
         });
 
         if (error) throw error;
@@ -243,6 +250,24 @@ export default function TemplateItemDialog({
                   <SelectItem key={party} value={party}>
                     {party}
                   </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="category">Compliance Category</Label>
+            <Select
+              value={formData.category || 'none'}
+              onValueChange={(v) => setFormData({ ...formData, category: v === 'none' ? '' : v })}
+            >
+              <SelectTrigger id="category">
+                <SelectValue placeholder="None" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">None</SelectItem>
+                {COMPLIANCE_CATEGORIES.map((c) => (
+                  <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
