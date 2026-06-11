@@ -352,6 +352,7 @@ export type Database = {
         Row: {
           address: string | null
           avatar_color: string | null
+          building_type: string | null
           city: string | null
           council_details: Json | null
           created_at: string | null
@@ -373,6 +374,7 @@ export type Database = {
         Insert: {
           address?: string | null
           avatar_color?: string | null
+          building_type?: string | null
           city?: string | null
           council_details?: Json | null
           created_at?: string | null
@@ -394,6 +396,7 @@ export type Database = {
         Update: {
           address?: string | null
           avatar_color?: string | null
+          building_type?: string | null
           city?: string | null
           council_details?: Json | null
           created_at?: string | null
@@ -424,6 +427,7 @@ export type Database = {
       }
       checklist_templates: {
         Row: {
+          applies_to_building_types: string[] | null
           created_at: string | null
           description: string | null
           frequency: string
@@ -434,6 +438,7 @@ export type Database = {
           responsible_role: string | null
         }
         Insert: {
+          applies_to_building_types?: string[] | null
           created_at?: string | null
           description?: string | null
           frequency?: string
@@ -444,6 +449,7 @@ export type Database = {
           responsible_role?: string | null
         }
         Update: {
+          applies_to_building_types?: string[] | null
           created_at?: string | null
           description?: string | null
           frequency?: string
@@ -848,11 +854,13 @@ export type Database = {
           avatar_url: string | null
           created_at: string | null
           daily_digest: boolean | null
+          deactivated: boolean
           email: string | null
           email_notifications: boolean | null
           full_name: string | null
           id: string
           issue_updates: boolean | null
+          must_set_password: boolean
           overdue_alerts: boolean | null
           phone: string | null
           task_reminders: boolean | null
@@ -862,11 +870,13 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string | null
           daily_digest?: boolean | null
+          deactivated?: boolean
           email?: string | null
           email_notifications?: boolean | null
           full_name?: string | null
           id: string
           issue_updates?: boolean | null
+          must_set_password?: boolean
           overdue_alerts?: boolean | null
           phone?: string | null
           task_reminders?: boolean | null
@@ -876,11 +886,13 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string | null
           daily_digest?: boolean | null
+          deactivated?: boolean
           email?: string | null
           email_notifications?: boolean | null
           full_name?: string | null
           id?: string
           issue_updates?: boolean | null
+          must_set_password?: boolean
           overdue_alerts?: boolean | null
           phone?: string | null
           task_reminders?: boolean | null
@@ -929,6 +941,7 @@ export type Database = {
       task_instances: {
         Row: {
           building_id: string
+          category: string | null
           completed_at: string | null
           completed_by: string | null
           completion_notes: string | null
@@ -948,6 +961,7 @@ export type Database = {
         }
         Insert: {
           building_id: string
+          category?: string | null
           completed_at?: string | null
           completed_by?: string | null
           completion_notes?: string | null
@@ -967,6 +981,7 @@ export type Database = {
         }
         Update: {
           building_id?: string
+          category?: string | null
           completed_at?: string | null
           completed_by?: string | null
           completion_notes?: string | null
@@ -1003,6 +1018,7 @@ export type Database = {
       }
       template_items: {
         Row: {
+          category: string | null
           display_order: number | null
           id: string
           requires_photo: boolean | null
@@ -1013,6 +1029,7 @@ export type Database = {
           template_id: string
         }
         Insert: {
+          category?: string | null
           display_order?: number | null
           id?: string
           requires_photo?: boolean | null
@@ -1023,6 +1040,7 @@ export type Database = {
           template_id: string
         }
         Update: {
+          category?: string | null
           display_order?: number | null
           id?: string
           requires_photo?: boolean | null
