@@ -213,7 +213,7 @@ const handler = async (req: Request): Promise<Response> => {
 
         try {
           const emailResponse = await resend.emails.send({
-            from: "Building Ops <alerts@gmi-operations.vercel.app>",
+            from: "Building Ops <alerts@buildingops.app>",
             to: [recipientEmail],
             subject: `⚠️ ${totalAlerts} Building Alert${totalAlerts > 1 ? 's' : ''} Require Attention`,
             html: emailHtml,
@@ -379,7 +379,7 @@ function generateAlertEmailHtml(recipientName: string, alerts: AlertSummary): st
   html += `
               <!-- CTA Button -->
               <div style="text-align: center; margin-top: 32px;">
-                <a href="https://gmi-operations.vercel.app/dashboard" 
+                <a href="https://buildingops.app/dashboard"
                    style="display: inline-block; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 14px; font-weight: 600;">
                   View Dashboard
                 </a>
