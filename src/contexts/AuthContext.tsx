@@ -50,6 +50,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
+        // Recovery links that land anywhere except the reset/set-password
+        // pages (e.g. resets initiated from the iOS app carry no redirect_to
+        // and land on the root) must show the new-password form — not
+        // silently sign the user in. The hash marker re-arms ResetPassword's
+        // recovery mode because the original URL hash is consumed before
+        // this event fires.
+        if (
+          event === 'PASSWORD_RECOVERY' &&
+          window.location.pathname !== '/reset' &&
+          window.location.pathname !== '/set-password'
+        ) {
+          window.location.replace('/reset#type=recovery');
+          return;
+        }
         setSession(session);
         setUser(session?.user ?? null);
 
