@@ -213,7 +213,7 @@ const handler = async (req: Request): Promise<Response> => {
 
         try {
           const emailResponse = await resend.emails.send({
-            from: "GMI Operations <alerts@gmi-operations.lovable.app>",
+            from: "Building Ops <alerts@gmi-operations.vercel.app>",
             to: [recipientEmail],
             subject: `⚠️ ${totalAlerts} Building Alert${totalAlerts > 1 ? 's' : ''} Require Attention`,
             html: emailHtml,
@@ -379,7 +379,7 @@ function generateAlertEmailHtml(recipientName: string, alerts: AlertSummary): st
   html += `
               <!-- CTA Button -->
               <div style="text-align: center; margin-top: 32px;">
-                <a href="https://gmi-operations.lovable.app/dashboard" 
+                <a href="https://gmi-operations.vercel.app/dashboard" 
                    style="display: inline-block; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 14px; font-weight: 600;">
                   View Dashboard
                 </a>
@@ -391,10 +391,10 @@ function generateAlertEmailHtml(recipientName: string, alerts: AlertSummary): st
           <tr>
             <td style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb;">
               <p style="margin: 0; color: #9ca3af; font-size: 12px;">
-                This is an automated notification from GMI Operations.
+                This is an automated notification from Building Ops.
               </p>
               <p style="margin: 8px 0 0; color: #9ca3af; font-size: 12px;">
-                © ${new Date().getFullYear()} GMI Operations. All rights reserved.
+                © ${new Date().getFullYear()} Building Ops. All rights reserved.
               </p>
             </td>
           </tr>

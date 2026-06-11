@@ -19,7 +19,7 @@ export default function Auth() {
   const { user, signIn, signUp, loading } = useAuth();
   const { organization } = useOrganization();
 
-  const appName = organization?.name || 'FM Comply';
+  const appName = organization?.name || 'Building Ops';
   const logoUrl = organization?.logo_url;
 
   const [isSubmitting, setIsSubmitting] = useState(false);

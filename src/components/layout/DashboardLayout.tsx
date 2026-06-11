@@ -124,7 +124,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const appName = organization?.name || 'FM Comply';
+  const appName = organization?.name || 'Building Ops';
   const logoUrl = organization?.logo_url;
   const avatarUrl = profile?.avatar_url;
 

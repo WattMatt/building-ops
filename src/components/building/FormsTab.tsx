@@ -224,7 +224,7 @@ export default function FormsTab({ buildingId, buildingName }: FormsTabProps) {
         fields,
         submission.form_data,
         {
-          name: organization?.name || 'FM Comply',
+          name: organization?.name || 'Building Ops',
           logoUrl: organization?.logo_url,
           primaryColor: organization?.primary_color || '#2563eb',
           address: organization?.address,

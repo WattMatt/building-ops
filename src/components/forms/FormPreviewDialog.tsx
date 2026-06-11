@@ -48,7 +48,7 @@ export function FormPreviewDialog({ form, open, onOpenChange }: FormPreviewDialo
         { id: form.id, name: form.name, description: form.description, category: form.category },
         fields,
         {
-          name: organization?.name || 'FM Comply',
+          name: organization?.name || 'Building Ops',
           logoUrl: organization?.logo_url,
           primaryColor: organization?.primary_color || '#2563eb',
           address: organization?.address,
@@ -80,7 +80,7 @@ export function FormPreviewDialog({ form, open, onOpenChange }: FormPreviewDialo
 
   const generateFormHtml = (form: FormTemplate, fields: FormField[]) => {
     const primaryColor = organization?.primary_color || '#2563eb';
-    const orgName = organization?.name || 'FM Comply';
+    const orgName = organization?.name || 'Building Ops';
     
     return `
 <!DOCTYPE html>

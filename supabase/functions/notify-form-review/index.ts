@@ -11,7 +11,7 @@ async function sendEmail(to: string[], subject: string, html: string) {
       "Authorization": `Bearer ${RESEND_API_KEY}`,
     },
     body: JSON.stringify({
-      from: "FM Comply <notifications@fmcomply.co.za>",
+      from: "Building Ops <notifications@fmcomply.co.za>",
       to,
       subject,
       html,
@@ -176,14 +176,14 @@ serve(async (req: Request): Promise<Response> => {
               ` : ''}
               
               <p style="color: #6b7280; font-size: 14px; margin: 0;">
-                Log in to the FM Comply platform to view full details.
+                Log in to the Building Ops platform to view full details.
               </p>
             </div>
             
             <!-- Footer -->
             <div style="background-color: #f9fafb; padding: 16px 32px; text-align: center; border-top: 1px solid #e5e7eb;">
               <p style="color: #9ca3af; font-size: 12px; margin: 0;">
-                This is an automated notification from FM Comply.
+                This is an automated notification from Building Ops.
               </p>
             </div>
           </div>

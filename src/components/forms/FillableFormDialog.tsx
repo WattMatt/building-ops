@@ -379,7 +379,7 @@ export function FillableFormDialog({
     );
   };
 
-  const orgName = organization?.name || 'FM Comply';
+  const orgName = organization?.name || 'Building Ops';
   const logoUrl = organization?.logo_url;
   const primaryColor = organization?.primary_color || '#2563eb';
 
