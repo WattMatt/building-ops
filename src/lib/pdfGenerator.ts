@@ -1,6 +1,8 @@
 import pdfMake from 'pdfmake/build/pdfmake';
 import pdfFonts from 'pdfmake/build/vfs_fonts';
 import { FormField } from './formFields';
+import { assembleHsReportData, certificateStatus, type HsTask, type HsDocument } from './hsComplianceReport';
+import { categoryMeta } from './compliance';
 
 // Initialize pdfMake with fonts
 pdfMake.vfs = pdfFonts.vfs;
@@ -590,4 +592,192 @@ export async function generateFilledFormPdf(
   };
 
   pdfMake.createPdf(docDefinition).download(`${form.name.replace(/\s+/g, '_')}_Submission.pdf`);
+}
+
+// ===== H&S Compliance Report =====
+
+const CERT_STATUS_LABEL: Record<string, { text: string; color: string }> = {
+  expired: { text: 'EXPIRED', color: '#dc2626' },
+  expiring_soon: { text: 'Expiring soon', color: '#d97706' },
+  current: { text: 'Current', color: '#16a34a' },
+  no_expiry: { text: 'No expiry recorded', color: '#6b7280' },
+};
+
+function categoryLabel(cat: string): string {
+  return categoryMeta(cat)?.label ?? (cat === 'uncategorised' ? 'Uncategorised' : cat);
+}
+
+export async function generateHsCompliancePdf(opts: {
+  buildingName: string;
+  rangeStart: string; // yyyy-MM-dd
+  rangeEnd: string;
+  tasks: HsTask[];
+  documents: HsDocument[];
+  photoDataUrls: Record<string, string[]>; // task id -> thumbnail dataURLs
+  branding: OrganizationBranding;
+}): Promise<void> {
+  const { buildingName, rangeStart, rangeEnd, tasks, documents, photoDataUrls, branding } = opts;
+  const primaryColor = hexToRgb(branding.primaryColor);
+  const today = new Date();
+  const data = assembleHsReportData(tasks, documents, today);
+
+  const content: any[] = [];
+
+  content.push({
+    columns: [
+      { width: '*', stack: [{ text: branding.name, style: 'orgName' }] },
+      {
+        width: 'auto',
+        stack: [
+          { text: 'H&S COMPLIANCE REPORT', fontSize: 10, bold: true, color: primaryColor, alignment: 'right' },
+          { text: `${rangeStart} to ${rangeEnd}`, fontSize: 9, color: '#6b7280', alignment: 'right' },
+          { text: `Generated ${today.toLocaleDateString('en-ZA')}`, fontSize: 8, color: '#9ca3af', alignment: 'right' },
+        ],
+      },
+    ],
+    margin: [0, 0, 0, 15],
+  });
+  content.push(createColoredLine(primaryColor));
+  content.push({ text: buildingName, style: 'header', alignment: 'center', margin: [0, 0, 0, 20] });
+
+  // 1. Summary by compliance category
+  content.push({ text: '1. Compliance Summary', style: 'sectionTitle' });
+  content.push({
+    table: {
+      headerRows: 1,
+      widths: ['*', 'auto', 'auto', 'auto'],
+      body: [
+        ['Category', 'Completed', 'Outstanding', 'Overdue'].map((h) => ({ text: h, bold: true, fontSize: 9 })),
+        ...data.summary.map((s) => [
+          { text: categoryLabel(s.category), fontSize: 9 },
+          { text: String(s.completed), fontSize: 9, alignment: 'center' },
+          { text: String(s.outstanding), fontSize: 9, alignment: 'center' },
+          { text: String(s.overdue), fontSize: 9, alignment: 'center', color: s.overdue > 0 ? '#dc2626' : '#111827' },
+        ]),
+      ],
+    },
+    layout: 'lightHorizontalLines',
+    margin: [0, 5, 0, 20],
+  });
+
+  // 2. Completed tasks with evidence
+  content.push({ text: '2. Completed Checks (evidence)', style: 'sectionTitle' });
+  if (data.completedTasks.length === 0) {
+    content.push({ text: 'No completed H&S checks in this period.', fontSize: 9, italics: true, color: '#6b7280', margin: [0, 5, 0, 20] });
+  } else {
+    const body: any[][] = [
+      ['Check', 'Category', 'Completed', 'By', 'Evidence'].map((h) => ({ text: h, bold: true, fontSize: 9 })),
+    ];
+    for (const t of data.completedTasks) {
+      const photos = photoDataUrls[t.id] ?? [];
+      const evidence: any[] = [];
+      if (photos.length > 0) {
+        evidence.push({ columns: photos.map((p) => ({ image: p, fit: [60, 45], margin: [0, 0, 4, 0] })) });
+      }
+      const extraPhotos = (t.photo_urls?.length ?? 0) - photos.length;
+      evidence.push({
+        text: [
+          t.photo_urls?.length ? `${t.photo_urls.length} photo(s) on file${extraPhotos > 0 ? ` (${extraPhotos} not shown)` : ''}` : 'No photos',
+          t.signature_confirmed ? ' · signed' : '',
+        ].join(''),
+        fontSize: 7, color: '#6b7280',
+      });
+      body.push([
+        { stack: [{ text: t.task_name, fontSize: 9 }, ...(t.completion_notes ? [{ text: t.completion_notes, fontSize: 7, color: '#6b7280' }] : [])] },
+        { text: categoryLabel(t.category ?? 'uncategorised'), fontSize: 8 },
+        { text: t.completed_at ? new Date(t.completed_at).toLocaleDateString('en-ZA') : '-', fontSize: 8 },
+        { text: t.completed_by_name ?? '-', fontSize: 8 },
+        { stack: evidence },
+      ]);
+    }
+    content.push({
+      table: { headerRows: 1, widths: ['*', 'auto', 'auto', 'auto', 140], body },
+      layout: 'lightHorizontalLines',
+      margin: [0, 5, 0, 20],
+    });
+  }
+
+  // 3. Outstanding & overdue
+  content.push({ text: '3. Outstanding & Overdue Items', style: 'sectionTitle' });
+  if (data.outstandingTasks.length === 0) {
+    content.push({ text: 'Nothing outstanding in this period.', fontSize: 9, italics: true, color: '#16a34a', margin: [0, 5, 0, 20] });
+  } else {
+    const todayStr = today.toISOString().slice(0, 10);
+    content.push({
+      table: {
+        headerRows: 1,
+        widths: ['*', 'auto', 'auto', 'auto'],
+        body: [
+          ['Check', 'Category', 'Due', 'Status'].map((h) => ({ text: h, bold: true, fontSize: 9 })),
+          ...data.outstandingTasks.map((t) => [
+            { text: t.task_name, fontSize: 9 },
+            { text: categoryLabel(t.category ?? 'uncategorised'), fontSize: 8 },
+            { text: t.due_date, fontSize: 8 },
+            t.due_date < todayStr
+              ? { text: 'OVERDUE', fontSize: 8, bold: true, color: '#dc2626' }
+              : { text: 'Pending', fontSize: 8, color: '#6b7280' },
+          ]),
+        ],
+      },
+      layout: 'lightHorizontalLines',
+      margin: [0, 5, 0, 20],
+    });
+  }
+
+  // 4. Statutory certificate register
+  content.push({ text: '4. Statutory Certificate Register', style: 'sectionTitle' });
+  if (documents.length === 0) {
+    content.push({ text: 'No documents on file for this building.', fontSize: 9, italics: true, color: '#dc2626', margin: [0, 5, 0, 10] });
+  } else {
+    content.push({
+      table: {
+        headerRows: 1,
+        widths: ['*', 'auto', 'auto', 'auto', 'auto'],
+        body: [
+          ['Document', 'Type', 'Authority', 'Expiry', 'Status'].map((h) => ({ text: h, bold: true, fontSize: 9 })),
+          ...documents.map((d) => {
+            const cs = certificateStatus(d, today);
+            const label = CERT_STATUS_LABEL[cs.status];
+            return [
+              { text: d.name, fontSize: 9 },
+              { text: d.document_type.replace(/_/g, ' '), fontSize: 8 },
+              { text: d.issuing_authority ?? '-', fontSize: 8 },
+              { text: d.expiry_date ?? '-', fontSize: 8 },
+              { text: cs.daysRemaining !== null && cs.status !== 'expired' ? `${label.text} (${cs.daysRemaining}d)` : label.text, fontSize: 8, bold: cs.status === 'expired', color: label.color },
+            ];
+          }),
+        ],
+      },
+      layout: 'lightHorizontalLines',
+      margin: [0, 5, 0, 10],
+    });
+  }
+
+  content.push({
+    text: 'Generated from Building Ops checklist completion records and the building document register. Photo evidence is retained in the system of record.',
+    fontSize: 7, color: '#9ca3af', margin: [0, 10, 0, 0],
+  });
+
+  const docDefinition: any = {
+    pageSize: 'A4',
+    pageMargins: [40, 40, 40, 60],
+    content,
+    styles: {
+      header: { fontSize: 20, bold: true, color: primaryColor },
+      orgName: { fontSize: 12, bold: true, color: primaryColor },
+      sectionTitle: { fontSize: 13, bold: true, color: '#111827', margin: [0, 10, 0, 4] },
+      footer: { fontSize: 8, color: '#9ca3af' },
+    },
+    footer: (currentPage: number, pageCount: number) => ({
+      columns: [
+        { text: `${branding.name} — H&S Compliance Report — ${buildingName}`, style: 'footer', margin: [40, 20, 0, 0] },
+        { text: `Page ${currentPage} of ${pageCount}`, style: 'footer', alignment: 'right', margin: [0, 20, 40, 0] },
+      ],
+    }),
+    defaultStyle: { font: 'Roboto' },
+  };
+
+  pdfMake.createPdf(docDefinition).download(
+    `HS_Compliance_${buildingName.replace(/\s+/g, '_')}_${rangeStart}_${rangeEnd}.pdf`
+  );
 }
