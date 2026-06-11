@@ -126,7 +126,7 @@ export function useIssues(
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Failed to fetch issues');
       setError(error);
-      console.error('Error fetching issues:', err);
+      if (import.meta.env.DEV) console.error('Error fetching issues:', err);
       toast.error('Failed to load issues');
     } finally {
       setLoading(false);
@@ -148,7 +148,7 @@ export function useIssues(
         await fetchIssues();
         return data.id;
       } catch (err) {
-        console.error('Error creating issue:', err);
+        if (import.meta.env.DEV) console.error('Error creating issue:', err);
         toast.error('Failed to create issue');
         return null;
       }
@@ -170,7 +170,7 @@ export function useIssues(
         await fetchIssues();
         return true;
       } catch (err) {
-        console.error('Error updating issue:', err);
+        if (import.meta.env.DEV) console.error('Error updating issue:', err);
         toast.error('Failed to update issue');
         return false;
       }

@@ -212,7 +212,7 @@ export function FormSubmissionsDialog({
             reviewNotes: actionNotes || undefined,
             reviewedAt: reviewedAt,
           }
-        }).catch(err => console.error('Failed to send review notification:', err));
+        }).catch(err => if (import.meta.env.DEV) console.error('Failed to send review notification:', err));
       }
       
       setActionDialogOpen(false);
@@ -220,7 +220,7 @@ export function FormSubmissionsDialog({
       refetch();
       queryClient.invalidateQueries({ queryKey: ['form-submissions'] });
     } catch (error: any) {
-      console.error('Action error:', error);
+      if (import.meta.env.DEV) console.error('Action error:', error);
       toast.error(error.message || 'Failed to update submission');
     } finally {
       setIsSubmittingAction(false);
@@ -252,7 +252,7 @@ export function FormSubmissionsDialog({
       );
       toast.success('PDF downloaded successfully');
     } catch (error) {
-      console.error('PDF generation error:', error);
+      if (import.meta.env.DEV) console.error('PDF generation error:', error);
       toast.error('Failed to generate PDF');
     } finally {
       setIsDownloading(false);

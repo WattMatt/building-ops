@@ -162,7 +162,7 @@ export function FillableFormDialog({
           .upload(fileName, photo.file);
 
         if (uploadError) {
-          console.error('Photo upload error:', uploadError);
+          if (import.meta.env.DEV) console.error('Photo upload error:', uploadError);
           continue;
         }
 
@@ -240,9 +240,8 @@ export function FillableFormDialog({
           }
         }).then(({ error: notifyError }) => {
           if (notifyError) {
-            console.error('Failed to send notification:', notifyError);
+            if (import.meta.env.DEV) console.error('Failed to send notification:', notifyError);
           } else {
-            console.log('Manager notification sent');
           }
         });
       }
@@ -251,7 +250,7 @@ export function FillableFormDialog({
       onOpenChange(false);
       onSubmitSuccess?.();
     } catch (error: any) {
-      console.error('Error submitting form:', error);
+      if (import.meta.env.DEV) console.error('Error submitting form:', error);
       toast.error(error.message || 'Failed to submit form');
     } finally {
       setIsSubmitting(false);

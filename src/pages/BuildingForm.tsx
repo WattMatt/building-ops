@@ -182,7 +182,7 @@ export default function BuildingForm() {
         });
       }
     } catch (error) {
-      console.error('Error fetching building:', error);
+      if (import.meta.env.DEV) console.error('Error fetching building:', error);
       toast.error('Failed to load building');
       navigate('/buildings');
     } finally {
@@ -207,7 +207,7 @@ export default function BuildingForm() {
       .upload(filePath, logoFile, { upsert: true });
 
     if (uploadError) {
-      console.error('Logo upload error:', uploadError);
+      if (import.meta.env.DEV) console.error('Logo upload error:', uploadError);
       toast.error('Failed to upload logo');
       return logoUrl;
     }
@@ -334,7 +334,7 @@ export default function BuildingForm() {
 
       navigate('/buildings');
     } catch (error: any) {
-      console.error('Error saving building:', error);
+      if (import.meta.env.DEV) console.error('Error saving building:', error);
       toast.error(error.message || 'Failed to save building');
     } finally {
       setLoading(false);

@@ -91,7 +91,7 @@ export default function NotesTab({ buildingId }: NotesTabProps) {
       if (error) throw error;
       setNotes(data || []);
     } catch (error) {
-      console.error('Error fetching notes:', error);
+      if (import.meta.env.DEV) console.error('Error fetching notes:', error);
       toast.error('Failed to load notes');
     } finally {
       setLoading(false);
@@ -157,7 +157,7 @@ export default function NotesTab({ buildingId }: NotesTabProps) {
       resetForm();
       fetchNotes();
     } catch (error: any) {
-      console.error('Error saving note:', error);
+      if (import.meta.env.DEV) console.error('Error saving note:', error);
       toast.error(error.message || 'Failed to save note');
     } finally {
       setSaving(false);
@@ -175,7 +175,7 @@ export default function NotesTab({ buildingId }: NotesTabProps) {
       toast.success(note.is_pinned ? 'Note unpinned' : 'Note pinned');
       fetchNotes();
     } catch (error) {
-      console.error('Error toggling pin:', error);
+      if (import.meta.env.DEV) console.error('Error toggling pin:', error);
       toast.error('Failed to update note');
     }
   };
@@ -190,7 +190,7 @@ export default function NotesTab({ buildingId }: NotesTabProps) {
       toast.success('Note deleted successfully');
       fetchNotes();
     } catch (error) {
-      console.error('Error deleting note:', error);
+      if (import.meta.env.DEV) console.error('Error deleting note:', error);
       toast.error('Failed to delete note');
     }
   };

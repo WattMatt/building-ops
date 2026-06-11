@@ -98,7 +98,7 @@ export default function Profile() {
         setTaskReminders(data.task_reminders ?? true);
       }
     } catch (error) {
-      console.error('Error fetching profile:', error);
+      if (import.meta.env.DEV) console.error('Error fetching profile:', error);
       toast.error('Failed to load profile');
     } finally {
       setIsLoading(false);
@@ -122,7 +122,7 @@ export default function Profile() {
       if (error) throw error;
       toast.success('Profile updated successfully');
     } catch (error) {
-      console.error('Error saving profile:', error);
+      if (import.meta.env.DEV) console.error('Error saving profile:', error);
       toast.error('Failed to save profile');
     } finally {
       setIsSaving(false);
@@ -149,7 +149,7 @@ export default function Profile() {
       if (error) throw error;
       toast.success('Notification preferences saved');
     } catch (error) {
-      console.error('Error saving notifications:', error);
+      if (import.meta.env.DEV) console.error('Error saving notifications:', error);
       toast.error('Failed to save notification preferences');
     } finally {
       setIsSavingNotifications(false);
@@ -184,7 +184,7 @@ export default function Profile() {
       setNewPassword('');
       setConfirmPassword('');
     } catch (error: any) {
-      console.error('Error changing password:', error);
+      if (import.meta.env.DEV) console.error('Error changing password:', error);
       toast.error(error.message || 'Failed to update password');
     } finally {
       setIsChangingPassword(false);
@@ -220,7 +220,7 @@ export default function Profile() {
       await signOut();
       navigate('/auth');
     } catch (error: any) {
-      console.error('Error deleting account:', error);
+      if (import.meta.env.DEV) console.error('Error deleting account:', error);
       toast.error(error.message || 'Failed to delete account');
     } finally {
       setIsDeletingAccount(false);
@@ -291,7 +291,7 @@ export default function Profile() {
       setAvatarUrl(publicUrl);
       toast.success('Avatar uploaded successfully');
     } catch (error) {
-      console.error('Upload error:', error);
+      if (import.meta.env.DEV) console.error('Upload error:', error);
       toast.error('Failed to upload avatar');
     } finally {
       setIsUploading(false);
@@ -321,7 +321,7 @@ export default function Profile() {
       setAvatarUrl(url);
       toast.success(url ? 'Avatar updated' : 'Avatar removed');
     } catch (error) {
-      console.error('Error updating avatar:', error);
+      if (import.meta.env.DEV) console.error('Error updating avatar:', error);
       toast.error('Failed to update avatar');
     } finally {
       setIsUploading(false);

@@ -65,7 +65,7 @@ export default function Settings() {
       if (error) throw error;
       toast.success('Organization settings saved');
     } catch (error) {
-      console.error('Save error:', error);
+      if (import.meta.env.DEV) console.error('Save error:', error);
       toast.error('Failed to save organization settings');
     } finally {
       setIsSaving(false);
@@ -95,7 +95,7 @@ export default function Settings() {
       if (error) throw error;
       toast.success('Branding settings saved');
     } catch (error) {
-      console.error('Save error:', error);
+      if (import.meta.env.DEV) console.error('Save error:', error);
       toast.error('Failed to save branding settings');
     } finally {
       setIsSavingBranding(false);
@@ -148,7 +148,7 @@ export default function Settings() {
       setLogoUrl(publicUrl);
       toast.success('Logo uploaded and saved successfully');
     } catch (error) {
-      console.error('Upload error:', error);
+      if (import.meta.env.DEV) console.error('Upload error:', error);
       toast.error('Failed to upload logo');
     } finally {
       setIsUploading(false);

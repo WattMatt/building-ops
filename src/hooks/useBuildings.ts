@@ -48,7 +48,7 @@ export function useBuildings(
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Failed to fetch buildings');
       setError(error);
-      console.error('Error fetching buildings:', err);
+      if (import.meta.env.DEV) console.error('Error fetching buildings:', err);
       toast.error('Failed to load buildings');
     } finally {
       setLoading(false);
@@ -68,7 +68,7 @@ export function useBuildings(
       toast.success('Building deleted successfully');
       return true;
     } catch (err) {
-      console.error('Error deleting building:', err);
+      if (import.meta.env.DEV) console.error('Error deleting building:', err);
       toast.error('Failed to delete building');
       return false;
     }
@@ -116,7 +116,7 @@ export function useBuilding(id: string | undefined) {
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Failed to fetch building');
       setError(error);
-      console.error('Error fetching building:', err);
+      if (import.meta.env.DEV) console.error('Error fetching building:', err);
     } finally {
       setLoading(false);
     }

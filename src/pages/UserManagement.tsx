@@ -118,7 +118,7 @@ export default function UserManagement() {
 
       setUsers(usersWithRoles);
     } catch (error) {
-      console.error('Error fetching users:', error);
+      if (import.meta.env.DEV) console.error('Error fetching users:', error);
       toast.error('Failed to load users');
     } finally {
       setLoading(false);
@@ -157,7 +157,7 @@ export default function UserManagement() {
       );
       toast.success('User role updated');
     } catch (error) {
-      console.error('Error updating role:', error);
+      if (import.meta.env.DEV) console.error('Error updating role:', error);
       toast.error('Failed to update user role');
     }
   };
@@ -170,7 +170,7 @@ export default function UserManagement() {
       setUsers((prev) => prev.filter((u) => u.id !== userId));
       toast.success('User removed');
     } catch (error) {
-      console.error('Error deleting user:', error);
+      if (import.meta.env.DEV) console.error('Error deleting user:', error);
       toast.error('Failed to remove user');
     }
   };
@@ -200,7 +200,7 @@ export default function UserManagement() {
       toast.success('User avatar updated');
       setAvatarDialogUser(null);
     } catch (error) {
-      console.error('Error updating avatar:', error);
+      if (import.meta.env.DEV) console.error('Error updating avatar:', error);
       toast.error('Failed to update user avatar');
     } finally {
       setSavingAvatar(false);

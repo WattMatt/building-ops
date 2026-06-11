@@ -26,7 +26,6 @@ const convertHeicToJpeg = async (file: File): Promise<File> => {
     return file;
   }
 
-  console.log(`Converting HEIC file: ${file.name}`);
   
   try {
     const blob = await heic2any({
@@ -45,13 +44,12 @@ const convertHeicToJpeg = async (file: File): Promise<File> => {
       lastModified: Date.now(),
     });
 
-    console.log(
       `HEIC conversion complete: ${file.name} (${(file.size / 1024).toFixed(0)}KB) → ${newFileName} (${(convertedFile.size / 1024).toFixed(0)}KB)`
     );
 
     return convertedFile;
   } catch (error) {
-    console.error('HEIC conversion failed:', error);
+    if (import.meta.env.DEV) console.error('HEIC conversion failed:', error);
     toast.error('Failed to convert HEIC image. Please try a different format.');
     throw error;
   }
@@ -191,7 +189,6 @@ export function PhotoCapture({
                   type: 'image/jpeg',
                   lastModified: Date.now(),
                 });
-                console.log(
                   `Compressed ${file.name}: ${(file.size / 1024).toFixed(0)}KB → ${(compressedFile.size / 1024).toFixed(0)}KB`
                 );
                 resolve(compressedFile);
@@ -204,13 +201,13 @@ export function PhotoCapture({
             compressionQuality
           );
         } catch (error) {
-          console.error('Compression error:', error);
+          if (import.meta.env.DEV) console.error('Compression error:', error);
           resolve(file); // Fallback to original on error
         }
       };
 
       img.onerror = () => {
-        console.error('Failed to load image for compression');
+        if (import.meta.env.DEV) console.error('Failed to load image for compression');
         resolve(file); // Fallback to original on error
       };
 
@@ -256,7 +253,7 @@ export function PhotoCapture({
 
       return { file: processedFile, preview };
     } catch (error) {
-      console.error('Error processing file:', error);
+      if (import.meta.env.DEV) console.error('Error processing file:', error);
       return null;
     }
   }, [acceptedTypes, maxSizeMB, compressImage]);
@@ -285,7 +282,7 @@ export function PhotoCapture({
         }
       }
     } catch (error) {
-      console.error('Error processing files:', error);
+      if (import.meta.env.DEV) console.error('Error processing files:', error);
       toast.error('Failed to process some images');
     } finally {
       setIsProcessing(false);
@@ -582,7 +579,6 @@ export function SinglePhotoCapture({
                   type: 'image/jpeg',
                   lastModified: Date.now(),
                 });
-                console.log(
                   `Compressed avatar: ${(file.size / 1024).toFixed(0)}KB → ${(compressedFile.size / 1024).toFixed(0)}KB`
                 );
                 resolve(compressedFile);
@@ -636,7 +632,7 @@ export function SinglePhotoCapture({
 
       onPhotoSelect(processedFile);
     } catch (error) {
-      console.error('Error processing file:', error);
+      if (import.meta.env.DEV) console.error('Error processing file:', error);
       toast.error('Failed to process image');
     } finally {
       setIsCompressing(false);
