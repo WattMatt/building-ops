@@ -21,6 +21,7 @@ import {
   ClipboardCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { categoryMeta } from '@/lib/compliance';
 import {
   format,
   startOfDay,
@@ -62,6 +63,7 @@ interface TaskInstance {
   requires_signature: boolean;
   responsible_role: string;
   building_id: string;
+  category: string | null;
   completion?: {
     completed_by: string;
     completed_at: string;
@@ -183,7 +185,8 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
           requires_photo,
           requires_signature,
           responsible_role,
-          building_id
+          building_id,
+          category
         `)
         .eq('building_id', buildingId)
         .order('due_date');
@@ -285,14 +288,18 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
         }));
 
       if (newTasks.length > 0) {
-        const { error: insertError } = await supabase
+        // .select() counts rows that actually landed — the DB scoping trigger
+        // may legitimately skip rows for non-applicable templates
+        const { data: inserted, error: insertError } = await supabase
           .from('task_instances')
-          .insert(newTasks);
+          .insert(newTasks)
+          .select('id');
 
         if (insertError) throw insertError;
+        return inserted?.length ?? 0;
       }
 
-      return newTasks.length;
+      return 0;
     } catch (error) {
       console.error('Error generating tasks:', error);
       throw error;
@@ -723,6 +730,11 @@ function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, variant = '
                   </p>
                   {task.task_description && (
                     <p className="text-xs text-muted-foreground mt-0.5">{task.task_description}</p>
+                  )}
+                  {categoryMeta(task.category) && (
+                    <Badge variant="outline" className={`mt-1 ${categoryMeta(task.category)!.color}`}>
+                      {categoryMeta(task.category)!.label}
+                    </Badge>
                   )}
                   {showDueDate && (
                     <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
