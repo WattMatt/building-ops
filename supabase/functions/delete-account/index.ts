@@ -52,7 +52,7 @@ serve(async (req) => {
     await adminClient.from("user_roles").delete().eq("user_id", user.id);
     
     // Delete building assignments
-    await adminClient.from("user_building_assignments").delete().eq("user_id", user.id);
+    await adminClient.from("user_buildings").delete().eq("user_id", user.id);
 
     // Delete the user from auth.users
     const { error: deleteError } = await adminClient.auth.admin.deleteUser(user.id);

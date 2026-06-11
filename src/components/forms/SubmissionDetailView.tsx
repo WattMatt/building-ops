@@ -5,6 +5,8 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { SignedImage } from '@/components/ui/signed-image';
+import { openStorageFile } from '@/integrations/supabase/storage';
 import {
   Eye,
   Download,
@@ -258,19 +260,18 @@ export function SubmissionDetailView({
             </h4>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {submission.photo_urls.map((url, i) => (
-                <a
+                <button
                   key={i}
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                  type="button"
+                  onClick={() => openStorageFile(url)}
                   className="aspect-square rounded-lg overflow-hidden border hover:border-primary"
                 >
-                  <img
+                  <SignedImage
                     src={url}
                     alt={`Evidence ${i + 1}`}
                     className="w-full h-full object-cover"
                   />
-                </a>
+                </button>
               ))}
             </div>
           </div>

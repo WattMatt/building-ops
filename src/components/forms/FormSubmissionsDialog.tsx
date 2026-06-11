@@ -22,6 +22,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { supabase } from '@/integrations/supabase/client';
+import { openStorageFile } from '@/integrations/supabase/storage';
+import { SignedImage } from '@/components/ui/signed-image';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { format } from 'date-fns';
@@ -470,14 +472,13 @@ export function FormSubmissionsDialog({
                   </h4>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                     {selectedSubmission.photo_urls.map((url, index) => (
-                      <a
+                      <button
                         key={index}
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        type="button"
+                        onClick={() => openStorageFile(url)}
                         className="relative aspect-square rounded-lg overflow-hidden border hover:border-primary transition-colors group"
                       >
-                        <img
+                        <SignedImage
                           src={url}
                           alt={`Evidence photo ${index + 1}`}
                           className="w-full h-full object-cover"
@@ -485,7 +486,7 @@ export function FormSubmissionsDialog({
                         <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                           <Eye className="h-5 w-5 text-white" />
                         </div>
-                      </a>
+                      </button>
                     ))}
                   </div>
                 </div>

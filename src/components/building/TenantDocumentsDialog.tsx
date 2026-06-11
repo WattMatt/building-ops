@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { openStorageFile } from '@/integrations/supabase/storage';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -136,7 +137,7 @@ export default function TenantDocumentsDialog({ tenant, open, onOpenChange }: Te
         .from('tenant_documents')
         .insert({
           tenant_id: tenant.id,
-          name: documentName.trim(),
+          document_name: documentName.trim(),
           document_type: selectedType,
           file_url: urlData.publicUrl,
           file_name: selectedFile.name,
@@ -345,7 +346,7 @@ function DocumentsTable({
       <TableBody>
         {documents.map((doc) => (
           <TableRow key={doc.id}>
-            <TableCell className="font-medium">{doc.name}</TableCell>
+            <TableCell className="font-medium">{doc.document_name}</TableCell>
             <TableCell>
               <Badge variant="outline">
                 {DOCUMENT_TYPES.find((t) => t.value === doc.document_type)?.label || doc.document_type}
@@ -358,7 +359,7 @@ function DocumentsTable({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => window.open(doc.file_url, '_blank')}
+                  onClick={() => openStorageFile(doc.file_url)}
                   title="Open"
                 >
                   <ExternalLink className="h-4 w-4" />

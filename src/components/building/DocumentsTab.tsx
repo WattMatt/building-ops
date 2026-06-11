@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { openStorageFile } from '@/integrations/supabase/storage';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -500,11 +501,9 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           {doc.file_url && (
-                            <DropdownMenuItem asChild>
-                              <a href={doc.file_url} target="_blank" rel="noopener noreferrer">
-                                <ExternalLink className="h-4 w-4 mr-2" />
-                                View File
-                              </a>
+                            <DropdownMenuItem onClick={() => openStorageFile(doc.file_url)}>
+                              <ExternalLink className="h-4 w-4 mr-2" />
+                              View File
                             </DropdownMenuItem>
                           )}
                           {isAdminOrManager && (

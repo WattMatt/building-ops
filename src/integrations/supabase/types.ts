@@ -17,8 +17,9 @@ export type Database = {
       asset_service_history: {
         Row: {
           asset_id: string
+          contractor_id: string | null
           cost: number | null
-          created_at: string
+          created_at: string | null
           created_by: string | null
           description: string | null
           id: string
@@ -26,13 +27,13 @@ export type Database = {
           notes: string | null
           performed_by: string | null
           service_date: string
-          service_type: string
-          updated_at: string
+          service_type: string | null
         }
         Insert: {
           asset_id: string
+          contractor_id?: string | null
           cost?: number | null
-          created_at?: string
+          created_at?: string | null
           created_by?: string | null
           description?: string | null
           id?: string
@@ -40,13 +41,13 @@ export type Database = {
           notes?: string | null
           performed_by?: string | null
           service_date: string
-          service_type: string
-          updated_at?: string
+          service_type?: string | null
         }
         Update: {
           asset_id?: string
+          contractor_id?: string | null
           cost?: number | null
-          created_at?: string
+          created_at?: string | null
           created_by?: string | null
           description?: string | null
           id?: string
@@ -54,8 +55,7 @@ export type Database = {
           notes?: string | null
           performed_by?: string | null
           service_date?: string
-          service_type?: string
-          updated_at?: string
+          service_type?: string | null
         }
         Relationships: [
           {
@@ -70,32 +70,26 @@ export type Database = {
       audit_logs: {
         Row: {
           action: string
-          created_at: string
-          details: Json | null
-          entity_id: string
-          entity_type: string
+          created_at: string | null
+          entity_id: string | null
+          entity_type: string | null
           id: string
-          ip_address: string | null
           user_id: string | null
         }
         Insert: {
           action: string
-          created_at?: string
-          details?: Json | null
-          entity_id: string
-          entity_type: string
+          created_at?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
           id?: string
-          ip_address?: string | null
           user_id?: string | null
         }
         Update: {
           action?: string
-          created_at?: string
-          details?: Json | null
-          entity_id?: string
-          entity_type?: string
+          created_at?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
           id?: string
-          ip_address?: string | null
           user_id?: string | null
         }
         Relationships: []
@@ -103,8 +97,10 @@ export type Database = {
       building_assets: {
         Row: {
           building_id: string
-          category: string
-          created_at: string
+          category: string | null
+          condition_rating: number | null
+          created_at: string | null
+          expected_lifespan_years: number | null
           id: string
           installation_date: string | null
           last_service_date: string | null
@@ -114,14 +110,21 @@ export type Database = {
           name: string
           next_service_date: string | null
           notes: string | null
+          photo_url: string | null
+          purchase_date: string | null
+          purchase_price: number | null
+          replacement_cost: number | null
           serial_number: string | null
-          status: string
-          updated_at: string
+          status: string | null
+          warranty_expiry: string | null
+          warranty_provider: string | null
         }
         Insert: {
           building_id: string
-          category: string
-          created_at?: string
+          category?: string | null
+          condition_rating?: number | null
+          created_at?: string | null
+          expected_lifespan_years?: number | null
           id?: string
           installation_date?: string | null
           last_service_date?: string | null
@@ -131,14 +134,21 @@ export type Database = {
           name: string
           next_service_date?: string | null
           notes?: string | null
+          photo_url?: string | null
+          purchase_date?: string | null
+          purchase_price?: number | null
+          replacement_cost?: number | null
           serial_number?: string | null
-          status?: string
-          updated_at?: string
+          status?: string | null
+          warranty_expiry?: string | null
+          warranty_provider?: string | null
         }
         Update: {
           building_id?: string
-          category?: string
-          created_at?: string
+          category?: string | null
+          condition_rating?: number | null
+          created_at?: string | null
+          expected_lifespan_years?: number | null
           id?: string
           installation_date?: string | null
           last_service_date?: string | null
@@ -148,9 +158,14 @@ export type Database = {
           name?: string
           next_service_date?: string | null
           notes?: string | null
+          photo_url?: string | null
+          purchase_date?: string | null
+          purchase_price?: number | null
+          replacement_cost?: number | null
           serial_number?: string | null
-          status?: string
-          updated_at?: string
+          status?: string | null
+          warranty_expiry?: string | null
+          warranty_provider?: string | null
         }
         Relationships: [
           {
@@ -162,64 +177,11 @@ export type Database = {
           },
         ]
       }
-      building_checklist_items: {
-        Row: {
-          building_id: string
-          created_at: string
-          created_by: string | null
-          frequency: string
-          id: string
-          is_active: boolean | null
-          requires_photo: boolean | null
-          requires_signature: boolean | null
-          responsible_role: string
-          task_description: string | null
-          task_name: string
-          updated_at: string
-        }
-        Insert: {
-          building_id: string
-          created_at?: string
-          created_by?: string | null
-          frequency?: string
-          id?: string
-          is_active?: boolean | null
-          requires_photo?: boolean | null
-          requires_signature?: boolean | null
-          responsible_role?: string
-          task_description?: string | null
-          task_name: string
-          updated_at?: string
-        }
-        Update: {
-          building_id?: string
-          created_at?: string
-          created_by?: string | null
-          frequency?: string
-          id?: string
-          is_active?: boolean | null
-          requires_photo?: boolean | null
-          requires_signature?: boolean | null
-          responsible_role?: string
-          task_description?: string | null
-          task_name?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "building_checklist_items_building_id_fkey"
-            columns: ["building_id"]
-            isOneToOne: false
-            referencedRelation: "buildings"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       building_documents: {
         Row: {
           building_id: string
-          created_at: string
-          document_type: string
+          created_at: string | null
+          document_type: string | null
           expiry_date: string | null
           file_url: string | null
           id: string
@@ -228,13 +190,12 @@ export type Database = {
           name: string
           notes: string | null
           reference_number: string | null
-          updated_at: string
           uploaded_by: string | null
         }
         Insert: {
           building_id: string
-          created_at?: string
-          document_type: string
+          created_at?: string | null
+          document_type?: string | null
           expiry_date?: string | null
           file_url?: string | null
           id?: string
@@ -243,13 +204,12 @@ export type Database = {
           name: string
           notes?: string | null
           reference_number?: string | null
-          updated_at?: string
           uploaded_by?: string | null
         }
         Update: {
           building_id?: string
-          created_at?: string
-          document_type?: string
+          created_at?: string | null
+          document_type?: string | null
           expiry_date?: string | null
           file_url?: string | null
           id?: string
@@ -258,7 +218,6 @@ export type Database = {
           name?: string
           notes?: string | null
           reference_number?: string | null
-          updated_at?: string
           uploaded_by?: string | null
         }
         Relationships: [
@@ -276,34 +235,34 @@ export type Database = {
           building_id: string
           category: string | null
           content: string
-          created_at: string
-          created_by: string
+          created_at: string | null
+          created_by: string | null
           id: string
           is_pinned: boolean | null
-          title: string
-          updated_at: string
+          title: string | null
+          updated_at: string | null
         }
         Insert: {
           building_id: string
           category?: string | null
           content: string
-          created_at?: string
-          created_by: string
+          created_at?: string | null
+          created_by?: string | null
           id?: string
           is_pinned?: boolean | null
-          title: string
-          updated_at?: string
+          title?: string | null
+          updated_at?: string | null
         }
         Update: {
           building_id?: string
           category?: string | null
           content?: string
-          created_at?: string
-          created_by?: string
+          created_at?: string | null
+          created_by?: string | null
           id?: string
           is_pinned?: boolean | null
-          title?: string
-          updated_at?: string
+          title?: string | null
+          updated_at?: string | null
         }
         Relationships: [
           {
@@ -322,15 +281,20 @@ export type Database = {
           contact_email: string | null
           contact_name: string | null
           contact_phone: string | null
-          created_at: string
+          created_at: string | null
+          escalation_percentage: number | null
+          fit_out_notes: string | null
           id: string
           is_active: boolean | null
-          lease_end_date: string | null
-          lease_start_date: string | null
-          notes: string | null
-          shop_name: string
-          shop_number: string
-          updated_at: string
+          lease_end: string | null
+          lease_start: string | null
+          lease_type: string | null
+          make_good_clause: string | null
+          monthly_rent: number | null
+          name: string | null
+          shop_name: string | null
+          shop_number: string | null
+          unit_number: string | null
         }
         Insert: {
           area?: string | null
@@ -338,15 +302,20 @@ export type Database = {
           contact_email?: string | null
           contact_name?: string | null
           contact_phone?: string | null
-          created_at?: string
+          created_at?: string | null
+          escalation_percentage?: number | null
+          fit_out_notes?: string | null
           id?: string
           is_active?: boolean | null
-          lease_end_date?: string | null
-          lease_start_date?: string | null
-          notes?: string | null
-          shop_name: string
-          shop_number: string
-          updated_at?: string
+          lease_end?: string | null
+          lease_start?: string | null
+          lease_type?: string | null
+          make_good_clause?: string | null
+          monthly_rent?: number | null
+          name?: string | null
+          shop_name?: string | null
+          shop_number?: string | null
+          unit_number?: string | null
         }
         Update: {
           area?: string | null
@@ -354,15 +323,20 @@ export type Database = {
           contact_email?: string | null
           contact_name?: string | null
           contact_phone?: string | null
-          created_at?: string
+          created_at?: string | null
+          escalation_percentage?: number | null
+          fit_out_notes?: string | null
           id?: string
           is_active?: boolean | null
-          lease_end_date?: string | null
-          lease_start_date?: string | null
-          notes?: string | null
-          shop_name?: string
-          shop_number?: string
-          updated_at?: string
+          lease_end?: string | null
+          lease_start?: string | null
+          lease_type?: string | null
+          make_good_clause?: string | null
+          monthly_rent?: number | null
+          name?: string | null
+          shop_name?: string | null
+          shop_number?: string | null
+          unit_number?: string | null
         }
         Relationships: [
           {
@@ -376,11 +350,11 @@ export type Database = {
       }
       buildings: {
         Row: {
-          address: string
+          address: string | null
           avatar_color: string | null
-          city: string
+          city: string | null
           council_details: Json | null
-          created_at: string
+          created_at: string | null
           electrical_authority: Json | null
           emergency_contacts: Json | null
           id: string
@@ -390,19 +364,18 @@ export type Database = {
           longitude: number | null
           meter_reading_company: Json | null
           name: string
-          organization_id: string
+          organization_id: string | null
           professional_team: Json | null
-          statutory_certificates: Json | null
-          timezone: string
-          updated_at: string
+          timezone: string | null
+          updated_at: string | null
           utility_tariffs: Json | null
         }
         Insert: {
-          address: string
+          address?: string | null
           avatar_color?: string | null
-          city?: string
+          city?: string | null
           council_details?: Json | null
-          created_at?: string
+          created_at?: string | null
           electrical_authority?: Json | null
           emergency_contacts?: Json | null
           id?: string
@@ -412,19 +385,18 @@ export type Database = {
           longitude?: number | null
           meter_reading_company?: Json | null
           name: string
-          organization_id: string
+          organization_id?: string | null
           professional_team?: Json | null
-          statutory_certificates?: Json | null
-          timezone?: string
-          updated_at?: string
+          timezone?: string | null
+          updated_at?: string | null
           utility_tariffs?: Json | null
         }
         Update: {
-          address?: string
+          address?: string | null
           avatar_color?: string | null
-          city?: string
+          city?: string | null
           council_details?: Json | null
-          created_at?: string
+          created_at?: string | null
           electrical_authority?: Json | null
           emergency_contacts?: Json | null
           id?: string
@@ -434,11 +406,10 @@ export type Database = {
           longitude?: number | null
           meter_reading_company?: Json | null
           name?: string
-          organization_id?: string
+          organization_id?: string | null
           professional_team?: Json | null
-          statutory_certificates?: Json | null
-          timezone?: string
-          updated_at?: string
+          timezone?: string | null
+          updated_at?: string | null
           utility_tariffs?: Json | null
         }
         Relationships: [
@@ -453,37 +424,34 @@ export type Database = {
       }
       checklist_templates: {
         Row: {
-          created_at: string
+          created_at: string | null
           description: string | null
-          frequency: Database["public"]["Enums"]["task_frequency"]
+          frequency: string
           id: string
           is_active: boolean | null
           name: string
-          organization_id: string
-          responsible_role: Database["public"]["Enums"]["app_role"]
-          updated_at: string
+          organization_id: string | null
+          responsible_role: string | null
         }
         Insert: {
-          created_at?: string
+          created_at?: string | null
           description?: string | null
-          frequency: Database["public"]["Enums"]["task_frequency"]
+          frequency?: string
           id?: string
           is_active?: boolean | null
           name: string
-          organization_id: string
-          responsible_role: Database["public"]["Enums"]["app_role"]
-          updated_at?: string
+          organization_id?: string | null
+          responsible_role?: string | null
         }
         Update: {
-          created_at?: string
+          created_at?: string | null
           description?: string | null
-          frequency?: Database["public"]["Enums"]["task_frequency"]
+          frequency?: string
           id?: string
           is_active?: boolean | null
           name?: string
-          organization_id?: string
-          responsible_role?: Database["public"]["Enums"]["app_role"]
-          updated_at?: string
+          organization_id?: string | null
+          responsible_role?: string | null
         }
         Relationships: [
           {
@@ -495,51 +463,148 @@ export type Database = {
           },
         ]
       }
+      contractor_documents: {
+        Row: {
+          contractor_id: string
+          document_name: string
+          document_type: string
+          expiry_date: string | null
+          file_url: string | null
+          id: string
+          is_verified: boolean | null
+          uploaded_at: string | null
+        }
+        Insert: {
+          contractor_id: string
+          document_name: string
+          document_type: string
+          expiry_date?: string | null
+          file_url?: string | null
+          id?: string
+          is_verified?: boolean | null
+          uploaded_at?: string | null
+        }
+        Update: {
+          contractor_id?: string
+          document_name?: string
+          document_type?: string
+          expiry_date?: string | null
+          file_url?: string | null
+          id?: string
+          is_verified?: boolean | null
+          uploaded_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contractor_documents_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "contractors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contractors: {
+        Row: {
+          company_name: string
+          contact_email: string | null
+          contact_name: string | null
+          contact_phone: string | null
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          notes: string | null
+          organization_id: string | null
+          rating: number | null
+          trade: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          company_name: string
+          contact_email?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          notes?: string | null
+          organization_id?: string | null
+          rating?: number | null
+          trade?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          company_name?: string
+          contact_email?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          notes?: string | null
+          organization_id?: string | null
+          rating?: number | null
+          trade?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contractors_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       form_submissions: {
         Row: {
           building_id: string | null
-          created_at: string
-          form_data: Json
+          created_at: string | null
+          form_data: Json | null
           form_name: string
-          form_template_id: string
+          form_template_id: string | null
+          form_type: string | null
           id: string
-          photo_urls: string[] | null
+          photo_urls: Json | null
           review_notes: string | null
           reviewed_at: string | null
           reviewed_by: string | null
-          status: string
-          submitted_by: string
-          updated_at: string
+          status: string | null
+          submitted_by: string | null
+          updated_at: string | null
         }
         Insert: {
           building_id?: string | null
-          created_at?: string
-          form_data?: Json
+          created_at?: string | null
+          form_data?: Json | null
           form_name: string
-          form_template_id: string
+          form_template_id?: string | null
+          form_type?: string | null
           id?: string
-          photo_urls?: string[] | null
+          photo_urls?: Json | null
           review_notes?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
-          status?: string
-          submitted_by: string
-          updated_at?: string
+          status?: string | null
+          submitted_by?: string | null
+          updated_at?: string | null
         }
         Update: {
           building_id?: string | null
-          created_at?: string
-          form_data?: Json
+          created_at?: string | null
+          form_data?: Json | null
           form_name?: string
-          form_template_id?: string
+          form_template_id?: string | null
+          form_type?: string | null
           id?: string
-          photo_urls?: string[] | null
+          photo_urls?: Json | null
           review_notes?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
-          status?: string
-          submitted_by?: string
-          updated_at?: string
+          status?: string | null
+          submitted_by?: string | null
+          updated_at?: string | null
         }
         Relationships: [
           {
@@ -551,60 +616,125 @@ export type Database = {
           },
         ]
       }
-      issues: {
+      issue_activity: {
         Row: {
-          assigned_to: string | null
-          building_id: string
-          corrective_action: string | null
+          activity_type: string
+          author_name: string | null
+          comment: string | null
           created_at: string
-          deadline: string | null
-          description: string
           id: string
-          photo_urls: string[] | null
-          priority: Database["public"]["Enums"]["issue_priority"]
-          reported_by: string
-          resolved_at: string | null
-          resolved_by: string | null
-          status: Database["public"]["Enums"]["issue_status"]
-          task_instance_id: string | null
-          title: string
-          updated_at: string
+          issue_id: string
+          new_value: string | null
+          old_value: string | null
+          photo_urls: Json | null
+          user_id: string | null
         }
         Insert: {
-          assigned_to?: string | null
-          building_id: string
-          corrective_action?: string | null
+          activity_type: string
+          author_name?: string | null
+          comment?: string | null
           created_at?: string
-          deadline?: string | null
-          description: string
           id?: string
-          photo_urls?: string[] | null
-          priority?: Database["public"]["Enums"]["issue_priority"]
-          reported_by: string
-          resolved_at?: string | null
-          resolved_by?: string | null
-          status?: Database["public"]["Enums"]["issue_status"]
-          task_instance_id?: string | null
-          title: string
-          updated_at?: string
+          issue_id: string
+          new_value?: string | null
+          old_value?: string | null
+          photo_urls?: Json | null
+          user_id?: string | null
         }
         Update: {
+          activity_type?: string
+          author_name?: string | null
+          comment?: string | null
+          created_at?: string
+          id?: string
+          issue_id?: string
+          new_value?: string | null
+          old_value?: string | null
+          photo_urls?: Json | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "issue_activity_issue_id_fkey"
+            columns: ["issue_id"]
+            isOneToOne: false
+            referencedRelation: "issues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      issues: {
+        Row: {
+          actual_cost: number | null
+          assigned_to: string | null
+          building_id: string
+          category: string | null
+          contractor_id: string | null
+          corrective_action: string | null
+          created_at: string | null
+          deadline: string | null
+          description: string
+          estimated_cost: number | null
+          first_response_at: string | null
+          id: string
+          photo_urls: Json | null
+          priority: string
+          reported_by: string
+          resolved_at: string | null
+          responsibility: string | null
+          sla_breached_at: string | null
+          sla_target_hours: number | null
+          status: string
+          task_instance_id: string | null
+          title: string
+        }
+        Insert: {
+          actual_cost?: number | null
+          assigned_to?: string | null
+          building_id: string
+          category?: string | null
+          contractor_id?: string | null
+          corrective_action?: string | null
+          created_at?: string | null
+          deadline?: string | null
+          description: string
+          estimated_cost?: number | null
+          first_response_at?: string | null
+          id?: string
+          photo_urls?: Json | null
+          priority?: string
+          reported_by: string
+          resolved_at?: string | null
+          responsibility?: string | null
+          sla_breached_at?: string | null
+          sla_target_hours?: number | null
+          status?: string
+          task_instance_id?: string | null
+          title: string
+        }
+        Update: {
+          actual_cost?: number | null
           assigned_to?: string | null
           building_id?: string
+          category?: string | null
+          contractor_id?: string | null
           corrective_action?: string | null
-          created_at?: string
+          created_at?: string | null
           deadline?: string | null
           description?: string
+          estimated_cost?: number | null
+          first_response_at?: string | null
           id?: string
-          photo_urls?: string[] | null
-          priority?: Database["public"]["Enums"]["issue_priority"]
+          photo_urls?: Json | null
+          priority?: string
           reported_by?: string
           resolved_at?: string | null
-          resolved_by?: string | null
-          status?: Database["public"]["Enums"]["issue_status"]
+          responsibility?: string | null
+          sla_breached_at?: string | null
+          sla_target_hours?: number | null
+          status?: string
           task_instance_id?: string | null
           title?: string
-          updated_at?: string
         }
         Relationships: [
           {
@@ -623,48 +753,102 @@ export type Database = {
           },
         ]
       }
+      media_attachments: {
+        Row: {
+          caption: string | null
+          captured_at: string | null
+          captured_by: string | null
+          created_at: string | null
+          deleted_at: string | null
+          file_size_bytes: number | null
+          file_type: string | null
+          id: string
+          is_after_image: boolean | null
+          is_before_image: boolean | null
+          latitude: number | null
+          longitude: number | null
+          original_filename: string | null
+          public_url: string | null
+          record_id: string
+          record_type: string
+          storage_path: string
+        }
+        Insert: {
+          caption?: string | null
+          captured_at?: string | null
+          captured_by?: string | null
+          created_at?: string | null
+          deleted_at?: string | null
+          file_size_bytes?: number | null
+          file_type?: string | null
+          id?: string
+          is_after_image?: boolean | null
+          is_before_image?: boolean | null
+          latitude?: number | null
+          longitude?: number | null
+          original_filename?: string | null
+          public_url?: string | null
+          record_id: string
+          record_type: string
+          storage_path: string
+        }
+        Update: {
+          caption?: string | null
+          captured_at?: string | null
+          captured_by?: string | null
+          created_at?: string | null
+          deleted_at?: string | null
+          file_size_bytes?: number | null
+          file_type?: string | null
+          id?: string
+          is_after_image?: boolean | null
+          is_before_image?: boolean | null
+          latitude?: number | null
+          longitude?: number | null
+          original_filename?: string | null
+          public_url?: string | null
+          record_id?: string
+          record_type?: string
+          storage_path?: string
+        }
+        Relationships: []
+      }
       organizations: {
         Row: {
-          address: string | null
-          created_at: string
+          created_at: string | null
           email: string | null
           id: string
           logo_url: string | null
-          name: string
-          phone: string | null
+          name: string | null
           primary_color: string | null
-          updated_at: string
+          updated_at: string | null
         }
         Insert: {
-          address?: string | null
-          created_at?: string
+          created_at?: string | null
           email?: string | null
           id?: string
           logo_url?: string | null
-          name: string
-          phone?: string | null
+          name?: string | null
           primary_color?: string | null
-          updated_at?: string
+          updated_at?: string | null
         }
         Update: {
-          address?: string | null
-          created_at?: string
+          created_at?: string | null
           email?: string | null
           id?: string
           logo_url?: string | null
-          name?: string
-          phone?: string | null
+          name?: string | null
           primary_color?: string | null
-          updated_at?: string
+          updated_at?: string | null
         }
         Relationships: []
       }
       profiles: {
         Row: {
           avatar_url: string | null
-          created_at: string
+          created_at: string | null
           daily_digest: boolean | null
-          email: string
+          email: string | null
           email_notifications: boolean | null
           full_name: string | null
           id: string
@@ -672,14 +856,13 @@ export type Database = {
           overdue_alerts: boolean | null
           phone: string | null
           task_reminders: boolean | null
-          theme_preference: string | null
-          updated_at: string
+          updated_at: string | null
         }
         Insert: {
           avatar_url?: string | null
-          created_at?: string
+          created_at?: string | null
           daily_digest?: boolean | null
-          email: string
+          email?: string | null
           email_notifications?: boolean | null
           full_name?: string | null
           id: string
@@ -687,14 +870,13 @@ export type Database = {
           overdue_alerts?: boolean | null
           phone?: string | null
           task_reminders?: boolean | null
-          theme_preference?: string | null
-          updated_at?: string
+          updated_at?: string | null
         }
         Update: {
           avatar_url?: string | null
-          created_at?: string
+          created_at?: string | null
           daily_digest?: boolean | null
-          email?: string
+          email?: string | null
           email_notifications?: boolean | null
           full_name?: string | null
           id?: string
@@ -702,39 +884,35 @@ export type Database = {
           overdue_alerts?: boolean | null
           phone?: string | null
           task_reminders?: boolean | null
-          theme_preference?: string | null
-          updated_at?: string
+          updated_at?: string | null
         }
         Relationships: []
       }
       task_completions: {
         Row: {
-          completed_at: string
           completed_by: string
-          created_at: string
+          created_at: string | null
           id: string
           notes: string | null
-          photo_urls: string[] | null
+          photo_urls: Json | null
           signature_confirmed: boolean | null
           task_instance_id: string
         }
         Insert: {
-          completed_at?: string
           completed_by: string
-          created_at?: string
+          created_at?: string | null
           id?: string
           notes?: string | null
-          photo_urls?: string[] | null
+          photo_urls?: Json | null
           signature_confirmed?: boolean | null
           task_instance_id: string
         }
         Update: {
-          completed_at?: string
           completed_by?: string
-          created_at?: string
+          created_at?: string | null
           id?: string
           notes?: string | null
-          photo_urls?: string[] | null
+          photo_urls?: Json | null
           signature_confirmed?: boolean | null
           task_instance_id?: string
         }
@@ -751,48 +929,60 @@ export type Database = {
       task_instances: {
         Row: {
           building_id: string
-          created_at: string
+          completed_at: string | null
+          completed_by: string | null
+          completion_notes: string | null
+          created_at: string | null
           due_date: string
-          frequency: Database["public"]["Enums"]["task_frequency"]
+          frequency: string
           id: string
+          photo_urls: Json | null
           requires_photo: boolean | null
           requires_signature: boolean | null
-          responsible_role: Database["public"]["Enums"]["app_role"]
-          status: Database["public"]["Enums"]["task_status"]
+          responsible_role: string | null
+          signature_url: string | null
+          status: string
           task_description: string | null
           task_name: string
           template_item_id: string | null
-          updated_at: string
         }
         Insert: {
           building_id: string
-          created_at?: string
+          completed_at?: string | null
+          completed_by?: string | null
+          completion_notes?: string | null
+          created_at?: string | null
           due_date: string
-          frequency: Database["public"]["Enums"]["task_frequency"]
+          frequency?: string
           id?: string
+          photo_urls?: Json | null
           requires_photo?: boolean | null
           requires_signature?: boolean | null
-          responsible_role: Database["public"]["Enums"]["app_role"]
-          status?: Database["public"]["Enums"]["task_status"]
+          responsible_role?: string | null
+          signature_url?: string | null
+          status?: string
           task_description?: string | null
           task_name: string
           template_item_id?: string | null
-          updated_at?: string
         }
         Update: {
           building_id?: string
-          created_at?: string
+          completed_at?: string | null
+          completed_by?: string | null
+          completion_notes?: string | null
+          created_at?: string | null
           due_date?: string
-          frequency?: Database["public"]["Enums"]["task_frequency"]
+          frequency?: string
           id?: string
+          photo_urls?: Json | null
           requires_photo?: boolean | null
           requires_signature?: boolean | null
-          responsible_role?: Database["public"]["Enums"]["app_role"]
-          status?: Database["public"]["Enums"]["task_status"]
+          responsible_role?: string | null
+          signature_url?: string | null
+          status?: string
           task_description?: string | null
           task_name?: string
           template_item_id?: string | null
-          updated_at?: string
         }
         Relationships: [
           {
@@ -813,8 +1003,7 @@ export type Database = {
       }
       template_items: {
         Row: {
-          created_at: string
-          display_order: number
+          display_order: number | null
           id: string
           requires_photo: boolean | null
           requires_signature: boolean | null
@@ -824,8 +1013,7 @@ export type Database = {
           template_id: string
         }
         Insert: {
-          created_at?: string
-          display_order?: number
+          display_order?: number | null
           id?: string
           requires_photo?: boolean | null
           requires_signature?: boolean | null
@@ -835,8 +1023,7 @@ export type Database = {
           template_id: string
         }
         Update: {
-          created_at?: string
-          display_order?: number
+          display_order?: number | null
           id?: string
           requires_photo?: boolean | null
           requires_signature?: boolean | null
@@ -857,48 +1044,45 @@ export type Database = {
       }
       tenant_documents: {
         Row: {
-          created_at: string
+          created_at: string | null
+          document_name: string
           document_type: string
           expiry_date: string | null
-          file_name: string
+          file_name: string | null
           file_size: number | null
-          file_url: string
+          file_url: string | null
           id: string
           issue_date: string | null
-          name: string
           notes: string | null
           tenant_id: string
-          updated_at: string
           uploaded_by: string | null
         }
         Insert: {
-          created_at?: string
+          created_at?: string | null
+          document_name: string
           document_type: string
           expiry_date?: string | null
-          file_name: string
+          file_name?: string | null
           file_size?: number | null
-          file_url: string
+          file_url?: string | null
           id?: string
           issue_date?: string | null
-          name: string
           notes?: string | null
           tenant_id: string
-          updated_at?: string
           uploaded_by?: string | null
         }
         Update: {
-          created_at?: string
+          created_at?: string | null
+          document_name?: string
           document_type?: string
           expiry_date?: string | null
-          file_name?: string
+          file_name?: string | null
           file_size?: number | null
-          file_url?: string
+          file_url?: string | null
           id?: string
           issue_date?: string | null
-          name?: string
           notes?: string | null
           tenant_id?: string
-          updated_at?: string
           uploaded_by?: string | null
         }
         Relationships: [
@@ -911,7 +1095,7 @@ export type Database = {
           },
         ]
       }
-      user_building_assignments: {
+      user_buildings: {
         Row: {
           building_id: string
           created_at: string
@@ -932,7 +1116,7 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "user_building_assignments_building_id_fkey"
+            foreignKeyName: "user_buildings_building_id_fkey"
             columns: ["building_id"]
             isOneToOne: false
             referencedRelation: "buildings"
@@ -942,21 +1126,18 @@ export type Database = {
       }
       user_roles: {
         Row: {
-          created_at: string
-          id: string
-          role: Database["public"]["Enums"]["app_role"]
+          building_id: string | null
+          role: string
           user_id: string
         }
         Insert: {
-          created_at?: string
-          id?: string
-          role?: Database["public"]["Enums"]["app_role"]
+          building_id?: string | null
+          role?: string
           user_id: string
         }
         Update: {
-          created_at?: string
-          id?: string
-          role?: Database["public"]["Enums"]["app_role"]
+          building_id?: string | null
+          role?: string
           user_id?: string
         }
         Relationships: []
@@ -966,33 +1147,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      get_user_role: {
-        Args: { _user_id: string }
-        Returns: Database["public"]["Enums"]["app_role"]
-      }
-      has_building_access: {
-        Args: { _building_id: string; _user_id: string }
-        Returns: boolean
-      }
-      has_role: {
-        Args: {
-          _role: Database["public"]["Enums"]["app_role"]
-          _user_id: string
-        }
-        Returns: boolean
-      }
-      has_tenant_access: {
-        Args: { _tenant_id: string; _user_id: string }
-        Returns: boolean
-      }
-      is_admin_or_manager: { Args: { _user_id: string }; Returns: boolean }
+      app_role: { Args: never; Returns: string }
+      can_access_building: { Args: { b: string }; Returns: boolean }
+      delete_own_account: { Args: never; Returns: undefined }
+      is_admin: { Args: never; Returns: boolean }
+      is_admin_or_manager: { Args: never; Returns: boolean }
     }
     Enums: {
-      app_role: "admin" | "manager" | "user" | "reviewer"
-      issue_priority: "low" | "medium" | "high" | "critical"
-      issue_status: "open" | "in_progress" | "resolved" | "escalated"
-      task_frequency: "daily" | "weekly" | "monthly" | "quarterly" | "annually"
-      task_status: "pending" | "completed" | "overdue" | "issue_logged"
+      [_ in never]: never
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1119,12 +1281,6 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {
-      app_role: ["admin", "manager", "user", "reviewer"],
-      issue_priority: ["low", "medium", "high", "critical"],
-      issue_status: ["open", "in_progress", "resolved", "escalated"],
-      task_frequency: ["daily", "weekly", "monthly", "quarterly", "annually"],
-      task_status: ["pending", "completed", "overdue", "issue_logged"],
-    },
+    Enums: {},
   },
 } as const
