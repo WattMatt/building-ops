@@ -10,7 +10,7 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
-  const { user, role, loading } = useAuth();
+  const { user, role, mustSetPassword, loading } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -26,6 +26,12 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
 
   if (!user) {
     return <Navigate to="/auth" state={{ from: location }} replace />;
+  }
+
+  // First-login gate: a user who must set their password is sent to /set-password
+  // (a public route) before they can reach any protected page.
+  if (mustSetPassword) {
+    return <Navigate to="/set-password" replace />;
   }
 
   if (allowedRoles && role && !allowedRoles.includes(role)) {

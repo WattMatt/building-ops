@@ -11,6 +11,8 @@ import DashboardLayout from "@/components/layout/DashboardLayout";
 
 // Pages
 import Auth from "./pages/Auth";
+import SetPassword from "./pages/SetPassword";
+import ResetPassword from "./pages/ResetPassword";
 import Dashboard from "./pages/Dashboard";
 import Buildings from "./pages/Buildings";
 import BuildingForm from "./pages/BuildingForm";
@@ -39,8 +41,11 @@ const App = () => (
           <AuthProvider>
             <OrganizationThemeProvider>
             <Routes>
+              {/* Public routes (outside ProtectedRoute) */}
               <Route path="/auth" element={<Auth />} />
-            
+              <Route path="/set-password" element={<SetPassword />} />
+              <Route path="/reset" element={<ResetPassword />} />
+
             {/* Protected Routes with Dashboard Layout */}
             <Route path="/" element={
               <ProtectedRoute>

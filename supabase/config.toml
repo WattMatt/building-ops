@@ -1,6 +1,12 @@
-project_id = "fawfqyhhmvhfdtxzglki"
+project_id = "qdzgkttiosahdfqresvz"
 
 [functions.delete-account]
+verify_jwt = false
+
+[functions.invite-user]
+verify_jwt = false
+
+[functions.set-user-status]
 verify_jwt = false
 
 [functions.notify-form-submission]

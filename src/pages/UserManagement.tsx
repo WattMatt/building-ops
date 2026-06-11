@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth, type InviteUserPayload } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { useBuildings } from '@/hooks/useBuildings';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Table,
   TableBody,
@@ -36,8 +39,13 @@ import {
   Search,
   Shield,
   MoreVertical,
-  Trash2,
   Loader2,
+  UserX,
+  UserCheck,
+  Copy,
+  Check,
+  Mail,
+  KeyRound,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -49,6 +57,8 @@ import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { AvatarPicker } from '@/components/avatar/AvatarPicker';
 
+type UserStatus = 'active' | 'invited' | 'deactivated';
+
 interface UserWithRole {
   id: string;
   email: string;
@@ -56,7 +66,14 @@ interface UserWithRole {
   avatar_url: string | null;
   role: string;
   created_at: string;
+  // Invited (pending) = the user still has the first-login gate set.
+  must_set_password?: boolean;
+  // Durable deactivation flag maintained by the set-user-status edge function
+  // on profiles.deactivated. Read on load; updated optimistically in-session.
+  deactivated?: boolean;
 }
+
+type InviteMode = 'invite' | 'temp_password';
 
 const roleColors: Record<string, string> = {
   admin: 'bg-destructive text-destructive-foreground',
@@ -73,13 +90,28 @@ const roleLabels: Record<string, string> = {
 };
 
 export default function UserManagement() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, inviteUser, setUserStatus } = useAuth();
+  const { buildings, loading: buildingsLoading } = useBuildings();
   const [users, setUsers] = useState<UserWithRole[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Invite dialog state
   const [isInviteOpen, setIsInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteFullName, setInviteFullName] = useState('');
   const [inviteRole, setInviteRole] = useState<string>('user');
+  const [inviteBuildingIds, setInviteBuildingIds] = useState<string[]>([]);
+  const [inviteMode, setInviteMode] = useState<InviteMode>('invite');
+  const [isInviting, setIsInviting] = useState(false);
+
+  // One-time temp-password modal state
+  const [tempPasswordResult, setTempPasswordResult] = useState<{ email: string; password: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  // Deactivate/reactivate in-flight tracking
+  const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
+
   const [avatarDialogUser, setAvatarDialogUser] = useState<UserWithRole | null>(null);
   const [selectedAvatarUrl, setSelectedAvatarUrl] = useState<string | null>(null);
   const [savingAvatar, setSavingAvatar] = useState(false);
@@ -93,10 +125,11 @@ export default function UserManagement() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      // Fetch profiles with their roles
+      // Fetch profiles with their roles. select('*') so must_set_password and
+      // deactivated are included even if the generated types lag the migration.
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
-        .select('id, email, full_name, avatar_url, created_at');
+        .select('*');
 
       if (profilesError) throw profilesError;
 
@@ -108,11 +141,18 @@ export default function UserManagement() {
       if (rolesError) throw rolesError;
 
       // Combine profiles with roles
-      const usersWithRoles = (profiles || []).map(profile => {
-        const userRole = roles?.find(r => r.user_id === profile.id);
+      const usersWithRoles: UserWithRole[] = (profiles || []).map((profile) => {
+        const p = profile as typeof profile & { must_set_password?: boolean; deactivated?: boolean };
+        const userRole = roles?.find((r) => r.user_id === p.id);
         return {
-          ...profile,
+          id: p.id,
+          email: p.email ?? '',
+          full_name: p.full_name,
+          avatar_url: p.avatar_url,
+          created_at: p.created_at ?? new Date().toISOString(),
           role: userRole?.role || 'user',
+          must_set_password: Boolean(p.must_set_password),
+          deactivated: Boolean(p.deactivated),
         };
       });
 
@@ -125,22 +165,100 @@ export default function UserManagement() {
     }
   };
 
+  const getStatus = (user: UserWithRole): UserStatus => {
+    if (user.deactivated) return 'deactivated';
+    if (user.must_set_password) return 'invited';
+    return 'active';
+  };
+
   const filteredUsers = users.filter(
     (user) =>
       user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (user.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false)
   );
 
+  const resetInviteForm = () => {
+    setInviteEmail('');
+    setInviteFullName('');
+    setInviteRole('user');
+    setInviteBuildingIds([]);
+    setInviteMode('invite');
+  };
+
+  const toggleInviteBuilding = (buildingId: string) => {
+    setInviteBuildingIds((prev) =>
+      prev.includes(buildingId)
+        ? prev.filter((id) => id !== buildingId)
+        : [...prev, buildingId]
+    );
+  };
+
   const handleInvite = async () => {
-    if (!inviteEmail) {
-      toast.error('Please enter an email address');
+    const email = inviteEmail.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      toast.error('Please enter a valid email address');
       return;
     }
 
-    toast.success(`Invitation sent to ${inviteEmail}`);
-    setIsInviteOpen(false);
-    setInviteEmail('');
-    setInviteRole('user');
+    const payload: InviteUserPayload = {
+      email,
+      fullName: inviteFullName.trim() || undefined,
+      role: inviteRole as InviteUserPayload['role'],
+      buildingIds: inviteBuildingIds.length > 0 ? inviteBuildingIds : undefined,
+      mode: inviteMode,
+    };
+
+    setIsInviting(true);
+    try {
+      const result = await inviteUser(payload);
+      setIsInviteOpen(false);
+
+      if (result.status === 'temp_password' && result.tempPassword) {
+        // Show the generated password exactly once.
+        setTempPasswordResult({ email, password: result.tempPassword });
+        setCopied(false);
+      } else {
+        toast.success(`Invite sent to ${email}`);
+      }
+
+      resetInviteForm();
+      fetchUsers();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to invite user';
+      toast.error(message);
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
+  const handleCopyTempPassword = async () => {
+    if (!tempPasswordResult) return;
+    try {
+      await navigator.clipboard.writeText(tempPasswordResult.password);
+      setCopied(true);
+      toast.success('Password copied to clipboard');
+    } catch {
+      toast.error('Could not copy — select and copy it manually');
+    }
+  };
+
+  const handleSetStatus = async (user: UserWithRole, action: 'deactivate' | 'reactivate') => {
+    if (action === 'deactivate' && !confirm(`Deactivate ${user.full_name || user.email}? They will lose access until reactivated.`)) {
+      return;
+    }
+    setStatusUpdatingId(user.id);
+    try {
+      await setUserStatus(user.id, action);
+      setUsers((prev) =>
+        prev.map((u) => (u.id === user.id ? { ...u, deactivated: action === 'deactivate' } : u))
+      );
+      toast.success(action === 'deactivate' ? 'User deactivated' : 'User reactivated');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update user status';
+      toast.error(message);
+    } finally {
+      setStatusUpdatingId(null);
+    }
   };
 
   const handleRoleChange = async (userId: string, newRole: string) => {
@@ -159,19 +277,6 @@ export default function UserManagement() {
     } catch (error) {
       if (import.meta.env.DEV) console.error('Error updating role:', error);
       toast.error('Failed to update user role');
-    }
-  };
-
-  const handleDelete = async (userId: string) => {
-    if (!confirm('Are you sure you want to remove this user?')) return;
-    
-    try {
-      // Note: Full user deletion requires admin API, this just removes from display
-      setUsers((prev) => prev.filter((u) => u.id !== userId));
-      toast.success('User removed');
-    } catch (error) {
-      if (import.meta.env.DEV) console.error('Error deleting user:', error);
-      toast.error('Failed to remove user');
     }
   };
 
@@ -251,25 +356,32 @@ export default function UserManagement() {
             Manage team members and their access levels
           </p>
         </div>
-        <Dialog open={isInviteOpen} onOpenChange={setIsInviteOpen}>
+        <Dialog
+          open={isInviteOpen}
+          onOpenChange={(open) => {
+            setIsInviteOpen(open);
+            if (!open) resetInviteForm();
+          }}
+        >
           <DialogTrigger asChild>
             <Button>
               <Plus className="w-4 h-4 mr-2" />
               Invite User
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Invite Team Member</DialogTitle>
               <DialogDescription>
-                Send an invitation to join your organization
+                Create an account and assign access. Send an invite email, or generate a
+                temporary password to hand over directly.
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2">
-                <Label htmlFor="email">Email Address</Label>
+                <Label htmlFor="invite-email">Email Address</Label>
                 <Input
-                  id="email"
+                  id="invite-email"
                   type="email"
                   placeholder="user@company.com"
                   value={inviteEmail}
@@ -277,9 +389,19 @@ export default function UserManagement() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="role">Role</Label>
+                <Label htmlFor="invite-name">Full Name (optional)</Label>
+                <Input
+                  id="invite-name"
+                  type="text"
+                  placeholder="Jane Smith"
+                  value={inviteFullName}
+                  onChange={(e) => setInviteFullName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="invite-role">Role</Label>
                 <Select value={inviteRole} onValueChange={setInviteRole}>
-                  <SelectTrigger>
+                  <SelectTrigger id="invite-role">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -290,12 +412,75 @@ export default function UserManagement() {
                   </SelectContent>
                 </Select>
               </div>
+
+              <div className="space-y-2">
+                <Label>Building Access (optional)</Label>
+                {buildingsLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading buildings…
+                  </div>
+                ) : buildings.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No buildings available.</p>
+                ) : (
+                  <ScrollArea className="h-36 rounded-md border p-2">
+                    <div className="space-y-2">
+                      {buildings.map((b) => (
+                        <label
+                          key={b.id}
+                          className="flex items-center gap-2 text-sm cursor-pointer"
+                        >
+                          <Checkbox
+                            checked={inviteBuildingIds.includes(b.id)}
+                            onCheckedChange={() => toggleInviteBuilding(b.id)}
+                          />
+                          <span>{b.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Leave empty for organization-wide access (subject to role).
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Onboarding method</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant={inviteMode === 'invite' ? 'default' : 'outline'}
+                    className="justify-start"
+                    onClick={() => setInviteMode('invite')}
+                  >
+                    <Mail className="h-4 w-4 mr-2" />
+                    Send invite email
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={inviteMode === 'temp_password' ? 'default' : 'outline'}
+                    className="justify-start"
+                    onClick={() => setInviteMode('temp_password')}
+                  >
+                    <KeyRound className="h-4 w-4 mr-2" />
+                    Temp password
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {inviteMode === 'invite'
+                    ? 'The user receives an email to set their own password.'
+                    : 'A one-time password is generated for you to hand over. The user must change it on first login.'}
+                </p>
+              </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsInviteOpen(false)}>
+              <Button variant="outline" onClick={() => setIsInviteOpen(false)} disabled={isInviting}>
                 Cancel
               </Button>
-              <Button onClick={handleInvite}>Send Invitation</Button>
+              <Button onClick={handleInvite} disabled={isInviting}>
+                {isInviting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {inviteMode === 'invite' ? 'Send Invite' : 'Create & Generate Password'}
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -356,6 +541,7 @@ export default function UserManagement() {
                 <TableRow>
                   <TableHead>User</TableHead>
                   <TableHead>Role</TableHead>
+                  <TableHead>Status</TableHead>
                   <TableHead>Joined</TableHead>
                   <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
@@ -415,24 +601,59 @@ export default function UserManagement() {
                         </SelectContent>
                       </Select>
                     </TableCell>
+                    <TableCell>
+                      {(() => {
+                        const status = getStatus(user);
+                        if (status === 'deactivated') {
+                          return (
+                            <Badge variant="secondary" className="bg-muted text-muted-foreground">
+                              Deactivated
+                            </Badge>
+                          );
+                        }
+                        if (status === 'invited') {
+                          return (
+                            <Badge variant="secondary" className="bg-warning text-warning-foreground">
+                              Invited (pending)
+                            </Badge>
+                          );
+                        }
+                        return (
+                          <Badge variant="secondary" className="bg-success text-success-foreground">
+                            Active
+                          </Badge>
+                        );
+                      })()}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">
                       {new Date(user.created_at).toLocaleDateString()}
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <MoreVertical className="h-4 w-4" />
+                          <Button variant="ghost" size="icon" disabled={statusUpdatingId === user.id}>
+                            {statusUpdatingId === user.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <MoreVertical className="h-4 w-4" />
+                            )}
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onClick={() => handleDelete(user.id)}
-                            className="text-destructive focus:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Remove User
-                          </DropdownMenuItem>
+                          {user.deactivated ? (
+                            <DropdownMenuItem onClick={() => handleSetStatus(user, 'reactivate')}>
+                              <UserCheck className="h-4 w-4 mr-2" />
+                              Reactivate User
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem
+                              onClick={() => handleSetStatus(user, 'deactivate')}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <UserX className="h-4 w-4 mr-2" />
+                              Deactivate User
+                            </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -468,6 +689,53 @@ export default function UserManagement() {
             <Button onClick={handleSaveAvatar} disabled={savingAvatar}>
               {savingAvatar && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               Save Avatar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* One-time temporary password modal */}
+      <Dialog
+        open={!!tempPasswordResult}
+        onOpenChange={(open) => {
+          if (!open) {
+            setTempPasswordResult(null);
+            setCopied(false);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Temporary password created</DialogTitle>
+            <DialogDescription>
+              Copy this password and hand it to {tempPasswordResult?.email} securely. It is
+              shown only once and cannot be retrieved again.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <Input
+                readOnly
+                value={tempPasswordResult?.password ?? ''}
+                className="font-mono"
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              <Button type="button" variant="outline" size="icon" onClick={handleCopyTempPassword}>
+                {copied ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
+              </Button>
+            </div>
+            <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm text-foreground">
+              The user must change this password on first login.
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={() => {
+                setTempPasswordResult(null);
+                setCopied(false);
+              }}
+            >
+              Done
             </Button>
           </DialogFooter>
         </DialogContent>

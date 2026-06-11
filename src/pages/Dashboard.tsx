@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDashboardStats } from '@/hooks/useDashboardStats';
+import { useUserProfile } from '@/hooks/useUserProfile';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +17,8 @@ import {
   ArrowRight,
   Plus,
   Loader2,
+  UserCircle,
+  X,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
@@ -42,6 +46,21 @@ const statusColors: Record<string, string> = {
 export default function Dashboard() {
   const { role, isAdminOrManager } = useAuth();
   const { stats, upcomingTasks, recentIssues, loading } = useDashboardStats();
+  const { profile, loading: profileLoading } = useUserProfile();
+  const [profileNudgeDismissed, setProfileNudgeDismissed] = useState(
+    () => localStorage.getItem('profileNudgeDismissed') === 'true'
+  );
+
+  const dismissProfileNudge = () => {
+    localStorage.setItem('profileNudgeDismissed', 'true');
+    setProfileNudgeDismissed(true);
+  };
+
+  const showProfileNudge =
+    !profileLoading &&
+    !profileNudgeDismissed &&
+    profile !== null &&
+    !profile.full_name?.trim();
 
   const formatDueDate = (dateStr: string) => {
     const today = format(new Date(), 'yyyy-MM-dd');
@@ -61,6 +80,31 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {/* Profile completion nudge (non-blocking, dismissible) */}
+      {showProfileNudge && (
+        <div className="flex items-start gap-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
+          <UserCircle className="h-5 w-5 text-primary mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <p className="font-medium text-sm">Complete your profile</p>
+            <p className="text-sm text-muted-foreground">
+              Add your name and an avatar so teammates can recognise you.
+            </p>
+          </div>
+          <Button asChild size="sm" variant="outline">
+            <Link to="/profile">Update profile</Link>
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-8 w-8 shrink-0"
+            onClick={dismissProfileNudge}
+            aria-label="Dismiss"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>

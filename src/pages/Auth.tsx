@@ -1,22 +1,21 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrganization } from '@/hooks/useOrganization';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { Building2, Shield, ClipboardCheck } from 'lucide-react';
 import { z } from 'zod';
 
 const emailSchema = z.string().email('Please enter a valid email address');
-const passwordSchema = z.string().min(6, 'Password must be at least 6 characters');
+const passwordSchema = z.string().min(1, 'Please enter your password');
 
 export default function Auth() {
   const navigate = useNavigate();
-  const { user, signIn, signUp, loading } = useAuth();
+  const { user, signIn, loading } = useAuth();
   const { organization } = useOrganization();
 
   const appName = organization?.name || 'Building Ops';
@@ -25,10 +24,6 @@ export default function Auth() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
-  const [signupEmail, setSignupEmail] = useState('');
-  const [signupPassword, setSignupPassword] = useState('');
-  const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
-  const [signupFullName, setSignupFullName] = useState('');
 
   // Redirect if already logged in
   useEffect(() => {
@@ -41,24 +36,6 @@ export default function Auth() {
     try {
       emailSchema.parse(loginEmail);
       passwordSchema.parse(loginPassword);
-      return true;
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        toast.error(error.errors[0].message);
-      }
-      return false;
-    }
-  };
-
-  const validateSignup = () => {
-    try {
-      emailSchema.parse(signupEmail);
-      passwordSchema.parse(signupPassword);
-      
-      if (signupPassword !== signupConfirmPassword) {
-        toast.error('Passwords do not match');
-        return false;
-      }
       return true;
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -84,26 +61,6 @@ export default function Auth() {
       }
     } else {
       toast.success('Welcome back!');
-      navigate('/');
-    }
-  };
-
-  const handleSignup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validateSignup()) return;
-
-    setIsSubmitting(true);
-    const { error } = await signUp(signupEmail, signupPassword, signupFullName);
-    setIsSubmitting(false);
-
-    if (error) {
-      if (error.message.includes('already registered')) {
-        toast.error('An account with this email already exists');
-      } else {
-        toast.error(error.message);
-      }
-    } else {
-      toast.success('Account created successfully!');
       navigate('/');
     }
   };
@@ -196,107 +153,55 @@ export default function Auth() {
               )}
               <span className="font-bold text-sm">{appName}</span>
             </div>
-            <CardTitle>Welcome</CardTitle>
+            <CardTitle>Welcome back</CardTitle>
             <CardDescription>
-              Sign in to your account or create a new one
+              Sign in to your account
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="login" className="w-full">
-              <TabsList className="grid w-full grid-cols-2 mb-6">
-                <TabsTrigger value="login">Sign In</TabsTrigger>
-                <TabsTrigger value="signup">Sign Up</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="login">
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="login-email">Email</Label>
-                    <Input
-                      id="login-email"
-                      type="email"
-                      placeholder="you@company.com"
-                      value={loginEmail}
-                      onChange={(e) => setLoginEmail(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="login-password">Password</Label>
-                    <Input
-                      id="login-password"
-                      type="password"
-                      placeholder="••••••••"
-                      value={loginPassword}
-                      onChange={(e) => setLoginPassword(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    disabled={isSubmitting}
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="login-email">Email</Label>
+                <Input
+                  id="login-email"
+                  type="email"
+                  placeholder="you@company.com"
+                  value={loginEmail}
+                  onChange={(e) => setLoginEmail(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="login-password">Password</Label>
+                  <Link
+                    to="/reset"
+                    className="text-sm text-primary hover:underline"
                   >
-                    {isSubmitting ? 'Signing in...' : 'Sign In'}
-                  </Button>
-                </form>
-              </TabsContent>
+                    Forgot password?
+                  </Link>
+                </div>
+                <Input
+                  id="login-password"
+                  type="password"
+                  placeholder="••••••••"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? 'Signing in...' : 'Sign In'}
+              </Button>
+            </form>
 
-              <TabsContent value="signup">
-                <form onSubmit={handleSignup} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-name">Full Name</Label>
-                    <Input
-                      id="signup-name"
-                      type="text"
-                      placeholder="Enter your full name"
-                      value={signupFullName}
-                      onChange={(e) => setSignupFullName(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-email">Email</Label>
-                    <Input
-                      id="signup-email"
-                      type="email"
-                      placeholder="you@company.com"
-                      value={signupEmail}
-                      onChange={(e) => setSignupEmail(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-password">Password</Label>
-                    <Input
-                      id="signup-password"
-                      type="password"
-                      placeholder="••••••••"
-                      value={signupPassword}
-                      onChange={(e) => setSignupPassword(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="signup-confirm">Confirm Password</Label>
-                    <Input
-                      id="signup-confirm"
-                      type="password"
-                      placeholder="••••••••"
-                      value={signupConfirmPassword}
-                      onChange={(e) => setSignupConfirmPassword(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    disabled={isSubmitting}
-                  >
-                    {isSubmitting ? 'Creating account...' : 'Create Account'}
-                  </Button>
-                </form>
-              </TabsContent>
-            </Tabs>
+            <p className="mt-6 text-center text-sm text-muted-foreground">
+              Need access? Contact your administrator.
+            </p>
           </CardContent>
         </Card>
       </div>
