@@ -23,6 +23,7 @@ import {
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import GlobalAlertsWidget from '@/components/dashboard/GlobalAlertsWidget';
+import HsComplianceWidget from '@/components/dashboard/HsComplianceWidget';
 import PendingSubmissionsWidget from '@/components/dashboard/PendingSubmissionsWidget';
 import BuildingAlertsWidget from '@/components/dashboard/BuildingAlertsWidget';
 
@@ -209,6 +210,9 @@ export default function Dashboard() {
           </div>
         </CardContent>
       </Card>
+
+      {/* H&S compliance score per building */}
+      {isAdminOrManager && <HsComplianceWidget />}
 
       {/* Global Alerts for Admins/Managers */}
       {isAdminOrManager && <GlobalAlertsWidget />}
