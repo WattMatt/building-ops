@@ -12,8 +12,18 @@ import {
   CheckCircle2,
   AlertTriangle,
   Loader2,
+  ShieldCheck,
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, subDays } from 'date-fns';
+import { useOrganization } from '@/hooks/useOrganization';
+import { generateHsCompliancePdf } from '@/lib/pdfGenerator';
+import type { HsTask, HsDocument } from '@/lib/hsComplianceReport';
+import { resolveStorageUrl } from '@/integrations/supabase/storage';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { toast } from 'sonner';
 
 interface ReportStats {
   complianceRate: number;
@@ -48,6 +58,8 @@ const reportTypes = [
   },
 ];
 
+const MAX_EMBEDDED_PHOTOS = 30;
+
 export default function Reports() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<ReportStats>({
@@ -55,10 +67,119 @@ export default function Reports() {
     buildingsCount: 0,
     pendingIssues: 0,
   });
+  const { organization } = useOrganization();
+  const [hsDialogOpen, setHsDialogOpen] = useState(false);
+  const [hsBuildings, setHsBuildings] = useState<{ id: string; name: string }[]>([]);
+  const [hsBuildingId, setHsBuildingId] = useState('');
+  const [hsStart, setHsStart] = useState(format(subDays(new Date(), 90), 'yyyy-MM-dd'));
+  const [hsEnd, setHsEnd] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [hsGenerating, setHsGenerating] = useState(false);
 
   useEffect(() => {
     fetchStats();
   }, []);
+
+  const openHsDialog = async () => {
+    setHsDialogOpen(true);
+    const { data } = await supabase.from('buildings').select('id, name').order('name');
+    setHsBuildings(data || []);
+  };
+
+  const handleGenerateHsReport = async () => {
+    if (!hsBuildingId) { toast.error('Select a building'); return; }
+    setHsGenerating(true);
+    try {
+      const building = hsBuildings.find((b) => b.id === hsBuildingId)!;
+
+      // H&S tasks = instances carrying a compliance category (set by the DB trigger)
+      const { data: taskRows, error: tasksError } = await supabase
+        .from('task_instances')
+        .select('id, task_name, category, status, due_date, completed_at, completed_by, completion_notes, photo_urls, signature_url')
+        .eq('building_id', hsBuildingId)
+        .gte('due_date', hsStart)
+        .lte('due_date', hsEnd)
+        .not('category', 'is', null)
+        .order('due_date');
+      if (tasksError) throw tasksError;
+
+      const completerIds = [...new Set((taskRows || []).map((t) => t.completed_by).filter(Boolean))] as string[];
+      const names = new Map<string, string>();
+      if (completerIds.length > 0) {
+        const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', completerIds);
+        (profiles || []).forEach((p) => names.set(p.id, p.full_name ?? 'Unknown'));
+      }
+
+      const tasks: HsTask[] = (taskRows || []).map((t) => ({
+        id: t.id,
+        task_name: t.task_name,
+        category: t.category,
+        status: t.status,
+        due_date: t.due_date,
+        completed_at: t.completed_at,
+        completed_by_name: t.completed_by ? (names.get(t.completed_by) ?? 'Unknown') : null,
+        completion_notes: t.completion_notes,
+        photo_urls: Array.isArray(t.photo_urls) ? (t.photo_urls as string[]) : [],
+        signature_confirmed: Boolean(t.signature_url),
+      }));
+
+      const { data: docRows, error: docsError } = await supabase
+        .from('building_documents')
+        .select('id, name, document_type, expiry_date, issuing_authority, reference_number')
+        .eq('building_id', hsBuildingId)
+        .order('document_type');
+      if (docsError) throw docsError;
+      const documents: HsDocument[] = (docRows || []).map((d) => ({ ...d, document_type: d.document_type ?? 'other' }));
+
+      // embed up to MAX_EMBEDDED_PHOTOS thumbnails (1 per completed task, newest first)
+      const photoDataUrls: Record<string, string[]> = {};
+      let embedded = 0;
+      const completedWithPhotos = tasks
+        .filter((t) => t.status === 'completed' && t.photo_urls.length > 0)
+        .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''));
+      for (const t of completedWithPhotos) {
+        if (embedded >= MAX_EMBEDDED_PHOTOS) break;
+        try {
+          const signed = await resolveStorageUrl(t.photo_urls[0]);
+          if (!signed) continue;
+          const blob = await (await fetch(signed)).blob();
+          const dataUrl: string = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          photoDataUrls[t.id] = [dataUrl];
+          embedded += 1;
+        } catch {
+          // photo unavailable — report shows "N photo(s) on file" without thumbnail
+        }
+      }
+
+      await generateHsCompliancePdf({
+        buildingName: building.name,
+        rangeStart: hsStart,
+        rangeEnd: hsEnd,
+        tasks,
+        documents,
+        photoDataUrls,
+        branding: {
+          name: organization?.name || 'Building Ops',
+          logoUrl: organization?.logo_url,
+          primaryColor: organization?.primary_color || '#2563eb',
+          address: organization?.address,
+          phone: organization?.phone,
+          email: organization?.email,
+        },
+      });
+      toast.success('H&S Compliance Report downloaded');
+      setHsDialogOpen(false);
+    } catch (error) {
+      console.error('H&S report error:', error);
+      toast.error('Failed to generate H&S report');
+    } finally {
+      setHsGenerating(false);
+    }
+  };
 
   const fetchStats = async () => {
     setLoading(true);
@@ -180,6 +301,23 @@ export default function Reports() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex items-center justify-between p-4 rounded-lg border hover:bg-muted/50 transition-colors">
+            <div className="flex items-start gap-4">
+              <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                <ShieldCheck className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="font-medium">H&S Compliance Report</h3>
+                <p className="text-sm text-muted-foreground">
+                  Survey-ready evidence pack: completed checks with photo evidence, outstanding items, certificate register status
+                </p>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" onClick={openHsDialog}>
+              <Download className="h-4 w-4 mr-2" />
+              Generate PDF
+            </Button>
+          </div>
           {reportTypes.map((report) => (
             <div
               key={report.id}
@@ -207,6 +345,50 @@ export default function Reports() {
           ))}
         </CardContent>
       </Card>
+
+      {/* H&S Compliance Report Dialog */}
+      <Dialog open={hsDialogOpen} onOpenChange={setHsDialogOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>H&S Compliance Report</DialogTitle>
+            <DialogDescription>
+              Generates a branded PDF evidence pack for a building over a date range.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="hs-building">Building</Label>
+              <Select value={hsBuildingId} onValueChange={setHsBuildingId}>
+                <SelectTrigger id="hs-building">
+                  <SelectValue placeholder="Select building" />
+                </SelectTrigger>
+                <SelectContent>
+                  {hsBuildings.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="hs-start">From</Label>
+                <Input id="hs-start" type="date" value={hsStart} onChange={(e) => setHsStart(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="hs-end">To</Label>
+                <Input id="hs-end" type="date" value={hsEnd} onChange={(e) => setHsEnd(e.target.value)} />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHsDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleGenerateHsReport} disabled={hsGenerating || !hsBuildingId}>
+              {hsGenerating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Generate PDF
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

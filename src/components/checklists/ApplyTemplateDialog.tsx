@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, Building2, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format, startOfDay, startOfWeek, startOfMonth, startOfQuarter, startOfYear, addDays, addMonths, addQuarters, addYears } from 'date-fns';
+import { templateAppliesToBuilding, BUILDING_TYPES } from '@/lib/compliance';
 
 type TaskFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually';
 
@@ -23,11 +24,13 @@ interface Template {
   id: string;
   name: string;
   frequency: TaskFrequency;
+  applies_to_building_types?: string[] | null;
 }
 
 interface Building {
   id: string;
   name: string;
+  building_type: string | null;
 }
 
 interface ApplyTemplateDialogProps {
@@ -78,7 +81,7 @@ export default function ApplyTemplateDialog({
     try {
       const { data, error } = await supabase
         .from('buildings')
-        .select('id, name')
+        .select('id, name, building_type')
         .order('name');
 
       if (error) throw error;
@@ -88,10 +91,14 @@ export default function ApplyTemplateDialog({
     }
   };
 
+  const isEligible = (b: Building) =>
+    templateAppliesToBuilding(template?.applies_to_building_types ?? null, b.building_type);
+  const eligibleBuildings = buildings.filter(isEligible);
+
   const handleSelectAll = (checked: boolean) => {
     setSelectAll(checked);
     if (checked) {
-      setSelectedBuildings(new Set(buildings.map(b => b.id)));
+      setSelectedBuildings(new Set(eligibleBuildings.map(b => b.id)));
     } else {
       setSelectedBuildings(new Set());
     }
@@ -105,7 +112,7 @@ export default function ApplyTemplateDialog({
       newSelected.add(buildingId);
     }
     setSelectedBuildings(newSelected);
-    setSelectAll(newSelected.size === buildings.length);
+    setSelectAll(newSelected.size === eligibleBuildings.length);
   };
 
   const handleApply = async () => {
@@ -159,12 +166,15 @@ export default function ApplyTemplateDialog({
           }));
 
         if (newTasks.length > 0) {
-          const { error: insertError } = await supabase
+          // .select() returns the rows that actually landed — the DB scoping
+          // trigger may legitimately skip rows, so don't trust newTasks.length
+          const { data: inserted, error: insertError } = await supabase
             .from('task_instances')
-            .insert(newTasks);
+            .insert(newTasks)
+            .select('id');
 
           if (insertError) throw insertError;
-          totalCreated += newTasks.length;
+          totalCreated += inserted?.length ?? 0;
         }
       }
 
@@ -204,38 +214,51 @@ export default function ApplyTemplateDialog({
               onCheckedChange={handleSelectAll}
             />
             <Label htmlFor="select-all" className="font-medium">
-              Select All Buildings ({buildings.length})
+              Select All Buildings ({eligibleBuildings.length})
             </Label>
           </div>
 
           <ScrollArea className="h-[300px] pr-4">
             <div className="space-y-2">
-              {buildings.map((building) => (
-                <div
-                  key={building.id}
-                  className={`flex items-center space-x-3 p-3 rounded-lg border transition-colors ${
-                    selectedBuildings.has(building.id)
-                      ? 'bg-primary/5 border-primary/30'
-                      : 'hover:bg-muted/50'
-                  }`}
-                >
-                  <Checkbox
-                    id={building.id}
-                    checked={selectedBuildings.has(building.id)}
-                    onCheckedChange={() => handleBuildingToggle(building.id)}
-                  />
-                  <Label
-                    htmlFor={building.id}
-                    className="flex-1 flex items-center gap-2 cursor-pointer"
+              {buildings.map((building) => {
+                const eligible = isEligible(building);
+                return (
+                  <div
+                    key={building.id}
+                    className={`flex items-center space-x-3 p-3 rounded-lg border transition-colors ${
+                      !eligible
+                        ? 'opacity-50'
+                        : selectedBuildings.has(building.id)
+                          ? 'bg-primary/5 border-primary/30'
+                          : 'hover:bg-muted/50'
+                    }`}
                   >
-                    <Building2 className="h-4 w-4 text-muted-foreground" />
-                    {building.name}
-                  </Label>
-                  {selectedBuildings.has(building.id) && (
-                    <CheckCircle2 className="h-4 w-4 text-primary" />
-                  )}
-                </div>
-              ))}
+                    <Checkbox
+                      id={building.id}
+                      disabled={!eligible}
+                      checked={selectedBuildings.has(building.id)}
+                      onCheckedChange={() => handleBuildingToggle(building.id)}
+                    />
+                    <Label
+                      htmlFor={building.id}
+                      className={`flex-1 flex items-center gap-2 ${eligible ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                    >
+                      <Building2 className="h-4 w-4 text-muted-foreground" />
+                      <span className="flex-1">{building.name}</span>
+                      {!eligible && (
+                        <span className="text-xs text-muted-foreground">
+                          Not applicable — {building.building_type
+                            ? (BUILDING_TYPES.find((t) => t.value === building.building_type)?.label ?? building.building_type)
+                            : 'building type not set'}
+                        </span>
+                      )}
+                    </Label>
+                    {selectedBuildings.has(building.id) && (
+                      <CheckCircle2 className="h-4 w-4 text-primary" />
+                    )}
+                  </div>
+                );
+              })}
 
               {buildings.length === 0 && (
                 <div className="text-center py-8 text-muted-foreground">

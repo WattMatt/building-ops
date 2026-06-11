@@ -16,6 +16,8 @@ import ContactSection, { ContactInfo } from '@/components/building/ContactSectio
 import ProfessionalTeamSection, { ProfessionalTeam, ProfessionalContact } from '@/components/building/ProfessionalTeamSection';
 import TariffSection, { UtilityTariffs, UtilityTariff } from '@/components/building/TariffSection';
 import { SinglePhotoCapture } from '@/components/ui/photo-capture';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { BUILDING_TYPES } from '@/lib/compliance';
 import { BuildingCardPreview } from '@/components/building/BuildingCardPreview';
 import { BuildingAvatarPicker } from '@/components/avatar/BuildingAvatarPicker';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -68,6 +70,7 @@ export default function BuildingForm() {
   // Form state
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
+  const [buildingType, setBuildingType] = useState<string | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPosition, setLogoPosition] = useState<string>('top-left');
@@ -102,6 +105,7 @@ export default function BuildingForm() {
 
       setName(data.name);
       setAddress(data.address);
+      setBuildingType(data.building_type ?? null);
       setLogoUrl(data.logo_url);
       setLogoPosition(data.logo_position || 'top-left');
       setAvatarColor(data.avatar_color || null);
@@ -273,6 +277,7 @@ export default function BuildingForm() {
       const buildingData: Record<string, any> = {
         name: name.trim(),
         address: address.trim(),
+        building_type: buildingType,
         organization_id: organization.id,
         logo_position: logoPosition,
         avatar_color: avatarColor,
@@ -301,6 +306,7 @@ export default function BuildingForm() {
         const insertData = {
           name: name.trim(),
           address: address.trim(),
+          building_type: buildingType,
           organization_id: organization.id,
           logo_position: logoPosition,
           avatar_color: avatarColor,
@@ -511,6 +517,23 @@ export default function BuildingForm() {
                 onChange={(e) => setAddress(e.target.value)}
                 required
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="building_type">Building Type</Label>
+              <Select value={buildingType ?? 'unset'} onValueChange={(v) => setBuildingType(v === 'unset' ? null : v)}>
+                <SelectTrigger id="building_type">
+                  <SelectValue placeholder="Select building type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unset">Not classified</SelectItem>
+                  {BUILDING_TYPES.map((t) => (
+                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Controls which H&S checklist add-ons apply (retail / industrial). Unclassified buildings get core checklists only.
+              </p>
             </div>
           </CardContent>
         </Card>

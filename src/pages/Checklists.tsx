@@ -47,6 +47,7 @@ import {
 import { toast } from 'sonner';
 import TemplateItemDialog from '@/components/checklists/TemplateItemDialog';
 import ApplyTemplateDialog from '@/components/checklists/ApplyTemplateDialog';
+import { categoryMeta, BUILDING_TYPES } from '@/lib/compliance';
 
 type TaskFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually';
 
@@ -58,6 +59,7 @@ interface Template {
   responsible_role: string;
   is_active: boolean;
   organization_id: string;
+  applies_to_building_types: string[] | null;
 }
 
 interface TemplateItem {
@@ -69,6 +71,7 @@ interface TemplateItem {
   requires_signature: boolean;
   display_order: number;
   template_id: string;
+  category: string | null;
   template?: {
     id: string;
     name: string;
@@ -272,6 +275,13 @@ export default function Checklists() {
                 )}
               </div>
               <CardTitle className="text-lg">{template.name}</CardTitle>
+              {template.applies_to_building_types && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {template.applies_to_building_types
+                    .map((t) => BUILDING_TYPES.find((b) => b.value === t)?.label ?? t)
+                    .join(', ')} only
+                </p>
+              )}
             </CardHeader>
             <CardContent>
               <div className="flex items-center justify-between">
@@ -378,7 +388,12 @@ export default function Checklists() {
                           <span className="text-sm">{item.responsible_party || '-'}</span>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {categoryMeta(item.category) && (
+                              <Badge variant="outline" className={categoryMeta(item.category)!.color}>
+                                {categoryMeta(item.category)!.label}
+                              </Badge>
+                            )}
                             {item.requires_photo && (
                               <Badge variant="outline" className="gap-1">
                                 <Camera className="h-3 w-3" />
