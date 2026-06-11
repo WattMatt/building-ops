@@ -212,7 +212,9 @@ export function FormSubmissionsDialog({
             reviewNotes: actionNotes || undefined,
             reviewedAt: reviewedAt,
           }
-        }).catch(err => if (import.meta.env.DEV) console.error('Failed to send review notification:', err));
+        }).catch(err => {
+          if (import.meta.env.DEV) console.error('Failed to send review notification:', err);
+        });
       }
       
       setActionDialogOpen(false);

@@ -44,9 +44,6 @@ const convertHeicToJpeg = async (file: File): Promise<File> => {
       lastModified: Date.now(),
     });
 
-      `HEIC conversion complete: ${file.name} (${(file.size / 1024).toFixed(0)}KB) → ${newFileName} (${(convertedFile.size / 1024).toFixed(0)}KB)`
-    );
-
     return convertedFile;
   } catch (error) {
     if (import.meta.env.DEV) console.error('HEIC conversion failed:', error);
@@ -189,8 +186,6 @@ export function PhotoCapture({
                   type: 'image/jpeg',
                   lastModified: Date.now(),
                 });
-                  `Compressed ${file.name}: ${(file.size / 1024).toFixed(0)}KB → ${(compressedFile.size / 1024).toFixed(0)}KB`
-                );
                 resolve(compressedFile);
               } else {
                 // Original is smaller, use it
@@ -579,8 +574,6 @@ export function SinglePhotoCapture({
                   type: 'image/jpeg',
                   lastModified: Date.now(),
                 });
-                  `Compressed avatar: ${(file.size / 1024).toFixed(0)}KB → ${(compressedFile.size / 1024).toFixed(0)}KB`
-                );
                 resolve(compressedFile);
               } else {
                 resolve(file);
