@@ -3,6 +3,7 @@ import pdfFonts from 'pdfmake/build/vfs_fonts';
 import { FormField } from './formFields';
 import { assembleHsReportData, certificateStatus, type HsTask, type HsDocument } from './hsComplianceReport';
 import { categoryMeta } from './compliance';
+import type { Content, TDocumentDefinitions } from 'pdfmake/interfaces';
 
 // Initialize pdfMake with fonts
 pdfMake.vfs = pdfFonts.vfs;
@@ -621,7 +622,7 @@ export async function generateHsCompliancePdf(opts: {
   const today = new Date();
   const data = assembleHsReportData(tasks, documents, today);
 
-  const content: any[] = [];
+  const content: Content[] = [];
 
   content.push({
     columns: [
@@ -665,12 +666,12 @@ export async function generateHsCompliancePdf(opts: {
   if (data.completedTasks.length === 0) {
     content.push({ text: 'No completed H&S checks in this period.', fontSize: 9, italics: true, color: '#6b7280', margin: [0, 5, 0, 20] });
   } else {
-    const body: any[][] = [
+    const body: Content[][] = [
       ['Check', 'Category', 'Completed', 'By', 'Evidence'].map((h) => ({ text: h, bold: true, fontSize: 9 })),
     ];
     for (const t of data.completedTasks) {
       const photos = photoDataUrls[t.id] ?? [];
-      const evidence: any[] = [];
+      const evidence: Content[] = [];
       if (photos.length > 0) {
         evidence.push({ columns: photos.map((p) => ({ image: p, fit: [60, 45], margin: [0, 0, 4, 0] })) });
       }
@@ -758,7 +759,7 @@ export async function generateHsCompliancePdf(opts: {
     fontSize: 7, color: '#9ca3af', margin: [0, 10, 0, 0],
   });
 
-  const docDefinition: any = {
+  const docDefinition: TDocumentDefinitions = {
     pageSize: 'A4',
     pageMargins: [40, 40, 40, 60],
     content,

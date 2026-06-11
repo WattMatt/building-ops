@@ -200,7 +200,7 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
         .select(`
           task_instance_id,
           completed_by,
-          completed_at
+          completed_at:created_at
         `)
         .in('task_instance_id', taskIds);
 
