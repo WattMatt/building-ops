@@ -1,73 +1,37 @@
-# Welcome to your Lovable project
+# Building Ops — web app
 
-## Project info
+Property and facilities management for building managers, administrators, and on-site staff. Web companion to the GMI Operations iOS app — both share the **GMI-ops** Supabase backend as the single source of truth.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+**Production:** https://buildingops.app (Vercel, auto-deploys on push to `main`)
 
-## How can I edit this code?
+## Stack
 
-There are several ways of editing your application.
+- Vite + React + TypeScript
+- shadcn/ui + Tailwind CSS
+- Supabase (PostgreSQL + Auth + Storage + Edge Functions), project `qdzgkttiosahdfqresvz`
 
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+## Local development
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
 npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Connection is env-driven (`.env` / Vercel env): `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_SUPABASE_PROJECT_ID`.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Backend rules (shared schema — read before touching data shapes)
 
-**Use GitHub Codespaces**
+- The schema is managed from the iOS repo via `GMI/sql/*.sql` migrations — **never** `supabase db push` from here.
+- Data-shape and storage-path conventions are pinned in `GMI/specs/SCHEMA_CONTRACT.md`; changes to those need both teams' ack first.
+- `src/integrations/supabase/types.ts` is regenerated with `supabase gen types typescript --project-id qdzgkttiosahdfqresvz`.
+- The private `tenant-documents` bucket is read via signed URLs (`src/integrations/supabase/storage.ts`) — never `getPublicUrl`.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Edge functions
 
-## What technologies are used for this project?
+Live in `supabase/functions/`; deploy per-function:
 
-This project is built with:
+```sh
+supabase functions deploy <name> --project-ref qdzgkttiosahdfqresvz
+```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+Email goes out via Resend from `notifications@buildingops.app` (`RESEND_API_KEY` is a Supabase secret).

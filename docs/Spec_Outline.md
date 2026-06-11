@@ -629,7 +629,7 @@ Login → Dashboard (Portfolio Overview)
 | date-fns | Date formatting |
 | Recharts | Charts and visualizations |
 
-### 9.2 Backend Stack (Lovable Cloud)
+### 9.2 Backend Stack (Supabase — GMI-ops project)
 
 | Technology | Purpose |
 |------------|---------|
