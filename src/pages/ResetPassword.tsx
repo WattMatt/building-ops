@@ -106,8 +106,18 @@ export default function ResetPassword() {
       // then context) over the possibly-stale context user: a recovery flow can
       // establish a session that hasn't propagated to AuthContext yet.
       const { data: { session } } = await supabase.auth.getSession();
-      const isLoggedIn = !!(data.user ?? session?.user ?? user);
-      navigate(isLoggedIn ? '/' : '/auth');
+      const freshUser = data.user ?? session?.user ?? user;
+      // Choosing a password HERE also satisfies the first-login gate — without
+      // this, invitees who used a reset link instead of the invite link kept
+      // must_set_password=true and ProtectedRoute bounced them out of the app
+      // on every login ("login doesn't work").
+      if (freshUser) {
+        await supabase
+          .from('profiles')
+          .update({ must_set_password: false } as never)
+          .eq('id', freshUser.id);
+      }
+      navigate(freshUser ? '/' : '/auth');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to update password';
       toast.error(message);
