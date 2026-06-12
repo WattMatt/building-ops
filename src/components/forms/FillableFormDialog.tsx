@@ -156,14 +156,16 @@ export function FillableFormDialog({
     
     for (const [fieldLabel, photos] of Object.entries(photoUploads)) {
       for (const photo of photos) {
-        const fileName = `form-submissions/${user?.id}/${Date.now()}-${photo.file.name}`;
+        // Path MUST be photos/<uid>/… — the only tenant-documents prefix a
+        // non-admin may write. Throw on failure rather than silently dropping
+        // the photo the user attached to their submission.
+        const fileName = `photos/${user?.id}/${Date.now()}-${photo.file.name}`;
         const { error: uploadError } = await supabase.storage
           .from('tenant-documents')
           .upload(fileName, photo.file);
 
         if (uploadError) {
-          if (import.meta.env.DEV) console.error('Photo upload error:', uploadError);
-          continue;
+          throw new Error(`Photo upload failed: ${uploadError.message}`);
         }
 
         const { data: urlData } = supabase.storage
