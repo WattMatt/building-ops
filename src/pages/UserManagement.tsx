@@ -71,6 +71,10 @@ interface UserWithRole {
   // Durable deactivation flag maintained by the set-user-status edge function
   // on profiles.deactivated. Read on load; updated optimistically in-session.
   deactivated?: boolean;
+  // Real auth state from the invite-user fn's "status" action (admin-only):
+  // distinguishes "never signed in" from "signed in but still gated".
+  email_confirmed?: boolean;
+  last_sign_in_at?: string | null;
 }
 
 type InviteMode = 'invite' | 'temp_password';
@@ -111,6 +115,7 @@ export default function UserManagement() {
 
   // Deactivate/reactivate in-flight tracking
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
 
   const [avatarDialogUser, setAvatarDialogUser] = useState<UserWithRole | null>(null);
   const [selectedAvatarUrl, setSelectedAvatarUrl] = useState<string | null>(null);
@@ -156,6 +161,27 @@ export default function UserManagement() {
         };
       });
 
+      // Best-effort merge of real auth state (confirmed / last sign-in) so
+      // the status column shows the truth, not just the gate-flag proxy.
+      try {
+        const { data: statusData } = await supabase.functions.invoke('invite-user', {
+          body: { action: 'status' },
+        });
+        const authStates = new Map(
+          ((statusData?.users ?? []) as { id: string; email_confirmed: boolean; last_sign_in_at: string | null }[])
+            .map((u) => [u.id, u])
+        );
+        for (const u of usersWithRoles) {
+          const s = authStates.get(u.id);
+          if (s) {
+            u.email_confirmed = s.email_confirmed;
+            u.last_sign_in_at = s.last_sign_in_at;
+          }
+        }
+      } catch {
+        // Status enrichment is non-critical; the list still renders without it.
+      }
+
       setUsers(usersWithRoles);
     } catch (error) {
       if (import.meta.env.DEV) console.error('Error fetching users:', error);
@@ -169,6 +195,32 @@ export default function UserManagement() {
     if (user.deactivated) return 'deactivated';
     if (user.must_set_password) return 'invited';
     return 'active';
+  };
+
+  // Recovery actions (Onboarding Hardening): fresh sign-in link for a pending
+  // user — emailed via Resend, or copied so onboarding never depends on email.
+  const handleResend = async (user: UserWithRole, delivery: 'email' | 'link') => {
+    setResendingId(user.id);
+    try {
+      const { data, error } = await supabase.functions.invoke('invite-user', {
+        body: { action: 'resend', email: user.email, delivery },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      if (delivery === 'link') {
+        if (!data?.actionLink) throw new Error('No link returned');
+        await navigator.clipboard.writeText(data.actionLink);
+        toast.success('Sign-in link copied — valid for 1 hour. Send it however you like.');
+      } else {
+        toast.success(`Fresh invite emailed to ${user.email} (link valid 1 hour)`);
+      }
+      fetchUsers();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to resend invite';
+      toast.error(message);
+    } finally {
+      setResendingId(null);
+    }
   };
 
   const filteredUsers = users.filter(
@@ -614,7 +666,7 @@ export default function UserManagement() {
                         if (status === 'invited') {
                           return (
                             <Badge variant="secondary" className="bg-warning text-warning-foreground">
-                              Invited (pending)
+                              {user.last_sign_in_at ? 'Password setup pending' : 'Invited — never signed in'}
                             </Badge>
                           );
                         }
@@ -631,8 +683,8 @@ export default function UserManagement() {
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" disabled={statusUpdatingId === user.id}>
-                            {statusUpdatingId === user.id ? (
+                          <Button variant="ghost" size="icon" disabled={statusUpdatingId === user.id || resendingId === user.id}>
+                            {statusUpdatingId === user.id || resendingId === user.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
                               <MoreVertical className="h-4 w-4" />
@@ -640,6 +692,18 @@ export default function UserManagement() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          {getStatus(user) === 'invited' && (
+                            <>
+                              <DropdownMenuItem onClick={() => handleResend(user, 'email')}>
+                                <Mail className="h-4 w-4 mr-2" />
+                                Resend invite email
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleResend(user, 'link')}>
+                                <Copy className="h-4 w-4 mr-2" />
+                                Copy sign-in link
+                              </DropdownMenuItem>
+                            </>
+                          )}
                           {user.deactivated ? (
                             <DropdownMenuItem onClick={() => handleSetStatus(user, 'reactivate')}>
                               <UserCheck className="h-4 w-4 mr-2" />

@@ -79,7 +79,90 @@ serve(async (req) => {
     const buildingIds: string[] = Array.isArray(body.buildingIds) ? body.buildingIds : [];
     const mode = body.mode === "temp_password" ? "temp_password" : "invite";
 
+    // ── action: "status" — real auth state for the admin user list ──
+    // The "Invited (pending)" badge used to key off the must_set_password
+    // proxy alone; this exposes the truth (confirmed? ever signed in?).
+    if (body.action === "status") {
+      const { data: listData, error: listError } = await adminClient.auth.admin.listUsers({
+        page: 1,
+        perPage: 1000,
+      });
+      if (listError) return json({ error: `List failed: ${listError.message}` }, 500);
+      return json({
+        status: "ok",
+        users: (listData?.users ?? []).map((u) => ({
+          id: u.id,
+          email_confirmed: Boolean(u.email_confirmed_at),
+          last_sign_in_at: u.last_sign_in_at ?? null,
+        })),
+      });
+    }
+
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: "Valid email is required" }, 400);
+
+    // ── action: "resend" — recovery path for an EXISTING pending user ──
+    // Generates a fresh sign-in link and either emails it (Resend API,
+    // branded) or returns it for the admin to copy. The copy path makes
+    // onboarding independent of email delivery entirely.
+    if (body.action === "resend") {
+      const { data: profile } = await adminClient
+        .from("profiles").select("id, deactivated, full_name").eq("email", email).maybeSingle();
+      if (!profile) return json({ error: "No user with that email" }, 404);
+      if (profile.deactivated) return json({ error: "User is deactivated — reactivate them first" }, 409);
+
+      // The admin created this account and is vouching for the address:
+      // confirm it so a recovery-grade link is always issuable, whatever
+      // state the original invite died in.
+      await adminClient.auth.admin.updateUserById(profile.id, { email_confirm: true });
+
+      const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+        type: "recovery",
+        email,
+        options: { redirectTo: SET_PASSWORD_URL },
+      });
+      const actionLink = linkData?.properties?.action_link;
+      if (linkError || !actionLink) {
+        return json({ error: `Link generation failed: ${linkError?.message ?? "unknown"}` }, 500);
+      }
+
+      const delivery = body.delivery === "link" ? "link" : "email";
+      if (delivery === "email") {
+        const resendKey = Deno.env.get("RESEND_API_KEY");
+        if (!resendKey) return json({ error: "RESEND_API_KEY not configured" }, 500);
+        const greeting = profile.full_name ? `Hi ${profile.full_name},` : "Hi,";
+        const emailRes = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            from: "Building Ops <notifications@buildingops.app>",
+            to: [email],
+            subject: "Your Building Ops sign-in link",
+            html: `<div style="font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:480px;margin:0 auto;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
+<div style="background:#006d8f;padding:18px 32px;"><span style="color:#ffffff;font-size:18px;font-weight:700;">Building Ops</span></div>
+<div style="padding:28px 32px;color:#111827;font-size:14px;line-height:1.6;">
+<p style="margin:0 0 12px;">${greeting}</p>
+<p style="margin:0 0 20px;">Here is a fresh link to finish setting up your Building Ops account. Click it, choose a password, and you're in.</p>
+<p style="margin:0 0 24px;"><a href="${actionLink}" style="background:#006d8f;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;display:inline-block;">Set your password</a></p>
+<p style="margin:0;color:#6b7280;font-size:12px;">This link is valid for 1 hour. If it expires, ask your administrator to send a new one.</p>
+</div></div>`,
+          }),
+        });
+        if (!emailRes.ok) {
+          const detail = await emailRes.text().catch(() => "");
+          return json({ error: `Email send failed: ${detail.slice(0, 200)}` }, 502);
+        }
+      }
+
+      await adminClient.from("audit_logs").insert({
+        action: delivery === "email" ? "resend_invite_email" : "copy_invite_link",
+        entity_type: "user",
+        entity_id: profile.id,
+        user_id: caller.id,
+      });
+
+      return json(delivery === "email" ? { status: "resent" } : { status: "link", actionLink });
+    }
+
     if (!VALID_ROLES.includes(role)) return json({ error: "Invalid role" }, 400);
     const uuidRe = /^[0-9a-f-]{36}$/i;
     if (buildingIds.some((b) => !uuidRe.test(b))) return json({ error: "Invalid building id" }, 400);
