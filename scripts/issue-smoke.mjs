@@ -113,19 +113,19 @@ try {
   assert('issue resolved + assigned (terminal state persisted)', final?.status === 'resolved' && final?.assigned_to === userId,
     `status=${final?.status} assigned_to=${final?.assigned_to}`);
 
-  // ── step 3: audit trail readiness (F-32: app does not write this yet) ──
-  res = await fetch(`${URL_BASE}/rest/v1/issue_activity`, {
-    method: 'POST', headers: { ...authed(jwt), Prefer: 'return=representation' },
-    body: JSON.stringify({ issue_id: issue, user_id: userId, activity_type: 'status_change', old_value: 'escalated', new_value: 'resolved' }),
-  });
-  const iaOk = res.status === 201;
-  if (iaOk) cleanup.unshift(['issue_activity', `issue_id=eq.${issue}`]);
-  assert('issue_activity ACCEPTS a lifecycle row (audit trail ready to wire)', iaOk, `HTTP ${res.status} ${iaOk ? '' : await res.text()}`);
-  const live = await (await fetch(`${URL_BASE}/rest/v1/issue_activity?select=id&limit=1`, { headers: SVC })).json();
-  if ((live.length ?? 0) === 0) {
-    note('F-32: issue_activity has 0 rows in prod — the web app never writes it (no logging on transitions).');
-  }
-  note('F-33: the web UI has no controls to assign/transition/resolve — updateIssue() is never called; /issues is read-only. The lifecycle above is data-layer only.');
+  // ── step 3: audit trail auto-logged by the F-32 trigger ──
+  // The create + the 4 patches above (assign, in_progress, escalated, resolved)
+  // should each have produced an issue_activity row automatically.
+  const acts = await (await fetch(`${URL_BASE}/rest/v1/issue_activity?issue_id=eq.${issue}&select=activity_type,old_value,new_value,user_id&order=created_at`, { headers: SVC })).json();
+  if (acts.length) cleanup.unshift(['issue_activity', `issue_id=eq.${issue}`]);
+  const types = acts.map((a) => a.activity_type);
+  assert('trigger logged "created" on insert', types.includes('created'), `types=${types}`);
+  assert('trigger logged the assignment', acts.some((a) => a.activity_type === 'assignment' && a.new_value === userId), `acts=${JSON.stringify(acts)}`);
+  const statusLog = acts.filter((a) => a.activity_type === 'status_change');
+  assert('trigger logged all 3 status transitions (in_progress, escalated, resolved)',
+    statusLog.length === 3 && statusLog.map((a) => a.new_value).join(',') === 'in_progress,escalated,resolved',
+    `status_changes=${JSON.stringify(statusLog.map((a) => `${a.old_value}->${a.new_value}`))}`);
+  assert('every logged change attributes the actor (user_id set)', acts.every((a) => a.user_id === userId), 'some activity rows have no actor');
 } catch (e) {
   fail('smoke run', e.message);
 } finally {

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIssues } from '@/hooks/useIssues';
+import IssueDetailDialog from '@/components/issues/IssueDetailDialog';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -52,6 +53,9 @@ export default function Issues() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<IssueStatus | 'all'>('all');
   const [priorityFilter, setPriorityFilter] = useState<IssuePriority | 'all'>('all');
+  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
+  // Derive from the live list so the dialog reflects edits after refetch.
+  const selectedIssue = issues.find((i) => i.id === selectedIssueId) ?? null;
 
   const filteredIssues = issues.filter((issue) => {
     const matchesSearch =
@@ -222,7 +226,11 @@ export default function Issues() {
       ) : (
         <div className="space-y-4">
           {filteredIssues.map((issue) => (
-            <Card key={issue.id} className="hover:shadow-sm transition-shadow">
+            <Card
+              key={issue.id}
+              className="hover:shadow-sm transition-shadow cursor-pointer"
+              onClick={() => setSelectedIssueId(issue.id)}
+            >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex items-start gap-4">
@@ -277,6 +285,16 @@ export default function Issues() {
             </Card>
           ))}
         </div>
+      )}
+
+      {selectedIssue && (
+        <IssueDetailDialog
+          issue={selectedIssue}
+          open={!!selectedIssue}
+          onOpenChange={(o) => { if (!o) setSelectedIssueId(null); }}
+          canManage={isAdminOrManager}
+          onUpdated={refetch}
+        />
       )}
     </div>
   );
