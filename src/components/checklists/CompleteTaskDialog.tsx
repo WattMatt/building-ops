@@ -77,19 +77,23 @@ export default function CompleteTaskDialog({
     setLoading(true);
 
     try {
-      // Upload photos if any
+      // Upload photos if any. Path MUST be photos/<uid>/… — the only
+      // tenant-documents prefix a non-admin may write (storage policy
+      // "td write own photos"). A failed upload throws rather than silently
+      // dropping compliance evidence the user believes they attached.
       const photoUrls: string[] = [];
       for (const photo of photos) {
-        const fileName = `completions/${user.id}/${Date.now()}-${photo.file.name}`;
+        const fileName = `photos/${user.id}/${Date.now()}-${photo.file.name}`;
         const { error: uploadError } = await supabase.storage
           .from('tenant-documents')
           .upload(fileName, photo.file);
 
         if (uploadError) {
-          console.error('Photo upload error:', uploadError);
-          continue;
+          throw new Error(`Photo upload failed: ${uploadError.message}`);
         }
 
+        // Stored as a public-style URL; resolveStorageUrl re-signs it for the
+        // private bucket at display time (mirrors the forms/reports pattern).
         const { data: urlData } = supabase.storage
           .from('tenant-documents')
           .getPublicUrl(fileName);

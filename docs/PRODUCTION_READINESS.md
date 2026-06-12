@@ -10,14 +10,14 @@
 |---|---|---|---|---|---|---|---|
 | 0 | Auth & onboarding | ✅ | ✅ 2026-06-12 | ✅ `auth-smoke.mjs` (12) | ✅ owner, real inbox | ✅ ONBOARDING_RUNBOOK | **READY** |
 | 1 | RLS access matrix (roles × 22 tables × 4 ops + 5 storage prefixes) | ✅ pg_policies | ✅ | ✅ `rls-smoke.mjs` (386) | n/a (protocol-only) | this file | **READY** — found+fixed F-30 (tenant-docs policies dead) on first run |
-| 2 | Checklist execution | — | — | — | — | — | pending |
+| 2 | Checklist execution | ✅ | ✅ | ✅ `checklist-smoke.mjs` (10) | dry-run owed | this file | **READY** — found+fixed F-31a (completion photos uploaded to an unpoliced prefix → silent evidence loss) |
 | 3 | Issue lifecycle | — | — | — | — | — | pending |
 | 4 | Documents & certificates (incl. pg_cron renewals) | — | — | — | — | — | pending |
 | 5 | H&S compliance (scoping trigger → tasks → PDF) | — | — | — | — | — | pending |
 | 6 | Forms (submit → review → branded PDF) | — | — | — | — | — | pending |
 | 7 | Dashboard truthfulness (KPIs re-derived by SQL) | — | — | — | — | — | pending |
 | 8 | Admin operations (deactivate / role change / reassignment) | — | — | — | — | — | pending |
-| 9 | iOS offline queue field test (Runs A–D) | ✅ | n/a | unit-tested | **owner-owed** | n/a | blocked on physical test |
+| 9 | ~~iOS offline queue field test~~ | | | | | | **SKIPPED — owner ruling 2026-06-12: pilot is web-only, all iOS items out of readiness scope** |
 
 ## Standing battery
 
