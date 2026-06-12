@@ -117,9 +117,11 @@ export default function TenantDocumentsDialog({ tenant, open, onOpenChange }: Te
     setUploading(true);
 
     try {
-      // Upload file to storage
+      // Upload file to storage. Path MUST be tenant-docs/<tenant_id>/… — the
+      // tenant-docs storage policy keys off the "tenant-docs" prefix and
+      // resolves building access via building_tenants at segment 2.
       const fileExt = selectedFile.name.split('.').pop();
-      const filePath = `${tenant.id}/${Date.now()}.${fileExt}`;
+      const filePath = `tenant-docs/${tenant.id}/${Date.now()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
         .from('tenant-documents')

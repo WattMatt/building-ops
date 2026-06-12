@@ -144,7 +144,9 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
 
   const uploadFile = async (file: File): Promise<string | null> => {
     const fileExt = file.name.split('.').pop();
-    const fileName = `${buildingId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+    // Path MUST be documents/<building_id>/… — the building-docs storage
+    // policy keys off the "documents" prefix + building access at segment 2.
+    const fileName = `documents/${buildingId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
 
     const { error: uploadError } = await supabase.storage
       .from('tenant-documents')
