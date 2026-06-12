@@ -12,6 +12,11 @@ lerna-debug.log*
 .env.local
 .env.*.local
 
+# Schema is managed from the iOS repo (GMI/sql/) via the Management API.
+# The Supabase CLI recreates this dir on db pull — never commit or db push it.
+supabase/migrations/
+supabase/.temp/
+
 node_modules
 dist
 dist-ssr
