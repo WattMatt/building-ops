@@ -141,7 +141,23 @@ try {
   // ── guard: an admin cannot deactivate themselves ──
   res = await setStatus(personas.admin.jwt, personas.admin.id, 'deactivate');
   assert('guard: admin cannot deactivate their own account (400)', res.status === 400, `HTTP ${res.status}`);
-  console.log('  NOTE  last-admin guard is enforced in set-user-status but not exercised here (would require being the only admin on shared prod).');
+
+  // ── hard delete (delete-user edge fn): self-guard, then real deletion ──
+  const del = (callerJwt, userId) => fetch(`${URL_BASE}/functions/v1/delete-user`, {
+    method: 'POST', headers: { ...authed(callerJwt), apikey: ANON }, body: JSON.stringify({ userId }),
+  });
+  res = await del(personas.admin.jwt, personas.admin.id);
+  assert('guard: admin cannot delete their own account (400)', res.status === 400, `HTTP ${res.status}`);
+
+  res = await del(personas.admin.jwt, personas.target.id);
+  assert('admin hard-deletes the target user (delete-user 200)', res.ok, `HTTP ${res.status} ${res.ok ? '' : await res.text()}`);
+  const goneAuth = await fetch(`${URL_BASE}/auth/v1/admin/users/${personas.target.id}`, { headers: SVC });
+  assert('deleted user is removed from auth.users', goneAuth.status === 404, `HTTP ${goneAuth.status}`);
+  const goneProf = await (await fetch(`${URL_BASE}/rest/v1/profiles?id=eq.${personas.target.id}&select=id`, { headers: SVC })).json();
+  assert('deleted user profile + child rows gone', (goneProf.length ?? 0) === 0, `${goneProf.length} profile rows remain`);
+  delete personas.target; // already gone — skip it in teardown
+
+  console.log('  NOTE  last-admin guard is enforced in set-user-status/delete-user but not exercised here (would require being the only admin on shared prod).');
 } catch (e) {
   fail('smoke run', e.message);
 } finally {

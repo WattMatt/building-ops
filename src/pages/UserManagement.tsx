@@ -47,6 +47,7 @@ import {
   Mail,
   KeyRound,
   Building2,
+  Trash2,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -96,7 +97,7 @@ const roleLabels: Record<string, string> = {
 };
 
 export default function UserManagement() {
-  const { isAdmin, inviteUser, setUserStatus } = useAuth();
+  const { isAdmin, inviteUser, setUserStatus, user: currentUser } = useAuth();
   const { buildings, loading: buildingsLoading } = useBuildings();
   const [users, setUsers] = useState<UserWithRole[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,6 +122,11 @@ export default function UserManagement() {
 
   // Building-access editor (F-35)
   const [assigningUser, setAssigningUser] = useState<UserWithRole | null>(null);
+
+  // Hard-delete (typed-email confirmation; irreversible)
+  const [deletingUser, setDeletingUser] = useState<UserWithRole | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [avatarDialogUser, setAvatarDialogUser] = useState<UserWithRole | null>(null);
   const [selectedAvatarUrl, setSelectedAvatarUrl] = useState<string | null>(null);
@@ -320,6 +326,27 @@ export default function UserManagement() {
       toast.error(message);
     } finally {
       setStatusUpdatingId(null);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!deletingUser) return;
+    setIsDeleting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('delete-user', {
+        body: { userId: deletingUser.id },
+      });
+      if (error) throw new Error(error.message);
+      if (data?.error) throw new Error(data.error);
+      setUsers((prev) => prev.filter((u) => u.id !== deletingUser.id));
+      toast.success(`${deletingUser.full_name || deletingUser.email} deleted`);
+      setDeletingUser(null);
+      setDeleteConfirmText('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete user';
+      toast.error(message);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -737,6 +764,15 @@ export default function UserManagement() {
                               Deactivate User
                             </DropdownMenuItem>
                           )}
+                          {user.id !== currentUser?.id && (
+                            <DropdownMenuItem
+                              onClick={() => { setDeletingUser(user); setDeleteConfirmText(''); }}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Delete User…
+                            </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -834,6 +870,45 @@ export default function UserManagement() {
           onSaved={fetchUsers}
         />
       )}
+
+      {/* Hard-delete confirmation — irreversible; requires typing the email. */}
+      <Dialog open={!!deletingUser} onOpenChange={(o) => { if (!o) { setDeletingUser(null); setDeleteConfirmText(''); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-destructive">Delete user</DialogTitle>
+            <DialogDescription>
+              This permanently deletes <span className="font-medium">{deletingUser?.full_name || deletingUser?.email}</span>{' '}
+              and all of their access. This cannot be undone. To re-add them later you'll send a fresh invite.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="delete-confirm">
+              Type <span className="font-mono font-medium">{deletingUser?.email}</span> to confirm
+            </Label>
+            <Input
+              id="delete-confirm"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder={deletingUser?.email}
+              autoComplete="off"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setDeletingUser(null); setDeleteConfirmText(''); }} disabled={isDeleting}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteUser}
+              disabled={isDeleting || deleteConfirmText.trim().toLowerCase() !== (deletingUser?.email ?? '').toLowerCase()}
+              className="gap-2"
+            >
+              {isDeleting && <Loader2 className="h-4 w-4 animate-spin" />}
+              Delete permanently
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
