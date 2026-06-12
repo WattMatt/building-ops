@@ -127,8 +127,16 @@ try {
   const reJwt = res.ok ? (await res.json()).access_token : null;
   assert('reactivated user can log in again', !!reJwt, `login HTTP ${res.status}`);
   const ub2 = await (await fetch(`${URL_BASE}/rest/v1/user_buildings?user_id=eq.${personas.target.id}&select=id`, { headers: SVC })).json();
-  assert('F-35: building assignments are NOT restored on reactivate (admin must re-assign — no UI for it)', (ub2.length ?? 0) === 0, `unexpectedly restored ${ub2.length}`);
-  if (reJwt) assert('reactivated user still cannot see their old building until re-assigned', !(await canRead(reJwt, 'buildings', bldgA)), 'saw building without reassignment');
+  assert('reactivate does NOT auto-restore assignments (admin re-assigns explicitly — by design)', (ub2.length ?? 0) === 0, `unexpectedly restored ${ub2.length}`);
+  if (reJwt) assert('reactivated user cannot see their old building until re-assigned', !(await canRead(reJwt, 'buildings', bldgA)), 'saw building without reassignment');
+
+  // ── F-35 fix: admin re-assigns via the same insert EditAssignmentsDialog uses ──
+  const reassign = await fetch(`${URL_BASE}/rest/v1/user_buildings`, {
+    method: 'POST', headers: { ...authed(personas.admin.jwt), Prefer: 'return=representation' },
+    body: JSON.stringify({ user_id: personas.target.id, building_id: bldgA }),
+  });
+  assert('admin re-assigns a building (user_buildings insert — the F-35 UI path)', reassign.status === 201, `HTTP ${reassign.status}`);
+  if (reJwt) assert('after re-assignment the user regains building access', await canRead(reJwt, 'buildings', bldgA), 'access not restored after re-assignment');
 
   // ── guard: an admin cannot deactivate themselves ──
   res = await setStatus(personas.admin.jwt, personas.admin.id, 'deactivate');

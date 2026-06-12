@@ -46,6 +46,7 @@ import {
   Check,
   Mail,
   KeyRound,
+  Building2,
 } from 'lucide-react';
 import {
   DropdownMenu,
@@ -56,6 +57,7 @@ import {
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { AvatarPicker } from '@/components/avatar/AvatarPicker';
+import EditAssignmentsDialog from '@/components/users/EditAssignmentsDialog';
 
 type UserStatus = 'active' | 'invited' | 'deactivated';
 
@@ -116,6 +118,9 @@ export default function UserManagement() {
   // Deactivate/reactivate in-flight tracking
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
+
+  // Building-access editor (F-35)
+  const [assigningUser, setAssigningUser] = useState<UserWithRole | null>(null);
 
   const [avatarDialogUser, setAvatarDialogUser] = useState<UserWithRole | null>(null);
   const [selectedAvatarUrl, setSelectedAvatarUrl] = useState<string | null>(null);
@@ -704,6 +709,10 @@ export default function UserManagement() {
                               </DropdownMenuItem>
                             </>
                           )}
+                          <DropdownMenuItem onClick={() => setAssigningUser(user)}>
+                            <Building2 className="h-4 w-4 mr-2" />
+                            Edit building access
+                          </DropdownMenuItem>
                           {user.deactivated ? (
                             <DropdownMenuItem onClick={() => handleSetStatus(user, 'reactivate')}>
                               <UserCheck className="h-4 w-4 mr-2" />
@@ -804,6 +813,17 @@ export default function UserManagement() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {assigningUser && (
+        <EditAssignmentsDialog
+          userId={assigningUser.id}
+          userLabel={assigningUser.full_name || assigningUser.email}
+          buildings={buildings}
+          open={!!assigningUser}
+          onOpenChange={(o) => { if (!o) setAssigningUser(null); }}
+          onSaved={fetchUsers}
+        />
+      )}
     </div>
   );
 }
