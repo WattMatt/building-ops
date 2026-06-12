@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "smoke": "node scripts/auth-smoke.mjs && node scripts/rls-smoke.mjs && node scripts/checklist-smoke.mjs"
+    "smoke": "node scripts/auth-smoke.mjs && node scripts/rls-smoke.mjs && node scripts/checklist-smoke.mjs && node scripts/issue-smoke.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

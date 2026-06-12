@@ -11,7 +11,7 @@
 | 0 | Auth & onboarding | ✅ | ✅ 2026-06-12 | ✅ `auth-smoke.mjs` (12) | ✅ owner, real inbox | ✅ ONBOARDING_RUNBOOK | **READY** |
 | 1 | RLS access matrix (roles × 22 tables × 4 ops + 5 storage prefixes) | ✅ pg_policies | ✅ | ✅ `rls-smoke.mjs` (386) | n/a (protocol-only) | this file | **READY** — found+fixed F-30 (tenant-docs policies dead) on first run |
 | 2 | Checklist execution | ✅ | ✅ | ✅ `checklist-smoke.mjs` (10) | dry-run owed | this file | **READY** — found+fixed F-31a (completion photos uploaded to an unpoliced prefix → silent evidence loss) |
-| 3 | Issue lifecycle | — | — | — | — | — | pending |
+| 3 | Issue lifecycle | ✅ | ✅ | ✅ `issue-smoke.mjs` (8, backend) | n/a | this file | **BACKEND READY; UI INCOMPLETE** — fixed F-31 b/d (photo paths); **F-32** (audit trail never written) + **F-33** (no assign/transition/resolve UI) need owner decisions |
 | 4 | Documents & certificates (incl. pg_cron renewals) | — | — | — | — | — | pending |
 | 5 | H&S compliance (scoping trigger → tasks → PDF) | — | — | — | — | — | pending |
 | 6 | Forms (submit → review → branded PDF) | — | — | — | — | — | pending |

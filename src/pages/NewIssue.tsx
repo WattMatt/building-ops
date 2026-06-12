@@ -78,18 +78,21 @@ export default function NewIssue() {
       
       if (photos.length > 0) {
         for (const photo of photos) {
-          const fileName = `issues/${crypto.randomUUID()}.jpg`;
+          // photos/<uid>/… in the private tenant-documents bucket — the only
+          // prefix a non-admin may write. (Previously building-logos, an
+          // admin-write-only PUBLIC bucket, so site users were denied and
+          // evidence leaked public when they weren't.)
+          const fileName = `photos/${user.id}/${Date.now()}-${crypto.randomUUID()}.jpg`;
           const { error: uploadError } = await supabase.storage
-            .from('building-logos') // Using existing bucket for now
+            .from('tenant-documents')
             .upload(fileName, photo.file, { contentType: photo.file.type });
 
           if (uploadError) {
-            console.error('Error uploading photo:', uploadError);
-            continue;
+            throw new Error(`Photo upload failed: ${uploadError.message}`);
           }
 
           const { data: urlData } = supabase.storage
-            .from('building-logos')
+            .from('tenant-documents')
             .getPublicUrl(fileName);
 
           if (urlData) {
