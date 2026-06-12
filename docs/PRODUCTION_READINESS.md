@@ -1,0 +1,38 @@
+# Production Readiness Matrix — Building Ops
+
+> One row per client journey. A journey is **ready** when all five artifacts
+> exist and its smoke passes against production. Method (proven on auth,
+> 2026-06-12): layer map → live data audit → automated smoke → human dry run →
+> runbook entry + truthful UI. Findings go to the iOS repo's
+> `specs/verification/FINDINGS_REGISTER.md`.
+
+| # | Journey | Map | Data audit | Smoke | Dry run | Runbook | Status |
+|---|---|---|---|---|---|---|---|
+| 0 | Auth & onboarding | ✅ | ✅ 2026-06-12 | ✅ `auth-smoke.mjs` (12) | ✅ owner, real inbox | ✅ ONBOARDING_RUNBOOK | **READY** |
+| 1 | RLS access matrix (roles × 22 tables × 4 ops + 5 storage prefixes) | ✅ pg_policies | ✅ | ✅ `rls-smoke.mjs` (386) | n/a (protocol-only) | this file | **READY** — found+fixed F-30 (tenant-docs policies dead) on first run |
+| 2 | Checklist execution | — | — | — | — | — | pending |
+| 3 | Issue lifecycle | — | — | — | — | — | pending |
+| 4 | Documents & certificates (incl. pg_cron renewals) | — | — | — | — | — | pending |
+| 5 | H&S compliance (scoping trigger → tasks → PDF) | — | — | — | — | — | pending |
+| 6 | Forms (submit → review → branded PDF) | — | — | — | — | — | pending |
+| 7 | Dashboard truthfulness (KPIs re-derived by SQL) | — | — | — | — | — | pending |
+| 8 | Admin operations (deactivate / role change / reassignment) | — | — | — | — | — | pending |
+| 9 | iOS offline queue field test (Runs A–D) | ✅ | n/a | unit-tested | **owner-owed** | n/a | blocked on physical test |
+
+## Standing battery
+
+```sh
+npm run smoke   # auth-smoke + rls-smoke, ~90s, exit 0 = all journeys hold
+```
+
+Requires `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY` env.
+Run after **every** web deploy and **every** schema/policy migration.
+Both smokes use disposable `zztest-*` personas/fixtures and clean up after
+themselves (rls-smoke also sweeps strays from aborted runs).
+
+## Rules of the program
+
+- Schema/policy migrations are staging-first (`vkrihpmjajjcxmzgjqdr`), smoke
+  red→green there, then prod, then smoke again on prod.
+- A journey's smoke failing after a deploy is a stop-ship for that journey.
+- Every finding gets a register entry (F-xx) with evidence before it gets a fix.

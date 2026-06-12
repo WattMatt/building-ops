@@ -29,13 +29,17 @@
 | "Email rate limit exceeded" | `rate_limit_email_sent` exhausted (now 100/hr) | Use **Copy sign-in link** (no email involved); raise the limit in Auth config if onboarding in bulk. |
 | Reset email never arrives | As above, or SMTP credentials broken | Copy-link path for the stuck user; verify SMTP per §5. |
 
-## 4. Post-deploy smoke (≈20s)
+## 4. Post-deploy smoke (≈20s; full battery `npm run smoke` ≈90s)
 
 ```sh
 SUPABASE_URL=https://qdzgkttiosahdfqresvz.supabase.co \
 SUPABASE_SERVICE_ROLE_KEY=... \
 node scripts/auth-smoke.mjs
 ```
+
+For schema or policy changes, run the full battery instead (adds the 386-probe
+RLS access matrix, needs `SUPABASE_ANON_KEY` too): `npm run smoke`. See
+`docs/PRODUCTION_READINESS.md`.
 
 Protocol-checks, against production, with a disposable user it deletes afterwards:
 invite-link → verify → session → set password → login · recovery-link → new password → login · gate flag set → clear → login. Exit 0 = all journeys pass.

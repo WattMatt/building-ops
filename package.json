@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "smoke": "node scripts/auth-smoke.mjs && node scripts/rls-smoke.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
