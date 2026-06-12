@@ -13,7 +13,7 @@
 | 2 | Checklist execution | ✅ | ✅ | ✅ `checklist-smoke.mjs` (10) | dry-run owed | this file | **READY** — found+fixed F-31a (completion photos uploaded to an unpoliced prefix → silent evidence loss) |
 | 3 | Issue lifecycle | ✅ | ✅ | ✅ `issue-smoke.mjs` (8, backend) | n/a | this file | **BACKEND READY; UI INCOMPLETE** — fixed F-31 b/d (photo paths); **F-32** (audit trail never written) + **F-33** (no assign/transition/resolve UI) need owner decisions |
 | 4 | Documents & certificates (incl. pg_cron renewals) | ✅ | ✅ | ✅ `documents-smoke.mjs` (8) | dry-run owed | this file | **READY** — fixed F-31 e/f (doc upload paths); cert-renewal cron verified live (expiring→pending, lapsed→overdue, idempotent); signed-URL display confirmed |
-| 5 | H&S compliance (scoping trigger → tasks → PDF) | — | — | — | — | — | pending |
+| 5 | H&S compliance (scoping trigger → tasks → PDF) | ✅ | ✅ | ✅ `hs-smoke.mjs` (8) + 15 unit | n/a | this file | **READY (code)** — scoping trigger + category denorm verified live; PDF assembler unit-tested. **Owner action: classify the 2 prod buildings** (both `building_type` null → retail/industrial add-ons dormant until set) |
 | 6 | Forms (submit → review → branded PDF) | — | — | — | — | — | pending |
 | 7 | Dashboard truthfulness (KPIs re-derived by SQL) | — | — | — | — | — | pending |
 | 8 | Admin operations (deactivate / role change / reassignment) | — | — | — | — | — | pending |
