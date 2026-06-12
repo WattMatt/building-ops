@@ -1,3 +1,17 @@
+> # ⛔ SUPERSEDED — historical only (do not rely on this document)
+> This is the original **2024-01-24 "FM Comply" MVP vision doc**, written before the product
+> became **Building Ops**, before the migration off Lovable onto the shared GMI-ops Supabase
+> backend, and before most features existed. Kept only as a historical artifact.
+>
+> **Current, maintained specifications (2026-06-12):**
+> - Feature-level: `GMI/SPEC.md`
+> - Web function-level: `GMI/specs/web/` (per-file specs + `FORM_CATALOG.md`, `DOCUMENT_CATALOG.md`, `IMAGE_RECORDING.md`)
+> - iOS function-level: `GMI/specs/`
+> - Findings/verification: `GMI/specs/verification/FINDINGS_REGISTER.md`
+> - Production readiness: `docs/PRODUCTION_READINESS.md` (this repo)
+
+---
+
 # FM Comply - Facilities Management Compliance SaaS
 
 ## Specification Document v1.0
