@@ -114,10 +114,12 @@ export default function CompleteTaskDialog({
 
       if (completionError) throw completionError;
 
-      // Update task status to completed
+      // Update task status to completed. Stamp completed_at/completed_by on the
+      // instance too — Reports and the dashboard "completed today" KPI key off
+      // task_instances.completed_at, which was previously left null on web.
       const { error: updateError } = await supabase
         .from('task_instances')
-        .update({ status: 'completed' })
+        .update({ status: 'completed', completed_at: new Date().toISOString(), completed_by: user.id })
         .eq('id', taskId);
 
       if (updateError) throw updateError;

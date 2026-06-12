@@ -5,7 +5,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { format } from 'date-fns';
 
 interface DashboardStats {
   buildings: number;
@@ -58,7 +57,10 @@ export function useDashboardStats(): UseDashboardStatsReturn {
     setError(null);
 
     try {
-      const today = format(new Date(), 'yyyy-MM-dd');
+      // Local-day boundaries as UTC instants (no '+' in the encoded query).
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+      const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
 
       // Parallel fetch for performance
       const [
@@ -71,18 +73,21 @@ export function useDashboardStats(): UseDashboardStatsReturn {
       ] = await Promise.all([
         // Buildings count
         supabase.from('buildings').select('*', { count: 'exact', head: true }),
-        // Pending tasks (due today or overdue)
+        // Open tasks = pending OR overdue (matches the iOS F-06 semantics; the
+        // old status='pending' match silently dropped overdue-status tasks).
         supabase
           .from('task_instances')
           .select('*', { count: 'exact', head: true })
-          .eq('status', 'pending')
-          .lte('due_date', today),
-        // Completed today
+          .in('status', ['pending', 'overdue']),
+        // Completed today = completed WITH completed_at falling in the local
+        // day (was due_date=today, which miscounts: a task completed today but
+        // due another day wasn't counted, and vice-versa).
         supabase
           .from('task_instances')
           .select('*', { count: 'exact', head: true })
           .eq('status', 'completed')
-          .eq('due_date', today),
+          .gte('completed_at', startOfToday)
+          .lt('completed_at', startOfTomorrow),
         // Open issues
         supabase
           .from('issues')
