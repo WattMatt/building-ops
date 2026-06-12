@@ -198,7 +198,12 @@ export default function UserManagement() {
 
   const getStatus = (user: UserWithRole): UserStatus => {
     if (user.deactivated) return 'deactivated';
-    if (user.must_set_password) return 'invited';
+    // Ground truth: a user who has NEVER signed in still needs to set up,
+    // whatever the (fragile, default-false) must_set_password flag says — this
+    // is what kept a never-onboarded user mislabelled "Active" with no
+    // recovery action. A user mid-setup (signed in but gate still set) is also
+    // "invited" so the recovery link stays offered.
+    if (!user.last_sign_in_at || user.must_set_password) return 'invited';
     return 'active';
   };
 
@@ -217,7 +222,7 @@ export default function UserManagement() {
         await navigator.clipboard.writeText(data.actionLink);
         toast.success('Sign-in link copied — valid for 24 hours. Send it however you like.');
       } else {
-        toast.success(`Fresh invite emailed to ${user.email} (link valid 24 hours)`);
+        toast.success(`Sign-in link emailed to ${user.email} (valid 24 hours)`);
       }
       fetchUsers();
     } catch (error) {
@@ -697,11 +702,16 @@ export default function UserManagement() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          {getStatus(user) === 'invited' && (
+                          {/* Recovery valve — available for ANY non-deactivated
+                              user, not just "invited": a fresh sign-in link
+                              recovers a never-onboarded user AND a forgotten
+                              password. This is what was missing for locked-out
+                              "Active" users. */}
+                          {!user.deactivated && (
                             <>
                               <DropdownMenuItem onClick={() => handleResend(user, 'email')}>
                                 <Mail className="h-4 w-4 mr-2" />
-                                Resend invite email
+                                Send sign-in link (email)
                               </DropdownMenuItem>
                               <DropdownMenuItem onClick={() => handleResend(user, 'link')}>
                                 <Copy className="h-4 w-4 mr-2" />

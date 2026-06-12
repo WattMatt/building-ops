@@ -205,9 +205,19 @@ serve(async (req) => {
       );
     }
 
-    const profilePatch: Record<string, unknown> = { must_set_password: true };
+    // Set the first-login gate. Use upsert (not a bare update) and VERIFY the
+    // write: a plain update that matched zero rows — e.g. racing the
+    // handle_new_user trigger that creates the profile — used to leave
+    // must_set_password at its default (false), stranding the user as a
+    // never-onboarded account the admin UI mislabelled "Active". Fail loudly
+    // rather than hand back a half-provisioned invite.
+    const profilePatch: Record<string, unknown> = { id: newUserId, must_set_password: true };
     if (fullName) profilePatch.full_name = fullName;
-    await adminClient.from("profiles").update(profilePatch).eq("id", newUserId);
+    const { data: patched, error: patchErr } = await adminClient
+      .from("profiles").upsert(profilePatch, { onConflict: "id" }).select("id, must_set_password");
+    if (patchErr || !patched?.[0]?.must_set_password) {
+      return json({ error: `Failed to set first-login gate: ${patchErr?.message ?? "no row written"}` }, 500);
+    }
 
     // Audit trail
     await adminClient.from("audit_logs").insert({
