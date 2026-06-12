@@ -15,7 +15,7 @@
 
 ## 2. Recovery actions (User Management → row menu)
 
-- **Resend invite email** — generates a *fresh* 1-hour sign-in link and emails it via Resend (branded). Works regardless of how the original invite died; also auto-confirms the address (the admin is vouching for it).
+- **Resend invite email** — generates a *fresh* 24-hour sign-in link and emails it via Resend (branded). Works regardless of how the original invite died; also auto-confirms the address (the admin is vouching for it).
 - **Copy sign-in link** — same fresh link, copied to your clipboard instead of emailed. **This is the email-independence valve**: WhatsApp it, paste it in Teams, read it over the phone. Use it whenever email is in doubt.
 - Both land the user on `/set-password`, which clears the first-login gate on completion. (`/reset` also clears it since 2026-06-11.)
 
@@ -24,7 +24,7 @@
 | Symptom | Likely cause | Action |
 |---|---|---|
 | "Never got the invite email" | Delivery failure, spam, or (historically) rate limit / SMTP outage | **Copy sign-in link**, send it directly. If systemic, see §5. |
-| "My link says expired / invalid" | Links are one-time and valid 1 hour; corporate mail scanners can also consume them | **Resend invite email** or **Copy sign-in link**. |
+| "My link says expired / invalid" | Links are one-time and valid 24 hours (raised from 1h on 2026-06-12); corporate mail scanners can also consume them | **Resend invite email** or **Copy sign-in link**. |
 | "I log in and it just asks for a password again" | First-login gate still set (badge: *Password setup pending*) | That screen IS the next step — they set a password once and they're in. If it loops after setting, escalate (gate-clear regression). |
 | "Email rate limit exceeded" | `rate_limit_email_sent` exhausted (now 100/hr) | Use **Copy sign-in link** (no email involved); raise the limit in Auth config if onboarding in bulk. |
 | Reset email never arrives | As above, or SMTP credentials broken | Copy-link path for the stuck user; verify SMTP per §5. |

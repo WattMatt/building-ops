@@ -143,7 +143,7 @@ serve(async (req) => {
 <p style="margin:0 0 12px;">${greeting}</p>
 <p style="margin:0 0 20px;">Here is a fresh link to finish setting up your Building Ops account. Click it, choose a password, and you're in.</p>
 <p style="margin:0 0 24px;"><a href="${actionLink}" style="background:#006d8f;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;display:inline-block;">Set your password</a></p>
-<p style="margin:0;color:#6b7280;font-size:12px;">This link is valid for 1 hour. If it expires, ask your administrator to send a new one.</p>
+<p style="margin:0;color:#6b7280;font-size:12px;">This link is valid for 24 hours. If it expires, ask your administrator to send a new one.</p>
 </div></div>`,
           }),
         });

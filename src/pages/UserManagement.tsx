@@ -210,9 +210,9 @@ export default function UserManagement() {
       if (delivery === 'link') {
         if (!data?.actionLink) throw new Error('No link returned');
         await navigator.clipboard.writeText(data.actionLink);
-        toast.success('Sign-in link copied — valid for 1 hour. Send it however you like.');
+        toast.success('Sign-in link copied — valid for 24 hours. Send it however you like.');
       } else {
-        toast.success(`Fresh invite emailed to ${user.email} (link valid 1 hour)`);
+        toast.success(`Fresh invite emailed to ${user.email} (link valid 24 hours)`);
       }
       fetchUsers();
     } catch (error) {
