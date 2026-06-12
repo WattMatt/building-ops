@@ -32,6 +32,37 @@ export default function SetPassword() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Inline "request a fresh link" for an expired/already-used link — keeps the
+  // whole journey on this page instead of bouncing to the reset-password page.
+  const [reqEmail, setReqEmail] = useState('');
+  const [reqSent, setReqSent] = useState(false);
+  const [requesting, setRequesting] = useState(false);
+  // Links are one-time; corporate mail scanners often pre-click and consume them,
+  // so the human arrives with #error=otp_expired and no session. Detect that.
+  const linkExpired =
+    typeof window !== 'undefined' &&
+    (window.location.hash.includes('error') || window.location.hash.includes('otp_expired'));
+
+  const handleRequestNewLink = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const email = reqEmail.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      toast.error('Please enter a valid email address');
+      return;
+    }
+    setRequesting(true);
+    // Send a fresh setup link that lands right back here.
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/set-password`,
+    });
+    setRequesting(false);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    setReqSent(true); // always show success (don't leak which emails exist)
+  };
+
   useEffect(() => {
     let active = true;
 
@@ -108,36 +139,67 @@ export default function SetPassword() {
   }
 
   if (!hasSession) {
+    const Header = (
+      <CardHeader className="text-center">
+        <div className="flex flex-col items-center gap-2 mb-4">
+          {logoUrl ? (
+            <img src={logoUrl} alt={appName} className="w-16 h-16 rounded-lg object-contain" />
+          ) : (
+            <div className="w-16 h-16 bg-primary rounded-lg flex items-center justify-center">
+              <ClipboardCheck className="w-8 h-8 text-primary-foreground" />
+            </div>
+          )}
+          <span className="font-bold text-sm">{appName}</span>
+        </div>
+        <CardTitle>{reqSent ? 'Check your email' : 'This link has expired'}</CardTitle>
+        <CardDescription>
+          {reqSent
+            ? `If an account exists for ${reqEmail}, a fresh setup link is on its way.`
+            : linkExpired
+              ? 'Setup links can only be used once and expire after a short time — and email security scanners sometimes open them first. Enter your email and we’ll send a fresh one.'
+              : 'Enter your email and we’ll send a fresh link to finish setting up your account.'}
+        </CardDescription>
+      </CardHeader>
+    );
+
     return (
       <div className="flex min-h-screen items-center justify-center bg-background p-4">
         <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="flex flex-col items-center gap-2 mb-4">
-              {logoUrl ? (
-                <img src={logoUrl} alt={appName} className="w-16 h-16 rounded-lg object-contain" />
-              ) : (
-                <div className="w-16 h-16 bg-primary rounded-lg flex items-center justify-center">
-                  <ClipboardCheck className="w-8 h-8 text-primary-foreground" />
-                </div>
-              )}
-              <span className="font-bold text-sm">{appName}</span>
-            </div>
-            <CardTitle>Link expired or invalid</CardTitle>
-            <CardDescription>
-              This invite link is no longer valid. Invite links can only be used once
-              and expire after a short time.
-            </CardDescription>
-          </CardHeader>
+          {Header}
           <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Request a fresh link, or ask your administrator to re-send your invite.
-            </p>
-            <Button asChild className="w-full">
-              <Link to="/reset">Request a new link</Link>
-            </Button>
-            <Button asChild variant="ghost" className="w-full">
-              <Link to="/auth">Back to sign in</Link>
-            </Button>
+            {reqSent ? (
+              <>
+                <p className="text-sm text-muted-foreground text-center">
+                  Open the link in the email to choose your password. It’s valid for 24 hours
+                  and can only be used once.
+                </p>
+                <Button asChild variant="ghost" className="w-full">
+                  <Link to="/auth">Back to sign in</Link>
+                </Button>
+              </>
+            ) : (
+              <form onSubmit={handleRequestNewLink} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="setup-email">Email</Label>
+                  <Input
+                    id="setup-email"
+                    type="email"
+                    placeholder="you@company.com"
+                    value={reqEmail}
+                    onChange={(e) => setReqEmail(e.target.value)}
+                    autoComplete="email"
+                    required
+                  />
+                </div>
+                <Button type="submit" className="w-full" disabled={requesting}>
+                  {requesting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  {requesting ? 'Sending…' : 'Email me a fresh link'}
+                </Button>
+                <Button asChild variant="ghost" className="w-full">
+                  <Link to="/auth">Back to sign in</Link>
+                </Button>
+              </form>
+            )}
           </CardContent>
         </Card>
       </div>
