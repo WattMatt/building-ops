@@ -19,6 +19,7 @@ import { SinglePhotoCapture } from '@/components/ui/photo-capture';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BUILDING_TYPES } from '@/lib/compliance';
 import { BuildingCardPreview } from '@/components/building/BuildingCardPreview';
+import LocationSection from '@/components/building/LocationSection';
 import { BuildingAvatarPicker } from '@/components/avatar/BuildingAvatarPicker';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -70,6 +71,8 @@ export default function BuildingForm() {
   // Form state
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
   const [buildingType, setBuildingType] = useState<string | null>(null);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -105,6 +108,8 @@ export default function BuildingForm() {
 
       setName(data.name);
       setAddress(data.address);
+      setLatitude(data.latitude ?? null);
+      setLongitude(data.longitude ?? null);
       setBuildingType(data.building_type ?? null);
       setLogoUrl(data.logo_url);
       setLogoPosition(data.logo_position || 'top-left');
@@ -277,6 +282,8 @@ export default function BuildingForm() {
       const buildingData: Record<string, any> = {
         name: name.trim(),
         address: address.trim(),
+        latitude,
+        longitude,
         building_type: buildingType,
         organization_id: organization.id,
         logo_position: logoPosition,
@@ -306,6 +313,8 @@ export default function BuildingForm() {
         const insertData = {
           name: name.trim(),
           address: address.trim(),
+          latitude,
+          longitude,
           building_type: buildingType,
           organization_id: organization.id,
           logo_position: logoPosition,
@@ -537,6 +546,16 @@ export default function BuildingForm() {
             </div>
           </CardContent>
         </Card>
+
+        <LocationSection
+          address={address}
+          latitude={latitude}
+          longitude={longitude}
+          onChange={(c) => {
+            setLatitude(c?.latitude ?? null);
+            setLongitude(c?.longitude ?? null);
+          }}
+        />
 
         <Separator />
         <h2 className="text-lg font-semibold text-muted-foreground">Management Contacts</h2>
