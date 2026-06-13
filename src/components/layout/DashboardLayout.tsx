@@ -82,6 +82,11 @@ const mainNavItems: NavItem[] = [
 
 const reportsNavItems: NavItem[] = [
   {
+    title: 'Operational Reports',
+    href: '/reports/fortress',
+    icon: <ClipboardCheck className="w-4 h-4" />,
+  },
+  {
     title: 'Compliance Reports',
     href: '/reports',
     icon: <BarChart3 className="w-4 h-4" />,

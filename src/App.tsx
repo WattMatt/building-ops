@@ -22,6 +22,9 @@ import Issues from "./pages/Issues";
 import NewIssue from "./pages/NewIssue";
 import MapView from "./pages/MapView";
 import Reports from "./pages/Reports";
+import FortressReports from "./pages/FortressReports";
+import FortressReportEditor from "./components/reports/fortress/FortressReportEditor";
+import FortressBuildingDashboard from "./pages/FortressBuildingDashboard";
 import AuditArchive from "./pages/AuditArchive";
 import FormsLibrary from "./pages/FormsLibrary";
 import UserManagement from "./pages/UserManagement";
@@ -95,6 +98,21 @@ const App = () => (
             <Route path="/reports" element={
               <ProtectedRoute>
                 <DashboardLayout><Reports /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/reports/fortress" element={
+              <ProtectedRoute>
+                <DashboardLayout><FortressReports /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/reports/fortress/building/:id" element={
+              <ProtectedRoute>
+                <DashboardLayout><FortressBuildingDashboard /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/reports/fortress/:id" element={
+              <ProtectedRoute>
+                <DashboardLayout><FortressReportEditor /></DashboardLayout>
               </ProtectedRoute>
             } />
             <Route path="/audit" element={
