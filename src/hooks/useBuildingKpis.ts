@@ -7,7 +7,7 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { fdb } from '@/integrations/supabase/fortress-db';
-import { classify, THRESHOLDS, type KpiStatus } from '@/lib/fortressKpis';
+import { classify, ratioPct, waterDeltaPct, THRESHOLDS, type KpiStatus } from '@/lib/fortressKpis';
 
 export type KpiFormat = 'pct' | 'zar' | 'count' | 'number';
 export interface Kpi {
@@ -89,21 +89,21 @@ export function useBuildingKpis(buildingId: string | undefined) {
         const insp = inspRows.data ?? [];
         const acc = insp.filter((r) => r.acceptable === 'yes').length;
         const ans = insp.filter((r) => r.acceptable === 'yes' || r.acceptable === 'no').length;
-        const k2 = ans ? Math.round((acc / ans) * 1000) / 10 : null;
+        const k2 = ratioPct(acc, ans);
         kpis.push({ id: 'K2', label: 'Inspection Pass', value: k2, format: 'pct', status: classify(k2, THRESHOLDS.inspectionPass) });
         const openActions = insp.filter((r) => r.action_required && r.action_required !== 'none').length;
         kpis.push({ id: 'K3', label: 'Open Action Items', value: openActions, format: 'count', status: classify(openActions, THRESHOLDS.openActions) });
 
         // K4 recovery
         const exp = sum(recov.data, 'ytd_expense'); const rec = sum(recov.data, 'ytd_recovery');
-        const k4 = exp ? Math.round((rec / exp) * 1000) / 10 : null;
+        const k4 = ratioPct(rec, exp);
         kpis.push({ id: 'K4', label: 'Expense Recovery', value: k4, format: 'pct', status: classify(k4, THRESHOLDS.recovery), sub: k4 !== null ? `R${Math.round(rec).toLocaleString()} / R${Math.round(exp).toLocaleString()}` : undefined });
 
         // K8 water bulk vs site total Δ
         const rds = readings.data ?? [];
         const bulk = rds.find((r) => r.utility === 'water' && r.meter_name === 'Bulk Check')?.reading;
         const site = rds.find((r) => r.utility === 'water' && (r.meter_name ?? '').includes('Site Daily'))?.reading;
-        const k8 = bulk && site ? Math.round((Math.abs(num(site)! - num(bulk)!) / num(bulk)!) * 1000) / 10 : null;
+        const k8 = waterDeltaPct(num(bulk), num(site));
         kpis.push({ id: 'K8', label: 'Water Bulk Δ', value: k8, format: 'pct', status: classify(k8, THRESHOLDS.waterDelta) });
 
         // K9 solar / K10 borehole yield
@@ -115,7 +115,7 @@ export function useBuildingKpis(buildingId: string | undefined) {
         // K12 masterfile completeness
         const mf = master.data ?? [];
         const onFile = mf.filter((m) => m.on_file === true).length;
-        const k12 = mf.length ? Math.round((onFile / mf.length) * 1000) / 10 : null;
+        const k12 = ratioPct(onFile, mf.length);
         kpis.push({ id: 'K12', label: 'Masterfile Complete', value: k12, format: 'pct', status: classify(k12, THRESHOLDS.masterfile), sub: mf.length ? `${onFile}/${mf.length}` : undefined });
       }
 

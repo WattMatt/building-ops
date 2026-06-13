@@ -5,6 +5,20 @@
  */
 export type KpiStatus = 'good' | 'warn' | 'bad' | 'info';
 
+/** `num / den * 100`, rounded to `dp` decimals. null when den is missing or zero
+ *  (so a KPI with no denominator shows an honest empty-state, never NaN/∞). */
+export function ratioPct(num: number | null | undefined, den: number | null | undefined, dp = 1): number | null {
+  if (num === null || num === undefined || den === null || den === undefined || den === 0) return null;
+  const f = Math.pow(10, dp);
+  return Math.round((num / den) * 100 * f) / f;
+}
+
+/** |site − bulk| / bulk * 100 — the K8 water bulk-vs-check delta. */
+export function waterDeltaPct(bulk: number | null | undefined, site: number | null | undefined): number | null {
+  if (bulk === null || bulk === undefined || site === null || site === undefined || bulk === 0) return null;
+  return Math.round((Math.abs(site - bulk) / bulk) * 1000) / 10;
+}
+
 export interface KpiThreshold {
   /** higher is better unless `invert` */
   good: number;
