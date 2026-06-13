@@ -10,6 +10,7 @@ import { SectionCard } from '../SectionCard';
 import { fdb, type TenantCompliance, type YesNoNa } from '@/integrations/supabase/fortress-db';
 import { useFortressReport } from '@/hooks/useFortressReports';
 import type { SectionProps } from './types';
+import { YnsCell } from '../YnsCell';
 
 type Tenant = { id: string; shop_number: string | null; shop_name: string | null; name: string | null };
 
@@ -17,23 +18,10 @@ const YNS: { key: keyof TenantCompliance; label: string }[] = [
   { key: 'hvac_records_current', label: 'HVAC' },
   { key: 'generator_records_current', label: 'Generator' },
   { key: 'fire_sprinkler_annual', label: 'Sprinkler (yr)' },
-  { key: 'smoke_detection_current', label: 'Smoke det.' },
+  { key: 'smoke_detection_annual_service', label: 'Smoke det.' },
   { key: 'handheld_fire_current', label: 'Extinguishers' },
   { key: 'evac_plan_displayed', label: 'Evac plan' },
 ];
-
-function YnsCell({ value, disabled, onChange }: { value: YesNoNa | null; disabled: boolean; onChange: (v: YesNoNa) => void }) {
-  return (
-    <Select value={value ?? ''} onValueChange={(v) => onChange(v as YesNoNa)} disabled={disabled}>
-      <SelectTrigger className="h-8 w-20"><SelectValue placeholder="—" /></SelectTrigger>
-      <SelectContent>
-        <SelectItem value="yes">Yes</SelectItem>
-        <SelectItem value="no">No</SelectItem>
-        <SelectItem value="na">N/A</SelectItem>
-      </SelectContent>
-    </Select>
-  );
-}
 
 export default function TenantComplianceSection({ reportId, buildingId, readOnly }: SectionProps) {
   const qc = useQueryClient();

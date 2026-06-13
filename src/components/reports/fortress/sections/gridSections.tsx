@@ -49,7 +49,7 @@ const UTIL_YIELD_COLS: GridColumn[] = [
 
 const MASTERFILE_COLS: GridColumn[] = [
   { key: 'document_label', label: 'Document', type: 'text' },
-  { key: 'on_file', label: 'On File', type: 'bool' },
+  { key: 'on_file', label: 'On File', type: 'tristate', options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }, { value: 'unassessed', label: 'Unassessed' }] },
   { key: 'responsible', label: 'Responsible', type: 'text' },
   { key: 'comment', label: 'Comment', type: 'text' },
 ];
