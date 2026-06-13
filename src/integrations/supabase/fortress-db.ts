@@ -57,6 +57,15 @@ export type CapexItem = FRow<'capex_items'>;
 export type TenantCompliance = FRow<'tenant_compliance'>;
 export type TenantShopSpec = FRow<'tenant_shop_spec'>;
 
+// §6 delta tables (sql/2026-06-13_15.._18)
+export type BuildingTurnover = FRow<'building_turnover'>;
+export type CategoryTurnover = FRow<'category_turnover'>;
+export type HazardLog = FRow<'hazard_log'>;
+export type ReportChecklistItem = FRow<'report_checklist_items'>;
+export type LocalResourceContact = FRow<'local_resources_contacts'>;
+export type InspectionSubitem = FRow<'inspection_subitems'>;
+export type BuildingTurnoverGrowth = FViewRow<'v_building_turnover'>;
+
 export type ComplianceScore = FViewRow<'compliance_scores'>;
 export type ComplianceSectionScore = FViewRow<'compliance_section_scores'>;
 export type ComplianceCriticalScore = FViewRow<'compliance_critical_scores'>;
