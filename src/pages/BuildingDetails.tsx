@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,6 +17,7 @@ import NotesTab from '@/components/building/NotesTab';
 import OverviewWidgets from '@/components/building/OverviewWidgets';
 import ChecklistsTab from '@/components/building/ChecklistsTab';
 import FormsTab from '@/components/building/FormsTab';
+import ReportsTab from '@/components/building/ReportsTab';
 import { BuildingAvatar } from '@/components/building/BuildingAvatar';
 import { BuildingAvatarDialog } from '@/components/building/BuildingAvatarDialog';
 
@@ -36,10 +37,17 @@ export default function BuildingDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isAdminOrManager } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [building, setBuilding] = useState<Building | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') ?? 'overview');
   const [avatarDialogOpen, setAvatarDialogOpen] = useState(false);
+
+  // keep the active tab in the URL so report links / the editor back-button can deep-link here
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    setSearchParams((prev) => { prev.set('tab', tab); return prev; }, { replace: true });
+  };
 
   useEffect(() => {
     if (id) fetchBuilding(id);
@@ -149,7 +157,7 @@ export default function BuildingDetails() {
       </div>
 
       {/* Tabs - Mobile optimized with icons */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
         <TabsList className="w-full">
           <TabsTrigger value="overview" className="flex-1 sm:flex-none">
             <span className="hidden sm:inline">Overview</span>
@@ -160,6 +168,7 @@ export default function BuildingDetails() {
             <span className="sm:hidden">Tasks</span>
           </TabsTrigger>
           <TabsTrigger value="forms" className="flex-1 sm:flex-none">Forms</TabsTrigger>
+          <TabsTrigger value="reports" className="flex-1 sm:flex-none">Reports</TabsTrigger>
           <TabsTrigger value="tenants" className="flex-1 sm:flex-none">Tenants</TabsTrigger>
           <TabsTrigger value="assets" className="flex-1 sm:flex-none">Assets</TabsTrigger>
           <TabsTrigger value="maintenance" className="flex-1 sm:flex-none">
@@ -280,6 +289,10 @@ export default function BuildingDetails() {
 
         <TabsContent value="forms" className="mt-6">
           <FormsTab buildingId={building.id} buildingName={building.name} />
+        </TabsContent>
+
+        <TabsContent value="reports" className="mt-6">
+          <ReportsTab buildingId={building.id} buildingName={building.name} />
         </TabsContent>
 
         <TabsContent value="tenants" className="mt-6">

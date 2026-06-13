@@ -52,7 +52,7 @@ export default function FortressReportEditor() {
     return (
       <div className="p-6">
         <p className="text-sm text-muted-foreground">Report not found, or you don’t have access.</p>
-        <Button variant="outline" className="mt-4" onClick={() => navigate('/reports/fortress')}>
+        <Button variant="outline" className="mt-4" onClick={() => navigate('/buildings')}>
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to reports
         </Button>
       </div>
@@ -91,8 +91,8 @@ export default function FortressReportEditor() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <Button variant="ghost" size="sm" className="-ml-2 mb-1" onClick={() => navigate('/reports/fortress')}>
-            <ArrowLeft className="mr-2 h-4 w-4" /> Reports
+          <Button variant="ghost" size="sm" className="-ml-2 mb-1" onClick={() => navigate(`/buildings/${report.building_id}?tab=reports`)}>
+            <ArrowLeft className="mr-2 h-4 w-4" /> Back to building
           </Button>
           <h1 className="text-2xl font-semibold">{report.title}</h1>
           <p className="text-sm text-muted-foreground">
