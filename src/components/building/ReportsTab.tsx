@@ -2,7 +2,7 @@
  *  plus its OHS compliance and KPI dashboards. Lives inside BuildingDetails alongside
  *  Tenants/Assets/Documents — reports are per building, not a global list. */
 import { useNavigate } from 'react-router-dom';
-import { FileText } from 'lucide-react';
+import { FileText, Download, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -15,6 +15,15 @@ import { OhsComplianceTab } from '@/components/reports/fortress/OhsComplianceTab
 import { KpiCard } from '@/components/reports/fortress/KpiCard';
 import { REPORT_STATUS_VARIANT, formatPeriodLabel } from '@/lib/fortressReports';
 import { REPORT_TYPE_LABELS } from '@/integrations/supabase/fortress-db';
+import { useState } from 'react';
+import { format, subDays } from 'date-fns';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { toast } from 'sonner';
+import { useOrganization } from '@/hooks/useOrganization';
+import { generateBuildingHsReport } from '@/lib/hsReportData';
 
 export default function ReportsTab({ buildingId, buildingName }: { buildingId: string; buildingName?: string }) {
   const navigate = useNavigate();
@@ -22,12 +31,50 @@ export default function ReportsTab({ buildingId, buildingName }: { buildingId: s
   const { data: reports, isLoading } = useFortressReports(buildingId);
   const { data: kpiData } = useBuildingKpis(buildingId);
   const hasApproved = !!kpiData?.ops || !!kpiData?.cm;
+  const { organization } = useOrganization();
+  const [hsOpen, setHsOpen] = useState(false);
+  const [hsStart, setHsStart] = useState(format(subDays(new Date(), 90), 'yyyy-MM-dd'));
+  const [hsEnd, setHsEnd] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [hsGenerating, setHsGenerating] = useState(false);
+
+  const handleGenerateHs = async () => {
+    setHsGenerating(true);
+    try {
+      await generateBuildingHsReport({
+        buildingId,
+        buildingName: buildingName ?? 'Building',
+        rangeStart: hsStart,
+        rangeEnd: hsEnd,
+        branding: {
+          name: organization?.name || 'Building Ops',
+          logoUrl: organization?.logo_url,
+          primaryColor: organization?.primary_color || '#2563eb',
+          address: organization?.address,
+          phone: organization?.phone,
+          email: organization?.email,
+        },
+      });
+      toast.success('H&S Compliance Report downloaded');
+      setHsOpen(false);
+    } catch (error) {
+      console.error('H&S report error:', error);
+      toast.error('Failed to generate H&S report');
+    } finally {
+      setHsGenerating(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">Monthly OPS &amp; CM and annual inspection reports for this building.</p>
-        {isAdminOrManager && <NewReportDialog buildingId={buildingId} buildingName={buildingName} />}
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setHsOpen(true)}>
+            <Download className="h-4 w-4 mr-2" />
+            H&amp;S PDF
+          </Button>
+          {isAdminOrManager && <NewReportDialog buildingId={buildingId} buildingName={buildingName} />}
+        </div>
       </div>
 
       <Card>
@@ -87,6 +134,32 @@ export default function ReportsTab({ buildingId, buildingName }: { buildingId: s
           </TabsContent>
         </Tabs>
       )}
+
+      <Dialog open={hsOpen} onOpenChange={setHsOpen}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>H&amp;S Compliance Report</DialogTitle>
+            <DialogDescription>Branded PDF evidence pack for {buildingName ?? 'this building'} over a date range.</DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="tab-hs-start">From</Label>
+              <Input id="tab-hs-start" type="date" value={hsStart} onChange={(e) => setHsStart(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="tab-hs-end">To</Label>
+              <Input id="tab-hs-end" type="date" value={hsEnd} onChange={(e) => setHsEnd(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHsOpen(false)}>Cancel</Button>
+            <Button onClick={handleGenerateHs} disabled={hsGenerating}>
+              {hsGenerating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Generate PDF
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
