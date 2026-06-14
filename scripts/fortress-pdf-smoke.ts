@@ -14,6 +14,7 @@ const require = createRequire(import.meta.url);
 const PrinterMod: any = require('pdfmake/js/Printer.js');
 const PdfPrinter = PrinterMod.default ?? PrinterMod;
 import { buildReportDoc, type ReportData } from '@/lib/fortressReportDoc';
+import { ANNUAL_FIELD_SETS } from '@/lib/annualFieldSets';
 
 const REF = 'qdzgkttiosahdfqresvz';
 let tok = execSync('security find-generic-password -s "Supabase CLI" -w', { encoding: 'utf8' }).trim();
@@ -42,8 +43,8 @@ const CAP = 30; // embed a representative subset for the proof artifact
 async function main() {
   const rep = (await q(`SELECT title,report_period,report_type,asset_manager,ops_manager,centre_manager FROM reports WHERE id='${ANNUAL}'`))[0];
   const insp = (await q(`SELECT id,template_id FROM building_inspections WHERE report_id='${ANNUAL}'`))[0];
-  const items = await q(`SELECT id,section_no,section_title,item_label,sort_order FROM inspection_template_items WHERE template_id='${insp.template_id}' ORDER BY sort_order`);
-  const resps = await q(`SELECT template_item_id,condition_rating,recommendation,comment,capex_estimate,applicable,photo_urls FROM inspection_responses WHERE inspection_id='${insp.id}'`);
+  const items = await q(`SELECT id,section_no,section_title,item_label,sort_order,field_set FROM inspection_template_items WHERE template_id='${insp.template_id}' ORDER BY sort_order`);
+  const resps = await q(`SELECT template_item_id,condition_rating,recommendation,comment,capex_estimate,applicable,photo_urls,detail FROM inspection_responses WHERE inspection_id='${insp.id}'`);
   const byItem = new Map(resps.map((r) => [r.template_item_id, r]));
 
   let embedded = 0, flagged = 0, capexTotal = 0;
@@ -60,9 +61,16 @@ async function main() {
       const fp = localPhoto(ref.path);
       if (fp) { photos.push({ dataUrl: 'data:image/jpeg;base64,' + fs.readFileSync(fp).toString('base64'), caption: ref.caption ?? ref.ref ?? null }); embedded++; }
     }
+    // build the per-archetype detail fields (catalogue order + any extra keys)
+    const detail: Record<string, any> = (r?.detail && typeof r.detail === 'object') ? r.detail : {};
+    const cat = ANNUAL_FIELD_SETS[it.field_set as string] ?? [];
+    const fields: { label: string; value: string }[] = [];
+    const seen = new Set<string>();
+    for (const f of cat) { const v = detail[f.key]; if (v != null && String(v).trim() !== '') { fields.push({ label: f.label, value: String(v) }); seen.add(f.key); } }
+    for (const k of Object.keys(detail)) { if (!seen.has(k)) { const v = detail[k]; if (v != null && String(v).trim() !== '') fields.push({ label: k.replace(/[:?]\s*$/, ''), value: String(v) }); } }
     const title = it.section_title ?? 'Other';
     const arr = sectionMap.get(title) ?? [];
-    arr.push({ label: it.item_label ?? '', rating, recommendation: r?.recommendation ?? null, comment: r?.comment ?? null, capexEstimate: r?.capex_estimate ?? null, applicable: r?.applicable ?? true, photos });
+    arr.push({ label: it.item_label ?? '', rating, recommendation: r?.recommendation ?? null, comment: r?.comment ?? null, capexEstimate: r?.capex_estimate ?? null, applicable: r?.applicable ?? true, fields, photos });
     sectionMap.set(title, arr);
   }
 
