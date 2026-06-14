@@ -6,7 +6,6 @@ import { Badge } from '@/components/ui/badge';
 import {
   BarChart3,
   Download,
-  FileText,
   Calendar,
   Building2,
   CheckCircle2,
@@ -22,39 +21,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
+import { computeHsScores } from '@/lib/hsScore';
+import { generatePortfolioSummaryPdf } from '@/lib/pdfGenerator';
 
 interface ReportStats {
   complianceRate: number;
   buildingsCount: number;
   pendingIssues: number;
 }
-
-const reportTypes = [
-  {
-    id: 1,
-    name: 'Monthly Compliance Summary',
-    description: 'Overview of task completion rates and compliance scores',
-    type: 'summary',
-  },
-  {
-    id: 2,
-    name: 'Issue Resolution Report',
-    description: 'Details of all issues, their status, and resolution times',
-    type: 'issues',
-  },
-  {
-    id: 3,
-    name: 'Building Performance Report',
-    description: 'Comparative analysis of compliance across buildings',
-    type: 'performance',
-  },
-  {
-    id: 4,
-    name: 'Audit Compliance Pack',
-    description: 'Complete documentation package for regulatory audits',
-    type: 'audit',
-  },
-];
 
 export default function Reports() {
   const [loading, setLoading] = useState(true);
@@ -70,10 +46,17 @@ export default function Reports() {
   const [hsStart, setHsStart] = useState(format(subDays(new Date(), 90), 'yyyy-MM-dd'));
   const [hsEnd, setHsEnd] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [hsGenerating, setHsGenerating] = useState(false);
+  const { isAdminOrManager, loading: authLoading } = useAuth();
+  const navigate = useNavigate();
+  const [portfolioGenerating, setPortfolioGenerating] = useState(false);
 
   useEffect(() => {
     fetchStats();
   }, []);
+
+  useEffect(() => {
+    if (!authLoading && !isAdminOrManager) navigate('/dashboard', { replace: true });
+  }, [authLoading, isAdminOrManager, navigate]);
 
   const openHsDialog = async () => {
     setHsDialogOpen(true);
@@ -107,6 +90,44 @@ export default function Reports() {
       toast.error('Failed to generate H&S report');
     } finally {
       setHsGenerating(false);
+    }
+  };
+
+  const handleGeneratePortfolio = async () => {
+    setPortfolioGenerating(true);
+    try {
+      const today = new Date();
+      const windowStart = format(subDays(today, 30), 'yyyy-MM-dd');
+      const todayStr = format(today, 'yyyy-MM-dd');
+      const [{ data: buildings }, { data: tasks }, { data: documents }] = await Promise.all([
+        supabase.from('buildings').select('id, name').order('name'),
+        supabase
+          .from('task_instances')
+          .select('building_id, status, due_date, category')
+          .not('category', 'is', null)
+          .gte('due_date', windowStart)
+          .lte('due_date', todayStr),
+        supabase.from('building_documents').select('building_id, expiry_date'),
+      ]);
+      const rows = computeHsScores(buildings || [], tasks || [], documents || [], today);
+      await generatePortfolioSummaryPdf({
+        rows,
+        generatedAt: todayStr,
+        branding: {
+          name: organization?.name || 'Building Ops',
+          logoUrl: organization?.logo_url,
+          primaryColor: organization?.primary_color || '#2563eb',
+          address: organization?.address,
+          phone: organization?.phone,
+          email: organization?.email,
+        },
+      });
+      toast.success('Portfolio summary downloaded');
+    } catch (error) {
+      console.error('Portfolio report error:', error);
+      toast.error('Failed to generate portfolio summary');
+    } finally {
+      setPortfolioGenerating(false);
     }
   };
 
@@ -172,9 +193,9 @@ export default function Reports() {
             Generate and download compliance documentation
           </p>
         </div>
-        <Button>
-          <BarChart3 className="w-4 h-4 mr-2" />
-          Generate New Report
+        <Button onClick={handleGeneratePortfolio} disabled={portfolioGenerating}>
+          {portfolioGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <BarChart3 className="w-4 h-4 mr-2" />}
+          Portfolio Summary PDF
         </Button>
       </div>
 
@@ -247,31 +268,6 @@ export default function Reports() {
               Generate PDF
             </Button>
           </div>
-          {reportTypes.map((report) => (
-            <div
-              key={report.id}
-              className="flex items-center justify-between p-4 rounded-lg border hover:bg-muted/50 transition-colors"
-            >
-              <div className="flex items-start gap-4">
-                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <FileText className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <h3 className="font-medium">{report.name}</h3>
-                  <p className="text-sm text-muted-foreground">{report.description}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm">
-                  <Download className="h-4 w-4 mr-2" />
-                  PDF
-                </Button>
-                <Button variant="outline" size="sm">
-                  CSV
-                </Button>
-              </div>
-            </div>
-          ))}
         </CardContent>
       </Card>
 

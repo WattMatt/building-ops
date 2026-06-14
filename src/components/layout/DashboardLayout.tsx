@@ -84,6 +84,7 @@ const reportsNavItems: NavItem[] = [
     title: 'Compliance Reports',
     href: '/reports',
     icon: <BarChart3 className="w-4 h-4" />,
+    roles: ['admin', 'manager'],
   },
   {
     title: 'Forms Library',
@@ -184,7 +185,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               <SidebarGroupLabel>Reports & Audit</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {reportsNavItems.map((item) => (
+                  {reportsNavItems.filter(canAccessItem).map((item) => (
                     <SidebarMenuItem key={item.href}>
                       <SidebarMenuButton
                         asChild
