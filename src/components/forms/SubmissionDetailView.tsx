@@ -17,6 +17,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { format } from 'date-fns';
+import SignoffSection from './SignoffSection';
 
 interface SubmissionDetails {
   id: string;
@@ -201,6 +202,9 @@ export function SubmissionDetailView({
             </div>
           </div>
         )}
+
+        {/* Sign-off */}
+        <SignoffSection submissionId={submission.id} />
 
         {/* Form Data */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

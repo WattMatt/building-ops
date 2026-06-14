@@ -40,6 +40,7 @@ import {
   MapPin,
   BarChart3,
   FileSpreadsheet,
+  PenLine,
   User,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -76,6 +77,11 @@ const mainNavItems: NavItem[] = [
     title: 'Map View',
     href: '/map',
     icon: <MapPin className="w-4 h-4" />,
+  },
+  {
+    title: 'My Sign-offs',
+    href: '/my-signoffs',
+    icon: <PenLine className="w-4 h-4" />,
   },
 ];
 

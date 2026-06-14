@@ -25,6 +25,7 @@ import MapView from "./pages/MapView";
 import Reports from "./pages/Reports";
 import FortressReportEditor from "./components/reports/fortress/FortressReportEditor";
 import FormsLibrary from "./pages/FormsLibrary";
+import MySignoffs from "./pages/MySignoffs";
 import UserManagement from "./pages/UserManagement";
 import Settings from "./pages/Settings";
 import Profile from "./pages/Profile";
@@ -107,6 +108,11 @@ const App = () => (
             <Route path="/forms" element={
               <ProtectedRoute>
                 <DashboardLayout><FormsLibrary /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/my-signoffs" element={
+              <ProtectedRoute>
+                <DashboardLayout><MySignoffs /></DashboardLayout>
               </ProtectedRoute>
             } />
             <Route path="/users" element={
