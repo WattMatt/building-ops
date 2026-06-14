@@ -9,6 +9,9 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    // The default 'threads' pool hangs in this environment (worker_threads +
+    // jsdom). 'forks' runs the suite reliably. See docs/plans/2026-06-14-phase1.
+    pool: "forks",
   },
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
