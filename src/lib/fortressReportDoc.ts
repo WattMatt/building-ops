@@ -29,6 +29,7 @@ export interface ReportData {
   compliancePct?: number | null;
   compliance?: { itemNo: string; prompt: string; mark: string; comment: string }[];
   recoveries?: { service: string; ytdExpense: number | null; ytdRecovery: number | null; pctRecovery: string }[];
+  ppm?: { service: string; frequency: string | null; servicedMonths: string[] }[];
   // cm
   turnover?: { tenant: string; density: string; growth: string; band: string }[];
   incidentsTotal?: number | null;
@@ -87,6 +88,12 @@ export function buildReportDoc(
       content.push(table(['Service', 'YTD Expense', 'YTD Recovery', '% Rec'],
         data.recoveries.map((r) => [r.service, formatZAR(r.ytdExpense), formatZAR(r.ytdRecovery), r.pctRecovery]),
         ['*', 'auto', 'auto', 'auto']));
+    }
+    if (data.ppm && data.ppm.length) {
+      section('PPM Schedule');
+      content.push(table(['Service', 'Frequency', 'Months serviced'],
+        data.ppm.map((p) => [p.service, p.frequency ?? '—', p.servicedMonths.length ? p.servicedMonths.join(', ') : '—']),
+        ['*', 'auto', '*']));
     }
   }
 

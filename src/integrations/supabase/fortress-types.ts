@@ -3157,6 +3157,60 @@ export type FortressDatabase = {
         }
         Relationships: []
       }
+      ppm_services: {
+        Row: {
+          building_id: string
+          comment: string | null
+          created_at: string
+          frequency: string | null
+          id: string
+          months: Json
+          report_id: string | null
+          service_name: string
+          sort_order: number | null
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          comment?: string | null
+          created_at?: string
+          frequency?: string | null
+          id?: string
+          months?: Json
+          report_id?: string | null
+          service_name: string
+          sort_order?: number | null
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          comment?: string | null
+          created_at?: string
+          frequency?: string | null
+          id?: string
+          months?: Json
+          report_id?: string | null
+          service_name?: string
+          sort_order?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ppm_services_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ppm_services_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       utility_readings: {
         Row: {
           building_id: string

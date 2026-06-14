@@ -37,6 +37,7 @@ export type BuildingInspection = FRow<'building_inspections'>;
 export type InspectionResponse = FRow<'inspection_responses'>;
 
 export type ExpenseRecovery = FRow<'expense_recoveries'>;
+export type PpmService = FRow<'ppm_services'>;
 export type UtilityReading = FRow<'utility_readings'>;
 export type UtilityYield = FRow<'utility_yields'>;
 export type LoadsheddingLog = FRow<'loadshedding_log'>;

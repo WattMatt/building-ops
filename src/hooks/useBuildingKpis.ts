@@ -8,6 +8,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fdb } from '@/integrations/supabase/fortress-db';
 import { classify, ratioPct, waterDeltaPct, THRESHOLDS, type KpiStatus } from '@/lib/fortressKpis';
+import { ppmCompletion, type PpmServiceLike } from '@/lib/ppmStatus';
 
 export type KpiFormat = 'pct' | 'zar' | 'count' | 'number';
 export interface Kpi {
@@ -235,22 +236,17 @@ export function useBuildingKpis(buildingId: string | undefined) {
         kpis.push({ id: 'O6', label: 'Equipment Overdue', value: overdue, format: 'count', status: classify(overdue, THRESHOLDS.equipmentOverdue) });
       }
 
-      // K11 PPM Completion — from ppm_monthly_status (building-scoped): completed ('done') vs scheduled (all rows)
-      // for the latest period_month. null when the view returns nothing OR no completions are tracked yet
-      // (zero 'done' rows ⇒ completion isn't being captured, so show an honest empty-state, not a misleading 0%).
-      const ppm = await fdb.from('ppm_monthly_status').select('period_month,status').eq('building_id', bid);
-      const ppmRows = (ppm.data ?? []) as { period_month: string | null; status: string | null }[];
+      // K11 PPM Serviced — ppm_services on the latest approved ops report: the share of
+      // services that have been serviced at least once (any 'done' month cell) over the
+      // report's 12-month window. null when there are no services (honest empty-state).
       let k11: number | null = null; let k11Sub: string | undefined;
-      const ppmDoneTotal = ppmRows.filter((r) => r.status === 'done').length;
-      if (ppmRows.length && ppmDoneTotal > 0) {
-        const periods = [...new Set(ppmRows.map((r) => r.period_month).filter((p): p is string => !!p))].sort();
-        const latestP = periods[periods.length - 1];
-        const scope = ppmRows.filter((r) => r.period_month === latestP);
-        const done = scope.filter((r) => r.status === 'done').length;
-        k11 = ratioPct(done, scope.length);
-        k11Sub = `${done}/${scope.length}`;
+      if (ops) {
+        const ppm = await fdb.from('ppm_services').select('months').eq('report_id', ops.id);
+        const { doneCount, total, pct } = ppmCompletion((ppm.data ?? []) as PpmServiceLike[]);
+        k11 = pct;
+        if (total > 0) k11Sub = `${doneCount}/${total}`;
       }
-      kpis.push({ id: 'K11', label: 'PPM Completion', value: k11, format: 'pct', status: classify(k11, THRESHOLDS.ppm), sub: k11Sub });
+      kpis.push({ id: 'K11', label: 'PPM Serviced', value: k11, format: 'pct', status: classify(k11, THRESHOLDS.ppm), sub: k11Sub });
 
       // O7 Days Since Evac Drill — days since the most recent COMPLETED evacuation-drill task for the building.
       const evacTasks = await fdb.from('task_instances').select('id').eq('building_id', bid).ilike('task_name', '%evac%');

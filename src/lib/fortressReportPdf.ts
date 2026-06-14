@@ -10,8 +10,16 @@ import pdfFonts from 'pdfmake/build/vfs_fonts';
 import { fdb, type ReportType } from '@/integrations/supabase/fortress-db';
 import { resolveStorageUrl } from '@/integrations/supabase/storage';
 import { buildReportDoc, MARK, type ReportData, type EmbeddedPhoto, type AnnualItem } from '@/lib/fortressReportDoc';
+import { doneMonths, type PpmCell } from '@/lib/ppmStatus';
 
 pdfMake.vfs = pdfFonts.vfs;
+
+/** "Aug 2025" from a "YYYY-MM" PPM month key. */
+function ppmMonthLabel(monthKey: string): string {
+  const d = new Date(`${monthKey}-01T00:00:00`);
+  if (Number.isNaN(d.getTime())) return monthKey;
+  return d.toLocaleDateString('en-ZA', { month: 'short', year: 'numeric' });
+}
 
 export interface ReportBranding { name: string; primaryColor: string; logoUrl?: string | null }
 
@@ -94,6 +102,14 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     }
     const rec = (await fdb.from('expense_recoveries').select('service,ytd_expense,ytd_recovery,pct_recovery').eq('report_id', reportId)).data ?? [];
     data.recoveries = rec.map((r) => ({ service: r.service ?? '', ytdExpense: r.ytd_expense, ytdRecovery: r.ytd_recovery, pctRecovery: `${r.pct_recovery ?? '—'}%` }));
+
+    const ppm = (await fdb.from('ppm_services').select('service_name,frequency,months,sort_order')
+      .eq('report_id', reportId).order('sort_order', { ascending: true, nullsFirst: false })).data ?? [];
+    data.ppm = ppm.map((p) => ({
+      service: p.service_name ?? '',
+      frequency: p.frequency ?? null,
+      servicedMonths: doneMonths({ months: p.months as Record<string, PpmCell> }).map(ppmMonthLabel),
+    }));
   }
 
   if (report.report_type === ('cm_monthly' as ReportType)) {
