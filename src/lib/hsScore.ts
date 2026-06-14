@@ -68,3 +68,30 @@ export function computeHsScores(
 
   return rows;
 }
+
+export interface PortfolioSummary {
+  total: number;
+  good: number;
+  warning: number;
+  critical: number;
+  none: number;
+  avgScore: number | null;
+  expiredCerts: number;
+}
+
+/** Aggregate per-building scores into portfolio band counts + average. */
+export function summarizePortfolio(rows: HsBuildingScore[]): PortfolioSummary {
+  const scored = rows.filter((r) => r.score !== null) as (HsBuildingScore & { score: number })[];
+  const avgScore = scored.length
+    ? Math.round(scored.reduce((sum, r) => sum + r.score, 0) / scored.length)
+    : null;
+  return {
+    total: rows.length,
+    good: rows.filter((r) => scoreBand(r.score) === 'good').length,
+    warning: rows.filter((r) => scoreBand(r.score) === 'warning').length,
+    critical: rows.filter((r) => scoreBand(r.score) === 'critical').length,
+    none: rows.filter((r) => scoreBand(r.score) === 'none').length,
+    avgScore,
+    expiredCerts: rows.filter((r) => r.hasExpiredCert).length,
+  };
+}

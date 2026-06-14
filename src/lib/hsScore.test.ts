@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeHsScores, scoreBand, type HsScoreTask, type HsScoreDocument } from './hsScore';
+import { computeHsScores, scoreBand, summarizePortfolio, type HsScoreTask, type HsScoreDocument } from './hsScore';
 
 const T = (over: Partial<HsScoreTask>): HsScoreTask => ({
   building_id: 'b1', status: 'pending', due_date: '2026-06-01', category: 'fire_safety', ...over,
@@ -75,5 +75,29 @@ describe('scoreBand', () => {
     expect(scoreBand(70)).toBe('warning');
     expect(scoreBand(69)).toBe('critical');
     expect(scoreBand(null)).toBe('none');
+  });
+});
+
+describe('summarizePortfolio', () => {
+  const rows = [
+    { building_id: 'a', name: 'A', total: 10, completed: 10, score: 100, hasExpiredCert: false },
+    { building_id: 'b', name: 'B', total: 10, completed: 8, score: 80, hasExpiredCert: true },
+    { building_id: 'c', name: 'C', total: 10, completed: 5, score: 50, hasExpiredCert: false },
+    { building_id: 'd', name: 'D', total: 0, completed: 0, score: null, hasExpiredCert: false },
+  ];
+  it('counts bands, averages only scored buildings, and counts expired certs', () => {
+    const s = summarizePortfolio(rows);
+    expect(s.total).toBe(4);
+    expect(s.good).toBe(1);
+    expect(s.warning).toBe(1);
+    expect(s.critical).toBe(1);
+    expect(s.none).toBe(1);
+    expect(s.avgScore).toBe(77);
+    expect(s.expiredCerts).toBe(1);
+  });
+  it('returns null average when no building has a score', () => {
+    const s = summarizePortfolio([{ building_id: 'd', name: 'D', total: 0, completed: 0, score: null, hasExpiredCert: false }]);
+    expect(s.avgScore).toBeNull();
+    expect(s.none).toBe(1);
   });
 });

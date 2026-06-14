@@ -3,6 +3,7 @@ import pdfFonts from 'pdfmake/build/vfs_fonts';
 import { FormField } from './formFields';
 import { assembleHsReportData, certificateStatus, type HsTask, type HsDocument } from './hsComplianceReport';
 import { categoryMeta } from './compliance';
+import { scoreBand, summarizePortfolio, type HsBuildingScore } from './hsScore';
 import type { Content, TDocumentDefinitions } from 'pdfmake/interfaces';
 
 // Initialize pdfMake with fonts
@@ -781,4 +782,52 @@ export async function generateHsCompliancePdf(opts: {
   pdfMake.createPdf(docDefinition).download(
     `HS_Compliance_${buildingName.replace(/\s+/g, '_')}_${rangeStart}_${rangeEnd}.pdf`
   );
+}
+
+export async function generatePortfolioSummaryPdf(opts: {
+  rows: HsBuildingScore[];
+  generatedAt: string; // yyyy-MM-dd
+  branding: OrganizationBranding;
+}): Promise<void> {
+  const { rows, generatedAt, branding } = opts;
+  const s = summarizePortfolio(rows);
+
+  const headerRow: Content[] = ['Building', 'Done / Total', 'Score', 'Status', 'Cert'].map(
+    (t) => ({ text: t, style: 'th' })
+  );
+  const dataRows: Content[][] = rows.map((r) => [
+    { text: r.name },
+    { text: `${r.completed} / ${r.total}` },
+    { text: r.score === null ? 'N/A' : `${r.score}%` },
+    { text: scoreBand(r.score) },
+    { text: r.hasExpiredCert ? 'EXPIRED' : 'OK' },
+  ]);
+
+  const docDefinition: TDocumentDefinitions = {
+    pageMargins: [40, 50, 40, 40],
+    content: [
+      { text: branding.name, style: 'org' },
+      { text: 'Portfolio Compliance Summary', style: 'title' },
+      { text: `Generated ${generatedAt}`, style: 'meta' },
+      {
+        text: `${s.total} buildings · ${s.avgScore === null ? 'no scored buildings' : `portfolio average ${s.avgScore}%`} · ${s.good} good, ${s.warning} warning, ${s.critical} critical, ${s.none} no data · ${s.expiredCerts} with an expired certificate`,
+        style: 'summary',
+      },
+      {
+        margin: [0, 12, 0, 0],
+        layout: 'lightHorizontalLines',
+        table: { headerRows: 1, widths: ['*', 'auto', 'auto', 'auto', 'auto'], body: [headerRow, ...dataRows] },
+      },
+    ],
+    styles: {
+      org: { color: branding.primaryColor, bold: true, fontSize: 12, margin: [0, 0, 0, 2] },
+      title: { fontSize: 20, bold: true, margin: [0, 0, 0, 2] },
+      meta: { color: '#6b7280', fontSize: 10, margin: [0, 0, 0, 8] },
+      summary: { fontSize: 11, margin: [0, 0, 0, 4] },
+      th: { bold: true, fontSize: 10, color: branding.primaryColor },
+    },
+    defaultStyle: { font: 'Roboto', fontSize: 10 },
+  };
+
+  pdfMake.createPdf(docDefinition).download(`Portfolio_Compliance_${generatedAt}.pdf`);
 }
