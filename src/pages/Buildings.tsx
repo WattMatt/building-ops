@@ -16,8 +16,6 @@ import {
   Eye,
   Upload,
   Download,
-  ImageIcon,
-  Type,
   Camera,
 } from 'lucide-react';
 import {
@@ -189,31 +187,8 @@ export default function Buildings() {
           {filteredBuildings.map((building) => {
             const position = building.logo_position || 'top-left';
 
-            const hasCustomLogo = building.logo_url && !building.logo_url.includes('dicebear');
-            const hasPattern = building.logo_url?.includes('dicebear');
-
             return (
               <Card key={building.id} className="group hover:shadow-md transition-shadow relative overflow-hidden">
-                {/* Avatar type indicator badge */}
-                <div className="absolute top-2 right-2 z-10">
-                  {hasCustomLogo ? (
-                    <Badge variant="secondary" className="text-xs gap-1 px-1.5 py-0.5 bg-primary/10 text-primary border-primary/20">
-                      <ImageIcon className="h-3 w-3" />
-                      <span className="hidden sm:inline">Logo</span>
-                    </Badge>
-                  ) : hasPattern ? (
-                    <Badge variant="secondary" className="text-xs gap-1 px-1.5 py-0.5">
-                      <Building2 className="h-3 w-3" />
-                      <span className="hidden sm:inline">Pattern</span>
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-xs gap-1 px-1.5 py-0.5">
-                      <Type className="h-3 w-3" />
-                      <span className="hidden sm:inline">Initials</span>
-                    </Badge>
-                  )}
-                </div>
-
                 {/* Top-center logo banner */}
                 {position === 'top-center' && (
                   <div className="flex justify-center pt-4 pb-2">
