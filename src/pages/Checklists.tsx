@@ -48,7 +48,7 @@ import {
 import { toast } from 'sonner';
 import TemplateItemDialog from '@/components/checklists/TemplateItemDialog';
 import ApplyTemplateDialog from '@/components/checklists/ApplyTemplateDialog';
-import PreviewTemplateDialog from '@/components/checklists/PreviewTemplateDialog';
+import PreviewTemplateDialog, { type PreviewItem } from '@/components/checklists/PreviewTemplateDialog';
 import { categoryMeta, BUILDING_TYPES } from '@/lib/compliance';
 
 type TaskFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually';
@@ -485,7 +485,7 @@ export default function Checklists() {
         open={previewOpen}
         onOpenChange={setPreviewOpen}
         template={previewTemplate}
-        items={items.filter((i) => i.template_id === previewTemplate?.id)}
+        items={items.filter((i) => i.template_id === previewTemplate?.id) satisfies PreviewItem[]}
       />
 
       {/* Delete Confirmation */}

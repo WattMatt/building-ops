@@ -48,7 +48,7 @@ Expected: Vite prints `Local: http://localhost:5173/` (or `8080`) with no instal
 npm run test
 npx tsc --noEmit 2>&1 | grep -c "error TS"
 ```
-Expected: vitest runs `src/lib/hsScore.test.ts` and `src/test/example.test.ts` to completion (PASS). The `tsc` line prints an integer (the pre-existing error count, expected ~140). **Write that number here:** `BASELINE_TSC_ERRORS = ____`. Every later task must keep the count at or below this number.
+Expected: vitest runs `src/lib/hsScore.test.ts` and `src/test/example.test.ts` to completion (PASS). The `tsc` line prints an integer (the pre-existing error count, expected ~140). **Recorded:** `BASELINE_TSC_ERRORS = 0` (the repo's `tsc --noEmit` is clean — the stale "~140" note was wrong; main was fixed by the recent Fortress PR). Every later task must keep the count at `0`. (Also recorded: vitest = 40 passed across 7 files; build OK. The default vitest `threads` pool hangs in this env — fixed to `pool: 'forks'`.)
 
 - [ ] **Step 5: Commit**
 
