@@ -65,20 +65,18 @@ export default function BuildingInspectionSection({ reportId, buildingId, readOn
                         <ToggleGroupItem value="na" className="h-8 px-3 text-xs">N/A</ToggleGroupItem>
                       </ToggleGroup>
                     </div>
-                    {r?.acceptable === 'no' && (
-                      <div className="mt-2 flex gap-2">
-                        <Select
-                          value={r?.action_required ?? ''}
-                          onValueChange={(v) => !readOnly && setResponse(it.id, { action_required: v as ActionRequired })}
-                          disabled={readOnly}
-                        >
-                          <SelectTrigger className="h-8 w-44"><SelectValue placeholder="Action required" /></SelectTrigger>
-                          <SelectContent>
-                            {ACTIONS.map((a) => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
+                    <div className="mt-2 flex gap-2">
+                      <Select
+                        value={r?.action_required ?? ''}
+                        onValueChange={(v) => !readOnly && setResponse(it.id, { action_required: v as ActionRequired })}
+                        disabled={readOnly}
+                      >
+                        <SelectTrigger className="h-8 w-44"><SelectValue placeholder="Action required" /></SelectTrigger>
+                        <SelectContent>
+                          {ACTIONS.map((a) => <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
                     <Input
                       className="mt-2 h-8"
                       placeholder="Comment (optional)"

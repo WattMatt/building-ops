@@ -23,6 +23,8 @@ const EXPENSE_COLS: GridColumn[] = [
   { key: 'budget_pct_recovery', label: 'Budget %', type: 'number' },
   { key: 'records_uploaded', label: 'Records', type: 'bool' },
   { key: 'fault_found', label: 'Fault', type: 'text' },
+  { key: 'date_fault_reported', label: 'Fault Reported', type: 'date' },
+  { key: 'date_fault_repaired', label: 'Fault Repaired', type: 'date' },
   { key: 'comment', label: 'Comment', type: 'text' },
 ];
 
@@ -35,6 +37,8 @@ const UTIL_READING_COLS: GridColumn[] = [
     { value: 'bulk', label: 'Bulk' }, { value: 'common_area', label: 'Common area' },
     { value: 'tenant', label: 'Tenant' }, { value: 'night_usage', label: 'Night usage' }, { value: 'unmetered', label: 'Unmetered' }] },
   { key: 'pct_of_bulk', label: '% of Bulk', type: 'number' },
+  { key: 'difference', label: 'Difference', type: 'number' },
+  { key: 'night_window', label: 'Night Window', type: 'text' },
   { key: 'comment', label: 'Comment', type: 'text' },
 ];
 
