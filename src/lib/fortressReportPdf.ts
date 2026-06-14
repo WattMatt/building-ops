@@ -10,6 +10,7 @@ import pdfFonts from 'pdfmake/build/vfs_fonts';
 import { fdb, type ReportType } from '@/integrations/supabase/fortress-db';
 import { resolveStorageUrl } from '@/integrations/supabase/storage';
 import { buildReportDoc, MARK, type ReportData, type EmbeddedPhoto, type AnnualItem } from '@/lib/fortressReportDoc';
+import { ANNUAL_FIELD_SETS } from '@/lib/annualFieldSets';
 import { doneMonths, type PpmCell } from '@/lib/ppmStatus';
 
 pdfMake.vfs = pdfFonts.vfs;
@@ -128,10 +129,10 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     const insp = (await fdb.from('building_inspections').select('id,template_id').eq('report_id', reportId).maybeSingle()).data;
     if (insp?.template_id) {
       const items = (await fdb.from('inspection_template_items')
-        .select('id,section_no,section_title,item_label,sort_order')
+        .select('id,section_no,section_title,item_label,sort_order,field_set')
         .eq('template_id', insp.template_id).order('sort_order')).data ?? [];
       const resps = (await fdb.from('inspection_responses')
-        .select('template_item_id,condition_rating,recommendation,comment,capex_estimate,applicable,photo_urls')
+        .select('template_item_id,condition_rating,recommendation,comment,capex_estimate,applicable,photo_urls,detail')
         .eq('inspection_id', insp.id)).data ?? [];
       const byItem = new Map(resps.map((r) => [r.template_item_id, r]));
 
@@ -151,6 +152,23 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
           const dataUrl = await embedPhoto(ref.path);
           if (dataUrl) { photos.push({ dataUrl, caption: ref.caption ?? ref.ref ?? null }); embedded += 1; }
         }
+        // Per-archetype detail fields in catalogue order, then any extra keys.
+        const detail = (r?.detail && typeof r.detail === 'object' && !Array.isArray(r.detail))
+          ? (r.detail as Record<string, unknown>)
+          : null;
+        const fields: { label: string; value: string }[] = [];
+        if (detail) {
+          const catalogue = ANNUAL_FIELD_SETS[it.field_set] ?? [];
+          const seen = new Set<string>();
+          for (const f of catalogue) {
+            const v = detail[f.key];
+            if (v != null && String(v).trim() !== '') { fields.push({ label: f.label, value: String(v) }); seen.add(f.key); }
+          }
+          for (const [k, v] of Object.entries(detail)) {
+            if (seen.has(k) || v == null || String(v).trim() === '') continue;
+            fields.push({ label: k.replace(/\s*[:?]\s*$/, '').trim(), value: String(v) });
+          }
+        }
         const title = it.section_title ?? 'Other';
         const arr = sectionMap.get(title) ?? [];
         arr.push({
@@ -160,6 +178,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
           comment: r?.comment ?? null,
           capexEstimate: r?.capex_estimate ?? null,
           applicable: r?.applicable ?? true,
+          fields,
           photos,
         });
         sectionMap.set(title, arr);

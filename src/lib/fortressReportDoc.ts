@@ -19,6 +19,8 @@ export interface AnnualItem {
   comment?: string | null;
   capexEstimate?: number | null;
   applicable?: boolean | null;
+  /** Per-archetype detail fields (catalogue order), non-empty only. */
+  fields?: { label: string; value: string }[];
   photos: EmbeddedPhoto[];
 }
 export interface AnnualSection { title: string; items: AnnualItem[] }
@@ -137,6 +139,10 @@ export function buildReportDoc(
         });
         if (it.recommendation) content.push({ text: `Recommendation: ${it.recommendation}`, fontSize: 8.5, color: '#374151', margin: [8, 0, 0, 0] });
         if (it.comment) content.push({ text: it.comment, fontSize: 8.5, italics: true, color: '#6b7280', margin: [8, 0, 0, 0] });
+        for (const f of it.fields ?? []) {
+          if (!f.value) continue;
+          content.push({ text: [{ text: `${f.label}: `, bold: true }, f.value], fontSize: 8.5, color: '#374151', margin: [8, 0, 0, 0] });
+        }
         if (it.photos.length) content.push(...photoRows(it.photos));
       }
     }

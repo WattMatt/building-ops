@@ -27,7 +27,9 @@ describe('buildReportDoc — annual_inspection', () => {
   const data: ReportData = {
     annualSections: [
       { title: 'Electrical', items: [
-        { label: 'Stand-by generator', rating: 'critical', recommendation: 'Service unit', comment: 'noisy', capexEstimate: 1000, applicable: true, photos: [{ dataUrl: PHOTO, caption: 'gen 1' }] },
+        { label: 'Stand-by generator', rating: 'critical', recommendation: 'Service unit', comment: 'noisy', capexEstimate: 1000, applicable: true,
+          fields: [{ label: 'Size generator', value: '500kVA' }, { label: 'Make and model', value: 'Cummins X' }],
+          photos: [{ dataUrl: PHOTO, caption: 'gen 1' }] },
         { label: 'DB board', rating: 'good', applicable: true, photos: [] },
       ] },
       { title: 'Building Fabric', items: [
@@ -60,6 +62,12 @@ describe('buildReportDoc — annual_inspection', () => {
     expect(text).toContain('gen 1');
     expect(text).toContain('1 flagged');
     expect(text).toContain('Roof sheeting — N/A'); // applicable:false collapses to one line
+  });
+  it('renders per-archetype detail fields under the item', () => {
+    expect(text).toContain('Size generator: ');
+    expect(text).toContain('500kVA');
+    expect(text).toContain('Make and model: ');
+    expect(text).toContain('Cummins X');
   });
   it('renders the Capex Register table', () => {
     expect(text).toContain('Capex Register');
