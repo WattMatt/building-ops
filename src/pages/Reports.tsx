@@ -21,8 +21,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
 import { computeHsScores } from '@/lib/hsScore';
 import { generatePortfolioSummaryPdf } from '@/lib/pdfGenerator';
 
@@ -46,17 +44,11 @@ export default function Reports() {
   const [hsStart, setHsStart] = useState(format(subDays(new Date(), 90), 'yyyy-MM-dd'));
   const [hsEnd, setHsEnd] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [hsGenerating, setHsGenerating] = useState(false);
-  const { isAdminOrManager, loading: authLoading } = useAuth();
-  const navigate = useNavigate();
   const [portfolioGenerating, setPortfolioGenerating] = useState(false);
 
   useEffect(() => {
     fetchStats();
   }, []);
-
-  useEffect(() => {
-    if (!authLoading && !isAdminOrManager) navigate('/dashboard', { replace: true });
-  }, [authLoading, isAdminOrManager, navigate]);
 
   const openHsDialog = async () => {
     setHsDialogOpen(true);

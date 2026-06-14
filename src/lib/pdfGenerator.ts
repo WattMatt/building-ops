@@ -791,6 +791,7 @@ export async function generatePortfolioSummaryPdf(opts: {
 }): Promise<void> {
   const { rows, generatedAt, branding } = opts;
   const s = summarizePortfolio(rows);
+  const statusLabel: Record<string, string> = { good: 'Good', warning: 'Watch', critical: 'Critical', none: 'No checks' };
 
   const headerRow: Content[] = ['Building', 'Done / Total', 'Score', 'Status', 'Cert'].map(
     (t) => ({ text: t, style: 'th' })
@@ -799,7 +800,7 @@ export async function generatePortfolioSummaryPdf(opts: {
     { text: r.name },
     { text: `${r.completed} / ${r.total}` },
     { text: r.score === null ? 'N/A' : `${r.score}%` },
-    { text: scoreBand(r.score) },
+    { text: statusLabel[scoreBand(r.score)] },
     { text: r.hasExpiredCert ? 'EXPIRED' : 'OK' },
   ]);
 
