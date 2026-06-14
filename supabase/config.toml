@@ -18,11 +18,13 @@ verify_jwt = false
 [functions.notify-expiring-alerts]
 verify_jwt = false
 
+# Client-invoked (authenticated): require a JWT so they can't be hit anonymously.
 [functions.notify-signoff-request]
-verify_jwt = false
+verify_jwt = true
 
 [functions.notify-signoff-complete]
-verify_jwt = false
+verify_jwt = true
 
+# Cron-invoked (no user JWT): guarded by the x-signoff-secret header instead.
 [functions.signoff-reminders]
 verify_jwt = false

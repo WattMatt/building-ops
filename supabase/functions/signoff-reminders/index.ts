@@ -87,6 +87,18 @@ serve(async (req: Request): Promise<Response> => {
           .from("form_signoff_requests")
           .update({ status: "expired", active: false, updated_at: nowIso })
           .eq("id", r.id);
+        // expiry vetoes the submission (mirrors decline): reject + halt remaining
+        // steps so the chain can't stall and the re-request button reappears.
+        await supabase
+          .from("form_submissions")
+          .update({ signoff_status: "rejected", updated_at: nowIso })
+          .eq("id", r.submission_id);
+        await supabase
+          .from("form_signoff_requests")
+          .update({ active: false, updated_at: nowIso })
+          .eq("submission_id", r.submission_id)
+          .neq("id", r.id)
+          .eq("status", "pending");
         expired++;
         const fn = await formName(r.submission_id);
         await sendEmail(

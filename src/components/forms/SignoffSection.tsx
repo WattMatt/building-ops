@@ -104,6 +104,18 @@ export default function SignoffSection({ submissionId, onChanged }: { submission
       const { data: sub } = await supabase.from('form_submissions').select('signoff_status').eq('id', submissionId).single();
       if (sub?.signoff_status === 'complete') {
         supabase.functions.invoke('notify-signoff-complete', { body: { submissionId } });
+      } else {
+        // a sequential chain may have just activated the next signer — notify them
+        // (parallel signers were all notified at assign time).
+        const { data: nextActive } = await supabase
+          .from('form_signoff_requests')
+          .select('id, mode')
+          .eq('submission_id', submissionId)
+          .eq('active', true)
+          .eq('status', 'pending');
+        (nextActive || [])
+          .filter((r) => r.mode === 'sequential')
+          .forEach((r) => supabase.functions.invoke('notify-signoff-request', { body: { requestId: r.id } }));
       }
       toast.success('Signed');
       setSignOpen(false);
