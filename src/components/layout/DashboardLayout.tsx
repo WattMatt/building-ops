@@ -33,7 +33,6 @@ import {
   Building2,
   ClipboardCheck,
   AlertTriangle,
-  FileText,
   Settings,
   Users,
   LogOut,
@@ -85,11 +84,6 @@ const reportsNavItems: NavItem[] = [
     title: 'Compliance Reports',
     href: '/reports',
     icon: <BarChart3 className="w-4 h-4" />,
-  },
-  {
-    title: 'Audit Archive',
-    href: '/audit',
-    icon: <FileText className="w-4 h-4" />,
   },
   {
     title: 'Forms Library',
