@@ -77,7 +77,7 @@ Every workstream must satisfy these (they are the "bullet-proof testing / coding
 - `BuildingDetails.tsx` — **delete the `BuildingAvatar`** (`:123-129`); keep the positioned overlay (`:100-115`). Verify spacing where the avatar used to sit next to the back button.
 - `Buildings.tsx` — **remove the `<Badge>` "Logo" indicator** (`:198-215`). Leave the `logo_position`-driven `BuildingAvatar` rendering intact.
 
-**Visual guide:** Figure 1 (logo before/after, both views).
+**Visual guide:** Figure 1 — [logo before/after, both views](figures/fig1-logo-before-after.svg).
 
 **Test plan:**
 - Unit: render `BuildingDetails` with a building that has a `logo_url` → assert exactly **one** logo `<img>` in the header; render without `logo_url` → assert the initials fallback, no broken image.
@@ -234,7 +234,7 @@ signoff_status = pending
 - Sign-off progress indicator in `SubmissionDetailView` (who signed / pending / sequence, with timestamps and method).
 - Hooks: `useMySignoffQueue`, `useSignoffHistory`.
 
-**Visual guide:** Figure 4 (multi-signer sign-off flow + sequence/parallel).
+**Visual guide:** Figure 4 — [multi-signer sign-off flow](figures/fig4-signoff-flow.svg) (sequence/parallel routing detailed in §8.2).
 
 ### 8.5 Test plan (the heaviest)
 - **Unit:** state-machine transitions — sequential ordering, parallel completion, decline → rejected, expiry; signature validation (drawn present XOR typed present); turn enforcement.
@@ -280,5 +280,5 @@ WS-0 (env baseline) ──► Phase 1: WS-A, WS-C, WS-D (parallel, independent)
 ## 11. Open Items / Spawned Sub-Specs
 
 - **WS-E sub-spec** — full implementation plan (migrations, edge functions, components, flag rollout) to be written via the writing-plans flow before any WS-E code.
-- **Visual guides** — Figures 1–4 to be produced and embedded/linked here.
+- **Visual guides** — Figure 1 (logo) and Figure 4 (sign-off flow) produced and linked under `docs/figures/`. Figure 2 (reports placement) and Figure 3 (checklist preview) to be produced with their workstream plans.
 - **Portfolio rollup content** — exact metric set for the org-wide PDF to be finalised in the WS-B plan (proposed: per-building completion %, open issues by severity, expiring docs in 30/60/90 days).
