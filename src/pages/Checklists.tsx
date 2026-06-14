@@ -43,10 +43,12 @@ import {
   Loader2,
   ListChecks,
   Send,
+  Eye,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import TemplateItemDialog from '@/components/checklists/TemplateItemDialog';
 import ApplyTemplateDialog from '@/components/checklists/ApplyTemplateDialog';
+import PreviewTemplateDialog from '@/components/checklists/PreviewTemplateDialog';
 import { categoryMeta, BUILDING_TYPES } from '@/lib/compliance';
 
 type TaskFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually';
@@ -110,6 +112,14 @@ export default function Checklists() {
   const [selectedItem, setSelectedItem] = useState<TemplateItem | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
   const [itemToDelete, setItemToDelete] = useState<TemplateItem | null>(null);
+
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewTemplate, setPreviewTemplate] = useState<Template | null>(null);
+
+  const handlePreviewTemplate = (template: Template) => {
+    setPreviewTemplate(template);
+    setPreviewOpen(true);
+  };
 
   useEffect(() => {
     fetchData();
@@ -289,15 +299,25 @@ export default function Checklists() {
                   <ListChecks className="h-4 w-4" />
                   {template.itemCount} tasks
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleApplyTemplate(template)}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <Building2 className="h-3 w-3 mr-1" />
-                  Apply
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handlePreviewTemplate(template)}
+                  >
+                    <Eye className="h-3 w-3 mr-1" />
+                    Preview
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleApplyTemplate(template)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <Building2 className="h-3 w-3 mr-1" />
+                    Apply
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -458,6 +478,14 @@ export default function Checklists() {
         onOpenChange={setApplyDialogOpen}
         template={selectedTemplate}
         onSuccess={fetchData}
+      />
+
+      {/* Template Preview Dialog */}
+      <PreviewTemplateDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        template={previewTemplate}
+        items={items.filter((i) => i.template_id === previewTemplate?.id)}
       />
 
       {/* Delete Confirmation */}
