@@ -14,12 +14,29 @@ import type { SectionProps } from './types';
 type Tenant = { id: string; shop_number: string | null; shop_name: string | null; name: string | null };
 
 const TEXT_FIELDS: { key: keyof TenantShopSpec; label: string }[] = [
+  // DISTRIBUTION BOARDS
   { key: 'actual_amps', label: 'Actual Amps' },
   { key: 'lease_amps', label: 'Lease Amps' },
+  // HVAC
   { key: 'hvac_units', label: 'HVAC Units' },
   { key: 'hvac_btu', label: 'HVAC BTU' },
+  { key: 'hvac_gas', label: 'HVAC Gas' },
+  // TYPE OF LIGHTFITTINGS
   { key: 'lighting_type', label: 'Lighting' },
+  // SHOP FRONT
   { key: 'shopfront_type', label: 'Shopfront' },
+  // ROLLER SHUTTER
+  { key: 'roller_shutter_type', label: 'Roller Shutter' },
+  // CEILING
+  { key: 'ceiling_structure', label: 'Ceiling Structure' },
+  { key: 'ceiling_height', label: 'Ceiling Height' },
+  // FLOOR FINISH
+  { key: 'floor_finish', label: 'Floor Finish' },
+  // STRUCTURE
+  { key: 'walls', label: 'Walls' },
+  { key: 'wall_finish', label: 'Wall Finish' },
+  // PLUMBING (plumbing_toilets is numeric — rendered separately)
+  { key: 'plumbing_sink', label: 'Plumbing Sink' },
   { key: 'notes', label: 'Notes' },
 ];
 
@@ -79,6 +96,7 @@ export default function ShopSpecSection({ buildingId, readOnly }: SectionProps) 
                 <TableHead className="min-w-40">Tenant</TableHead>
                 <TableHead>DB Phase</TableHead>
                 <TableHead>Generator</TableHead>
+                <TableHead>Toilets</TableHead>
                 {TEXT_FIELDS.map((f) => <TableHead key={String(f.key)}>{f.label}</TableHead>)}
               </TableRow>
             </TableHeader>
@@ -102,6 +120,20 @@ export default function ShopSpecSection({ buildingId, readOnly }: SectionProps) 
                         value={(spec?.generator_connection as YesNoNa | null) ?? null}
                         disabled={readOnly}
                         onChange={(v) => !readOnly && setField(t.id, { generator_connection: v } as Partial<TenantShopSpec>)}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        className="h-8 w-20"
+                        type="number"
+                        min={0}
+                        defaultValue={spec?.plumbing_toilets ?? ''}
+                        disabled={readOnly}
+                        onBlur={(e) => {
+                          if (readOnly) return;
+                          const next = e.target.value === '' ? null : Number(e.target.value);
+                          if (next !== (spec?.plumbing_toilets ?? null) && !Number.isNaN(next)) setField(t.id, { plumbing_toilets: next });
+                        }}
                       />
                     </TableCell>
                     {TEXT_FIELDS.map((f) => (

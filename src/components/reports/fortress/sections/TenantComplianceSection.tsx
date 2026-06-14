@@ -17,13 +17,20 @@ type Tenant = { id: string; shop_number: string | null; shop_name: string | null
 const YNS: { key: keyof TenantCompliance; label: string }[] = [
   { key: 'hvac_records_current', label: 'HVAC' },
   { key: 'generator_records_current', label: 'Generator' },
+  { key: 'fire_sprinkler_weekly', label: 'Sprinkler (wk)' },
   { key: 'fire_sprinkler_annual', label: 'Sprinkler (yr)' },
+  { key: 'fire_sprinkler_3yr', label: 'Sprinkler (3yr)' },
   { key: 'sprinkler_dedicated', label: 'Sprinkler (ded.)' },
   { key: 'smoke_detection_annual_service', label: 'Smoke det. (svc)' },
   { key: 'smoke_detection_dedicated', label: 'Smoke det. (ded.)' },
   { key: 'smoke_extraction_annual_service', label: 'Smoke extr. (svc)' },
   { key: 'smoke_extraction_dedicated', label: 'Smoke extr. (ded.)' },
   { key: 'handheld_fire_current', label: 'Extinguishers' },
+  { key: 'fire_blanket', label: 'Fire blanket' },
+  { key: 'food_extraction_cert', label: 'Food extr. cert' },
+  { key: 'grease_trap_clean', label: 'Grease trap' },
+  { key: 'gas_coc', label: 'Gas COC' },
+  { key: 'flammable_liquid_cert', label: 'Flammable liq. cert' },
   { key: 'evac_plan_displayed', label: 'Evac plan' },
 ];
 
@@ -89,10 +96,16 @@ export default function TenantComplianceSection({ reportId, buildingId, readOnly
                 <TableHead className="min-w-40">Tenant</TableHead>
                 <TableHead>Lease Clause #</TableHead>
                 <TableHead>Occupancy Cert #</TableHead>
+                <TableHead>Occupancy Cert Date</TableHead>
                 <TableHead>COC Resp.</TableHead>
+                <TableHead>COC Cert #</TableHead>
                 <TableHead>COC Date</TableHead>
+                <TableHead>HVAC Resp.</TableHead>
+                <TableHead>HVAC Handover</TableHead>
                 <TableHead>Gen. Resp.</TableHead>
                 {YNS.map((c) => <TableHead key={String(c.key)}>{c.label}</TableHead>)}
+                <TableHead>OHS Risks</TableHead>
+                <TableHead>Comment</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -118,6 +131,15 @@ export default function TenantComplianceSection({ reportId, buildingId, readOnly
                       />
                     </TableCell>
                     <TableCell>
+                      <Input
+                        className="h-8 w-36"
+                        type="date"
+                        defaultValue={row?.occupancy_cert_date ?? ''}
+                        disabled={readOnly}
+                        onBlur={(e) => { if (!readOnly && e.target.value !== (row?.occupancy_cert_date ?? '')) setField(t.id, { occupancy_cert_date: e.target.value || null }); }}
+                      />
+                    </TableCell>
+                    <TableCell>
                       <Select value={row?.electrical_coc_responsibility ?? ''} onValueChange={(v) => !readOnly && setField(t.id, { electrical_coc_responsibility: v })} disabled={readOnly}>
                         <SelectTrigger className="h-8 w-24"><SelectValue placeholder="—" /></SelectTrigger>
                         <SelectContent>
@@ -128,11 +150,37 @@ export default function TenantComplianceSection({ reportId, buildingId, readOnly
                     </TableCell>
                     <TableCell>
                       <Input
+                        className="h-8 w-28"
+                        defaultValue={row?.electrical_coc_cert_no ?? ''}
+                        disabled={readOnly}
+                        onBlur={(e) => { if (!readOnly && e.target.value !== (row?.electrical_coc_cert_no ?? '')) setField(t.id, { electrical_coc_cert_no: e.target.value || null }); }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
                         className="h-8 w-36"
                         type="date"
                         defaultValue={row?.electrical_coc_date ?? ''}
                         disabled={readOnly}
                         onBlur={(e) => { if (!readOnly && e.target.value !== (row?.electrical_coc_date ?? '')) setField(t.id, { electrical_coc_date: e.target.value || null }); }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Select value={row?.hvac_responsibility ?? ''} onValueChange={(v) => !readOnly && setField(t.id, { hvac_responsibility: v })} disabled={readOnly}>
+                        <SelectTrigger className="h-8 w-24"><SelectValue placeholder="—" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="tenant">Tenant</SelectItem>
+                          <SelectItem value="ll">Landlord</SelectItem>
+                          <SelectItem value="na">N/A</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        className="h-8 w-24"
+                        defaultValue={row?.hvac_handover_month ?? ''}
+                        disabled={readOnly}
+                        onBlur={(e) => { if (!readOnly && e.target.value !== (row?.hvac_handover_month ?? '')) setField(t.id, { hvac_handover_month: e.target.value || null }); }}
                       />
                     </TableCell>
                     <TableCell>
@@ -154,6 +202,22 @@ export default function TenantComplianceSection({ reportId, buildingId, readOnly
                         />
                       </TableCell>
                     ))}
+                    <TableCell>
+                      <Input
+                        className="h-8 w-40"
+                        defaultValue={row?.ohs_risks ?? ''}
+                        disabled={readOnly}
+                        onBlur={(e) => { if (!readOnly && e.target.value !== (row?.ohs_risks ?? '')) setField(t.id, { ohs_risks: e.target.value || null }); }}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Input
+                        className="h-8 w-40"
+                        defaultValue={row?.comment ?? ''}
+                        disabled={readOnly}
+                        onBlur={(e) => { if (!readOnly && e.target.value !== (row?.comment ?? '')) setField(t.id, { comment: e.target.value || null }); }}
+                      />
+                    </TableCell>
                   </TableRow>
                 );
               })}
