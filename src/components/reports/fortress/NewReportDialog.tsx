@@ -9,9 +9,10 @@ import {
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Loader2, Plus } from 'lucide-react';
 import { useBuildings } from '@/hooks/useBuildings';
-import { useCreateReport } from '@/hooks/useFortressReports';
+import { useCreateReport, useCarryForwardReport, useFortressReports } from '@/hooks/useFortressReports';
 import { REPORT_TYPE_LABELS, type ReportType } from '@/integrations/supabase/fortress-db';
 import { periodFromMonthInput, formatPeriodLabel } from '@/lib/fortressReports';
 
@@ -27,14 +28,18 @@ export function NewReportDialog({ buildingId: lockedBuildingId, buildingName: lo
   const navigate = useNavigate();
   const { buildings } = useBuildings();
   const createReport = useCreateReport();
+  const carryForward = useCarryForwardReport();
 
   const [open, setOpen] = useState(false);
   const [pickedBuildingId, setPickedBuildingId] = useState('');
   const [reportType, setReportType] = useState<ReportType>('ops_monthly');
   const [month, setMonth] = useState(defaultMonth());
+  const [carry, setCarry] = useState(true);
 
   const buildingId = lockedBuildingId ?? pickedBuildingId;
   const buildingName = lockedName ?? buildings.find((b) => b.id === buildingId)?.name ?? 'Building';
+  const reportsQuery = useFortressReports(buildingId);
+  const priorReport = reportsQuery.data?.find((r) => r.report_type === reportType) ?? null;
   const canCreate = buildingId && reportType && month;
 
   const handleCreate = async () => {
@@ -48,6 +53,9 @@ export function NewReportDialog({ buildingId: lockedBuildingId, buildingName: lo
       title,
       inspectionDate: reportType === 'annual_inspection' ? period : null,
     });
+    if (carry && priorReport) {
+      await carryForward.mutateAsync({ newReport: report, fromReportId: priorReport.id }).catch(() => {});
+    }
     setOpen(false);
     navigate(`/reports/fortress/${report.id}`);
   };
@@ -91,6 +99,12 @@ export function NewReportDialog({ buildingId: lockedBuildingId, buildingName: lo
             <Label htmlFor="report-month">Period</Label>
             <Input id="report-month" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
           </div>
+          {priorReport && (
+            <label className="flex items-start gap-2 text-sm">
+              <Checkbox checked={carry} onCheckedChange={(v) => setCarry(!!v)} className="mt-0.5" />
+              <span>Carry forward from <strong>{formatPeriodLabel(priorReport.report_period)}</strong> — keeps the structure (services, tenants, narratives) and blanks the values to re-enter.</span>
+            </label>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
