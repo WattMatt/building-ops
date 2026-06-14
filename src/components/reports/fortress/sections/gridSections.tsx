@@ -49,7 +49,7 @@ const UTIL_YIELD_COLS: GridColumn[] = [
 
 const MASTERFILE_COLS: GridColumn[] = [
   { key: 'document_label', label: 'Document', type: 'text' },
-  { key: 'on_file', label: 'On File', type: 'bool' },
+  { key: 'on_file', label: 'On File', type: 'tristate', options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }, { value: 'unassessed', label: 'Unassessed' }] },
   { key: 'responsible', label: 'Responsible', type: 'text' },
   { key: 'comment', label: 'Comment', type: 'text' },
 ];
@@ -169,6 +169,32 @@ const CAPEX_COLS: GridColumn[] = [
   { key: 'status', label: 'Status', type: 'text' },
 ];
 
+const CATEGORY_TURNOVER_COLS: GridColumn[] = [
+  { key: 'category', label: 'Category', type: 'text' },
+  { key: 'monthly_turnover', label: 'Monthly TO', type: 'number' },
+  { key: 'trading_density', label: 'Trading Density', type: 'number' },
+  { key: 'rank', label: 'Rank', type: 'number' },
+  { key: 'comment', label: 'Comment', type: 'text' },
+];
+
+const LOCAL_RESOURCES_COLS: GridColumn[] = [
+  { key: 'resource_type', label: 'Type', type: 'select', options: [{ value: 'cpf', label: 'CPF' }, { value: 'police', label: 'Police' }, { value: 'authority', label: 'Authority' }] },
+  { key: 'name', label: 'Name', type: 'text' },
+  { key: 'last_meeting_date', label: 'Last Meeting', type: 'date' },
+  { key: 'frequency', label: 'Frequency', type: 'text' },
+  { key: 'contact_person', label: 'Contact', type: 'text' },
+  { key: 'contact_number', label: 'Number', type: 'text' },
+];
+
+const CHECKLIST_COLS: GridColumn[] = [
+  { key: 'section_key', label: 'Section', type: 'text' },
+  { key: 'item_key', label: 'Item', type: 'text' },
+  { key: 'value_text', label: 'Value', type: 'text' },
+  { key: 'value_date', label: 'Date', type: 'date' },
+  { key: 'response', label: 'Y/N/NA', type: 'tristate' },
+  { key: 'comment', label: 'Comment', type: 'text' },
+];
+
 // ---- Section components ------------------------------------------------------
 export const ExpenseRecoveriesSection = (p: SectionProps) =>
   <EditableGrid {...p} table="expense_recoveries" title="Expense Recoveries" hint="YTD expense vs recovery per service. % recovery is computed." columns={EXPENSE_COLS} addLabel="Add service" />;
@@ -220,3 +246,12 @@ export const UtilityManagementSection = (p: SectionProps) => (
     <EditableGrid {...p} table="service_interruptions" title="Service Interruptions" hint="Municipal interruptions." columns={INTERRUPTION_COLS} addLabel="Add interruption" />
   </div>
 );
+
+export const CategoryTurnoverSection = (p: SectionProps) =>
+  <EditableGrid {...p} table="category_turnover" title="Top Categories" hint="Top-5 performing categories by turnover." columns={CATEGORY_TURNOVER_COLS} addLabel="Add category" />;
+
+export const LocalResourcesSection = (p: SectionProps) =>
+  <EditableGrid {...p} table="local_resources_contacts" title="Local Resources" hint="CPF / Police / Authority contacts & meetings." columns={LOCAL_RESOURCES_COLS} addLabel="Add contact" />;
+
+export const ReportChecklistSection = (p: SectionProps) =>
+  <EditableGrid {...p} table="report_checklist_items" title="General Checklist" hint="Site-visit / inspection / asset-register checklist items." columns={CHECKLIST_COLS} addLabel="Add item" />;

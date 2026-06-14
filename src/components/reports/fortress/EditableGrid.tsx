@@ -14,7 +14,7 @@ import { SectionCard } from './SectionCard';
 import { useReportSection } from '@/hooks/useReportSection';
 import type { FTableName } from '@/integrations/supabase/fortress-db';
 
-export type GridColType = 'text' | 'number' | 'date' | 'select' | 'bool';
+export type GridColType = 'text' | 'number' | 'date' | 'select' | 'tristate' | 'bool';
 
 export interface GridColumn {
   key: string;
@@ -107,6 +107,13 @@ export function EditableGrid({ reportId, buildingId, readOnly, table, title, hin
                             <SelectContent>
                               <SelectItem value="yes">Yes</SelectItem>
                               <SelectItem value="no">No</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : c.type === 'tristate' ? (
+                          <Select value={(row[c.key] as string) ?? ''} onValueChange={(v) => setCell(i, c.key, v)} disabled={readOnly}>
+                            <SelectTrigger className="h-8 min-w-24"><SelectValue placeholder="—" /></SelectTrigger>
+                            <SelectContent>
+                              {(c.options ?? [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }, { value: 'na', label: 'N/A' }]).map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         ) : c.type === 'select' ? (

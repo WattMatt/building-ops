@@ -13,6 +13,7 @@ import PpmSection from './PpmSection';
 import ConditionInspectionSection from './ConditionInspectionSection';
 import TenantComplianceSection from './TenantComplianceSection';
 import ShopSpecSection from './ShopSpecSection';
+import BuildingTurnoverSection from './BuildingTurnoverSection';
 import {
   ExpenseRecoveriesSection,
   MasterfileSection,
@@ -24,6 +25,9 @@ import {
   LeasingSection,
   TradingArrearsSection,
   UtilityManagementSection,
+  CategoryTurnoverSection,
+  LocalResourcesSection,
+  ReportChecklistSection,
 } from './gridSections';
 
 export const SECTION_REGISTRY: Record<string, ComponentType<SectionProps>> = {
@@ -45,6 +49,10 @@ export const SECTION_REGISTRY: Record<string, ComponentType<SectionProps>> = {
   tenant_compliance: TenantComplianceSection,
   shop_spec: ShopSpecSection,
   security_incidents: SecurityIncidentsSection,
+  building_turnover: BuildingTurnoverSection,
+  category_turnover: CategoryTurnoverSection,
+  local_resources: LocalResourcesSection,
+  report_checklist: ReportChecklistSection,
   // Annual
   condition_inspection: ConditionInspectionSection,
   capex: CapexSection,

@@ -18,6 +18,7 @@ export interface SectionMeta {
 export const REPORT_SECTIONS: Record<ReportType, SectionMeta[]> = {
   ops_monthly: [
     { key: 'operational_overview', label: 'Operational Overview', hint: 'Narrative status per building system.' },
+    { key: 'report_checklist', label: 'General Checklist', hint: 'Site-visit, night/roof inspection, asset register, SLAs.' },
     { key: 'ohs_compliance', label: 'OHS Act Compliance', hint: 'Weighted compliance — scored live from the template.' },
     { key: 'building_inspection', label: 'Building Inspection', hint: 'Monthly acceptable / action checklist.' },
     { key: 'expense_recoveries', label: 'Expense Recoveries', hint: 'YTD expense vs recovery per service.' },
@@ -27,7 +28,10 @@ export const REPORT_SECTIONS: Record<ReportType, SectionMeta[]> = {
   ],
   cm_monthly: [
     { key: 'building_overview', label: 'Building Overview', hint: 'Narrative.' },
+    { key: 'local_resources', label: 'Local Resources', hint: 'CPF / Police / Authority contacts & meetings.' },
+    { key: 'building_turnover', label: 'Building Turnover', hint: 'Centre trading performance + computed growth.' },
     { key: 'turnover', label: 'Turnover', hint: 'Per-tenant trading density, COO, growth.' },
+    { key: 'category_turnover', label: 'Top Categories', hint: 'Top-5 performing categories.' },
     { key: 'footfall_toilet', label: 'Footfall & Toilet Fund', hint: 'Entrance counts + toilet fund.' },
     { key: 'leasing', label: 'Leasing', hint: 'Vacancies, waitlist, movements.' },
     { key: 'trading_arrears', label: 'Trading Hours & Arrears', hint: 'Breaches + arrears.' },
@@ -47,6 +51,13 @@ export const REQUIRED_SECTIONS: Record<ReportType, string[]> = {
   ops_monthly: ['ohs_compliance'],
   cm_monthly: ['turnover'],
   annual_inspection: ['condition_inspection'],
+};
+
+/** Report-scoped backing table per gated section — submit checks ≥1 row exists. */
+export const REQUIRED_SECTION_TABLE: Record<string, string> = {
+  ohs_compliance: 'compliance_assessments',
+  turnover: 'tenant_turnover',
+  condition_inspection: 'building_inspections',
 };
 
 /**

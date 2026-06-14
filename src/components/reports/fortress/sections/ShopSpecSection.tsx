@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SectionCard } from '../SectionCard';
-import { fdb, type TenantShopSpec } from '@/integrations/supabase/fortress-db';
+import { fdb, type TenantShopSpec, type YesNoNa } from '@/integrations/supabase/fortress-db';
+import { YnsCell } from '../YnsCell';
 import type { SectionProps } from './types';
 
 type Tenant = { id: string; shop_number: string | null; shop_name: string | null; name: string | null };
@@ -77,6 +78,7 @@ export default function ShopSpecSection({ buildingId, readOnly }: SectionProps) 
               <TableRow>
                 <TableHead className="min-w-40">Tenant</TableHead>
                 <TableHead>DB Phase</TableHead>
+                <TableHead>Generator</TableHead>
                 {TEXT_FIELDS.map((f) => <TableHead key={String(f.key)}>{f.label}</TableHead>)}
               </TableRow>
             </TableHeader>
@@ -94,6 +96,13 @@ export default function ShopSpecSection({ buildingId, readOnly }: SectionProps) 
                           <SelectItem value="three">Three</SelectItem>
                         </SelectContent>
                       </Select>
+                    </TableCell>
+                    <TableCell>
+                      <YnsCell
+                        value={(spec?.generator_connection as YesNoNa | null) ?? null}
+                        disabled={readOnly}
+                        onChange={(v) => !readOnly && setField(t.id, { generator_connection: v } as Partial<TenantShopSpec>)}
+                      />
                     </TableCell>
                     {TEXT_FIELDS.map((f) => (
                       <TableCell key={String(f.key)}>

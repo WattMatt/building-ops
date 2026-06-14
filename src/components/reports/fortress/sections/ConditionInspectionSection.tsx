@@ -7,7 +7,11 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { SectionCard } from '../SectionCard';
-import { useInspectionSection } from '@/hooks/useInspectionSection';
+import { SignedImage } from '@/components/ui/signed-image';
+import { openStorageFile } from '@/integrations/supabase/storage';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+import { useInspectionSection, type PhotoRef } from '@/hooks/useInspectionSection';
 import type { ConditionRating, InspectionTemplateItem } from '@/integrations/supabase/fortress-db';
 import type { SectionProps } from './types';
 
@@ -20,6 +24,14 @@ const RATINGS: { value: ConditionRating; label: string }[] = [
 
 export default function ConditionInspectionSection({ reportId, buildingId, readOnly }: SectionProps) {
   const { items, responses, isLoading, setResponse } = useInspectionSection(reportId, buildingId, 'annual');
+
+  const addPhoto = async (it: InspectionTemplateItem, file: File) => {
+    const path = `documents/${buildingId}/annual/${it.section_no}/${crypto.randomUUID()}.jpg`;
+    const { error } = await supabase.storage.from('tenant-documents').upload(path, file, { contentType: file.type || 'image/jpeg', upsert: true });
+    if (error) { if (import.meta.env.DEV) console.error('photo upload:', error); toast.error('Photo upload failed.'); return; }
+    const existing = (responses[it.id]?.photo_urls as unknown as PhotoRef[] | undefined) ?? [];
+    await setResponse(it.id, { photo_urls: [...existing, { ref: `${it.section_no}.${existing.length + 1}`, caption: it.item_label, path }] });
+  };
 
   const grouped = useMemo(() => {
     const map = new Map<string, InspectionTemplateItem[]>();
@@ -100,6 +112,19 @@ export default function ConditionInspectionSection({ reportId, buildingId, readO
                             disabled={readOnly}
                             onBlur={(e) => { if (!readOnly && e.target.value !== (r?.comment ?? '')) setResponse(it.id, { comment: e.target.value }); }}
                           />
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {((r?.photo_urls as unknown as PhotoRef[] | undefined) ?? []).map((p, idx) => (
+                            <button key={idx} type="button" title={p.caption ?? ''} onClick={() => openStorageFile('/object/tenant-documents/' + p.path)} className="h-16 w-16 overflow-hidden rounded border">
+                              <SignedImage src={'/object/tenant-documents/' + p.path} alt={p.caption ?? 'photo'} className="h-full w-full object-cover" />
+                            </button>
+                          ))}
+                          {!readOnly && (
+                            <label className="flex h-16 w-16 cursor-pointer items-center justify-center rounded border border-dashed text-xs text-muted-foreground hover:bg-muted">
+                              + Photo
+                              <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) addPhoto(it, f); e.currentTarget.value = ''; }} />
+                            </label>
+                          )}
                         </div>
                       </div>
                     )}

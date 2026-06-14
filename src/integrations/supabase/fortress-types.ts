@@ -1,6 +1,7 @@
 // GENERATED — Fortress reporting tables (staging schema, ref vkrihpmjajjcxmzgjqdr).
 // Regenerate: supabase gen types typescript --project-id vkrihpmjajjcxmzgjqdr \
-//   | sed -n '1,3037p' | sed 's/export type Database/export type FortressDatabase/'
+//   | sed '/^type DatabaseWithoutInternals = Omit<Database/,$d' | sed 's/export type Database/export type FortressDatabase/'
+// (structural cut before the generated helper block — robust to schema growth; we use our own FRow<> helpers in fortress-db.ts.)
 // Isolated from ./types.ts (which carries prod-only profiles columns) — do not merge.
 export type Json =
   | string
@@ -414,6 +415,60 @@ export type FortressDatabase = {
           },
         ]
       }
+      building_turnover: {
+        Row: {
+          annual_trading_density: number | null
+          building_id: string
+          cm_comment: string | null
+          created_at: string
+          current_month_total: number | null
+          id: string
+          previous_year_month_total: number | null
+          report_id: string
+          spend_per_head: number | null
+          updated_at: string
+        }
+        Insert: {
+          annual_trading_density?: number | null
+          building_id: string
+          cm_comment?: string | null
+          created_at?: string
+          current_month_total?: number | null
+          id?: string
+          previous_year_month_total?: number | null
+          report_id: string
+          spend_per_head?: number | null
+          updated_at?: string
+        }
+        Update: {
+          annual_trading_density?: number | null
+          building_id?: string
+          cm_comment?: string | null
+          created_at?: string
+          current_month_total?: number | null
+          id?: string
+          previous_year_month_total?: number | null
+          report_id?: string
+          spend_per_head?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "building_turnover_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "building_turnover_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: true
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       buildings: {
         Row: {
           address: string | null
@@ -541,6 +596,60 @@ export type FortressDatabase = {
           },
           {
             foreignKeyName: "capex_items_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      category_turnover: {
+        Row: {
+          building_id: string
+          category: string
+          comment: string | null
+          created_at: string
+          id: string
+          monthly_turnover: number | null
+          rank: number | null
+          report_id: string
+          trading_density: number | null
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          category: string
+          comment?: string | null
+          created_at?: string
+          id?: string
+          monthly_turnover?: number | null
+          rank?: number | null
+          report_id: string
+          trading_density?: number | null
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          category?: string
+          comment?: string | null
+          created_at?: string
+          id?: string
+          monthly_turnover?: number | null
+          rank?: number | null
+          report_id?: string
+          trading_density?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "category_turnover_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "category_turnover_report_id_fkey"
             columns: ["report_id"]
             isOneToOne: false
             referencedRelation: "reports"
@@ -1097,6 +1206,78 @@ export type FortressDatabase = {
           },
         ]
       }
+      hazard_log: {
+        Row: {
+          assessment_id: string
+          building_id: string
+          corrective_action: string | null
+          created_at: string
+          hazard: string | null
+          id: string
+          sort_order: number
+          status: string | null
+          updated_at: string
+        }
+        Insert: {
+          assessment_id: string
+          building_id: string
+          corrective_action?: string | null
+          created_at?: string
+          hazard?: string | null
+          id?: string
+          sort_order?: number
+          status?: string | null
+          updated_at?: string
+        }
+        Update: {
+          assessment_id?: string
+          building_id?: string
+          corrective_action?: string | null
+          created_at?: string
+          hazard?: string | null
+          id?: string
+          sort_order?: number
+          status?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hazard_log_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "compliance_assessments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hazard_log_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "compliance_critical_scores"
+            referencedColumns: ["assessment_id"]
+          },
+          {
+            foreignKeyName: "hazard_log_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "compliance_scores"
+            referencedColumns: ["assessment_id"]
+          },
+          {
+            foreignKeyName: "hazard_log_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "compliance_section_scores"
+            referencedColumns: ["assessment_id"]
+          },
+          {
+            foreignKeyName: "hazard_log_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inspection_responses: {
         Row: {
           acceptable: string | null
@@ -1165,6 +1346,60 @@ export type FortressDatabase = {
             columns: ["template_item_id"]
             isOneToOne: false
             referencedRelation: "inspection_template_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inspection_subitems: {
+        Row: {
+          building_id: string
+          created_at: string
+          detail: Json
+          id: string
+          inspection_response_id: string
+          item_type: string | null
+          label: string | null
+          quantity: number | null
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          created_at?: string
+          detail?: Json
+          id?: string
+          inspection_response_id: string
+          item_type?: string | null
+          label?: string | null
+          quantity?: number | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          created_at?: string
+          detail?: Json
+          id?: string
+          inspection_response_id?: string
+          item_type?: string | null
+          label?: string | null
+          quantity?: number | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inspection_subitems_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inspection_subitems_inspection_response_id_fkey"
+            columns: ["inspection_response_id"]
+            isOneToOne: false
+            referencedRelation: "inspection_responses"
             referencedColumns: ["id"]
           },
         ]
@@ -1500,6 +1735,66 @@ export type FortressDatabase = {
           },
         ]
       }
+      local_resources_contacts: {
+        Row: {
+          building_id: string
+          contact_number: string | null
+          contact_person: string | null
+          created_at: string
+          frequency: string | null
+          id: string
+          last_meeting_date: string | null
+          name: string | null
+          report_id: string
+          resource_type: string | null
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          contact_number?: string | null
+          contact_person?: string | null
+          created_at?: string
+          frequency?: string | null
+          id?: string
+          last_meeting_date?: string | null
+          name?: string | null
+          report_id: string
+          resource_type?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          contact_number?: string | null
+          contact_person?: string | null
+          created_at?: string
+          frequency?: string | null
+          id?: string
+          last_meeting_date?: string | null
+          name?: string | null
+          report_id?: string
+          resource_type?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "local_resources_contacts_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_resources_contacts_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       masterfile_items: {
         Row: {
           building_id: string
@@ -1508,7 +1803,7 @@ export type FortressDatabase = {
           document_id: string | null
           document_label: string | null
           id: string
-          on_file: boolean | null
+          on_file: string | null
           report_id: string | null
           responsible: string | null
           updated_at: string
@@ -1520,7 +1815,7 @@ export type FortressDatabase = {
           document_id?: string | null
           document_label?: string | null
           id?: string
-          on_file?: boolean | null
+          on_file?: string | null
           report_id?: string | null
           responsible?: string | null
           updated_at?: string
@@ -1532,7 +1827,7 @@ export type FortressDatabase = {
           document_id?: string | null
           document_label?: string | null
           id?: string
-          on_file?: boolean | null
+          on_file?: string | null
           report_id?: string | null
           responsible?: string | null
           updated_at?: string
@@ -1696,6 +1991,66 @@ export type FortressDatabase = {
         }
         Relationships: []
       }
+      report_checklist_items: {
+        Row: {
+          building_id: string
+          comment: string | null
+          created_at: string
+          id: string
+          item_key: string
+          report_id: string
+          response: string | null
+          section_key: string
+          sort_order: number
+          updated_at: string
+          value_date: string | null
+          value_text: string | null
+        }
+        Insert: {
+          building_id: string
+          comment?: string | null
+          created_at?: string
+          id?: string
+          item_key: string
+          report_id: string
+          response?: string | null
+          section_key: string
+          sort_order?: number
+          updated_at?: string
+          value_date?: string | null
+          value_text?: string | null
+        }
+        Update: {
+          building_id?: string
+          comment?: string | null
+          created_at?: string
+          id?: string
+          item_key?: string
+          report_id?: string
+          response?: string | null
+          section_key?: string
+          sort_order?: number
+          updated_at?: string
+          value_date?: string | null
+          value_text?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_checklist_items_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_checklist_items_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       report_narratives: {
         Row: {
           body: string | null
@@ -1767,6 +2122,7 @@ export type FortressDatabase = {
           author_name: string | null
           building_id: string
           centre_manager: string | null
+          cloned_from_report_id: string | null
           created_at: string
           id: string
           inspection_date: string | null
@@ -1788,6 +2144,7 @@ export type FortressDatabase = {
           author_name?: string | null
           building_id: string
           centre_manager?: string | null
+          cloned_from_report_id?: string | null
           created_at?: string
           id?: string
           inspection_date?: string | null
@@ -1809,6 +2166,7 @@ export type FortressDatabase = {
           author_name?: string | null
           building_id?: string
           centre_manager?: string | null
+          cloned_from_report_id?: string | null
           created_at?: string
           id?: string
           inspection_date?: string | null
@@ -1837,6 +2195,13 @@ export type FortressDatabase = {
             columns: ["building_id"]
             isOneToOne: false
             referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reports_cloned_from_report_id_fkey"
+            columns: ["cloned_from_report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
             referencedColumns: ["id"]
           },
           {
@@ -2203,6 +2568,7 @@ export type FortressDatabase = {
           comment: string | null
           created_at: string
           electrical_coc_cert_no: string | null
+          electrical_coc_date: string | null
           electrical_coc_responsibility: string | null
           evac_plan_displayed: string | null
           fire_blanket: string | null
@@ -2214,19 +2580,24 @@ export type FortressDatabase = {
           gas_coc: string | null
           generator_dedicated: string | null
           generator_records_current: string | null
+          generator_responsibility: string | null
           grease_trap_clean: string | null
           handheld_fire_current: string | null
           hvac_handover_month: string | null
           hvac_records_current: string | null
           hvac_responsibility: string | null
           id: string
+          lease_clause_no: string | null
           occupancy_cert_date: string | null
           occupancy_cert_no: string | null
           ohs_risks: string | null
           period: string | null
           report_id: string | null
-          smoke_detection_current: string | null
-          smoke_extraction_current: string | null
+          smoke_detection_annual_service: string | null
+          smoke_detection_dedicated: string | null
+          smoke_extraction_annual_service: string | null
+          smoke_extraction_dedicated: string | null
+          sprinkler_dedicated: string | null
           tenant_id: string
           updated_at: string
         }
@@ -2235,6 +2606,7 @@ export type FortressDatabase = {
           comment?: string | null
           created_at?: string
           electrical_coc_cert_no?: string | null
+          electrical_coc_date?: string | null
           electrical_coc_responsibility?: string | null
           evac_plan_displayed?: string | null
           fire_blanket?: string | null
@@ -2246,19 +2618,24 @@ export type FortressDatabase = {
           gas_coc?: string | null
           generator_dedicated?: string | null
           generator_records_current?: string | null
+          generator_responsibility?: string | null
           grease_trap_clean?: string | null
           handheld_fire_current?: string | null
           hvac_handover_month?: string | null
           hvac_records_current?: string | null
           hvac_responsibility?: string | null
           id?: string
+          lease_clause_no?: string | null
           occupancy_cert_date?: string | null
           occupancy_cert_no?: string | null
           ohs_risks?: string | null
           period?: string | null
           report_id?: string | null
-          smoke_detection_current?: string | null
-          smoke_extraction_current?: string | null
+          smoke_detection_annual_service?: string | null
+          smoke_detection_dedicated?: string | null
+          smoke_extraction_annual_service?: string | null
+          smoke_extraction_dedicated?: string | null
+          sprinkler_dedicated?: string | null
           tenant_id: string
           updated_at?: string
         }
@@ -2267,6 +2644,7 @@ export type FortressDatabase = {
           comment?: string | null
           created_at?: string
           electrical_coc_cert_no?: string | null
+          electrical_coc_date?: string | null
           electrical_coc_responsibility?: string | null
           evac_plan_displayed?: string | null
           fire_blanket?: string | null
@@ -2278,19 +2656,24 @@ export type FortressDatabase = {
           gas_coc?: string | null
           generator_dedicated?: string | null
           generator_records_current?: string | null
+          generator_responsibility?: string | null
           grease_trap_clean?: string | null
           handheld_fire_current?: string | null
           hvac_handover_month?: string | null
           hvac_records_current?: string | null
           hvac_responsibility?: string | null
           id?: string
+          lease_clause_no?: string | null
           occupancy_cert_date?: string | null
           occupancy_cert_no?: string | null
           ohs_risks?: string | null
           period?: string | null
           report_id?: string | null
-          smoke_detection_current?: string | null
-          smoke_extraction_current?: string | null
+          smoke_detection_annual_service?: string | null
+          smoke_detection_dedicated?: string | null
+          smoke_extraction_annual_service?: string | null
+          smoke_extraction_dedicated?: string | null
+          sprinkler_dedicated?: string | null
           tenant_id?: string
           updated_at?: string
         }
@@ -2451,7 +2834,7 @@ export type FortressDatabase = {
           db_phase: string | null
           effective_from: string | null
           floor_finish: string | null
-          generator_connection: boolean | null
+          generator_connection: string | null
           hvac_btu: string | null
           hvac_gas: string | null
           hvac_units: string | null
@@ -2478,7 +2861,7 @@ export type FortressDatabase = {
           db_phase?: string | null
           effective_from?: string | null
           floor_finish?: string | null
-          generator_connection?: boolean | null
+          generator_connection?: string | null
           hvac_btu?: string | null
           hvac_gas?: string | null
           hvac_units?: string | null
@@ -2505,7 +2888,7 @@ export type FortressDatabase = {
           db_phase?: string | null
           effective_from?: string | null
           floor_finish?: string | null
-          generator_connection?: boolean | null
+          generator_connection?: string | null
           hvac_btu?: string | null
           hvac_gas?: string | null
           hvac_units?: string | null
@@ -2777,8 +3160,10 @@ export type FortressDatabase = {
           category: string | null
           comment: string | null
           created_at: string
+          difference: number | null
           id: string
           meter_name: string | null
+          night_window: string | null
           pct_of_bulk: number | null
           reading: number | null
           report_id: string | null
@@ -2791,8 +3176,10 @@ export type FortressDatabase = {
           category?: string | null
           comment?: string | null
           created_at?: string
+          difference?: number | null
           id?: string
           meter_name?: string | null
+          night_window?: string | null
           pct_of_bulk?: number | null
           reading?: number | null
           report_id?: string | null
@@ -2805,8 +3192,10 @@ export type FortressDatabase = {
           category?: string | null
           comment?: string | null
           created_at?: string
+          difference?: number | null
           id?: string
           meter_name?: string | null
+          night_window?: string | null
           pct_of_bulk?: number | null
           reading?: number | null
           report_id?: string | null
@@ -3015,6 +3404,63 @@ export type FortressDatabase = {
             columns: ["building_id"]
             isOneToOne: false
             referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_building_turnover: {
+        Row: {
+          annual_trading_density: number | null
+          building_id: string | null
+          cm_comment: string | null
+          created_at: string | null
+          current_month_total: number | null
+          growth_pct: number | null
+          id: string | null
+          previous_year_month_total: number | null
+          report_id: string | null
+          spend_per_head: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          annual_trading_density?: number | null
+          building_id?: string | null
+          cm_comment?: string | null
+          created_at?: string | null
+          current_month_total?: number | null
+          growth_pct?: never
+          id?: string | null
+          previous_year_month_total?: number | null
+          report_id?: string | null
+          spend_per_head?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          annual_trading_density?: number | null
+          building_id?: string | null
+          cm_comment?: string | null
+          created_at?: string | null
+          current_month_total?: number | null
+          growth_pct?: never
+          id?: string | null
+          previous_year_month_total?: number | null
+          report_id?: string | null
+          spend_per_head?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "building_turnover_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "building_turnover_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: true
+            referencedRelation: "reports"
             referencedColumns: ["id"]
           },
         ]
