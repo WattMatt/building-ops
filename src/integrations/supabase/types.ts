@@ -576,6 +576,7 @@ export type Database = {
           review_notes: string | null
           reviewed_at: string | null
           reviewed_by: string | null
+          signoff_status: string
           status: string | null
           submitted_by: string | null
           updated_at: string | null
@@ -592,6 +593,7 @@ export type Database = {
           review_notes?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
+          signoff_status?: string
           status?: string | null
           submitted_by?: string | null
           updated_at?: string | null
@@ -608,6 +610,7 @@ export type Database = {
           review_notes?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
+          signoff_status?: string
           status?: string | null
           submitted_by?: string | null
           updated_at?: string | null
@@ -618,6 +621,125 @@ export type Database = {
             columns: ["building_id"]
             isOneToOne: false
             referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      form_signoff_requests: {
+        Row: {
+          active: boolean
+          assigned_by: string | null
+          assigned_to: string
+          created_at: string
+          decline_reason: string | null
+          due_at: string | null
+          id: string
+          instructions: string | null
+          mode: string
+          reminded_at: string | null
+          sequence_order: number
+          status: string
+          submission_id: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          assigned_by?: string | null
+          assigned_to: string
+          created_at?: string
+          decline_reason?: string | null
+          due_at?: string | null
+          id?: string
+          instructions?: string | null
+          mode?: string
+          reminded_at?: string | null
+          sequence_order?: number
+          status?: string
+          submission_id: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          assigned_by?: string | null
+          assigned_to?: string
+          created_at?: string
+          decline_reason?: string | null
+          due_at?: string | null
+          id?: string
+          instructions?: string | null
+          mode?: string
+          reminded_at?: string | null
+          sequence_order?: number
+          status?: string
+          submission_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_signoff_requests_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "form_submissions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      form_signatures: {
+        Row: {
+          confirmation_text: string
+          id: string
+          ip_address: string | null
+          method: string
+          notes: string | null
+          request_id: string
+          signed_at: string
+          signature_url: string | null
+          signer_id: string
+          submission_id: string
+          typed_name: string | null
+          user_agent: string | null
+        }
+        Insert: {
+          confirmation_text: string
+          id?: string
+          ip_address?: string | null
+          method: string
+          notes?: string | null
+          request_id: string
+          signed_at?: string
+          signature_url?: string | null
+          signer_id: string
+          submission_id: string
+          typed_name?: string | null
+          user_agent?: string | null
+        }
+        Update: {
+          confirmation_text?: string
+          id?: string
+          ip_address?: string | null
+          method?: string
+          notes?: string | null
+          request_id?: string
+          signed_at?: string
+          signature_url?: string | null
+          signer_id?: string
+          submission_id?: string
+          typed_name?: string | null
+          user_agent?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_signatures_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "form_signoff_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_signatures_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "form_submissions"
             referencedColumns: ["id"]
           },
         ]

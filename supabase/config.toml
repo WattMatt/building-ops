@@ -17,3 +17,12 @@ verify_jwt = false
 
 [functions.notify-expiring-alerts]
 verify_jwt = false
+
+[functions.notify-signoff-request]
+verify_jwt = false
+
+[functions.notify-signoff-complete]
+verify_jwt = false
+
+[functions.signoff-reminders]
+verify_jwt = false
