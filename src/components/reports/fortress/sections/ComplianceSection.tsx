@@ -34,7 +34,8 @@ export default function ComplianceSection({ reportId, buildingId, readOnly }: Se
           <Badge variant={liveBuildingPct != null && liveBuildingPct >= 90 ? 'default' : 'secondary'} className="text-sm">
             {formatPct(liveBuildingPct)}
           </Badge>
-          <p className="mt-1 text-xs text-muted-foreground">{answered}/{scoredTotal} scored answered</p>
+          <p className="mt-1 text-xs text-muted-foreground">Target 100%</p>
+          <p className="text-xs text-muted-foreground">{answered}/{scoredTotal} scored answered</p>
         </div>
       }
     >

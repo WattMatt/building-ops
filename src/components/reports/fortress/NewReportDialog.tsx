@@ -13,7 +13,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Loader2, Plus } from 'lucide-react';
 import { useBuildings } from '@/hooks/useBuildings';
 import { useCreateReport, useCarryForwardReport, useFortressReports } from '@/hooks/useFortressReports';
-import { REPORT_TYPE_LABELS, type ReportType } from '@/integrations/supabase/fortress-db';
+import { fdb, REPORT_TYPE_LABELS, type ReportType } from '@/integrations/supabase/fortress-db';
 import { periodFromMonthInput, formatPeriodLabel } from '@/lib/fortressReports';
 
 const defaultMonth = () => new Date().toISOString().slice(0, 7);
@@ -34,6 +34,7 @@ export function NewReportDialog({ buildingId: lockedBuildingId, buildingName: lo
   const [pickedBuildingId, setPickedBuildingId] = useState('');
   const [reportType, setReportType] = useState<ReportType>('ops_monthly');
   const [month, setMonth] = useState(defaultMonth());
+  const [preparedFor, setPreparedFor] = useState('');
   const [carry, setCarry] = useState(true);
 
   const buildingId = lockedBuildingId ?? pickedBuildingId;
@@ -53,6 +54,12 @@ export function NewReportDialog({ buildingId: lockedBuildingId, buildingName: lo
       title,
       inspectionDate: reportType === 'annual_inspection' ? period : null,
     });
+    const trimmedPreparedFor = preparedFor.trim();
+    if (trimmedPreparedFor) {
+      await fdb.from('reports').update({ prepared_for: trimmedPreparedFor }).eq('id', report.id).then(({ error }) => {
+        if (error && import.meta.env.DEV) console.error('Set prepared_for failed:', error);
+      });
+    }
     if (carry && priorReport) {
       await carryForward.mutateAsync({ newReport: report, fromReportId: priorReport.id }).catch(() => {});
     }
@@ -98,6 +105,10 @@ export function NewReportDialog({ buildingId: lockedBuildingId, buildingName: lo
           <div className="space-y-2">
             <Label htmlFor="report-month">Period</Label>
             <Input id="report-month" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="report-prepared-for">Prepared for <span className="text-muted-foreground">(optional)</span></Label>
+            <Input id="report-prepared-for" placeholder="e.g. Capital Propfund" value={preparedFor} onChange={(e) => setPreparedFor(e.target.value)} />
           </div>
           {priorReport && (
             <label className="flex items-start gap-2 text-sm">

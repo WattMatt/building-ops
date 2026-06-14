@@ -1,5 +1,6 @@
 /** Report editor: section navigator + active section form + lifecycle actions. */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, CheckCircle2, ClipboardCheck, FileDown, Loader2, Send, Undo2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
@@ -8,6 +9,8 @@ import { useOrganization } from '@/hooks/useOrganization';
 import { generateReportPdf } from '@/lib/fortressReportPdf';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -27,12 +30,30 @@ export default function FortressReportEditor() {
   const { organization } = useOrganization();
   const { data: report, isLoading } = useFortressReport(id);
   const lifecycle = useReportLifecycle(id!);
+  const qc = useQueryClient();
 
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [preparedFor, setPreparedFor] = useState('');
   const [reviewOpen, setReviewOpen] = useState<null | ReportStatus>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [exporting, setExporting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => { setPreparedFor(report?.prepared_for ?? ''); }, [report?.prepared_for]);
+
+  const savePreparedFor = async () => {
+    if (!id || !report) return;
+    const next = preparedFor.trim() || null;
+    if (next === (report.prepared_for ?? null)) return;
+    const { error } = await fdb.from('reports').update({ prepared_for: next }).eq('id', id);
+    if (error) {
+      if (import.meta.env.DEV) console.error('Update prepared_for failed:', error);
+      toast.error('Could not save “Prepared for”.');
+      setPreparedFor(report.prepared_for ?? '');
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ['fortress-reports'] });
+  };
 
   const handleExport = async () => {
     if (!id) return;
@@ -122,6 +143,23 @@ export default function FortressReportEditor() {
           <p className="text-sm text-muted-foreground">
             {REPORT_TYPE_LABELS[report.report_type]} · {formatPeriodLabel(report.report_period)}
           </p>
+          {editable ? (
+            <div className="mt-2 flex items-center gap-2">
+              <Label htmlFor="prepared-for" className="text-xs text-muted-foreground">Prepared for</Label>
+              <Input
+                id="prepared-for"
+                className="h-8 w-56"
+                placeholder="e.g. Capital Propfund"
+                value={preparedFor}
+                onChange={(e) => setPreparedFor(e.target.value)}
+                onBlur={savePreparedFor}
+              />
+            </div>
+          ) : (
+            report.prepared_for && (
+              <p className="mt-1 text-sm text-muted-foreground">Prepared for {report.prepared_for}</p>
+            )
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={REPORT_STATUS_VARIANT[status] ?? 'outline'} className="capitalize">{status}</Badge>

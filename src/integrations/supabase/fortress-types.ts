@@ -1101,8 +1101,11 @@ export type FortressDatabase = {
           id: string
           month_count: number | null
           prev_ytd: number | null
+          recon_variance: number | null
           report_id: string | null
           source: string | null
+          system_count: number | null
+          ticksheet_count: number | null
           updated_at: string
           variance_pct: number | null
           ytd_count: number | null
@@ -1114,8 +1117,11 @@ export type FortressDatabase = {
           id?: string
           month_count?: number | null
           prev_ytd?: number | null
+          recon_variance?: number | null
           report_id?: string | null
           source?: string | null
+          system_count?: number | null
+          ticksheet_count?: number | null
           updated_at?: string
           variance_pct?: number | null
           ytd_count?: number | null
@@ -1127,8 +1133,11 @@ export type FortressDatabase = {
           id?: string
           month_count?: number | null
           prev_ytd?: number | null
+          recon_variance?: number | null
           report_id?: string | null
           source?: string | null
+          system_count?: number | null
+          ticksheet_count?: number | null
           updated_at?: string
           variance_pct?: number | null
           ytd_count?: number | null
@@ -3002,6 +3011,7 @@ export type FortressDatabase = {
       toilet_fund: {
         Row: {
           actual_banked: number | null
+          bale_variance: number | null
           budget: number | null
           building_id: string
           created_at: string
@@ -3015,6 +3025,7 @@ export type FortressDatabase = {
         }
         Insert: {
           actual_banked?: number | null
+          bale_variance?: number | null
           budget?: number | null
           building_id: string
           created_at?: string
@@ -3028,6 +3039,7 @@ export type FortressDatabase = {
         }
         Update: {
           actual_banked?: number | null
+          bale_variance?: number | null
           budget?: number | null
           building_id?: string
           created_at?: string

@@ -7,6 +7,12 @@ import { EditableGrid, type GridColumn } from '../EditableGrid';
 import { formatPct, formatZAR } from '@/lib/fortressReports';
 import type { SectionProps } from './types';
 
+// FootfallToiletSection and UtilityManagementSection moved to dedicated files
+// (they carry CM-specific reconciliation columns / narrative blocks); re-exported
+// here so the section registry's import path stays stable.
+export { FootfallToiletSection } from './FootfallToiletSection';
+export { UtilityManagementSection } from './UtilityManagementSection';
+
 const num = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v));
 const ratioPct = (a: unknown, b: unknown): number | null => {
   const x = num(a); const y = num(b);
@@ -58,25 +64,6 @@ const MASTERFILE_COLS: GridColumn[] = [
   { key: 'comment', label: 'Comment', type: 'text' },
 ];
 
-const LOADSHED_COLS: GridColumn[] = [
-  { key: 'day', label: 'Day', type: 'date' },
-  { key: 'week_no', label: 'Week', type: 'number' },
-  { key: 'stage', label: 'Stage', type: 'text' },
-  { key: 'hours', label: 'Hours', type: 'number' },
-  { key: 'diesel_litres', label: 'Diesel (L)', type: 'number' },
-  { key: 'diesel_date', label: 'Diesel Date', type: 'date' },
-];
-
-const INTERRUPTION_COLS: GridColumn[] = [
-  { key: 'date', label: 'Date', type: 'date' },
-  { key: 'interruption_type', label: 'Type', type: 'text' },
-  { key: 'start_time', label: 'Start', type: 'text' },
-  { key: 'end_time', label: 'End', type: 'text' },
-  { key: 'total_hours', label: 'Hours', type: 'number' },
-  { key: 'council_ref', label: 'Council Ref', type: 'text' },
-  { key: 'comment', label: 'Comment', type: 'text' },
-];
-
 // ---- CM ----------------------------------------------------------------------
 const TURNOVER_COLS: GridColumn[] = [
   { key: 'tenant_name', label: 'Tenant', type: 'text' },
@@ -88,24 +75,6 @@ const TURNOVER_COLS: GridColumn[] = [
   { key: 'rank_band', label: 'Band', type: 'select', options: [
     { value: 'anchor', label: 'Anchor' }, { value: 'top5', label: 'Top 5' }, { value: 'bottom5', label: 'Bottom 5' }, { value: 'other', label: 'Other' }] },
   { key: 'comment', label: 'Comment', type: 'text' },
-];
-
-const FOOTFALL_COLS: GridColumn[] = [
-  { key: 'entrance', label: 'Entrance', type: 'text' },
-  { key: 'month_count', label: 'Month', type: 'number' },
-  { key: 'ytd_count', label: 'YTD', type: 'number' },
-  { key: 'prev_ytd', label: 'Prev YTD', type: 'number' },
-  { key: 'variance_pct', label: 'Variance %', type: 'number' },
-  { key: 'source', label: 'Source', type: 'text' },
-];
-
-const TOILET_COLS: GridColumn[] = [
-  { key: 'issued_bales', label: 'Issued Bales', type: 'number' },
-  { key: 'stock_on_hand_bales', label: 'Stock Bales', type: 'number' },
-  { key: 'actual_banked', label: 'Banked', type: 'number' },
-  { key: 'budget', label: 'Budget', type: 'number' },
-  { key: 'variance', label: 'Variance', type: 'number' },
-  { key: 'profit_per_roll', label: 'Profit/Roll', type: 'number' },
 ];
 
 const VACANCY_COLS: GridColumn[] = [
@@ -222,13 +191,6 @@ export const UtilitiesSection = (p: SectionProps) => (
   </div>
 );
 
-export const FootfallToiletSection = (p: SectionProps) => (
-  <div className="space-y-6">
-    <EditableGrid {...p} table="footfall_counts" title="Footfall" hint="Entrance counts." columns={FOOTFALL_COLS} addLabel="Add entrance" />
-    <EditableGrid {...p} table="toilet_fund" title="Toilet Fund" hint="Banked vs budget." columns={TOILET_COLS} addLabel="Add row" />
-  </div>
-);
-
 export const LeasingSection = (p: SectionProps) => (
   <div className="space-y-6">
     <EditableGrid {...p} table="vacancies" title="Vacancies" hint="Available shops." columns={VACANCY_COLS} addLabel="Add vacancy" />
@@ -241,13 +203,6 @@ export const TradingArrearsSection = (p: SectionProps) => (
   <div className="space-y-6">
     <EditableGrid {...p} table="trading_hour_breaches" title="Trading Hour Breaches" hint="After-hours / non-trading." columns={BREACH_COLS} addLabel="Add breach" />
     <EditableGrid {...p} table="tenant_arrears" title="Tenant Arrears" hint="Closing balances." columns={ARREARS_COLS} addLabel="Add tenant" />
-  </div>
-);
-
-export const UtilityManagementSection = (p: SectionProps) => (
-  <div className="space-y-6">
-    <EditableGrid {...p} table="loadshedding_log" title="Loadshedding" hint="Per-day stage and diesel." columns={LOADSHED_COLS} addLabel="Add day" />
-    <EditableGrid {...p} table="service_interruptions" title="Service Interruptions" hint="Municipal interruptions." columns={INTERRUPTION_COLS} addLabel="Add interruption" />
   </div>
 );
 
