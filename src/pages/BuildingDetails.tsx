@@ -96,11 +96,11 @@ export default function BuildingDetails() {
       {/* Header */}
       <div className="flex flex-col gap-3 sm:gap-4">
         <div className="relative flex items-start sm:items-center gap-2 sm:gap-4">
-          {/* Positioned Logo Overlay */}
+          {/* Positioned Logo Overlay (single source of the building logo) */}
           {hasCustomLogo && (
             <div
               className={cn(
-                'absolute z-10',
+                'absolute z-10 group',
                 logoPosition === 'top-left' && 'top-0 left-10 sm:left-12',
                 logoPosition === 'top-center' && 'top-0 left-1/2 -translate-x-1/2',
                 logoPosition === 'top-right' && 'top-0 right-0'
@@ -111,6 +111,15 @@ export default function BuildingDetails() {
                 alt="Building logo"
                 className="w-8 h-8 sm:w-10 sm:h-10 object-contain rounded-md bg-background/95 backdrop-blur-sm border shadow-sm"
               />
+              {isAdminOrManager && (
+                <button
+                  onClick={() => setAvatarDialogOpen(true)}
+                  className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-md cursor-pointer"
+                  title="Change logo"
+                >
+                  <Camera className="h-4 w-4 text-white" />
+                </button>
+              )}
             </div>
           )}
           
@@ -118,25 +127,29 @@ export default function BuildingDetails() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
-            {/* Avatar with edit overlay for admins/managers */}
-            <div className="relative group shrink-0">
-              <BuildingAvatar 
-                name={building.name} 
-                logoUrl={building.logo_url} 
-                avatarColor={building.avatar_color}
-                size="lg" 
-                className="w-10 h-10 sm:w-12 sm:h-12"
-              />
-              {isAdminOrManager && (
-                <button
-                  onClick={() => setAvatarDialogOpen(true)}
-                  className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg cursor-pointer"
-                  title="Change avatar"
-                >
-                  <Camera className="h-4 w-4 text-white" />
-                </button>
-              )}
-            </div>
+            {/* Fallback avatar shown only when there is no custom logo (the
+                positioned overlay handles the custom-logo case). Keeps the
+                logo-upload entry point available for logo-less buildings. */}
+            {!hasCustomLogo && (
+              <div className="relative group shrink-0">
+                <BuildingAvatar
+                  name={building.name}
+                  logoUrl={building.logo_url}
+                  avatarColor={building.avatar_color}
+                  size="lg"
+                  className="w-10 h-10 sm:w-12 sm:h-12"
+                />
+                {isAdminOrManager && (
+                  <button
+                    onClick={() => setAvatarDialogOpen(true)}
+                    className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg cursor-pointer"
+                    title="Change avatar"
+                  >
+                    <Camera className="h-4 w-4 text-white" />
+                  </button>
+                )}
+              </div>
+            )}
             <div className={cn("min-w-0 flex-1", hasCustomLogo && logoPosition === 'top-center' && "pt-10 sm:pt-12")}>
               <h1 className="text-lg sm:text-2xl font-bold truncate">{building.name}</h1>
               <p className="text-xs sm:text-sm text-muted-foreground flex items-center gap-1 truncate">
