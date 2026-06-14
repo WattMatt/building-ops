@@ -1,7 +1,7 @@
 /** Report editor: section navigator + active section form + lifecycle actions. */
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, FileDown, Loader2, Send, Undo2, XCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ClipboardCheck, FileDown, Loader2, Send, Undo2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useOrganization } from '@/hooks/useOrganization';
@@ -22,7 +22,8 @@ import { getSectionComponent } from './sections/registry';
 export default function FortressReportEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user, isAdminOrManager } = useAuth();
+  const { user, role, isAdminOrManager } = useAuth();
+  const isReviewer = role === 'reviewer';
   const { organization } = useOrganization();
   const { data: report, isLoading } = useFortressReport(id);
   const lifecycle = useReportLifecycle(id!);
@@ -37,7 +38,7 @@ export default function FortressReportEditor() {
     if (!id) return;
     setExporting(true);
     try {
-      await generateReportPdf(id, { name: organization?.name ?? 'GMI Operations', primaryColor: organization?.primary_color ?? '#2563eb' });
+      await generateReportPdf(id, { name: organization?.name ?? 'GMI Operations', primaryColor: organization?.primary_color ?? '#2563eb', logoUrl: organization?.logo_url ?? null });
     } catch (e) {
       if (import.meta.env.DEV) console.error('PDF export failed:', e);
       toast.error('Could not generate the PDF.');
@@ -64,7 +65,7 @@ export default function FortressReportEditor() {
   const current = activeKey ?? sections[0]?.key ?? null;
   const status = report.status as ReportStatus;
   const isAuthor = report.author_id === user?.id;
-  const editable = status === 'draft' && (isAuthor || isAdminOrManager);
+  const editable = (status === 'draft' || status === 'rejected') && (isAuthor || isAdminOrManager);
   const SectionComp = current ? getSectionComponent(current) : undefined;
   const currentMeta = sections.find((s) => s.key === current);
 
@@ -93,14 +94,16 @@ export default function FortressReportEditor() {
   };
 
   const actions: { label: string; icon: typeof Send; next: ReportStatus; variant?: 'default' | 'outline' | 'destructive'; needsNotes?: boolean }[] = [];
-  if (status === 'draft' && (isAuthor || isAdminOrManager)) {
-    actions.push({ label: 'Submit for review', icon: Send, next: 'submitted' });
+  // draft → submitted (author or admin/manager); rejected → submitted (author re-submits a fixed report).
+  if ((status === 'draft' || status === 'rejected') && (isAuthor || isAdminOrManager)) {
+    actions.push({ label: status === 'rejected' ? 'Re-submit for review' : 'Submit for review', icon: Send, next: 'submitted' });
   }
-  if (status === 'submitted' && isAdminOrManager) {
-    actions.push({ label: 'Approve', icon: CheckCircle2, next: 'approved' });
-    actions.push({ label: 'Reject', icon: XCircle, next: 'rejected', variant: 'destructive', needsNotes: true });
+  // submitted → reviewed: reviewer role or admin/manager.
+  if (status === 'submitted' && (isReviewer || isAdminOrManager)) {
+    actions.push({ label: 'Mark reviewed', icon: ClipboardCheck, next: 'reviewed', variant: 'outline' });
   }
-  if (status === 'reviewed' && isAdminOrManager) {
+  // approve/reject reachable from both submitted and reviewed (admin/manager only).
+  if ((status === 'submitted' || status === 'reviewed') && isAdminOrManager) {
     actions.push({ label: 'Approve', icon: CheckCircle2, next: 'approved' });
     actions.push({ label: 'Reject', icon: XCircle, next: 'rejected', variant: 'destructive', needsNotes: true });
   }

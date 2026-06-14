@@ -61,4 +61,5 @@ export const THRESHOLDS = {
   masterfile: { good: 100, warn: 90 } as KpiThreshold,           // K12
   tenantCompliance: { good: 95, warn: 85 } as KpiThreshold,      // K13
   vacancy: { good: 0, warn: 5, invert: true } as KpiThreshold,   // K15
+  equipmentOverdue: { good: 0, warn: 2, invert: true } as KpiThreshold, // O6 (count of overdue services — lower better)
 } as const;

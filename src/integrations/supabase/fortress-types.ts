@@ -769,6 +769,7 @@ export type FortressDatabase = {
           comment: string | null
           created_at: string
           id: string
+          issue_id: string | null
           response: string | null
           score: number | null
           template_item_id: string
@@ -780,6 +781,7 @@ export type FortressDatabase = {
           comment?: string | null
           created_at?: string
           id?: string
+          issue_id?: string | null
           response?: string | null
           score?: number | null
           template_item_id: string
@@ -791,6 +793,7 @@ export type FortressDatabase = {
           comment?: string | null
           created_at?: string
           id?: string
+          issue_id?: string | null
           response?: string | null
           score?: number | null
           template_item_id?: string

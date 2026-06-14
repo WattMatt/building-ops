@@ -23,6 +23,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { computeHsScores } from '@/lib/hsScore';
 import { generatePortfolioSummaryPdf } from '@/lib/pdfGenerator';
+import { PortfolioComplianceCard } from '@/components/reports/fortress/PortfolioComplianceCard';
 
 interface ReportStats {
   complianceRate: number;
@@ -232,6 +233,12 @@ export default function Reports() {
             </div>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Operational Compliance — Portfolio (Fortress) */}
+      <div className="space-y-2">
+        <h2 className="text-lg font-semibold">Operational Compliance — Portfolio</h2>
+        <PortfolioComplianceCard />
       </div>
 
       {/* Available Reports */}

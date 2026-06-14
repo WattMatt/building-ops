@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { fdb } from '@/integrations/supabase/fortress-db';
 import { KpiCard } from './KpiCard';
-import { classify, THRESHOLDS, STATUS_CLASS } from '@/lib/fortressKpis';
+import { classify, THRESHOLDS } from '@/lib/fortressKpis';
 import { formatPeriodLabel } from '@/lib/fortressReports';
 import type { OhsAction, SectionScore, Kpi } from '@/hooks/useBuildingKpis';
 
@@ -31,13 +31,14 @@ export function OhsComplianceTab({ buildingId, kpis, sectionScores, actions, tre
   const { user } = useAuth();
   const [logged, setLogged] = useState<Record<string, boolean>>({});
 
-  const ohsKpis = kpis.filter((k) => ['K1', 'O2', 'O3', 'O4'].includes(k.id));
+  const ohsKpis = kpis.filter((k) => ['O1', 'O2', 'O3', 'O5'].includes(k.id));
 
   const logIssue = async (a: OhsAction) => {
     if (!user?.id) return;
     const secNo = a.section.split(' ')[0];
+    const issueId = crypto.randomUUID();
     const { error } = await fdb.from('issues').insert({
-      id: crypto.randomUUID(),
+      id: issueId,
       title: a.prompt.slice(0, 200),
       description: `OHS non-compliance — ${a.section}${a.comment ? `\n${a.comment}` : ''}`,
       priority: 'medium',
@@ -47,6 +48,9 @@ export function OhsComplianceTab({ buildingId, kpis, sectionScores, actions, tre
       category: ISSUE_CATEGORY[secNo] ?? 'other',
     } as never);
     if (error) { if (import.meta.env.DEV) console.error(error); toast.error('Could not log the issue.'); return; }
+    // Link the response → issue so it tracks to resolution and isn't re-offered on reload.
+    const { error: linkErr } = await fdb.from('compliance_responses').update({ issue_id: issueId }).eq('id', a.responseId);
+    if (linkErr && import.meta.env.DEV) console.error('issue link:', linkErr);
     setLogged((m) => ({ ...m, [a.responseId]: true }));
     toast.success('Logged as an issue.');
   };
@@ -98,8 +102,8 @@ export function OhsComplianceTab({ buildingId, kpis, sectionScores, actions, tre
                     {a.prompt}
                     {a.comment && <p className="mt-1 text-xs text-muted-foreground">{a.comment}</p>}
                   </div>
-                  <Button size="sm" variant="outline" disabled={logged[a.responseId]} onClick={() => logIssue(a)}>
-                    {logged[a.responseId] ? 'Logged' : 'Log as issue'}
+                  <Button size="sm" variant="outline" disabled={Boolean(a.issueId) || logged[a.responseId]} onClick={() => logIssue(a)}>
+                    {(a.issueId || logged[a.responseId]) ? 'Logged' : 'Log as issue'}
                   </Button>
                 </div>
               ))}

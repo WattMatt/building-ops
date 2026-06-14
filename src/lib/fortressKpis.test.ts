@@ -60,4 +60,46 @@ describe('classify (KPI threshold bands)', () => {
     expect(classify(90, THRESHOLDS.compliance)).toBe('good');
     expect(classify(90, THRESHOLDS.critical)).toBe('warn');
   });
+
+  it('inverted: equipment overdue count (O6 — good when zero)', () => {
+    expect(classify(0, THRESHOLDS.equipmentOverdue)).toBe('good');  // ≤0
+    expect(classify(2, THRESHOLDS.equipmentOverdue)).toBe('warn');  // ≤2
+    expect(classify(5, THRESHOLDS.equipmentOverdue)).toBe('bad');
+  });
+});
+
+// O8 "Compliance Trend Δ" = latest minus previous non-null point of the trend array.
+// The hook computes this inline; this mirrors that pure expression to lock the sign logic.
+function trendDelta(trend: (number | null)[]): number | null {
+  const pts = trend.filter((v): v is number => v !== null);
+  return pts.length >= 2 ? Math.round((pts[pts.length - 1] - pts[pts.length - 2]) * 10) / 10 : null;
+}
+function trendStatus(delta: number | null) {
+  return delta === null ? 'info' : delta >= 0 ? 'good' : 'bad';
+}
+
+describe('O8 compliance trend delta (sign logic)', () => {
+  it('positive delta → good', () => {
+    const d = trendDelta([80, 90]);
+    expect(d).toBe(10);
+    expect(trendStatus(d)).toBe('good');
+  });
+  it('negative delta → bad', () => {
+    const d = trendDelta([90, 82.5]);
+    expect(d).toBe(-7.5);
+    expect(trendStatus(d)).toBe('bad');
+  });
+  it('flat delta (0) → good', () => {
+    const d = trendDelta([88, 88]);
+    expect(d).toBe(0);
+    expect(trendStatus(d)).toBe('good');
+  });
+  it('ignores null points, uses last two real values', () => {
+    expect(trendDelta([70, null, 75])).toBe(5);
+  });
+  it('fewer than 2 points → null → info', () => {
+    expect(trendDelta([100])).toBeNull();
+    expect(trendDelta([null, null])).toBeNull();
+    expect(trendStatus(trendDelta([100]))).toBe('info');
+  });
 });
