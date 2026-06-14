@@ -53,6 +53,13 @@ export const REQUIRED_SECTIONS: Record<ReportType, string[]> = {
   annual_inspection: ['condition_inspection'],
 };
 
+/** Report-scoped backing table per gated section — submit checks ≥1 row exists. */
+export const REQUIRED_SECTION_TABLE: Record<string, string> = {
+  ohs_compliance: 'compliance_assessments',
+  turnover: 'tenant_turnover',
+  condition_inspection: 'building_inspections',
+};
+
 /**
  * Group-weighted OHS compliance %, N/A counts as a pass, only scored items count
  * (11_MARKING_AND_PERCENTAGES.md §1.5). Equivalent to the SQL compliance_scores view —

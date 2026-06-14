@@ -15,8 +15,8 @@ import {
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useFortressReport, useReportLifecycle } from '@/hooks/useFortressReports';
-import { REPORT_SECTIONS, REPORT_STATUS_VARIANT, formatPeriodLabel } from '@/lib/fortressReports';
-import { REPORT_TYPE_LABELS, type ReportStatus } from '@/integrations/supabase/fortress-db';
+import { REPORT_SECTIONS, REPORT_STATUS_VARIANT, formatPeriodLabel, REQUIRED_SECTIONS, REQUIRED_SECTION_TABLE } from '@/lib/fortressReports';
+import { fdb, REPORT_TYPE_LABELS, type ReportStatus } from '@/integrations/supabase/fortress-db';
 import { getSectionComponent } from './sections/registry';
 
 export default function FortressReportEditor() {
@@ -31,6 +31,7 @@ export default function FortressReportEditor() {
   const [reviewOpen, setReviewOpen] = useState<null | ReportStatus>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const handleExport = async () => {
     if (!id) return;
@@ -69,6 +70,26 @@ export default function FortressReportEditor() {
 
   const transition = (next: ReportStatus, notes?: string) => {
     lifecycle.mutate({ status: next, reviewNotes: notes }, { onSuccess: () => { setReviewOpen(null); setReviewNotes(''); } });
+  };
+
+  /** Block draft→submitted until each required section has at least one row. */
+  const validateAndSubmit = async () => {
+    if (!id || !report) return;
+    setSubmitting(true);
+    try {
+      const metas = REPORT_SECTIONS[report.report_type as keyof typeof REPORT_SECTIONS] ?? [];
+      const missing: string[] = [];
+      for (const k of REQUIRED_SECTIONS[report.report_type as keyof typeof REQUIRED_SECTIONS] ?? []) {
+        const table = REQUIRED_SECTION_TABLE[k];
+        if (!table) continue;
+        const { count } = await (fdb as any).from(table).select('id', { count: 'exact', head: true }).eq('report_id', id);
+        if (!count) missing.push(metas.find((s) => s.key === k)?.label ?? k);
+      }
+      if (missing.length) { toast.error(`Add at least one entry to: ${missing.join(', ')}`); return; }
+      transition('submitted');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const actions: { label: string; icon: typeof Send; next: ReportStatus; variant?: 'default' | 'outline' | 'destructive'; needsNotes?: boolean }[] = [];
@@ -112,8 +133,8 @@ export default function FortressReportEditor() {
                 key={a.next + a.label}
                 variant={a.variant ?? 'default'}
                 size="sm"
-                disabled={lifecycle.isPending}
-                onClick={() => (a.needsNotes ? setReviewOpen(a.next) : transition(a.next))}
+                disabled={lifecycle.isPending || submitting}
+                onClick={() => (a.needsNotes ? setReviewOpen(a.next) : a.next === 'submitted' ? validateAndSubmit() : transition(a.next))}
               >
                 {lifecycle.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Icon className="mr-2 h-4 w-4" />}
                 {a.label}
