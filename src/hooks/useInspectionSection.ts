@@ -19,6 +19,12 @@ import {
 
 export type InspectionCadence = 'monthly' | 'annual';
 
+export interface PhotoRef {
+  ref: string;
+  caption?: string | null;
+  path: string;
+}
+
 export interface InspectionResponsePatch {
   acceptable?: YesNoNa | null;
   condition_rating?: ConditionRating | null;
@@ -29,6 +35,7 @@ export interface InspectionResponsePatch {
   applicable?: boolean;
   next_service_due?: string | null;
   detail?: Record<string, unknown>;
+  photo_urls?: PhotoRef[];
 }
 
 export function useInspectionSection(
@@ -114,6 +121,7 @@ export function useInspectionSection(
           applicable: patch.applicable ?? existing?.applicable ?? true,
           next_service_due: patch.next_service_due ?? existing?.next_service_due ?? null,
           detail: (patch.detail ?? existing?.detail ?? {}) as never,
+          photo_urls: (patch.photo_urls ?? (existing?.photo_urls as unknown[]) ?? []) as never,
         },
         { onConflict: 'inspection_id,template_item_id' },
       );
