@@ -10,9 +10,14 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { fdb } from '@/integrations/supabase/fortress-db';
 import { KpiCard } from './KpiCard';
+import { RadialGauge } from './RadialGauge';
 import { classify, THRESHOLDS } from '@/lib/fortressKpis';
 import { formatPeriodLabel } from '@/lib/fortressReports';
+import { useOhsWorklist } from '@/hooks/useOhsWorklist';
 import type { OhsAction, SectionScore, Kpi } from '@/hooks/useBuildingKpis';
+
+const fmtDate = (iso: string): string =>
+  new Date(iso).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' });
 
 interface Props {
   buildingId: string;
@@ -30,8 +35,13 @@ const ISSUE_CATEGORY: Record<string, string> = {
 export function OhsComplianceTab({ buildingId, kpis, sectionScores, actions, trend }: Props) {
   const { user } = useAuth();
   const [logged, setLogged] = useState<Record<string, boolean>>({});
+  const { serviceItems, evac, isLoading: worklistLoading } = useOhsWorklist(buildingId);
 
-  const ohsKpis = kpis.filter((k) => ['O1', 'O2', 'O3', 'O5'].includes(k.id));
+  // Row A: O1/O2 as radial gauges; O3 (open non-compliances) + O5 (lowest section) as small tiles.
+  const byId = (id: string) => kpis.find((k) => k.id === id) ?? null;
+  const o1 = byId('O1');
+  const o2 = byId('O2');
+  const tileKpis = kpis.filter((k) => ['O3', 'O5'].includes(k.id));
 
   const logIssue = async (a: OhsAction) => {
     if (!user?.id) return;
@@ -59,9 +69,20 @@ export function OhsComplianceTab({ buildingId, kpis, sectionScores, actions, tre
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {ohsKpis.map((k) => <KpiCard key={k.id} kpi={k} />)}
-      </div>
+      {/* Row A — headline radial gauges + context tiles */}
+      <Card>
+        <CardContent className="flex flex-col gap-6 p-4 sm:flex-row sm:items-center">
+          <div className="flex flex-1 justify-center gap-8">
+            <RadialGauge value={o1?.value ?? null} threshold={THRESHOLDS.compliance} label="Building Compliance" />
+            <RadialGauge value={o2?.value ?? null} threshold={THRESHOLDS.critical} label="Critical Equipment" />
+          </div>
+          {tileKpis.length > 0 && (
+            <div className="grid flex-1 grid-cols-2 gap-3">
+              {tileKpis.map((k) => <KpiCard key={k.id} kpi={k} />)}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader><CardTitle className="text-base">Section breakdown</CardTitle></CardHeader>
@@ -108,6 +129,50 @@ export function OhsComplianceTab({ buildingId, kpis, sectionScores, actions, tre
                 </div>
               ))}
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Row D — equipment service register (from annual inspection next_service_due dates) */}
+      <Card>
+        <CardHeader><CardTitle className="text-base">Equipment service register</CardTitle></CardHeader>
+        <CardContent>
+          {worklistLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : serviceItems.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No service dates recorded.</p>
+          ) : (
+            <div className="space-y-2">
+              {serviceItems.map((s) => (
+                <div key={s.responseId} className="flex items-center justify-between gap-3 rounded-md border p-3">
+                  <div className="min-w-0 text-sm">
+                    <p className="truncate">{s.label}</p>
+                    {s.section && <p className="text-xs text-muted-foreground">{s.section}</p>}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {s.overdue && <Badge variant="destructive" className="text-[10px]">Overdue</Badge>}
+                    <span className="text-xs tabular-nums text-muted-foreground">{fmtDate(s.nextDue)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Row E — evacuation drill recency */}
+      <Card>
+        <CardHeader><CardTitle className="text-base">Evacuation drill</CardTitle></CardHeader>
+        <CardContent>
+          {worklistLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : evac ? (
+            <p className="text-sm">
+              Last evacuation drill: <span className="font-medium">{fmtDate(evac.date)}</span>{' '}
+              <span className="text-muted-foreground">({evac.daysAgo} {evac.daysAgo === 1 ? 'day' : 'days'} ago)</span>
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">No drill recorded.</p>
           )}
         </CardContent>
       </Card>

@@ -20,6 +20,7 @@ export const REPORT_SECTIONS: Record<ReportType, SectionMeta[]> = {
     { key: 'operational_overview', label: 'Operational Overview', hint: 'Narrative status per building system.' },
     { key: 'report_checklist', label: 'General Checklist', hint: 'Site-visit, night/roof inspection, asset register, SLAs.' },
     { key: 'ohs_compliance', label: 'OHS Act Compliance', hint: 'Weighted compliance — scored live from the template.' },
+    { key: 'hazard_log', label: 'Hazard Log', hint: 'Potential hazards + corrective actions.' },
     { key: 'building_inspection', label: 'Building Inspection', hint: 'Monthly acceptable / action checklist.' },
     { key: 'expense_recoveries', label: 'Expense Recoveries', hint: 'YTD expense vs recovery per service.' },
     { key: 'utilities', label: 'Utilities', hint: 'Meter readings + borehole/solar yields.' },
@@ -41,6 +42,7 @@ export const REPORT_SECTIONS: Record<ReportType, SectionMeta[]> = {
     { key: 'security_incidents', label: 'Security Incidents', hint: 'Monthly incident counts by type.' },
   ],
   annual_inspection: [
+    { key: 'building_profile', label: 'Building Profile', hint: 'Property profile (§3) — feeds the building KPIs.' },
     { key: 'condition_inspection', label: 'Condition Inspection', hint: '33-section equipment & fabric inspection.' },
     { key: 'capex', label: 'Capex Register', hint: 'Capital expenditure motivations.' },
   ],

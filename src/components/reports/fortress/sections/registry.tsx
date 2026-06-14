@@ -14,6 +14,8 @@ import ConditionInspectionSection from './ConditionInspectionSection';
 import TenantComplianceSection from './TenantComplianceSection';
 import ShopSpecSection from './ShopSpecSection';
 import BuildingTurnoverSection from './BuildingTurnoverSection';
+import BuildingProfileSection from './BuildingProfileSection';
+import HazardLogSection from './HazardLogSection';
 import {
   ExpenseRecoveriesSection,
   MasterfileSection,
@@ -34,6 +36,7 @@ export const SECTION_REGISTRY: Record<string, ComponentType<SectionProps>> = {
   // OPS
   operational_overview: OperationalOverviewSection,
   ohs_compliance: ComplianceSection,
+  hazard_log: HazardLogSection,
   building_inspection: BuildingInspectionSection,
   expense_recoveries: ExpenseRecoveriesSection,
   utilities: UtilitiesSection,
@@ -54,6 +57,7 @@ export const SECTION_REGISTRY: Record<string, ComponentType<SectionProps>> = {
   local_resources: LocalResourcesSection,
   report_checklist: ReportChecklistSection,
   // Annual
+  building_profile: BuildingProfileSection,
   condition_inspection: ConditionInspectionSection,
   capex: CapexSection,
 };
