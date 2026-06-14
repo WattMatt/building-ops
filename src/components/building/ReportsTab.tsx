@@ -113,10 +113,10 @@ export default function ReportsTab({ buildingId, buildingName }: { buildingId: s
       </Card>
 
       {hasApproved && (
-        <Tabs defaultValue="ohs">
+        <Tabs defaultValue="kpis">
           <TabsList>
-            <TabsTrigger value="ohs">OHS Compliance</TabsTrigger>
             <TabsTrigger value="kpis">KPIs</TabsTrigger>
+            <TabsTrigger value="ohs">OHS Compliance</TabsTrigger>
           </TabsList>
           <TabsContent value="ohs" className="mt-4">
             <OhsComplianceTab
