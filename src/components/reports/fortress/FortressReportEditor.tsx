@@ -59,8 +59,8 @@ export default function FortressReportEditor() {
     if (!id) return;
     setExporting(true);
     try {
-      // Fortress reports are branded "GMI Operations" (the FM company), not the web product brand/logo.
-      await generateReportPdf(id, { name: 'GMI Operations', primaryColor: organization?.primary_color ?? '#2563eb', logoUrl: null });
+      // Report header uses the organisation's configured name + logo (Settings).
+      await generateReportPdf(id, { name: organization?.name ?? '', primaryColor: organization?.primary_color ?? '#2563eb', logoUrl: organization?.logo_url ?? null });
     } catch (e) {
       if (import.meta.env.DEV) console.error('PDF export failed:', e);
       toast.error('Could not generate the PDF.');

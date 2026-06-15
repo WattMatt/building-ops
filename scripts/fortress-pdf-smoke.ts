@@ -42,6 +42,7 @@ const CAP = 30; // embed a representative subset for the proof artifact
 
 async function main() {
   const rep = (await q(`SELECT title,report_period,report_type,asset_manager,ops_manager,centre_manager FROM reports WHERE id='${ANNUAL}'`))[0];
+  const org = (await q(`SELECT name, primary_color FROM organizations LIMIT 1`))[0] ?? {};
   const insp = (await q(`SELECT id,template_id FROM building_inspections WHERE report_id='${ANNUAL}'`))[0];
   const items = await q(`SELECT id,section_no,section_title,item_label,sort_order,field_set FROM inspection_template_items WHERE template_id='${insp.template_id}' ORDER BY sort_order`);
   const resps = await q(`SELECT template_item_id,condition_rating,recommendation,comment,capex_estimate,applicable,photo_urls,detail FROM inspection_responses WHERE inspection_id='${insp.id}'`);
@@ -83,7 +84,7 @@ async function main() {
   const doc = buildReportDoc(
     { title: rep.title, report_period: rep.report_period, report_type: rep.report_type, managers: [rep.asset_manager, rep.ops_manager, rep.centre_manager].filter(Boolean) },
     data,
-    { color: '#1f4e79', orgName: 'GMI Operations' },
+    { color: (org as any).primary_color ?? '#1f4e79', orgName: (org as any).name ?? '' },
   );
 
   const vfs: Record<string, string> = (pdfFonts as any).vfs ?? (pdfFonts as any).pdfMake?.vfs ?? (pdfFonts as any);
