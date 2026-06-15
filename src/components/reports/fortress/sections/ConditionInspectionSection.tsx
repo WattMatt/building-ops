@@ -77,6 +77,49 @@ export default function ConditionInspectionSection({ reportId, buildingId, readO
     );
   };
 
+  // Some items are 2-D matrices flattened as `"<field> — <column>"` keys (e.g. Lifts/
+  // Escalators/Goods, or Electricity/Water/Gas). Render those as a compact grid.
+  const SEP = ' — ';
+  const matrixGrid = (it: InspectionTemplateItem, fields: AnnualField[]) => {
+    const rows: string[] = []; const cols: string[] = [];
+    for (const f of fields) {
+      const i = f.key.lastIndexOf(SEP);
+      const row = i >= 0 ? f.key.slice(0, i) : f.key;
+      const col = i >= 0 ? f.key.slice(i + SEP.length) : '';
+      if (!rows.includes(row)) rows.push(row);
+      if (!cols.includes(col)) cols.push(col);
+    }
+    cols.sort((a, b) => (a === '' ? -1 : b === '' ? 1 : 0)); // base/"General" column first
+    const detail = (responses[it.id]?.detail as Record<string, unknown> | null) ?? null;
+    return (
+      <div className="overflow-x-auto rounded border">
+        <table className="w-full border-collapse text-xs">
+          <thead>
+            <tr className="bg-muted/50">
+              <th className="p-1 text-left font-medium text-muted-foreground">Field</th>
+              {cols.map((c) => <th key={c || 'general'} className="p-1 text-left font-medium text-muted-foreground">{c || 'General'}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row} className="border-t">
+                <td className="p-1 align-top text-muted-foreground">{row.replace(/\s*[:?]\s*$/, '')}</td>
+                {cols.map((c) => {
+                  const key = c === '' ? row : `${row}${SEP}${c}`;
+                  return (
+                    <td key={c || 'general'} className="p-0.5">
+                      <Input className="h-7" defaultValue={detailStr(detail?.[key])} disabled={readOnly} onBlur={(e) => setDetail(it, key, e.target.value)} />
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
+
   const renderItem = (it: InspectionTemplateItem) => {
     const r = responses[it.id];
     const applicable = r?.applicable ?? true;
@@ -97,7 +140,9 @@ export default function ConditionInspectionSection({ reportId, buildingId, readO
         {applicable && (
           <div className="mt-3 space-y-3">
             {itemFields.length > 0 && (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{itemFields.map((f) => fieldInput(it, f))}</div>
+              itemFields.some((f) => f.key.includes(SEP))
+                ? matrixGrid(it, itemFields)
+                : <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">{itemFields.map((f) => fieldInput(it, f))}</div>
             )}
             {it.field_set === 'equip' && (
               <label className="flex flex-col gap-1 text-xs">
