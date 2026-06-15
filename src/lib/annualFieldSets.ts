@@ -367,3 +367,28 @@ export const ANNUAL_FIELD_SETS: Record<string, AnnualField[]> = {
   narrative: fields(NARRATIVE_KEYS, new Set(NARRATIVE_KEYS)),
   register: [],
 };
+
+// Flat lookup of {label, long} by verbatim key, across all archetypes — so the form can
+// render a template item's own `field_keys` (its real subset) rather than the whole union.
+const FIELD_META = new Map<string, AnnualField>();
+for (const list of Object.values(ANNUAL_FIELD_SETS)) for (const f of list) FIELD_META.set(f.key, f);
+
+/** Metadata for a detail key: from the catalogue if known, else derived from the key. */
+export function annualFieldMeta(key: string): AnnualField {
+  const known = FIELD_META.get(key);
+  if (known) return known;
+  return {
+    key,
+    label: key.replace(/\s*[:?]\s*$/, ''),
+    long: /describe|description|comment|recommend|introduction|disclaimer|further expansion/i.test(key),
+  };
+}
+
+/** A template item's own fields, ordered by the archetype catalogue then any extras. */
+export function annualItemFields(fieldSet: string, fieldKeys: string[]): AnnualField[] {
+  const keys = fieldKeys.length ? fieldKeys : (ANNUAL_FIELD_SETS[fieldSet] ?? []).map((f) => f.key);
+  const order = new Map((ANNUAL_FIELD_SETS[fieldSet] ?? []).map((f, i) => [f.key, i]));
+  return [...keys]
+    .sort((a, b) => (order.get(a) ?? 1e6) - (order.get(b) ?? 1e6))
+    .map((k) => annualFieldMeta(k));
+}

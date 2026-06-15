@@ -1422,6 +1422,7 @@ export type FortressDatabase = {
           allows_photo: boolean
           created_at: string
           field_set: string
+          field_keys: Json
           id: string
           item_label: string | null
           rating_type: string
@@ -1436,6 +1437,7 @@ export type FortressDatabase = {
           allows_photo?: boolean
           created_at?: string
           field_set?: string
+          field_keys?: Json
           id?: string
           item_label?: string | null
           rating_type?: string
@@ -1450,6 +1452,7 @@ export type FortressDatabase = {
           allows_photo?: boolean
           created_at?: string
           field_set?: string
+          field_keys?: Json
           id?: string
           item_label?: string | null
           rating_type?: string
