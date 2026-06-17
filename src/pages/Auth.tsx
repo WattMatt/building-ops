@@ -164,7 +164,9 @@ export default function Auth() {
                 <Label htmlFor="login-email">Email</Label>
                 <Input
                   id="login-email"
+                  name="email"
                   type="email"
+                  autoComplete="username"
                   placeholder="you@company.com"
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
@@ -183,7 +185,9 @@ export default function Auth() {
                 </div>
                 <Input
                   id="login-password"
+                  name="password"
                   type="password"
+                  autoComplete="current-password"
                   placeholder="••••••••"
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}

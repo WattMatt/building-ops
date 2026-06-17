@@ -85,5 +85,33 @@ export function useOrganizationTheme() {
     };
   }, [organization?.primary_color]);
 
+  // Point the browser-tab favicon at the organization logo so it matches the
+  // logo shown under branding. When no org logo is set, the static icons from
+  // index.html remain in place.
+  useEffect(() => {
+    const logoUrl = organization?.logo_url;
+    if (!logoUrl) return;
+
+    const head = document.head;
+    // Remove the typed default icons (favicon.ico / favicon.svg). Their declared
+    // MIME types would make the browser reject a logo of a different format, so
+    // we swap in a single untyped icon link and let the browser sniff it.
+    const defaults = Array.from(
+      head.querySelectorAll<HTMLLinkElement>("link[rel~='icon']")
+    );
+    defaults.forEach((l) => l.remove());
+
+    const link = document.createElement('link');
+    link.rel = 'icon';
+    link.href = logoUrl;
+    head.appendChild(link);
+
+    // Restore the static defaults if the logo clears or the app unmounts.
+    return () => {
+      link.remove();
+      defaults.forEach((l) => head.appendChild(l));
+    };
+  }, [organization?.logo_url]);
+
   return { organization };
 }
