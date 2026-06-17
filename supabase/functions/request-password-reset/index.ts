@@ -84,7 +84,7 @@ serve(async (req) => {
           ctaUrl: actionLink,
           footnote: "This link is valid for a short time and can only be used once.",
         });
-        await fetch("https://api.resend.com/emails", {
+        const emailRes = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -94,6 +94,9 @@ serve(async (req) => {
             html,
           }),
         });
+        if (!emailRes.ok) {
+          console.error("request-password-reset: Resend send failed", emailRes.status, (await emailRes.text().catch(() => "")).slice(0, 300));
+        }
       }
     }
 
