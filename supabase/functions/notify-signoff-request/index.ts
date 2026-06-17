@@ -1,14 +1,15 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { loadBranding, renderEmail } from "../_shared/email.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
 
-async function sendEmail(to: string[], subject: string, html: string) {
+async function sendEmail(from: string, to: string[], subject: string, html: string) {
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${RESEND_API_KEY}` },
-    body: JSON.stringify({ from: "Building Ops <notifications@buildingops.app>", to, subject, html }),
+    body: JSON.stringify({ from, to, subject, html }),
   });
   if (!res.ok) throw new Error(`Resend API error: ${await res.text()}`);
   return res.json();
@@ -77,25 +78,23 @@ serve(async (req: Request): Promise<Response> => {
       : null;
     const heading = reminder ? "Sign-off reminder" : "Sign-off requested";
 
+    const branding = await loadBranding(supabase);
+
     await sendEmail(
+      `${branding.appName} <notifications@buildingops.app>`,
       [signer.email],
       `${heading}: ${formName}`,
-      `
-      <!DOCTYPE html><html><head><meta charset="utf-8"></head>
-      <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f4f4f5;margin:0;padding:20px;">
-        <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-          <div style="background:#2563eb;padding:24px;text-align:center;">
-            <h1 style="color:#fff;margin:0;font-size:22px;">${heading}</h1>
-          </div>
-          <div style="padding:32px;">
-            <p style="color:#374151;font-size:16px;margin:0 0 8px;">Hi ${signer.full_name || "there"},</p>
-            <p style="color:#374151;font-size:16px;margin:0 0 24px;">${requesterName} has asked you to sign off on <strong>${formName}</strong>${buildingName ? ` for ${buildingName}` : ""}.</p>
-            ${due ? `<p style="color:#374151;font-size:14px;margin:0 0 16px;">Please sign by <strong>${due}</strong>.</p>` : ""}
-            ${request.instructions ? `<div style="background:#f9fafb;border-left:4px solid #2563eb;padding:16px;border-radius:4px;margin-bottom:24px;color:#374151;">${request.instructions}</div>` : ""}
-            <a href="${APP_URL}/my-signoffs" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;">Review &amp; sign</a>
-          </div>
-        </div>
-      </body></html>`,
+      renderEmail({
+        branding,
+        heading,
+        greeting: `Hi ${signer.full_name || "there"},`,
+        bodyHtml: `
+          <p style="margin:0 0 16px;">${requesterName} has asked you to sign off on <strong>${formName}</strong>${buildingName ? ` for ${buildingName}` : ""}.</p>
+          ${due ? `<p style="margin:0 0 16px;">Please sign by <strong>${due}</strong>.</p>` : ""}
+          ${request.instructions ? `<div style="background:#f9fafb;border-left:4px solid ${branding.color};padding:16px;border-radius:4px;margin:0 0 16px;color:#374151;">${request.instructions}</div>` : ""}`,
+        ctaText: "Review & sign",
+        ctaUrl: `${APP_URL}/my-signoffs`,
+      }),
     );
 
     return new Response(JSON.stringify({ success: true, notified: 1 }), {

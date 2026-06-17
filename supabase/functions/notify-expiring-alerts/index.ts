@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { Resend } from "https://esm.sh/resend@2.0.0";
+import { Branding, loadBranding, renderEmail } from "../_shared/email.ts";
 
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
@@ -202,6 +203,9 @@ const handler = async (req: Request): Promise<Response> => {
 
       console.log(`Found ${adminUsers?.length || 0} admin/manager users to notify`);
 
+      // Load org branding once for all recipients in this run.
+      const branding = await loadBranding(supabase);
+
       // Send email to each admin/manager
       for (const user of adminUsers || []) {
         const profile = (user.profiles as unknown) as { email: string; full_name: string | null };
@@ -210,11 +214,11 @@ const handler = async (req: Request): Promise<Response> => {
 
         console.log(`Sending alert email to ${recipientEmail}`);
 
-        const emailHtml = generateAlertEmailHtml(recipientName, alertSummary);
+        const emailHtml = generateAlertEmailHtml(branding, recipientName, alertSummary);
 
         try {
           const emailResponse = await resend.emails.send({
-            from: "Building Ops <alerts@buildingops.app>",
+            from: `${branding.appName} <alerts@buildingops.app>`,
             to: [recipientEmail],
             subject: `⚠️ ${totalAlerts} Building Alert${totalAlerts > 1 ? 's' : ''} Require Attention`,
             html: emailHtml,
@@ -255,40 +259,10 @@ async function getAdminCount(supabase: any): Promise<number> {
   return count || 0;
 }
 
-function generateAlertEmailHtml(recipientName: string, alerts: AlertSummary): string {
+function generateAlertEmailHtml(branding: Branding, recipientName: string, alerts: AlertSummary): string {
   const { expiringDocuments, expiredDocuments, overdueMaintenance } = alerts;
-  
+
   let html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Building Alerts</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f4f4f5;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f5; padding: 40px 20px;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
-          <!-- Header -->
-          <tr>
-            <td style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); padding: 32px; text-align: center;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 600;">
-                ⚠️ Building Alerts
-              </h1>
-              <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">
-                Items requiring your attention
-              </p>
-            </td>
-          </tr>
-          
-          <!-- Content -->
-          <tr>
-            <td style="padding: 32px;">
-              <p style="margin: 0 0 24px; color: #374151; font-size: 16px;">
-                Hi ${recipientName},
-              </p>
               <p style="margin: 0 0 24px; color: #6b7280; font-size: 14px;">
                 The following items require your attention:
               </p>`;
@@ -377,36 +351,14 @@ function generateAlertEmailHtml(recipientName: string, alerts: AlertSummary): st
               </div>`;
   }
 
-  html += `
-              <!-- CTA Button -->
-              <div style="text-align: center; margin-top: 32px;">
-                <a href="${APP_URL}/dashboard"
-                   style="display: inline-block; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 14px; font-weight: 600;">
-                  View Dashboard
-                </a>
-              </div>
-            </td>
-          </tr>
-          
-          <!-- Footer -->
-          <tr>
-            <td style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb;">
-              <p style="margin: 0; color: #9ca3af; font-size: 12px;">
-                This is an automated notification from Building Ops.
-              </p>
-              <p style="margin: 8px 0 0; color: #9ca3af; font-size: 12px;">
-                © ${new Date().getFullYear()} Building Ops. All rights reserved.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`;
-
-  return html;
+  return renderEmail({
+    branding,
+    heading: "⚠️ Building Alerts",
+    greeting: `Hi ${recipientName},`,
+    bodyHtml: html,
+    ctaText: "View Dashboard",
+    ctaUrl: `${APP_URL}/dashboard`,
+  });
 }
 
 serve(handler);

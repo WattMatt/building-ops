@@ -1,14 +1,15 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { loadBranding, renderEmail } from "../_shared/email.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
 
-async function sendEmail(to: string[], subject: string, html: string) {
+async function sendEmail(from: string, to: string[], subject: string, html: string) {
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${RESEND_API_KEY}` },
-    body: JSON.stringify({ from: "Building Ops <notifications@buildingops.app>", to, subject, html }),
+    body: JSON.stringify({ from, to, subject, html }),
   });
   if (!res.ok) throw new Error(`Resend API error: ${await res.text()}`);
   return res.json();
@@ -76,23 +77,19 @@ serve(async (req: Request): Promise<Response> => {
 
     const formName = submission.form_name ?? "a form";
 
+    const branding = await loadBranding(supabase);
+
     await sendEmail(
+      `${branding.appName} <notifications@buildingops.app>`,
       emails,
       `Sign-off complete: ${formName}`,
-      `
-      <!DOCTYPE html><html><head><meta charset="utf-8"></head>
-      <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f4f4f5;margin:0;padding:20px;">
-        <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-          <div style="background:#10b981;padding:24px;text-align:center;">
-            <div style="font-size:48px;color:#fff;margin-bottom:8px;">&#10003;</div>
-            <h1 style="color:#fff;margin:0;font-size:22px;">Sign-off complete</h1>
-          </div>
-          <div style="padding:32px;">
-            <p style="color:#374151;font-size:16px;margin:0 0 24px;">All required signatures have been collected for <strong>${formName}</strong>${buildingName ? ` (${buildingName})` : ""}.</p>
-            <a href="${APP_URL}/forms" style="display:inline-block;background:#10b981;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;">View submission</a>
-          </div>
-        </div>
-      </body></html>`,
+      renderEmail({
+        branding,
+        heading: "Sign-off complete",
+        bodyHtml: `<p style="margin:0 0 16px;">All required signatures have been collected for <strong>${formName}</strong>${buildingName ? ` (${buildingName})` : ""}.</p>`,
+        ctaText: "View submission",
+        ctaUrl: `${APP_URL}/forms`,
+      }),
     );
 
     return new Response(JSON.stringify({ success: true, notified: emails.length }), {
