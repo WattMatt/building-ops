@@ -65,7 +65,7 @@ function ResetShell({
  */
 export default function ResetPassword() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, isRecovery } = useAuth();
   const { organization } = useOrganization();
   const appName = organization?.name || 'Building Ops';
   const logoUrl = organization?.logo_url;
@@ -102,6 +102,14 @@ export default function ResetPassword() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Robust recovery detection: AuthContext catches PASSWORD_RECOVERY reliably
+  // (its listener is registered at app init) and exposes it here, even when the
+  // URL hash has already been consumed by detectSessionInUrl. This is what
+  // prevents the "/reset keeps showing the email form" loop.
+  useEffect(() => {
+    if (isRecovery) setMode('recovery');
+  }, [isRecovery]);
 
   const handleRequest = async (e: React.FormEvent) => {
     e.preventDefault();

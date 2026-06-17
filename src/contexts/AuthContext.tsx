@@ -28,6 +28,7 @@ interface AuthContextType {
   session: Session | null;
   role: AppRole | null;
   mustSetPassword: boolean;
+  isRecovery: boolean;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, fullName?: string) => Promise<{ error: Error | null }>;
@@ -48,6 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [role, setRole] = useState<AppRole | null>(null);
   const [mustSetPassword, setMustSetPassword] = useState(false);
+  const [isRecovery, setIsRecovery] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -60,13 +62,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // silently sign the user in. The hash marker re-arms ResetPassword's
         // recovery mode because the original URL hash is consumed before
         // this event fires.
-        if (
-          event === 'PASSWORD_RECOVERY' &&
-          window.location.pathname !== '/reset' &&
-          window.location.pathname !== '/set-password'
-        ) {
-          window.location.replace('/reset#type=recovery');
-          return;
+        if (event === 'PASSWORD_RECOVERY') {
+          // This listener is registered at app init, so it reliably catches the
+          // event even when a page's own listener attaches too late and the URL
+          // hash has already been consumed. Pages read isRecovery to switch into
+          // set-new-password mode.
+          setIsRecovery(true);
+          if (
+            window.location.pathname !== '/reset' &&
+            window.location.pathname !== '/set-password'
+          ) {
+            window.location.replace('/reset#type=recovery');
+            return;
+          }
         }
         setSession(session);
         setUser(session?.user ?? null);
@@ -225,6 +233,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         session,
         role,
         mustSetPassword,
+        isRecovery,
         loading,
         signIn,
         signUp,
