@@ -15,6 +15,48 @@ const MIN_PASSWORD_LENGTH = 8;
 type Mode = 'request' | 'recovery' | 'sent';
 
 /**
+ * Card chrome for the reset flow. Defined at MODULE scope (not inside
+ * ResetPassword) so its identity is stable across renders — a component
+ * declared in the render body is a new type every keystroke, which remounts
+ * its subtree and makes the inputs lose focus after a single character.
+ */
+function ResetShell({
+  appName,
+  logoUrl,
+  title,
+  description,
+  children,
+}: {
+  appName: string;
+  logoUrl?: string | null;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader className="text-center">
+          <div className="flex flex-col items-center gap-2 mb-4">
+            {logoUrl ? (
+              <img src={logoUrl} alt={appName} className="w-16 h-16 rounded-lg object-contain" />
+            ) : (
+              <div className="w-16 h-16 bg-primary rounded-lg flex items-center justify-center">
+                <ClipboardCheck className="w-8 h-8 text-primary-foreground" />
+              </div>
+            )}
+            <span className="font-bold text-sm">{appName}</span>
+          </div>
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </CardHeader>
+        <CardContent>{children}</CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/**
  * /reset — PUBLIC route, dual-mode:
  *  (a) "request": no recovery token in the URL → collect an email and send a
  *      reset link via resetPasswordForEmail (redirectTo points back here).
@@ -126,39 +168,9 @@ export default function ResetPassword() {
     }
   };
 
-  const Shell = ({
-    title,
-    description,
-    children,
-  }: {
-    title: string;
-    description: string;
-    children: React.ReactNode;
-  }) => (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <div className="flex flex-col items-center gap-2 mb-4">
-            {logoUrl ? (
-              <img src={logoUrl} alt={appName} className="w-16 h-16 rounded-lg object-contain" />
-            ) : (
-              <div className="w-16 h-16 bg-primary rounded-lg flex items-center justify-center">
-                <ClipboardCheck className="w-8 h-8 text-primary-foreground" />
-              </div>
-            )}
-            <span className="font-bold text-sm">{appName}</span>
-          </div>
-          <CardTitle>{title}</CardTitle>
-          <CardDescription>{description}</CardDescription>
-        </CardHeader>
-        <CardContent>{children}</CardContent>
-      </Card>
-    </div>
-  );
-
   if (mode === 'sent') {
     return (
-      <Shell
+      <ResetShell appName={appName} logoUrl={logoUrl}
         title="Check your email"
         description={`If an account exists for ${email}, a password reset link is on its way.`}
       >
@@ -174,13 +186,13 @@ export default function ResetPassword() {
             <Link to="/auth">Back to sign in</Link>
           </Button>
         </div>
-      </Shell>
+      </ResetShell>
     );
   }
 
   if (mode === 'recovery') {
     return (
-      <Shell title="Choose a new password" description="Enter a new password for your account.">
+      <ResetShell appName={appName} logoUrl={logoUrl} title="Choose a new password" description="Enter a new password for your account.">
         <form onSubmit={handleSetNewPassword} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="reset-new-password">New password</Label>
@@ -217,12 +229,12 @@ export default function ResetPassword() {
             {isSubmitting ? 'Updating…' : 'Update password'}
           </Button>
         </form>
-      </Shell>
+      </ResetShell>
     );
   }
 
   return (
-    <Shell
+    <ResetShell appName={appName} logoUrl={logoUrl}
       title="Reset your password"
       description="Enter your email and we'll send you a link to reset your password."
     >
@@ -247,6 +259,6 @@ export default function ResetPassword() {
           <Link to="/auth">Back to sign in</Link>
         </Button>
       </form>
-    </Shell>
+    </ResetShell>
   );
 }

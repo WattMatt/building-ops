@@ -285,8 +285,17 @@ export default function UserManagement() {
         // Show the generated password exactly once.
         setTempPasswordResult({ email, password: result.tempPassword });
         setCopied(false);
+      } else if (result.actionLink) {
+        // Email delivery wasn't available — copy the setup link so the admin
+        // can send it manually. Onboarding still completes.
+        try {
+          await navigator.clipboard.writeText(result.actionLink);
+          toast.success(`Invite created — email couldn't be sent, so the setup link is copied to your clipboard. Send it to ${email} (valid 24 hours).`);
+        } catch {
+          toast.success(`Invite created for ${email}, but email couldn't be sent. Use "Resend → Copy link" on their row to get the setup link.`);
+        }
       } else {
-        toast.success(`Invite sent to ${email}`);
+        toast.success(`Invite emailed to ${email}`);
       }
 
       resetInviteForm();

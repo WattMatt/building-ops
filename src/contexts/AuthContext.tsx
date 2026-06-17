@@ -17,6 +17,10 @@ export interface InviteUserResult {
   userId: string;
   status: 'invited' | 'temp_password';
   tempPassword?: string;
+  // Invite delivery: emailed=true when Resend accepted the message. When email
+  // could not be sent, actionLink carries the setup link for manual delivery.
+  emailed?: boolean;
+  actionLink?: string | null;
 }
 
 interface AuthContextType {
