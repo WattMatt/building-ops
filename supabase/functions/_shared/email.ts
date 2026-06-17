@@ -55,9 +55,13 @@ export function renderEmail(opts: {
   const { branding, preheader, heading, greeting, bodyHtml, ctaText, ctaUrl, footnote } = opts;
   const name = escapeAttr(branding.appName);
   const color = branding.color;
+  // Logo (any aspect ratio) sits on a white chip so it stays visible on the
+  // branded header colour; height-constrained with natural width. Falls back to
+  // the app name as a wordmark when no logo is set.
   const logo = branding.logoUrl
-    ? `<img src="${escapeAttr(branding.logoUrl)}" alt="${name}" width="36" height="36" style="display:inline-block;vertical-align:middle;border-radius:8px;background:#ffffff;object-fit:contain;" />
-       <span style="display:inline-block;vertical-align:middle;margin-left:10px;color:#ffffff;font-size:17px;font-weight:700;letter-spacing:-0.01em;">${name}</span>`
+    ? `<span style="display:inline-block;background:#ffffff;border-radius:8px;padding:7px 11px;line-height:0;">
+         <img src="${escapeAttr(branding.logoUrl)}" alt="${name}" style="height:30px;width:auto;max-width:190px;display:inline-block;vertical-align:middle;" />
+       </span>`
     : `<span style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:-0.01em;">${name}</span>`;
 
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>
