@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { loadBranding, renderEmail } from "../_shared/email.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -66,28 +67,31 @@ serve(async (req) => {
       const resendKey = Deno.env.get("RESEND_API_KEY");
 
       if (actionLink && resendKey) {
+        const branding = await loadBranding(admin);
+        const isSetup = dest === "/set-password";
         const greeting = profile.full_name ? `Hi ${profile.full_name},` : "Hi,";
-        const heading = dest === "/set-password" ? "Finish setting up your account" : "Reset your password";
-        const blurb =
-          dest === "/set-password"
-            ? "Here's a fresh link to finish setting up your Building Ops account. Click it, choose a password, and you're in."
-            : "We received a request to reset your Building Ops password. Click below to choose a new one. If you didn't ask for this, you can ignore this email.";
+        const heading = isSetup ? "Finish setting up your account" : "Reset your password";
+        const blurb = isSetup
+          ? `Here's a fresh link to finish setting up your ${branding.appName} account. Click below to choose a password and you're in.`
+          : `We received a request to reset your ${branding.appName} password. Click below to choose a new one. If you didn't ask for this, you can safely ignore this email.`;
+        const html = renderEmail({
+          branding,
+          preheader: heading,
+          heading,
+          greeting,
+          bodyHtml: `<p style="margin:0;">${blurb}</p>`,
+          ctaText: isSetup ? "Set your password" : "Reset password",
+          ctaUrl: actionLink,
+          footnote: "This link is valid for a short time and can only be used once.",
+        });
         await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({
-            from: "Building Ops <notifications@buildingops.app>",
+            from: `${branding.appName} <notifications@buildingops.app>`,
             to: [email],
-            subject: dest === "/set-password" ? "Your Building Ops setup link" : "Reset your Building Ops password",
-            html: `<div style="font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:480px;margin:0 auto;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
-<div style="background:#006d8f;padding:18px 32px;"><span style="color:#ffffff;font-size:18px;font-weight:700;">Building Ops</span></div>
-<div style="padding:28px 32px;color:#111827;font-size:14px;line-height:1.6;">
-<p style="margin:0 0 12px;">${greeting}</p>
-<p style="margin:0 0 8px;font-weight:600;">${heading}</p>
-<p style="margin:0 0 20px;">${blurb}</p>
-<p style="margin:0 0 24px;"><a href="${actionLink}" style="background:#006d8f;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;display:inline-block;">${dest === "/set-password" ? "Set your password" : "Reset password"}</a></p>
-<p style="margin:0;color:#6b7280;font-size:12px;">This link is valid for a short time and can only be used once.</p>
-</div></div>`,
+            subject: isSetup ? `Your ${branding.appName} setup link` : `Reset your ${branding.appName} password`,
+            html,
           }),
         });
       }

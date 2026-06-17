@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { loadBranding, renderEmail } from "../_shared/email.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -132,22 +133,25 @@ serve(async (req) => {
       if (delivery === "email") {
         const resendKey = Deno.env.get("RESEND_API_KEY");
         if (!resendKey) return json({ error: "RESEND_API_KEY not configured" }, 500);
+        const branding = await loadBranding(adminClient);
         const greeting = profile.full_name ? `Hi ${profile.full_name},` : "Hi,";
         const emailRes = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({
-            from: "Building Ops <notifications@buildingops.app>",
+            from: `${branding.appName} <notifications@buildingops.app>`,
             to: [email],
-            subject: "Your Building Ops sign-in link",
-            html: `<div style="font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:480px;margin:0 auto;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
-<div style="background:#006d8f;padding:18px 32px;"><span style="color:#ffffff;font-size:18px;font-weight:700;">Building Ops</span></div>
-<div style="padding:28px 32px;color:#111827;font-size:14px;line-height:1.6;">
-<p style="margin:0 0 12px;">${greeting}</p>
-<p style="margin:0 0 20px;">Here is a fresh link to finish setting up your Building Ops account. Click it, choose a password, and you're in.</p>
-<p style="margin:0 0 24px;"><a href="${actionLink}" style="background:#006d8f;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;display:inline-block;">Set your password</a></p>
-<p style="margin:0;color:#6b7280;font-size:12px;">This link is valid for 24 hours. If it expires, ask your administrator to send a new one.</p>
-</div></div>`,
+            subject: `Your ${branding.appName} sign-in link`,
+            html: renderEmail({
+              branding,
+              preheader: "Your fresh setup link",
+              heading: "Finish setting up your account",
+              greeting,
+              bodyHtml: `<p style="margin:0;">Here's a fresh link to finish setting up your ${branding.appName} account. Click below to choose a password and you're in.</p>`,
+              ctaText: "Set your password",
+              ctaUrl: actionLink,
+              footnote: "This link is valid for 24 hours. If it expires, ask your administrator to send a new one.",
+            }),
           }),
         });
         if (!emailRes.ok) {
@@ -258,22 +262,25 @@ serve(async (req) => {
     let emailed = false;
     const resendKey = Deno.env.get("RESEND_API_KEY");
     if (resendKey) {
+      const branding = await loadBranding(adminClient);
       const greeting = fullName ? `Hi ${fullName},` : "Hi,";
       const emailRes = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          from: "Building Ops <notifications@buildingops.app>",
+          from: `${branding.appName} <notifications@buildingops.app>`,
           to: [email],
-          subject: "Set up your Building Ops account",
-          html: `<div style="font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:480px;margin:0 auto;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
-<div style="background:#006d8f;padding:18px 32px;"><span style="color:#ffffff;font-size:18px;font-weight:700;">Building Ops</span></div>
-<div style="padding:28px 32px;color:#111827;font-size:14px;line-height:1.6;">
-<p style="margin:0 0 12px;">${greeting}</p>
-<p style="margin:0 0 20px;">You've been invited to Building Ops. Click below to choose a password and finish setting up your account.</p>
-<p style="margin:0 0 24px;"><a href="${actionLink}" style="background:#006d8f;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;display:inline-block;">Set your password</a></p>
-<p style="margin:0;color:#6b7280;font-size:12px;">This link is valid for 24 hours and can only be used once.</p>
-</div></div>`,
+          subject: `Set up your ${branding.appName} account`,
+          html: renderEmail({
+            branding,
+            preheader: `You've been invited to ${branding.appName}`,
+            heading: `Welcome to ${branding.appName}`,
+            greeting,
+            bodyHtml: `<p style="margin:0;">You've been invited to ${branding.appName}. Click below to choose a password and finish setting up your account.</p>`,
+            ctaText: "Set your password",
+            ctaUrl: actionLink,
+            footnote: "This link is valid for 24 hours and can only be used once.",
+          }),
         }),
       });
       emailed = emailRes.ok;
