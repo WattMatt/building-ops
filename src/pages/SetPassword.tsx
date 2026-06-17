@@ -51,13 +51,14 @@ export default function SetPassword() {
       return;
     }
     setRequesting(true);
-    // Send a fresh setup link that lands right back here.
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/set-password`,
+    // Send a fresh setup link via the Resend-backed endpoint (not Supabase's
+    // built-in mailer) that lands right back on /set-password.
+    const { error } = await supabase.functions.invoke('request-password-reset', {
+      body: { email, dest: 'setup' },
     });
     setRequesting(false);
     if (error) {
-      toast.error(error.message);
+      toast.error('Could not send the link right now. Please try again.');
       return;
     }
     setReqSent(true); // always show success (don't leak which emails exist)

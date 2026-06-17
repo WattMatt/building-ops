@@ -65,7 +65,7 @@ function ResetShell({
  */
 export default function ResetPassword() {
   const navigate = useNavigate();
-  const { resetPassword, user } = useAuth();
+  const { user } = useAuth();
   const { organization } = useOrganization();
   const appName = organization?.name || 'Building Ops';
   const logoUrl = organization?.logo_url;
@@ -112,11 +112,16 @@ export default function ResetPassword() {
     }
 
     setIsSubmitting(true);
-    const { error } = await resetPassword(trimmed);
+    // Route through our Resend-backed endpoint instead of Supabase's built-in
+    // mailer (unreliable on this project). The endpoint is enumeration-safe and
+    // always succeeds, so we only surface a generic failure on transport error.
+    const { error } = await supabase.functions.invoke('request-password-reset', {
+      body: { email: trimmed, dest: 'reset' },
+    });
     setIsSubmitting(false);
 
     if (error) {
-      toast.error(error.message);
+      toast.error('Could not send the reset link right now. Please try again.');
       return;
     }
     // Always present success to avoid leaking which emails are registered.

@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
 
 async function sendEmail(to: string[], subject: string, html: string) {
   const res = await fetch("https://api.resend.com/emails", {
@@ -88,7 +89,7 @@ serve(async (req: Request): Promise<Response> => {
           </div>
           <div style="padding:32px;">
             <p style="color:#374151;font-size:16px;margin:0 0 24px;">All required signatures have been collected for <strong>${formName}</strong>${buildingName ? ` (${buildingName})` : ""}.</p>
-            <a href="https://buildingops.app/forms" style="display:inline-block;background:#10b981;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;">View submission</a>
+            <a href="${APP_URL}/forms" style="display:inline-block;background:#10b981;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;">View submission</a>
           </div>
         </div>
       </body></html>`,

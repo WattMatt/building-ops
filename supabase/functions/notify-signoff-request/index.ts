@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
 
 async function sendEmail(to: string[], subject: string, html: string) {
   const res = await fetch("https://api.resend.com/emails", {
@@ -91,7 +92,7 @@ serve(async (req: Request): Promise<Response> => {
             <p style="color:#374151;font-size:16px;margin:0 0 24px;">${requesterName} has asked you to sign off on <strong>${formName}</strong>${buildingName ? ` for ${buildingName}` : ""}.</p>
             ${due ? `<p style="color:#374151;font-size:14px;margin:0 0 16px;">Please sign by <strong>${due}</strong>.</p>` : ""}
             ${request.instructions ? `<div style="background:#f9fafb;border-left:4px solid #2563eb;padding:16px;border-radius:4px;margin-bottom:24px;color:#374151;">${request.instructions}</div>` : ""}
-            <a href="https://buildingops.app/my-signoffs" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;">Review &amp; sign</a>
+            <a href="${APP_URL}/my-signoffs" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;">Review &amp; sign</a>
           </div>
         </div>
       </body></html>`,

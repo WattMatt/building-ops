@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { Resend } from "https://esm.sh/resend@2.0.0";
 
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
+const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -379,7 +380,7 @@ function generateAlertEmailHtml(recipientName: string, alerts: AlertSummary): st
   html += `
               <!-- CTA Button -->
               <div style="text-align: center; margin-top: 32px;">
-                <a href="https://buildingops.app/dashboard"
+                <a href="${APP_URL}/dashboard"
                    style="display: inline-block; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-size: 14px; font-weight: 600;">
                   View Dashboard
                 </a>

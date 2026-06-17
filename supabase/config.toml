@@ -1,9 +1,13 @@
-project_id = "qdzgkttiosahdfqresvz"
+project_id = "xuqxnpipetruujcuuflq"
 
 [functions.delete-account]
 verify_jwt = false
 
 [functions.invite-user]
+verify_jwt = false
+
+# Public self-service reset / fresh-setup-link endpoint (enumeration-safe).
+[functions.request-password-reset]
 verify_jwt = false
 
 [functions.set-user-status]

@@ -3,6 +3,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const SIGNOFF_SECRET = Deno.env.get("SIGNOFF_REMINDERS_SECRET");
+const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,7 +25,7 @@ const shell = (heading: string, color: string, body: string) => `
   <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f4f4f5;margin:0;padding:20px;">
     <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
       <div style="background:${color};padding:24px;text-align:center;"><h1 style="color:#fff;margin:0;font-size:22px;">${heading}</h1></div>
-      <div style="padding:32px;color:#374151;font-size:15px;">${body}<p style="margin-top:24px;"><a href="https://buildingops.app/my-signoffs" style="display:inline-block;background:${color};color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;">Open sign-offs</a></p></div>
+      <div style="padding:32px;color:#374151;font-size:15px;">${body}<p style="margin-top:24px;"><a href="${APP_URL}/my-signoffs" style="display:inline-block;background:${color};color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;">Open sign-offs</a></p></div>
     </div>
   </body></html>`;
 
