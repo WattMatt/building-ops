@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SectionCard } from '../SectionCard';
 import { fdb, type TenantShopSpec, type YesNoNa } from '@/integrations/supabase/fortress-db';
+import { byShopNumber } from '@/lib/tenantSort';
 import { YnsCell } from '../YnsCell';
 import type { SectionProps } from './types';
 
@@ -62,7 +63,7 @@ export default function ShopSpecSection({ buildingId, readOnly }: SectionProps) 
         .eq('is_current', true);
       const byTenant: Record<string, TenantShopSpec> = {};
       for (const s of specs ?? []) if (s.tenant_id) byTenant[s.tenant_id] = s;
-      return { tenants: (tenants ?? []) as Tenant[], byTenant };
+      return { tenants: ((tenants ?? []) as Tenant[]).sort(byShopNumber), byTenant };
     },
   });
 

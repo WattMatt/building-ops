@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SectionCard } from '../SectionCard';
 import { fdb, type TenantCompliance, type YesNoNa } from '@/integrations/supabase/fortress-db';
+import { byShopNumber } from '@/lib/tenantSort';
 import { useFortressReport } from '@/hooks/useFortressReports';
 import type { SectionProps } from './types';
 import { YnsCell } from '../YnsCell';
@@ -56,7 +57,7 @@ export default function TenantComplianceSection({ reportId, buildingId, readOnly
         .eq('period', period!);
       const byTenant: Record<string, TenantCompliance> = {};
       for (const r of rows ?? []) if (r.tenant_id) byTenant[r.tenant_id] = r;
-      return { tenants: (tenants ?? []) as Tenant[], byTenant };
+      return { tenants: ((tenants ?? []) as Tenant[]).sort(byShopNumber), byTenant };
     },
   });
 

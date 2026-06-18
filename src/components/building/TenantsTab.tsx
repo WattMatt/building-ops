@@ -2,6 +2,7 @@ import { useState, useEffect, Fragment } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { fdb, type TenantShopSpec } from '@/integrations/supabase/fortress-db';
+import { byShopNumber } from '@/lib/tenantSort';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -252,11 +253,7 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
         tenant.shop_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (tenant.contact_name?.toLowerCase().includes(searchQuery.toLowerCase()))
     )
-    // Natural/numeric order so shop numbers read 1,2,…,9,10,11 (not lexicographic 1,10,11,2);
-    // numeric codes sort ahead of named units (BUS TICKET OFFICE, KIOSK, …).
-    .sort((a, b) =>
-      (a.shop_number || '').localeCompare(b.shop_number || '', undefined, { numeric: true, sensitivity: 'base' })
-    );
+    .sort(byShopNumber); // standard natural/numeric tenant order — see src/lib/tenantSort.ts
 
   if (loading) {
     return (
