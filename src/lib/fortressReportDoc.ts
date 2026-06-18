@@ -40,6 +40,7 @@ export interface ReportData {
   annualFlagged?: number;
   annualCapexTotal?: number | null;
   capex?: { description: string; estimate: number | null }[];
+  electricalCompliance?: { shop_number: string; tenant_name: string; coc_number: string; coc_type: string; coc_status: string; coc_expiry_date: string; certificate_url: string; certificate_name: string }[];
   // all types — section narratives (report_narratives), e.g. building overview,
   // loadshedding, maintenance/project items, centre security incidents commentary
   narratives?: { heading: string; body: string; statusFlag?: string | null }[];
@@ -155,6 +156,33 @@ export function buildReportDoc(
       content.push(table(['Description', 'Estimate'],
         data.capex.map((c) => [c.description, formatZAR(c.estimate)]),
         ['*', 'auto']));
+    }
+
+    if (data.electricalCompliance && data.electricalCompliance.length) {
+      section('Electrical Compliance');
+      content.push({ text: 'Live snapshot from insight-linker at generation time.', fontSize: 8, italics: true, color: '#6b7280', margin: [0, 0, 0, 4] });
+      content.push({
+        table: {
+          headerRows: 1,
+          widths: ['auto', '*', 'auto', 'auto', 'auto', 'auto', '*'],
+          body: [
+            ['Shop', 'Tenant', 'COC #', 'Type', 'Status', 'Expires', 'Certificate'].map((h) => ({ text: h, bold: true, fontSize: 8, fillColor: '#f3f4f6' })),
+            ...data.electricalCompliance.map((r) => [
+              { text: r.shop_number || '', fontSize: 8 },
+              { text: r.tenant_name || '', fontSize: 8 },
+              { text: r.coc_number || '', fontSize: 8 },
+              { text: r.coc_type || '', fontSize: 8 },
+              { text: r.coc_status || '', fontSize: 8 },
+              { text: r.coc_expiry_date || '', fontSize: 8 },
+              r.certificate_url
+                ? { text: r.certificate_name || 'View', link: r.certificate_url, fontSize: 8, color: '#2563eb', decoration: 'underline' }
+                : { text: '—', fontSize: 8 },
+            ]),
+          ],
+        },
+        layout: 'lightHorizontalLines',
+        margin: [0, 4, 0, 12],
+      } as Content);
     }
   }
 
