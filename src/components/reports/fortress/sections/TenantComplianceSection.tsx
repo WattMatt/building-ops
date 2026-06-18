@@ -17,6 +17,7 @@ type Tenant = { id: string; shop_number: string | null; shop_name: string | null
 const YNS: { key: keyof TenantCompliance; label: string }[] = [
   { key: 'hvac_records_current', label: 'HVAC' },
   { key: 'generator_records_current', label: 'Generator' },
+  { key: 'generator_dedicated', label: 'Generator (ded.)' },
   { key: 'fire_sprinkler_weekly', label: 'Sprinkler (wk)' },
   { key: 'fire_sprinkler_annual', label: 'Sprinkler (yr)' },
   { key: 'fire_sprinkler_3yr', label: 'Sprinkler (3yr)' },

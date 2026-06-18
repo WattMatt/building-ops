@@ -40,6 +40,9 @@ export interface ReportData {
   annualFlagged?: number;
   annualCapexTotal?: number | null;
   capex?: { description: string; estimate: number | null }[];
+  // all types — section narratives (report_narratives), e.g. building overview,
+  // loadshedding, maintenance/project items, centre security incidents commentary
+  narratives?: { heading: string; body: string; statusFlag?: string | null }[];
 }
 
 export interface DocOptions { color: string; orgName: string; logoDataUrl?: string | null }
@@ -152,6 +155,16 @@ export function buildReportDoc(
       content.push(table(['Description', 'Estimate'],
         data.capex.map((c) => [c.description, formatZAR(c.estimate)]),
         ['*', 'auto']));
+    }
+  }
+
+  // Section narratives (all report types) — building overview, loadshedding,
+  // maintenance/project items, centre security incidents, etc.
+  if (data.narratives && data.narratives.length) {
+    section('Notes & Commentary');
+    for (const n of data.narratives) {
+      if (n.heading) content.push({ text: n.heading, fontSize: 11, bold: true, color, margin: [0, 8, 0, 2] });
+      if (n.body) content.push({ text: n.body, fontSize: 9, color: '#374151', margin: [0, 0, 0, 4], preserveLeadingSpaces: true });
     }
   }
 

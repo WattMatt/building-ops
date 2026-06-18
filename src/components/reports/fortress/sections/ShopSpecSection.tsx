@@ -13,6 +13,9 @@ import type { SectionProps } from './types';
 
 type Tenant = { id: string; shop_number: string | null; shop_name: string | null; name: string | null };
 
+/** DB-phase options matching the ingested data format (legacy 'single'/'three' never matched). */
+const DB_PHASE_OPTIONS = ['1 - Single Phase', '3 - Three phase', 'N/A'];
+
 const TEXT_FIELDS: { key: keyof TenantShopSpec; label: string }[] = [
   // DISTRIBUTION BOARDS
   { key: 'actual_amps', label: 'Actual Amps' },
@@ -108,10 +111,11 @@ export default function ShopSpecSection({ buildingId, readOnly }: SectionProps) 
                     <TableCell className="font-medium">{tenantLabel(t)}</TableCell>
                     <TableCell>
                       <Select value={spec?.db_phase ?? ''} onValueChange={(v) => !readOnly && setField(t.id, { db_phase: v })} disabled={readOnly}>
-                        <SelectTrigger className="h-8 w-24"><SelectValue placeholder="—" /></SelectTrigger>
+                        <SelectTrigger className="h-8 w-36"><SelectValue placeholder="—" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="single">Single</SelectItem>
-                          <SelectItem value="three">Three</SelectItem>
+                          {(spec?.db_phase && !DB_PHASE_OPTIONS.includes(spec.db_phase)
+                            ? [spec.db_phase, ...DB_PHASE_OPTIONS]
+                            : DB_PHASE_OPTIONS).map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </TableCell>

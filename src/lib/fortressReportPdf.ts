@@ -191,6 +191,16 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     data.capex = capex.map((c: any) => ({ description: c.description ?? '', estimate: c.estimate ?? null }));
   }
 
+  // Section narratives (all report types) — fetched generically so any section_key
+  // renders (building_overview, loadshedding, maintenance_project, security_incidents, …).
+  const narr = (await fdb.from('report_narratives')
+    .select('heading,body,status_flag,sort_order')
+    .eq('report_id', reportId)
+    .order('sort_order', { ascending: true, nullsFirst: false })).data ?? [];
+  data.narratives = narr
+    .filter((n) => (n.body ?? '').trim() !== '')
+    .map((n) => ({ heading: n.heading ?? '', body: n.body ?? '', statusFlag: n.status_flag ?? null }));
+
   const doc = buildReportDoc(
     { title: report.title, report_period: report.report_period, report_type: report.report_type as ReportType, managers },
     data,

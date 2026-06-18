@@ -33,6 +33,7 @@ import { Plus, MoreVertical, Edit, Trash2, FileText, Store, Search, Upload, Down
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import TenantDocumentsDialog from './TenantDocumentsDialog';
+import TenantShopSpecDialog from './TenantShopSpecDialog';
 import { TenantImportDialog } from '@/components/import';
 
 interface Tenant {
@@ -60,6 +61,7 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
   const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
   const [documentsDialogTenant, setDocumentsDialogTenant] = useState<Tenant | null>(null);
+  const [shopSpecDialogTenant, setShopSpecDialogTenant] = useState<Tenant | null>(null);
   const [saving, setSaving] = useState(false);
 
   // Form state
@@ -412,6 +414,10 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
                           <FileText className="h-4 w-4 mr-2" />
                           Documents
                         </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => setShopSpecDialogTenant(tenant)}>
+                          <Store className="h-4 w-4 mr-2" />
+                          Shop Spec
+                        </DropdownMenuItem>
                         {isAdminOrManager && (
                           <>
                             <DropdownMenuItem onClick={() => openEditDialog(tenant)}>
@@ -443,6 +449,16 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
           tenant={documentsDialogTenant}
           open={!!documentsDialogTenant}
           onOpenChange={(open) => !open && setDocumentsDialogTenant(null)}
+        />
+      )}
+
+      {/* Shop Spec Dialog */}
+      {shopSpecDialogTenant && (
+        <TenantShopSpecDialog
+          tenant={shopSpecDialogTenant}
+          buildingId={buildingId}
+          open={!!shopSpecDialogTenant}
+          onOpenChange={(open) => !open && setShopSpecDialogTenant(null)}
         />
       )}
 
