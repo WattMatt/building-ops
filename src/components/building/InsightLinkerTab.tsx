@@ -135,8 +135,8 @@ function ShopDrawer({ shop }: { shop: ILShop }) {
         {shop.photos.length === 0
           ? <p className="text-sm text-muted-foreground">No photos on file.</p>
           : <div className="flex flex-wrap gap-3">
-              {shop.photos.filter((p) => p.photo_url).map((p) => (
-                <a key={p.photo_url!} href={p.photo_url!} target="_blank" rel="noopener noreferrer" className="w-28">
+              {shop.photos.filter((p) => p.photo_url).map((p, i) => (
+                <a key={`${p.photo_url}-${i}`} href={p.photo_url!} target="_blank" rel="noopener noreferrer" className="w-28">
                   <img src={p.photo_url!} alt={p.inspection_title ?? 'photo'} className="h-20 w-28 rounded-md border object-cover" loading="lazy" />
                   <p className="mt-1 truncate text-[10px] text-muted-foreground">{p.inspection_title ?? ''}</p>
                 </a>

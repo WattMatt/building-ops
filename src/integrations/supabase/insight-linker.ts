@@ -23,7 +23,8 @@ export interface ILBuilding {
 export async function fetchBuildingInsightLinker(buildingId: string): Promise<ILBuilding> {
   const { data, error } = await supabase.rpc('building_insight_linker' as never, { p_building_id: buildingId } as never);
   if (error) throw error;
-  return data as unknown as ILBuilding;
+  const d = (data as unknown as Partial<ILBuilding>) ?? {};
+  return { ...d, linked: !!d.linked, fetched_at: d.fetched_at ?? '' } as ILBuilding;
 }
 
 export function useBuildingInsightLinker(buildingId: string, enabled: boolean) {

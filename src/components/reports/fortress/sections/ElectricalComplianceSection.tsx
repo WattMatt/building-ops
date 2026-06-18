@@ -30,7 +30,7 @@ export default function ElectricalComplianceSection({ buildingId }: SectionProps
           </TableHeader>
           <TableBody>
             {data.rows.map((r, i) => (
-              <TableRow key={r.certificate_url ?? `${r.shop_number ?? 'shop'}-${i}`}>
+              <TableRow key={`${r.shop_number ?? 'shop'}-${i}`}>
                 <TableCell className="font-medium">{r.shop_number ?? '—'}</TableCell>
                 <TableCell>{r.tenant_name ?? '—'}</TableCell>
                 <TableCell>{r.coc_number ?? '—'}</TableCell>
