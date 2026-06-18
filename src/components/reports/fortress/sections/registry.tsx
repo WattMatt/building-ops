@@ -11,6 +11,7 @@ import BuildingInspectionSection from './BuildingInspectionSection';
 import BuildingOverviewSection from './BuildingOverviewSection';
 import PpmSection from './PpmSection';
 import ConditionInspectionSection from './ConditionInspectionSection';
+import ElectricalComplianceSection from './ElectricalComplianceSection';
 import TenantComplianceSection from './TenantComplianceSection';
 import ShopSpecSection from './ShopSpecSection';
 import BuildingTurnoverSection from './BuildingTurnoverSection';
@@ -60,6 +61,7 @@ export const SECTION_REGISTRY: Record<string, ComponentType<SectionProps>> = {
   building_profile: BuildingProfileSection,
   condition_inspection: ConditionInspectionSection,
   capex: CapexSection,
+  electrical_compliance: ElectricalComplianceSection,
 };
 
 export function getSectionComponent(key: string): ComponentType<SectionProps> | undefined {

@@ -45,6 +45,7 @@ export const REPORT_SECTIONS: Record<ReportType, SectionMeta[]> = {
     { key: 'building_profile', label: 'Building Profile', hint: 'Property profile (§3) — feeds the building KPIs.' },
     { key: 'condition_inspection', label: 'Condition Inspection', hint: '33-section equipment & fabric inspection.' },
     { key: 'capex', label: 'Capex Register', hint: 'Capital expenditure motivations.' },
+    { key: 'electrical_compliance', label: 'Electrical Compliance', hint: 'Live per-shop Certificate of Compliance data from insight-linker.' },
   ],
 };
 
