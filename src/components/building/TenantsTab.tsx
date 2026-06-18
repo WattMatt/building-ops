@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { fdb, type TenantShopSpec } from '@/integrations/supabase/fortress-db';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,7 +30,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, MoreVertical, Edit, Trash2, FileText, Store, Search, Upload, Download } from 'lucide-react';
+import { Plus, MoreVertical, Edit, Trash2, FileText, Store, Search, Upload, Download, ChevronRight, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import TenantDocumentsDialog from './TenantDocumentsDialog';
@@ -52,6 +53,28 @@ interface TenantsTabProps {
   buildingId: string;
 }
 
+/** Shop-spec fields shown in the expandable per-tenant detail row (read-only). */
+const SPEC_FIELDS: { key: keyof TenantShopSpec; label: string }[] = [
+  { key: 'db_phase', label: 'DB Phase' },
+  { key: 'actual_amps', label: 'Actual Amps' },
+  { key: 'lease_amps', label: 'Lease Amps' },
+  { key: 'generator_connection', label: 'Generator' },
+  { key: 'hvac_units', label: 'HVAC Units' },
+  { key: 'hvac_btu', label: 'HVAC BTU' },
+  { key: 'hvac_gas', label: 'HVAC Gas' },
+  { key: 'lighting_type', label: 'Lighting' },
+  { key: 'shopfront_type', label: 'Shopfront' },
+  { key: 'roller_shutter_type', label: 'Roller Shutter' },
+  { key: 'ceiling_structure', label: 'Ceiling Structure' },
+  { key: 'ceiling_height', label: 'Ceiling Height' },
+  { key: 'floor_finish', label: 'Floor Finish' },
+  { key: 'walls', label: 'Walls' },
+  { key: 'wall_finish', label: 'Wall Finish' },
+  { key: 'plumbing_toilets', label: 'Toilets' },
+  { key: 'plumbing_sink', label: 'Plumbing Sink' },
+  { key: 'notes', label: 'Notes' },
+];
+
 export default function TenantsTab({ buildingId }: TenantsTabProps) {
   const { isAdminOrManager } = useAuth();
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -62,6 +85,8 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
   const [documentsDialogTenant, setDocumentsDialogTenant] = useState<Tenant | null>(null);
   const [shopSpecDialogTenant, setShopSpecDialogTenant] = useState<Tenant | null>(null);
+  const [specs, setSpecs] = useState<Record<string, TenantShopSpec>>({});
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   // Form state
@@ -86,6 +111,16 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
 
       if (error) throw error;
       setTenants(data || []);
+
+      // Load current shop specs (fortress-typed table) keyed by tenant_id.
+      const { data: specRows } = await fdb
+        .from('tenant_shop_spec')
+        .select('*')
+        .eq('building_id', buildingId)
+        .eq('is_current', true);
+      const byTenant: Record<string, TenantShopSpec> = {};
+      for (const s of specRows ?? []) if (s.tenant_id) byTenant[s.tenant_id] = s as TenantShopSpec;
+      setSpecs(byTenant);
     } catch (error) {
       console.error('Error fetching tenants:', error);
       toast.error('Failed to load tenants');
@@ -371,6 +406,7 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8" />
                 <TableHead>Shop #</TableHead>
                 <TableHead>Shop Name</TableHead>
                 <TableHead>Area</TableHead>
@@ -380,8 +416,23 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredTenants.map((tenant) => (
-                <TableRow key={tenant.id}>
+              {filteredTenants.map((tenant) => {
+                const spec = specs[tenant.id];
+                const expanded = expandedId === tenant.id;
+                return (
+                <Fragment key={tenant.id}>
+                <TableRow>
+                  <TableCell className="w-8">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => setExpandedId(expanded ? null : tenant.id)}
+                      aria-label="Toggle shop spec"
+                    >
+                      {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                    </Button>
+                  </TableCell>
                   <TableCell className="font-medium">{tenant.shop_number}</TableCell>
                   <TableCell>{tenant.shop_name}</TableCell>
                   <TableCell>{tenant.area || '-'}</TableCell>
@@ -437,7 +488,39 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
                     </DropdownMenu>
                   </TableCell>
                 </TableRow>
-              ))}
+                {expanded && (
+                  <TableRow className="bg-muted/30 hover:bg-muted/30">
+                    <TableCell colSpan={7} className="p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="text-sm font-semibold">Shop Specification</h4>
+                        {isAdminOrManager && (
+                          <Button size="sm" variant="outline" onClick={() => setShopSpecDialogTenant(tenant)}>
+                            <Store className="h-4 w-4 mr-2" />
+                            {spec ? 'Edit Shop Spec' : 'Add Shop Spec'}
+                          </Button>
+                        )}
+                      </div>
+                      {spec ? (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-2">
+                          {SPEC_FIELDS.map((f) => {
+                            const v = spec[f.key];
+                            return (
+                              <div key={String(f.key)} className="text-sm">
+                                <span className="text-muted-foreground">{f.label}: </span>
+                                <span className="font-medium">{v == null || v === '' ? '—' : String(v)}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No shop spec captured for this tenant yet.</p>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )}
+                </Fragment>
+                );
+              })}
             </TableBody>
           </Table>
         </Card>
@@ -458,7 +541,7 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
           tenant={shopSpecDialogTenant}
           buildingId={buildingId}
           open={!!shopSpecDialogTenant}
-          onOpenChange={(open) => !open && setShopSpecDialogTenant(null)}
+          onOpenChange={(open) => { if (!open) { setShopSpecDialogTenant(null); fetchTenants(); } }}
         />
       )}
 
