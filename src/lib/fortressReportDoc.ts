@@ -40,7 +40,7 @@ export interface ReportData {
   annualFlagged?: number;
   annualCapexTotal?: number | null;
   capex?: { description: string; estimate: number | null }[];
-  electricalCompliance?: { shop_number: string; tenant_name: string; coc_number: string; coc_type: string; coc_status: string; coc_expiry_date: string; certificate_url: string; certificate_name: string }[];
+  electricalCompliance?: { shop_number: string; tenant_name: string; coc_number: string; coc_type: string; coc_status: string; coc_issue_date: string; coc_expiry_date: string; certificate_url: string; certificate_name: string }[];
   // all types — section narratives (report_narratives), e.g. building overview,
   // loadshedding, maintenance/project items, centre security incidents commentary
   narratives?: { heading: string; body: string; statusFlag?: string | null }[];
@@ -164,15 +164,16 @@ export function buildReportDoc(
       content.push({
         table: {
           headerRows: 1,
-          widths: ['auto', '*', 'auto', 'auto', 'auto', 'auto', '*'],
+          widths: ['auto', '*', 'auto', 'auto', 'auto', 'auto', 'auto', '*'],
           body: [
-            ['Shop', 'Tenant', 'COC #', 'Type', 'Status', 'Expires', 'Certificate'].map((h) => ({ text: h, bold: true, fontSize: 8, fillColor: '#f3f4f6' })),
+            ['Shop', 'Tenant', 'COC #', 'Type', 'Status', 'Issued', 'Expires', 'Certificate'].map((h) => ({ text: h, bold: true, fontSize: 8, fillColor: '#f3f4f6' })),
             ...data.electricalCompliance.map((r) => [
               { text: r.shop_number || '', fontSize: 8 },
               { text: r.tenant_name || '', fontSize: 8 },
               { text: r.coc_number || '', fontSize: 8 },
               { text: r.coc_type || '', fontSize: 8 },
               { text: r.coc_status || '', fontSize: 8 },
+              { text: r.coc_issue_date || '', fontSize: 8 },
               { text: r.coc_expiry_date || '', fontSize: 8 },
               r.certificate_url
                 ? { text: r.certificate_name || 'View', link: r.certificate_url, fontSize: 8, color: '#2563eb', decoration: 'underline' }

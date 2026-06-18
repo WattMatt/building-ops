@@ -197,7 +197,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
         data.electricalCompliance = elec.rows.map((r) => ({
           shop_number: r.shop_number ?? '', tenant_name: r.tenant_name ?? '',
           coc_number: r.coc_number ?? '', coc_type: r.coc_type ?? '', coc_status: r.coc_status ?? '',
-          coc_expiry_date: r.coc_expiry_date ?? '', certificate_url: r.certificate_url ?? '', certificate_name: r.certificate_name ?? '',
+          coc_issue_date: r.coc_issue_date ?? '', coc_expiry_date: r.coc_expiry_date ?? '', certificate_url: r.certificate_url ?? '', certificate_name: r.certificate_name ?? '',
         }));
       }
     } catch { /* electrical compliance is best-effort; never block the PDF */ }

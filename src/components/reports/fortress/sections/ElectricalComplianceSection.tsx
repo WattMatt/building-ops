@@ -25,7 +25,7 @@ export default function ElectricalComplianceSection({ buildingId }: SectionProps
           <TableHeader>
             <TableRow>
               <TableHead>Shop</TableHead><TableHead>Tenant</TableHead><TableHead>COC #</TableHead>
-              <TableHead>Type</TableHead><TableHead>Status</TableHead><TableHead>Expires</TableHead><TableHead>Certificate</TableHead>
+              <TableHead>Type</TableHead><TableHead>Status</TableHead><TableHead>Issued</TableHead><TableHead>Expires</TableHead><TableHead>Certificate</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -36,6 +36,7 @@ export default function ElectricalComplianceSection({ buildingId }: SectionProps
                 <TableCell>{r.coc_number ?? '—'}</TableCell>
                 <TableCell>{r.coc_type ?? '—'}</TableCell>
                 <TableCell>{r.coc_status ? <Badge variant={cocBadgeVariant(r.coc_status)}>{r.coc_status}</Badge> : '—'}</TableCell>
+                <TableCell>{r.coc_issue_date ?? '—'}</TableCell>
                 <TableCell>{r.coc_expiry_date ?? '—'}</TableCell>
                 <TableCell>
                   {r.certificate_url
