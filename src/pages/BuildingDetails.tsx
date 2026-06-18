@@ -18,6 +18,7 @@ import OverviewWidgets from '@/components/building/OverviewWidgets';
 import ChecklistsTab from '@/components/building/ChecklistsTab';
 import FormsTab from '@/components/building/FormsTab';
 import ReportsTab from '@/components/building/ReportsTab';
+import InsightLinkerTab from '@/components/building/InsightLinkerTab';
 import { BuildingAvatar } from '@/components/building/BuildingAvatar';
 import { BuildingAvatarDialog } from '@/components/building/BuildingAvatarDialog';
 
@@ -188,6 +189,10 @@ export default function BuildingDetails() {
             <span className="hidden sm:inline">Maintenance</span>
             <span className="sm:hidden">Maint.</span>
           </TabsTrigger>
+          <TabsTrigger value="electrical" className="flex-1 sm:flex-none">
+            <span className="hidden sm:inline">Electrical &amp; Compliance</span>
+            <span className="sm:hidden">Elec.</span>
+          </TabsTrigger>
           <TabsTrigger value="documents" className="flex-1 sm:flex-none">
             <span className="hidden sm:inline">Documents</span>
             <span className="sm:hidden">Docs</span>
@@ -310,6 +315,10 @@ export default function BuildingDetails() {
 
         <TabsContent value="tenants" className="mt-6">
           <TenantsTab buildingId={building.id} />
+        </TabsContent>
+
+        <TabsContent value="electrical" className="mt-6">
+          <InsightLinkerTab buildingId={building.id} active={activeTab === 'electrical'} />
         </TabsContent>
 
         <TabsContent value="assets" className="mt-6">
