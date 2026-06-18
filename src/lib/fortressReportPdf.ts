@@ -12,6 +12,7 @@ import { resolveStorageUrl } from '@/integrations/supabase/storage';
 import { buildReportDoc, MARK, type ReportData, type EmbeddedPhoto, type AnnualItem } from '@/lib/fortressReportDoc';
 import { ANNUAL_FIELD_SETS } from '@/lib/annualFieldSets';
 import { doneMonths, type PpmCell } from '@/lib/ppmStatus';
+import { fetchReportElectricalCompliance } from '@/integrations/supabase/insight-linker';
 
 pdfMake.vfs = pdfFonts.vfs;
 
@@ -189,6 +190,17 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     }
     const capex = (await fdb.from('capex_items').select('description,estimate').eq('report_id', reportId)).data ?? [];
     data.capex = capex.map((c: any) => ({ description: c.description ?? '', estimate: c.estimate ?? null }));
+
+    try {
+      const elec = await fetchReportElectricalCompliance(report.building_id);
+      if (elec.linked && elec.rows.length) {
+        data.electricalCompliance = elec.rows.map((r) => ({
+          shop_number: r.shop_number ?? '', tenant_name: r.tenant_name ?? '',
+          coc_number: r.coc_number ?? '', coc_type: r.coc_type ?? '', coc_status: r.coc_status ?? '',
+          coc_expiry_date: r.coc_expiry_date ?? '', certificate_url: r.certificate_url ?? '', certificate_name: r.certificate_name ?? '',
+        }));
+      }
+    } catch { /* electrical compliance is best-effort; never block the PDF */ }
   }
 
   // Section narratives (all report types) — fetched generically so any section_key
