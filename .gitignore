@@ -34,3 +34,8 @@ dist-ssr
 *.sw?
 .vercel
 .env.local
+
+# Sync-conflict copies (iCloud/Dropbox-style "filename 2.ext", "filename 3.ext").
+# These are junk duplicates created when files are written rapidly inside a synced
+# folder — never real source. Ignore so they can't be accidentally committed.
+* [0-9].*
