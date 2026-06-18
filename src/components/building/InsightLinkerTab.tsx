@@ -87,7 +87,7 @@ export default function InsightLinkerTab({ buildingId, active }: Props) {
           <CardContent className="py-4">
             <p className="mb-2 text-sm font-semibold">Site documents</p>
             <div className="space-y-1">
-              {data.site_documents!.map((d, i) => (<DocLink key={d.file_url ?? `site-${i}`} name={d.file_name} url={d.file_url} size={null} />))}
+              {data.site_documents!.map((d, i) => (<DocLink key={d.file_url ?? `site-${i}`} category={d.category} name={d.file_name} url={d.file_url} size={null} />))}
             </div>
           </CardContent>
         </Card>

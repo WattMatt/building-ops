@@ -16,7 +16,7 @@ export interface ILBuilding {
   counts?: { shops: number; with_docs: number; with_photos: number };
   coc_rollup?: { docs: number; pass: number; fail: number; pending: number };
   shops?: ILShop[];
-  site_documents?: { file_name: string | null; file_url: string | null }[];
+  site_documents?: { file_name: string | null; file_url: string | null; category: string | null }[];
 }
 
 /** Call the building-scoped RPC. The function isn't in the generated Database types yet, so the name is cast. */
