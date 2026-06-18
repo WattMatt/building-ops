@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from './client';
 
-export interface ILDoc { file_name: string | null; file_url: string | null; file_size: number | null; coc_type: string | null; coc_status: string | null; coc_expiry_date: string | null; }
+export interface ILDoc { file_name: string | null; file_url: string | null; file_size: number | null; category: string | null; coc_type: string | null; coc_status: string | null; coc_expiry_date: string | null; }
 export interface ILPhoto { inspection_title: string | null; photo_url: string | null; }
 export interface ILShop {
   subsection_id: string; name: string | null; tenant_name: string | null; category: string | null;

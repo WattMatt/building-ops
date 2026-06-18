@@ -128,7 +128,7 @@ function ShopDrawer({ shop }: { shop: ILShop }) {
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Documents</p>
         {shop.documents.length === 0
           ? <p className="text-sm text-muted-foreground">No documents on file.</p>
-          : shop.documents.map((d, i) => (<DocLink key={d.file_url ?? `doc-${i}`} name={d.file_name} url={d.file_url} size={d.file_size} badge={d.coc_status ?? d.coc_type ?? undefined} />))}
+          : shop.documents.map((d, i) => (<DocLink key={d.file_url ?? `doc-${i}`} category={d.category} name={d.file_name} url={d.file_url} size={d.file_size} badge={d.coc_status ?? d.coc_type ?? undefined} />))}
       </div>
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Photos · by inspection type</p>
@@ -156,14 +156,19 @@ function Field({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
-function DocLink({ name, url, size, badge }: { name: string | null; url: string | null; size: number | null; badge?: string }) {
+function DocLink({ name, url, size, badge, category }: { name: string | null; url: string | null; size: number | null; badge?: string; category?: string | null }) {
   const cls = 'flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm';
+  const title = category || name || 'Untitled document';
+  const subtitle = category ? name : null;
   const inner = (
     <>
       <FileText className="h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />
-      <span className="flex-1 truncate font-medium">{name || 'Untitled document'}</span>
-      {badge && <Badge variant="outline" className="text-[10px]">{badge}</Badge>}
-      {size != null && <span className="text-xs text-muted-foreground">{formatFileSize(size)}</span>}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{title}</span>
+        {subtitle && <span className="block truncate text-xs text-muted-foreground">{subtitle}</span>}
+      </span>
+      {badge && <Badge variant="outline" className="shrink-0 text-[10px]">{badge}</Badge>}
+      {size != null && <span className="shrink-0 text-xs text-muted-foreground">{formatFileSize(size)}</span>}
     </>
   );
   return url
