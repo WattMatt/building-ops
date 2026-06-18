@@ -52,9 +52,17 @@ export default function InsightLinkerTab({ buildingId, active }: Props) {
             <TableBody>
               {shops.map((s) => (
                 <Fragment key={s.subsection_id}>
-                  <TableRow className="cursor-pointer" onClick={() => setOpen(open === s.subsection_id ? null : s.subsection_id)}>
+                  <TableRow
+                    className="cursor-pointer"
+                    tabIndex={0}
+                    aria-expanded={open === s.subsection_id}
+                    onClick={() => setOpen(open === s.subsection_id ? null : s.subsection_id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(open === s.subsection_id ? null : s.subsection_id); }
+                    }}
+                  >
                     <TableCell className="font-medium">
-                      {open === s.subsection_id ? <ChevronDown className="inline h-4 w-4" /> : <ChevronRight className="inline h-4 w-4" />} {s.name}
+                      {open === s.subsection_id ? <ChevronDown className="inline h-4 w-4" aria-hidden="true" /> : <ChevronRight className="inline h-4 w-4" aria-hidden="true" />} {s.name}
                     </TableCell>
                     <TableCell>{s.tenant_name ?? '—'}</TableCell>
                     <TableCell>{s.category ?? '—'}</TableCell>
@@ -79,7 +87,7 @@ export default function InsightLinkerTab({ buildingId, active }: Props) {
           <CardContent className="py-4">
             <p className="mb-2 text-sm font-semibold">Site documents</p>
             <div className="space-y-1">
-              {data.site_documents!.map((d, i) => (<DocLink key={i} name={d.file_name} url={d.file_url} size={null} />))}
+              {data.site_documents!.map((d, i) => (<DocLink key={d.file_url ?? `site-${i}`} name={d.file_name} url={d.file_url} size={null} />))}
             </div>
           </CardContent>
         </Card>
@@ -120,16 +128,16 @@ function ShopDrawer({ shop }: { shop: ILShop }) {
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Documents</p>
         {shop.documents.length === 0
           ? <p className="text-sm text-muted-foreground">No documents on file.</p>
-          : shop.documents.map((d, i) => (<DocLink key={i} name={d.file_name} url={d.file_url} size={d.file_size} badge={d.coc_status ?? d.coc_type ?? undefined} />))}
+          : shop.documents.map((d, i) => (<DocLink key={d.file_url ?? `doc-${i}`} name={d.file_name} url={d.file_url} size={d.file_size} badge={d.coc_status ?? d.coc_type ?? undefined} />))}
       </div>
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Photos · by inspection type</p>
         {shop.photos.length === 0
           ? <p className="text-sm text-muted-foreground">No photos on file.</p>
           : <div className="flex flex-wrap gap-3">
-              {shop.photos.map((p, i) => (
-                <a key={i} href={p.photo_url ?? '#'} target="_blank" rel="noopener noreferrer" className="w-28">
-                  <img src={p.photo_url ?? ''} alt={p.inspection_title ?? 'photo'} className="h-20 w-28 rounded-md border object-cover" loading="lazy" />
+              {shop.photos.filter((p) => p.photo_url).map((p) => (
+                <a key={p.photo_url!} href={p.photo_url!} target="_blank" rel="noopener noreferrer" className="w-28">
+                  <img src={p.photo_url!} alt={p.inspection_title ?? 'photo'} className="h-20 w-28 rounded-md border object-cover" loading="lazy" />
                   <p className="mt-1 truncate text-[10px] text-muted-foreground">{p.inspection_title ?? ''}</p>
                 </a>
               ))}
@@ -149,12 +157,16 @@ function Field({ label, value }: { label: string; value?: string | null }) {
 }
 
 function DocLink({ name, url, size, badge }: { name: string | null; url: string | null; size: number | null; badge?: string }) {
-  return (
-    <a href={url ?? '#'} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm hover:bg-accent">
-      <FileText className="h-4 w-4 shrink-0 text-red-600" />
+  const cls = 'flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm';
+  const inner = (
+    <>
+      <FileText className="h-4 w-4 shrink-0 text-red-600" aria-hidden="true" />
       <span className="flex-1 truncate font-medium">{name || 'Untitled document'}</span>
       {badge && <Badge variant="outline" className="text-[10px]">{badge}</Badge>}
-      <span className="text-xs text-muted-foreground">{formatFileSize(size)}</span>
-    </a>
+      {size != null && <span className="text-xs text-muted-foreground">{formatFileSize(size)}</span>}
+    </>
   );
+  return url
+    ? <a href={url} target="_blank" rel="noopener noreferrer" className={`${cls} hover:bg-accent`}>{inner}</a>
+    : <div className={`${cls} opacity-60`} title="No file URL available">{inner}</div>;
 }
