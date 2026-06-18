@@ -34,3 +34,27 @@ export function useBuildingInsightLinker(buildingId: string, enabled: boolean) {
     staleTime: 5 * 60 * 1000,
   });
 }
+
+export interface ElecComplianceRow {
+  shop_number: string | null; tenant_name: string | null;
+  coc_number: string | null; coc_type: string | null; coc_status: string | null;
+  coc_issue_date: string | null; coc_expiry_date: string | null;
+  certificate_url: string | null; certificate_name: string | null;
+}
+export interface ElecCompliance { linked: boolean; fetched_at: string; rows: ElecComplianceRow[]; }
+
+export async function fetchReportElectricalCompliance(buildingId: string): Promise<ElecCompliance> {
+  const { data, error } = await supabase.rpc('report_electrical_compliance' as never, { p_building_id: buildingId } as never);
+  if (error) throw error;
+  const d = (data as unknown as Partial<ElecCompliance>) ?? {};
+  return { linked: !!d.linked, fetched_at: d.fetched_at ?? '', rows: d.rows ?? [] };
+}
+
+export function useReportElectricalCompliance(buildingId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['report-electrical-compliance', buildingId],
+    queryFn: () => fetchReportElectricalCompliance(buildingId),
+    enabled: enabled && !!buildingId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
