@@ -113,6 +113,7 @@ function ShopDrawer({ shop }: { shop: ILShop }) {
         <div className="grid grid-cols-2 gap-2 text-sm">
           <Field label="COC number" value={shop.coc.number} />
           <Field label="COC type" value={shop.coc.type} />
+          <Field label="COC issued" value={shop.coc.issue_date} />
           <Field label="COC expiry" value={shop.coc.expiry} />
           <Field label="Metering status" value={shop.metering_status} />
         </div>
