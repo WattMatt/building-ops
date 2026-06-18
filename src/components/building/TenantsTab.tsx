@@ -245,12 +245,18 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
     toast.success(`Exported ${tenants.length} tenants`);
   };
 
-  const filteredTenants = tenants.filter(
-    (tenant) =>
-      tenant.shop_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      tenant.shop_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (tenant.contact_name?.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
+  const filteredTenants = tenants
+    .filter(
+      (tenant) =>
+        tenant.shop_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        tenant.shop_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (tenant.contact_name?.toLowerCase().includes(searchQuery.toLowerCase()))
+    )
+    // Natural/numeric order so shop numbers read 1,2,…,9,10,11 (not lexicographic 1,10,11,2);
+    // numeric codes sort ahead of named units (BUS TICKET OFFICE, KIOSK, …).
+    .sort((a, b) =>
+      (a.shop_number || '').localeCompare(b.shop_number || '', undefined, { numeric: true, sensitivity: 'base' })
+    );
 
   if (loading) {
     return (
