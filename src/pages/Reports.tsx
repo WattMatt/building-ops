@@ -9,7 +9,6 @@ import {
   Download,
   Calendar,
   Building2,
-  CheckCircle2,
   AlertTriangle,
   Loader2,
   ShieldCheck,
@@ -27,7 +26,6 @@ import { generatePortfolioSummaryPdf } from '@/lib/pdfGenerator';
 import { PortfolioComplianceCard } from '@/components/reports/fortress/PortfolioComplianceCard';
 
 interface ReportStats {
-  complianceRate: number;
   buildingsCount: number;
   pendingIssues: number;
 }
@@ -35,7 +33,6 @@ interface ReportStats {
 export default function Reports() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<ReportStats>({
-    complianceRate: 0,
     buildingsCount: 0,
     pendingIssues: 0,
   });
@@ -133,32 +130,13 @@ export default function Reports() {
         .from('buildings')
         .select('*', { count: 'exact', head: true });
 
-      // Fetch pending and completed tasks for compliance rate
-      const today = format(new Date(), 'yyyy-MM-dd');
-      const { count: pendingCount } = await supabase
-        .from('task_instances')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'pending');
-
-      const { count: completedCount } = await supabase
-        .from('task_instances')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'completed');
-
       // Fetch open issues
       const { count: openIssuesCount } = await supabase
         .from('issues')
         .select('*', { count: 'exact', head: true })
         .neq('status', 'resolved');
 
-      // Calculate compliance rate
-      const totalTasks = (pendingCount || 0) + (completedCount || 0);
-      const complianceRate = totalTasks > 0 
-        ? Math.round(((completedCount || 0) / totalTasks) * 100) 
-        : 0;
-
       setStats({
-        complianceRate,
         buildingsCount: buildingsCount || 0,
         pendingIssues: openIssuesCount || 0,
       });
@@ -194,20 +172,7 @@ export default function Reports() {
       </div>
 
       {/* Quick Stats */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-4">
-              <div className="h-12 w-12 rounded-full bg-success/10 flex items-center justify-center">
-                <CheckCircle2 className="h-6 w-6 text-success" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Overall Compliance</p>
-                <p className="text-2xl font-bold">{stats.complianceRate}%</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="grid gap-4 md:grid-cols-2">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center gap-4">
