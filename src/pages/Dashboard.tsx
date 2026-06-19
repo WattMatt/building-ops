@@ -7,13 +7,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { cn } from '@/lib/utils';
+import { classify, THRESHOLDS, STATUS_CLASS } from '@/lib/fortressKpis';
+import { usePortfolioCompliance } from '@/hooks/usePortfolioCompliance';
 import {
   Building2,
   ClipboardCheck,
   AlertTriangle,
   CheckCircle2,
   Clock,
-  TrendingUp,
   Calendar,
   ArrowRight,
   Plus,
@@ -48,6 +50,7 @@ const statusColors: Record<string, string> = {
 export default function Dashboard() {
   const { role, isAdminOrManager } = useAuth();
   const { stats, upcomingTasks, recentIssues, loading } = useDashboardStats();
+  const { portfolioAvg, reportedCount, total } = usePortfolioCompliance();
   const { profile, loading: profileLoading } = useUserProfile();
   const [profileNudgeDismissed, setProfileNudgeDismissed] = useState(
     () => localStorage.getItem('profileNudgeDismissed') === 'true'
@@ -188,27 +191,22 @@ export default function Dashboard() {
         </Card>
       </div>
 
-      {/* Compliance Score */}
+      {/* Portfolio OHS Compliance — real OHS Act compliance from approved monthly OPS reports */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Overall Compliance Score</CardTitle>
-              <CardDescription>Based on task completion across all buildings</CardDescription>
-            </div>
-            {stats.complianceRate > 0 && (
-              <div className="flex items-center gap-2 text-success">
-                <TrendingUp className="h-4 w-4" />
-                <span className="text-sm font-medium">Today's progress</span>
-              </div>
-            )}
-          </div>
+          <CardTitle>Portfolio OHS Compliance</CardTitle>
+          <CardDescription>Latest approved monthly OPS compliance score per building</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex items-center gap-4">
-            <div className="text-4xl font-bold">{stats.complianceRate}%</div>
-            <Progress value={stats.complianceRate} className="flex-1 h-3" />
+            <div className={cn('text-4xl font-bold tabular-nums', STATUS_CLASS[classify(portfolioAvg, THRESHOLDS.compliance)].text)}>
+              {portfolioAvg === null ? '—' : `${portfolioAvg}%`}
+            </div>
+            <Progress value={portfolioAvg ?? 0} className="flex-1 h-3" />
           </div>
+          <p className="text-sm text-muted-foreground mt-2">
+            {reportedCount} of {total} buildings reported
+          </p>
         </CardContent>
       </Card>
 

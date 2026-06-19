@@ -11,7 +11,6 @@ interface DashboardStats {
   pendingTasks: number;
   completedToday: number;
   openIssues: number;
-  complianceRate: number;
 }
 
 interface UpcomingTask {
@@ -45,7 +44,6 @@ export function useDashboardStats(): UseDashboardStatsReturn {
     pendingTasks: 0,
     completedToday: 0,
     openIssues: 0,
-    complianceRate: 0,
   });
   const [upcomingTasks, setUpcomingTasks] = useState<UpcomingTask[]>([]);
   const [recentIssues, setRecentIssues] = useState<RecentIssue[]>([]);
@@ -125,17 +123,12 @@ export function useDashboardStats(): UseDashboardStatsReturn {
 
       const pendingCount = pendingResult.count || 0;
       const completedCount = completedResult.count || 0;
-      const totalTasks = pendingCount + completedCount;
-      const complianceRate = totalTasks > 0
-        ? Math.round((completedCount / totalTasks) * 100)
-        : 0;
 
       setStats({
         buildings: buildingsResult.count || 0,
         pendingTasks: pendingCount,
         completedToday: completedCount,
         openIssues: issuesResult.count || 0,
-        complianceRate,
       });
 
       if (tasksResult.data) {
