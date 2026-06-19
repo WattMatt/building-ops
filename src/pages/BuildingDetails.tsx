@@ -22,6 +22,8 @@ import ReportsTab from '@/components/building/ReportsTab';
 import InsightLinkerTab from '@/components/building/InsightLinkerTab';
 import { BuildingAvatar } from '@/components/building/BuildingAvatar';
 import { BuildingAvatarDialog } from '@/components/building/BuildingAvatarDialog';
+import { BuildingScoreChips } from '@/components/building/BuildingScoreChips';
+import { useBuildingScore } from '@/hooks/useBuildingScore';
 
 interface Building {
   id: string;
@@ -43,6 +45,7 @@ export default function BuildingDetails() {
   const [building, setBuilding] = useState<Building | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') ?? 'overview');
+  const { ohsPct, taskPct } = useBuildingScore(id);
   const [avatarDialogOpen, setAvatarDialogOpen] = useState(false);
 
   // keep the active tab in the URL so report links / the editor back-button can deep-link here
@@ -158,6 +161,9 @@ export default function BuildingDetails() {
                 <MapPin className="h-3 w-3 shrink-0" />
                 <span className="truncate">{building.address}, {building.city}</span>
               </p>
+              <div className="mt-2">
+                <BuildingScoreChips ohsPct={ohsPct} taskPct={taskPct} />
+              </div>
             </div>
           </div>
         </div>

@@ -29,11 +29,14 @@ import { Link } from 'react-router-dom';
 import { BuildingAvatar } from '@/components/building/BuildingAvatar';
 import { BuildingAvatarDialog } from '@/components/building/BuildingAvatarDialog';
 import BuildingImportDialog from '@/components/building/BuildingImportDialog';
+import { BuildingScoreChips } from '@/components/building/BuildingScoreChips';
+import { useBuildingsScores } from '@/hooks/useBuildingsScores';
 import * as XLSX from 'xlsx';
 
 export default function Buildings() {
   const { isAdminOrManager } = useAuth();
   const { buildings, loading, error, refetch, deleteBuilding } = useBuildings();
+  const { scores } = useBuildingsScores();
   const [searchQuery, setSearchQuery] = useState('');
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [avatarDialogBuilding, setAvatarDialogBuilding] = useState<{
@@ -314,9 +317,15 @@ export default function Buildings() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm text-muted-foreground mb-4 line-clamp-2">
+                  <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
                     {building.address}
                   </p>
+                  <div className="mb-4">
+                    <BuildingScoreChips
+                      ohsPct={scores[building.id]?.ohsPct ?? null}
+                      taskPct={scores[building.id]?.taskPct ?? null}
+                    />
+                  </div>
                   <div className="flex items-center justify-between">
                     <Badge variant="secondary">
                       {building.latitude && building.longitude
