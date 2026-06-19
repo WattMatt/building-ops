@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Dialog,
@@ -114,7 +115,7 @@ export default function EditAssignmentsDialog({ userId, userLabel, buildings, op
             {buildings.map((b) => (
               <label key={b.id} htmlFor={`assign-${b.id}`} className="flex items-center gap-3 rounded-md p-2 hover:bg-muted/50 cursor-pointer">
                 <Checkbox id={`assign-${b.id}`} checked={selected.has(b.id)} onCheckedChange={() => toggle(b.id)} />
-                <Label htmlFor={`assign-${b.id}`} className="cursor-pointer font-normal">{b.name}</Label>
+                <Label htmlFor={`assign-${b.id}`} className="cursor-pointer font-normal">{formatBuildingName(b.name)}</Label>
               </label>
             ))}
           </div>

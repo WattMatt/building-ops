@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -252,7 +253,7 @@ export default function BuildingAlertsWidget() {
                     size="sm" 
                   />
                   <div className="min-w-0">
-                    <p className="font-medium text-sm truncate">{alert.building_name}</p>
+                    <p className="font-medium text-sm truncate">{formatBuildingName(alert.building_name)}</p>
                     <div className="flex flex-wrap items-center gap-2 mt-1">
                       {(alert.expired_documents > 0 || alert.expiring_documents > 0) && (
                         <div className="flex items-center gap-1 text-xs">

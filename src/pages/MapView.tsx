@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -106,7 +107,7 @@ export default function MapView() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['buildings-map'] });
-      toast.success(`Location set for ${buildingToPin?.name}`);
+      toast.success(`Location set for ${formatBuildingName(buildingToPin?.name)}`);
       cancelPinDropMode();
     },
     onError: (error: any) => {
@@ -143,7 +144,7 @@ export default function MapView() {
     setBuildingToPin(building);
     setPinDropMode(true);
     setDroppedCoords(null);
-    toast.info(`Click on the map to set location for "${building.name}"`);
+    toast.info(`Click on the map to set location for "${formatBuildingName(building.name)}"`);
   };
 
   const cancelPinDropMode = () => {
@@ -225,7 +226,7 @@ export default function MapView() {
             <div className="min-w-0">
               <p className="font-medium text-sm sm:text-base">Pin Drop Mode</p>
               <p className="text-xs sm:text-sm opacity-90 truncate">
-                Tap map to set location for <strong className="font-semibold">{buildingToPin.name}</strong>
+                Tap map to set location for <strong className="font-semibold">{formatBuildingName(buildingToPin.name)}</strong>
               </p>
             </div>
           </div>
@@ -297,7 +298,7 @@ export default function MapView() {
                       className="gap-1 sm:gap-1.5 text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3"
                     >
                       <MapPin className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                      <span className="truncate max-w-[120px] sm:max-w-none">{building.name}</span>
+                      <span className="truncate max-w-[120px] sm:max-w-none">{formatBuildingName(building.name)}</span>
                     </Button>
                   ))}
                 </div>
@@ -313,7 +314,7 @@ export default function MapView() {
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm Location</AlertDialogTitle>
             <AlertDialogDescription>
-              Set the location for <strong>{buildingToPin?.name}</strong> to these coordinates?
+              Set the location for <strong>{formatBuildingName(buildingToPin?.name)}</strong> to these coordinates?
               <br />
               <span className="font-mono text-xs mt-2 block">
                 Lat: {droppedCoords?.lat.toFixed(6)}, Lng: {droppedCoords?.lng.toFixed(6)}

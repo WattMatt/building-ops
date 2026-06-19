@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -140,7 +141,7 @@ export default function PendingSubmissionsWidget() {
                   <div className="min-w-0">
                     <p className="font-medium text-sm truncate">{submission.form_name}</p>
                     <p className="text-xs text-muted-foreground truncate">
-                      {submission.building_name} • {submission.submitter_name}
+                      {formatBuildingName(submission.building_name)} • {submission.submitter_name}
                     </p>
                   </div>
                 </div>

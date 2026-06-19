@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDashboardStats } from '@/hooks/useDashboardStats';
 import { useUserProfile } from '@/hooks/useUserProfile';
@@ -257,7 +258,7 @@ export default function Dashboard() {
                       <div>
                         <p className="font-medium text-sm">{task.task_name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {task.building_name}
+                          {formatBuildingName(task.building_name)}
                         </p>
                       </div>
                     </div>
@@ -311,7 +312,7 @@ export default function Dashboard() {
                       <div>
                         <p className="font-medium text-sm">{issue.title}</p>
                         <p className="text-xs text-muted-foreground">
-                          {issue.building_name}
+                          {formatBuildingName(issue.building_name)}
                         </p>
                       </div>
                     </div>

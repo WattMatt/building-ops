@@ -1,4 +1,5 @@
 import pdfMake from 'pdfmake/build/pdfmake';
+import { formatBuildingName } from '@/lib/buildingName';
 import pdfFonts from 'pdfmake/build/vfs_fonts';
 import { FormField } from './formFields';
 import { assembleHsReportData, certificateStatus, type HsTask, type HsDocument } from './hsComplianceReport';
@@ -640,7 +641,7 @@ export async function generateHsCompliancePdf(opts: {
     margin: [0, 0, 0, 15],
   });
   content.push(createColoredLine(primaryColor));
-  content.push({ text: buildingName, style: 'header', alignment: 'center', margin: [0, 0, 0, 20] });
+  content.push({ text: formatBuildingName(buildingName), style: 'header', alignment: 'center', margin: [0, 0, 0, 20] });
 
   // 1. Summary by compliance category
   content.push({ text: '1. Compliance Summary', style: 'sectionTitle' });
@@ -772,7 +773,7 @@ export async function generateHsCompliancePdf(opts: {
     },
     footer: (currentPage: number, pageCount: number) => ({
       columns: [
-        { text: `${branding.name} — H&S Compliance Report — ${buildingName}`, style: 'footer', margin: [40, 20, 0, 0] },
+        { text: `${branding.name} — H&S Compliance Report — ${formatBuildingName(buildingName)}`, style: 'footer', margin: [40, 20, 0, 0] },
         { text: `Page ${currentPage} of ${pageCount}`, style: 'footer', alignment: 'right', margin: [0, 20, 40, 0] },
       ],
     }),

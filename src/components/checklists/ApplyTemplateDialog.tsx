@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Dialog,
@@ -244,7 +245,7 @@ export default function ApplyTemplateDialog({
                       className={`flex-1 flex items-center gap-2 ${eligible ? 'cursor-pointer' : 'cursor-not-allowed'}`}
                     >
                       <Building2 className="h-4 w-4 text-muted-foreground" />
-                      <span className="flex-1">{building.name}</span>
+                      <span className="flex-1">{formatBuildingName(building.name)}</span>
                       {!eligible && (
                         <span className="text-xs text-muted-foreground">
                           Not applicable — {building.building_type

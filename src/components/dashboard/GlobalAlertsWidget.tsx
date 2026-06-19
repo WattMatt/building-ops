@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -192,7 +193,7 @@ export default function GlobalAlertsWidget() {
                         <p className="font-medium text-sm truncate">{doc.name}</p>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <Building2 className="h-3 w-3" />
-                          <span className="truncate">{doc.building_name}</span>
+                          <span className="truncate">{formatBuildingName(doc.building_name)}</span>
                           <span>•</span>
                           <span>{doc.document_type}</span>
                         </div>
@@ -235,7 +236,7 @@ export default function GlobalAlertsWidget() {
                         <p className="font-medium text-sm truncate">{asset.name}</p>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <Building2 className="h-3 w-3" />
-                          <span className="truncate">{asset.building_name}</span>
+                          <span className="truncate">{formatBuildingName(asset.building_name)}</span>
                           <span>•</span>
                           <span>{asset.category}</span>
                         </div>

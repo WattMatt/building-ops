@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -155,7 +156,7 @@ export default function ReportIssueDialog({
           <DialogDescription>
             Report an issue found during: <strong>{taskName}</strong>
             <br />
-            Building: <strong>{buildingName}</strong>
+            Building: <strong>{formatBuildingName(buildingName)}</strong>
           </DialogDescription>
         </DialogHeader>
 

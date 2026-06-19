@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import {
   Dialog,
   DialogContent,
@@ -147,7 +148,7 @@ export function FormSubmissionsDialog({
       return (data || []).reduce(
         (acc, building) => ({
           ...acc,
-          [building.id]: building.name,
+          [building.id]: formatBuildingName(building.name),
         }),
         {} as Record<string, string>
       );

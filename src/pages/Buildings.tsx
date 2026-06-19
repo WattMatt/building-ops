@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBuildings } from '@/hooks/useBuildings';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -243,7 +244,7 @@ export default function Buildings() {
                       </div>
                     )}
                     <div>
-                      <CardTitle className="text-base">{building.name}</CardTitle>
+                      <CardTitle className="text-base">{formatBuildingName(building.name)}</CardTitle>
                       <CardDescription className="flex items-center gap-1 mt-1">
                         <MapPin className="h-3 w-3" />
                         {building.city}

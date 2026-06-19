@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { useMySignoffs } from '@/hooks/useMySignoffs';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -43,7 +44,7 @@ export default function MySignoffs() {
                   <div className="min-w-0">
                     <p className="font-medium truncate">{it.form_name}</p>
                     <p className="text-sm text-muted-foreground truncate">
-                      {it.building_name || 'No building'}
+                      {formatBuildingName(it.building_name) || 'No building'}
                       {it.due_at && <> · due {format(new Date(it.due_at), 'PP')}</>}
                     </p>
                   </div>

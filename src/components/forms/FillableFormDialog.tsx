@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import {
   Dialog,
   DialogContent,
@@ -439,7 +440,7 @@ export function FillableFormDialog({
               </Label>
               {preselectedBuildingId ? (
                 <div className="h-10 px-3 border rounded-md bg-muted flex items-center">
-                  <span className="text-sm font-medium">{preselectedBuildingName || 'Selected Building'}</span>
+                  <span className="text-sm font-medium">{formatBuildingName(preselectedBuildingName) || 'Selected Building'}</span>
                 </div>
               ) : (
                 <Select value={selectedBuilding} onValueChange={setSelectedBuilding}>
@@ -449,7 +450,7 @@ export function FillableFormDialog({
                   <SelectContent>
                     {buildings?.map((building) => (
                       <SelectItem key={building.id} value={building.id}>
-                        {building.name}
+                        {formatBuildingName(building.name)}
                       </SelectItem>
                     ))}
                   </SelectContent>

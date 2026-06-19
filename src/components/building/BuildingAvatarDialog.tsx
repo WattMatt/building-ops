@@ -3,6 +3,7 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Dialog,
@@ -144,7 +145,7 @@ export function BuildingAvatarDialog({
           <DialogHeader>
             <DialogTitle>Change Building Avatar</DialogTitle>
             <DialogDescription>
-              Upload a logo or choose a pattern for {buildingName}
+              Upload a logo or choose a pattern for {formatBuildingName(buildingName)}
             </DialogDescription>
           </DialogHeader>
 

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBuildings } from '@/hooks/useBuildings';
@@ -167,7 +168,7 @@ export default function NewIssue() {
                 <SelectContent>
                   {buildings.map((building) => (
                     <SelectItem key={building.id} value={building.id}>
-                      {building.name}
+                      {formatBuildingName(building.name)}
                     </SelectItem>
                   ))}
                 </SelectContent>

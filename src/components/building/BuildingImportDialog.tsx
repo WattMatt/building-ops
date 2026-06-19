@@ -4,6 +4,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import {
@@ -498,7 +499,7 @@ export default function BuildingImportDialog({
                           </div>
                         )}
                       </TableCell>
-                      <TableCell className="font-medium">{building.name || '-'}</TableCell>
+                      <TableCell className="font-medium">{formatBuildingName(building.name) || '-'}</TableCell>
                       <TableCell className="max-w-[200px] truncate">
                         {building.address || '-'}
                       </TableCell>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { MAPBOX_ACCESS_TOKEN, DEFAULT_CENTER, DEFAULT_ZOOM, MAP_STYLES, MapStyle } from '@/lib/mapbox';
@@ -193,7 +194,7 @@ export function BuildingMap({
                   <div style="display: flex; align-items: flex-start; gap: 10px;">
                     ${avatarHtml}
                     <div style="flex: 1; min-width: 0;">
-                      <h3 style="font-weight: 600; font-size: 14px; margin: 0 0 4px 0; color: var(--foreground, #1a1a1a);">${building.name}</h3>
+                      <h3 style="font-weight: 600; font-size: 14px; margin: 0 0 4px 0; color: var(--foreground, #1a1a1a);">${formatBuildingName(building.name)}</h3>
                       <p style="font-size: 12px; margin: 0; color: var(--muted-foreground, #6b7280); display: flex; align-items: center; gap: 4px;">
                         <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                           <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>

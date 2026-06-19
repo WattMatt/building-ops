@@ -2,6 +2,7 @@
  *  plus its OHS compliance and KPI dashboards. Lives inside BuildingDetails alongside
  *  Tenants/Assets/Documents — reports are per building, not a global list. */
 import { useNavigate } from 'react-router-dom';
+import { formatBuildingName } from '@/lib/buildingName';
 import { FileText, Download, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -139,7 +140,7 @@ export default function ReportsTab({ buildingId, buildingName }: { buildingId: s
         <DialogContent className="sm:max-w-[420px]">
           <DialogHeader>
             <DialogTitle>H&amp;S Compliance Report</DialogTitle>
-            <DialogDescription>Branded PDF evidence pack for {buildingName ?? 'this building'} over a date range.</DialogDescription>
+            <DialogDescription>Branded PDF evidence pack for {formatBuildingName(buildingName) || 'this building'} over a date range.</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">

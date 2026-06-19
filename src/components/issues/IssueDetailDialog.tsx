@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Dialog,
@@ -171,7 +172,7 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
           <DialogTitle className="flex items-center gap-2 pr-6">{issue.title}</DialogTitle>
           <DialogDescription className="flex items-center gap-2 flex-wrap pt-1">
             <Badge variant="secondary" className={statusColors[issue.status]}>{statusLabels[issue.status]}</Badge>
-            <span className="flex items-center gap-1 text-xs"><Building2 className="h-3 w-3" />{issue.building_name}</span>
+            <span className="flex items-center gap-1 text-xs"><Building2 className="h-3 w-3" />{formatBuildingName(issue.building_name)}</span>
             <span className="flex items-center gap-1 text-xs"><Calendar className="h-3 w-3" />{format(new Date(issue.created_at), 'MMM d, yyyy')}</span>
             {issue.deadline && (
               <span className="flex items-center gap-1 text-xs"><Clock className="h-3 w-3" />Due {format(new Date(issue.deadline), 'MMM d')}</span>

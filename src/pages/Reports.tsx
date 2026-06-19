@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -288,7 +289,7 @@ export default function Reports() {
                 </SelectTrigger>
                 <SelectContent>
                   {hsBuildings.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    <SelectItem key={b.id} value={b.id}>{formatBuildingName(b.name)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

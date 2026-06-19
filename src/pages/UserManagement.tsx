@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { useAuth, type InviteUserPayload } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useBuildings } from '@/hooks/useBuildings';
@@ -522,7 +523,7 @@ export default function UserManagement() {
                             checked={inviteBuildingIds.includes(b.id)}
                             onCheckedChange={() => toggleInviteBuilding(b.id)}
                           />
-                          <span>{b.name}</span>
+                          <span>{formatBuildingName(b.name)}</span>
                         </label>
                       ))}
                     </div>

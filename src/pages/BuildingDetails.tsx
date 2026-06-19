@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -152,7 +153,7 @@ export default function BuildingDetails() {
               </div>
             )}
             <div className={cn("min-w-0 flex-1", hasCustomLogo && logoPosition === 'top-center' && "pt-10 sm:pt-12")}>
-              <h1 className="text-lg sm:text-2xl font-bold truncate">{building.name}</h1>
+              <h1 className="text-lg sm:text-2xl font-bold truncate">{formatBuildingName(building.name)}</h1>
               <p className="text-xs sm:text-sm text-muted-foreground flex items-center gap-1 truncate">
                 <MapPin className="h-3 w-3 shrink-0" />
                 <span className="truncate">{building.address}, {building.city}</span>

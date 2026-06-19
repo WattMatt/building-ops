@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIssues } from '@/hooks/useIssues';
 import IssueDetailDialog from '@/components/issues/IssueDetailDialog';
@@ -257,7 +258,7 @@ export default function Issues() {
                       <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1">
                           <Building2 className="h-3 w-3" />
-                          {issue.building_name}
+                          {formatBuildingName(issue.building_name)}
                         </span>
                         <span className="flex items-center gap-1">
                           <Calendar className="h-3 w-3" />

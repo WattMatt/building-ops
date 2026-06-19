@@ -1,6 +1,7 @@
 /** New-Report wizard: type + period → create a draft. Building is locked to the one
  *  passed in (reports are authored per building); falls back to a picker if none given. */
 import { useState } from 'react';
+import { formatBuildingName } from '@/lib/buildingName';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import {
@@ -76,7 +77,7 @@ export function NewReportDialog({ buildingId: lockedBuildingId, buildingName: lo
         <DialogHeader>
           <DialogTitle>New Report</DialogTitle>
           <DialogDescription>
-            {lockedBuildingId ? `Create a draft report for ${buildingName}.` : 'Create a draft. Fill sections as you go.'}
+            {lockedBuildingId ? `Create a draft report for ${formatBuildingName(buildingName)}.` : 'Create a draft. Fill sections as you go.'}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -86,7 +87,7 @@ export function NewReportDialog({ buildingId: lockedBuildingId, buildingName: lo
               <Select value={pickedBuildingId} onValueChange={setPickedBuildingId}>
                 <SelectTrigger><SelectValue placeholder="Select a building" /></SelectTrigger>
                 <SelectContent>
-                  {buildings.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  {buildings.map((b) => <SelectItem key={b.id} value={b.id}>{formatBuildingName(b.name)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
