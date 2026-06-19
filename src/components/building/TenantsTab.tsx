@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { fdb, type TenantShopSpec } from '@/integrations/supabase/fortress-db';
+import { fdb, type TenantShopSpec, type TenantCompliance } from '@/integrations/supabase/fortress-db';
 import { byShopNumber } from '@/lib/tenantSort';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -76,6 +76,41 @@ const SPEC_FIELDS: { key: keyof TenantShopSpec; label: string }[] = [
   { key: 'notes', label: 'Notes' },
 ];
 
+/** OHS & HK (tenant_compliance) fields shown read-only in the expandable detail row.
+ *  Source-of-truth authoring stays in the CM report's "Tenant OHS & HK" section; this is a
+ *  building-level read view of the latest captured period. */
+const COMPLIANCE_FIELDS: { key: keyof TenantCompliance; label: string }[] = [
+  { key: 'lease_clause_no', label: 'Lease Clause #' },
+  { key: 'occupancy_cert_no', label: 'Occupancy Cert #' },
+  { key: 'occupancy_cert_date', label: 'Occupancy Cert Date' },
+  { key: 'electrical_coc_responsibility', label: 'COC Resp.' },
+  { key: 'electrical_coc_cert_no', label: 'COC Cert #' },
+  { key: 'electrical_coc_date', label: 'COC Date' },
+  { key: 'hvac_responsibility', label: 'HVAC Resp.' },
+  { key: 'hvac_handover_month', label: 'HVAC Handover' },
+  { key: 'hvac_records_current', label: 'HVAC Records' },
+  { key: 'generator_responsibility', label: 'Generator Resp.' },
+  { key: 'generator_records_current', label: 'Generator Records' },
+  { key: 'generator_dedicated', label: 'Generator (ded.)' },
+  { key: 'sprinkler_dedicated', label: 'Sprinkler (ded.)' },
+  { key: 'fire_sprinkler_weekly', label: 'Sprinkler Weekly' },
+  { key: 'fire_sprinkler_annual', label: 'Sprinkler Annual' },
+  { key: 'fire_sprinkler_3yr', label: 'Sprinkler 3-Yr' },
+  { key: 'smoke_detection_dedicated', label: 'Smoke Detection (ded.)' },
+  { key: 'smoke_detection_annual_service', label: 'Smoke Detection Svc' },
+  { key: 'smoke_extraction_dedicated', label: 'Smoke Extraction (ded.)' },
+  { key: 'smoke_extraction_annual_service', label: 'Smoke Extraction Svc' },
+  { key: 'handheld_fire_current', label: 'Extinguishers' },
+  { key: 'evac_plan_displayed', label: 'Evac Plan' },
+  { key: 'fire_blanket', label: 'Fire Blanket' },
+  { key: 'food_extraction_cert', label: 'Food Extraction Cert' },
+  { key: 'grease_trap_clean', label: 'Grease Trap' },
+  { key: 'gas_coc', label: 'Gas COC' },
+  { key: 'flammable_liquid_cert', label: 'Flammable Liquid Cert' },
+  { key: 'ohs_risks', label: 'OHS Risks' },
+  { key: 'comment', label: 'Comment' },
+];
+
 export default function TenantsTab({ buildingId }: TenantsTabProps) {
   const { isAdminOrManager } = useAuth();
   const [tenants, setTenants] = useState<Tenant[]>([]);
@@ -87,6 +122,7 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
   const [documentsDialogTenant, setDocumentsDialogTenant] = useState<Tenant | null>(null);
   const [shopSpecDialogTenant, setShopSpecDialogTenant] = useState<Tenant | null>(null);
   const [specs, setSpecs] = useState<Record<string, TenantShopSpec>>({});
+  const [compliance, setCompliance] = useState<Record<string, TenantCompliance>>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -122,6 +158,16 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
       const byTenant: Record<string, TenantShopSpec> = {};
       for (const s of specRows ?? []) if (s.tenant_id) byTenant[s.tenant_id] = s as TenantShopSpec;
       setSpecs(byTenant);
+
+      // OHS & HK compliance (latest captured period per tenant) — read-only building view.
+      const { data: compRows } = await fdb
+        .from('tenant_compliance')
+        .select('*')
+        .eq('building_id', buildingId)
+        .order('period', { ascending: false });
+      const compByTenant: Record<string, TenantCompliance> = {};
+      for (const c of compRows ?? []) if (c.tenant_id && !compByTenant[c.tenant_id]) compByTenant[c.tenant_id] = c as TenantCompliance;
+      setCompliance(compByTenant);
     } catch (error) {
       console.error('Error fetching tenants:', error);
       toast.error('Failed to load tenants');
@@ -421,6 +467,7 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
             <TableBody>
               {filteredTenants.map((tenant) => {
                 const spec = specs[tenant.id];
+                const comp = compliance[tenant.id];
                 const expanded = expandedId === tenant.id;
                 return (
                 <Fragment key={tenant.id}>
@@ -518,6 +565,28 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
                       ) : (
                         <p className="text-sm text-muted-foreground">No shop spec captured for this tenant yet.</p>
                       )}
+
+                      <div className="mt-4 pt-3 border-t">
+                        <h4 className="text-sm font-semibold mb-3">
+                          OHS &amp; HK Compliance
+                          {comp?.period && <span className="ml-2 text-xs font-normal text-muted-foreground">as of {comp.period}</span>}
+                        </h4>
+                        {comp ? (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-2">
+                            {COMPLIANCE_FIELDS.map((f) => {
+                              const v = comp[f.key];
+                              return (
+                                <div key={String(f.key)} className="text-sm">
+                                  <span className="text-muted-foreground">{f.label}: </span>
+                                  <span className="font-medium">{v == null || v === '' ? '—' : String(v)}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">No OHS &amp; HK compliance captured for this tenant yet.</p>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 )}
