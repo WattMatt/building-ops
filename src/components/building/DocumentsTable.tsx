@@ -34,6 +34,7 @@ const STATUS_VARIANT: Record<StatusKind, 'default' | 'secondary' | 'destructive'
 interface Props {
   sections: DocSection[];
   flat: UnifiedDocument[]; // visual order, for preview indexing
+  narrowed: boolean; // a search query or filter is active → auto-expand so matches show
   canEdit: boolean;
   selected: Set<string>;
   onToggle: (key: string) => void;
@@ -52,14 +53,18 @@ function sizeLabel(bytes: number | null): string {
 }
 
 export default function DocumentsTable(p: Props) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Sections default to COLLAPSED on load — track the ones the user has explicitly opened.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const toggleSection = (label: string) =>
-    setCollapsed((c) => {
-      const n = new Set(c);
+    setExpanded((e) => {
+      const n = new Set(e);
       if (n.has(label)) n.delete(label);
       else n.add(label);
       return n;
     });
+  // Open if the user opened it, or there's only one section, or a search/filter is active.
+  const isOpen = (label: string) =>
+    p.narrowed || p.sections.length === 1 || expanded.has(label);
 
   if (p.flat.length === 0) {
     return (
@@ -166,19 +171,19 @@ export default function DocumentsTable(p: Props) {
         </TableHeader>
         <TableBody>
           {p.sections.map((section) => {
-            const isCollapsed = collapsed.has(section.label);
+            const open = isOpen(section.label);
             return (
               <Fragment key={section.label}>
                 <TableRow className="bg-muted/50 hover:bg-muted/60 cursor-pointer" onClick={() => toggleSection(section.label)}>
                   <TableCell colSpan={cols} className="py-2 text-xs font-medium">
                     <span className="inline-flex items-center gap-1.5">
-                      {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
                       {section.label}
                       <span className="text-muted-foreground font-normal">· {section.count}</span>
                     </span>
                   </TableCell>
                 </TableRow>
-                {!isCollapsed &&
+                {open &&
                   section.subgroups.map((sg, i) => (
                     <Fragment key={sg.label ?? `__flat${i}`}>
                       {sg.label && (

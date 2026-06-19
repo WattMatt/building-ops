@@ -48,6 +48,12 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
     () => sections.flatMap((s) => s.subgroups.flatMap((sg) => sg.docs)),
     [sections],
   );
+  const narrowed =
+    query.trim() !== '' ||
+    filters.source !== 'all' ||
+    filters.type !== 'all' ||
+    filters.status !== 'all' ||
+    filters.shop !== 'all';
 
   const metaFor = (doc: UnifiedDocument | null): DocumentFormValues | null => {
     if (!doc?.managedId) return null;
@@ -205,6 +211,7 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
       <DocumentsTable
         sections={sections}
         flat={flat}
+        narrowed={narrowed}
         canEdit={isAdminOrManager}
         selected={selected}
         onToggle={toggle}
