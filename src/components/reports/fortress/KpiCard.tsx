@@ -8,7 +8,7 @@ import type { Kpi } from '@/hooks/useBuildingKpis';
 function formatValue(k: Kpi): string {
   if (k.value === null || k.value === undefined) return '—';
   switch (k.format) {
-    case 'pct': return `${k.value}%`;
+    case 'pct': return `${Math.round(k.value * 10) / 10}%`;
     case 'zar': return formatZAR(k.value);
     case 'count': return String(k.value);
     default: return Number(k.value).toLocaleString('en-ZA');
