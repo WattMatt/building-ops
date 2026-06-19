@@ -5,7 +5,7 @@ export interface ILDoc { file_name: string | null; file_url: string | null; file
 export interface ILPhoto { inspection_title: string | null; photo_url: string | null; }
 export interface ILShop {
   subsection_id: string; name: string | null; tenant_name: string | null; category: string | null;
-  meter_serial_number: string | null; ct_ratio: string | null; metering_status: string | null;
+  meter_serial_number: string | null; ct_ratio: string | null; breaker_size: string | null; metering_status: string | null;
   coc: { number: string | null; status: string | null; type: string | null; issue_date: string | null; expiry: string | null };
   matched_tenant: { id: string; shop_number: string | null; shop_name: string | null } | null;
   documents: ILDoc[]; doc_count: number; photos: ILPhoto[]; photo_count: number;

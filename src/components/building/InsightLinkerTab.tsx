@@ -45,7 +45,8 @@ export default function InsightLinkerTab({ buildingId, active }: Props) {
             <TableHeader>
               <TableRow>
                 <TableHead>Shop</TableHead><TableHead>Tenant</TableHead><TableHead>Category</TableHead>
-                <TableHead>Meter S/N</TableHead><TableHead>CT</TableHead><TableHead>COC</TableHead>
+                <TableHead>Meter S/N</TableHead><TableHead>CT</TableHead><TableHead>Breaker</TableHead>
+                <TableHead>COC</TableHead><TableHead>COC No.</TableHead>
                 <TableHead className="text-right">Docs</TableHead><TableHead className="text-right">Photos</TableHead>
               </TableRow>
             </TableHeader>
@@ -68,12 +69,14 @@ export default function InsightLinkerTab({ buildingId, active }: Props) {
                     <TableCell>{s.category ?? '—'}</TableCell>
                     <TableCell>{s.meter_serial_number ?? '—'}</TableCell>
                     <TableCell>{s.ct_ratio ?? '—'}</TableCell>
+                    <TableCell>{s.breaker_size ?? '—'}</TableCell>
                     <TableCell>{s.coc.status ? <Badge variant={cocBadgeVariant(s.coc.status)}>{s.coc.status}</Badge> : '—'}</TableCell>
+                    <TableCell>{s.coc.number ?? '—'}</TableCell>
                     <TableCell className="text-right">{s.doc_count}</TableCell>
                     <TableCell className="text-right">{s.photo_count}</TableCell>
                   </TableRow>
                   {open === s.subsection_id && (
-                    <TableRow><TableCell colSpan={8} className="bg-muted/40"><ShopDrawer shop={s} /></TableCell></TableRow>
+                    <TableRow><TableCell colSpan={10} className="bg-muted/40"><ShopDrawer shop={s} /></TableCell></TableRow>
                   )}
                 </Fragment>
               ))}
