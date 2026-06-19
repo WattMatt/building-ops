@@ -1,9 +1,11 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { loadBranding, renderEmail } from "../_shared/email.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
 
-async function sendEmail(to: string[], subject: string, html: string) {
+async function sendEmail(from: string, to: string[], subject: string, html: string) {
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -11,7 +13,7 @@ async function sendEmail(to: string[], subject: string, html: string) {
       "Authorization": `Bearer ${RESEND_API_KEY}`,
     },
     body: JSON.stringify({
-      from: "Building Ops <notifications@buildingops.app>",
+      from,
       to,
       subject,
       html,
@@ -115,81 +117,53 @@ serve(async (req: Request): Promise<Response> => {
     const isApproved = status === 'approved';
     const statusLabel = isApproved ? 'Approved' : 'Rejected';
     const statusColor = isApproved ? '#16a34a' : '#dc2626';
-    const statusIcon = isApproved ? '✓' : '✗';
+
+    const branding = await loadBranding(supabase);
 
     // Send email notification
     const emailResponse = await sendEmail(
+      `${branding.appName} <notifications@buildingops.app>`,
       [profile.email],
       `Form ${statusLabel}: ${formName}`,
-      `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="utf-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        </head>
-        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f4f4f5; margin: 0; padding: 20px;">
-          <div style="max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-            <!-- Header -->
-            <div style="background-color: ${statusColor}; padding: 24px; text-align: center;">
-              <div style="font-size: 48px; color: white; margin-bottom: 8px;">${statusIcon}</div>
-              <h1 style="color: white; margin: 0; font-size: 24px;">Form ${statusLabel}</h1>
-            </div>
-            
-            <!-- Content -->
-            <div style="padding: 32px;">
-              <p style="color: #374151; font-size: 16px; margin: 0 0 8px;">
-                Hi ${profile.full_name || 'there'},
-              </p>
-              <p style="color: #374151; font-size: 16px; margin: 0 0 24px;">
-                Your form submission has been <strong style="color: ${statusColor};">${status}</strong>.
-              </p>
-              
-              <div style="background-color: #f9fafb; border-radius: 8px; padding: 20px; margin-bottom: 24px;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <tr>
-                    <td style="padding: 8px 0; color: #6b7280; font-size: 14px; width: 100px;">Form:</td>
-                    <td style="padding: 8px 0; color: #111827; font-size: 14px; font-weight: 600;">${formName}</td>
-                  </tr>
-                  ${buildingName ? `
-                  <tr>
-                    <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Building:</td>
-                    <td style="padding: 8px 0; color: #111827; font-size: 14px; font-weight: 600;">${buildingName}</td>
-                  </tr>
-                  ` : ''}
-                  <tr>
-                    <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Reviewed by:</td>
-                    <td style="padding: 8px 0; color: #111827; font-size: 14px;">${reviewerName}</td>
-                  </tr>
-                  <tr>
-                    <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Date:</td>
-                    <td style="padding: 8px 0; color: #111827; font-size: 14px;">${formattedTime}</td>
-                  </tr>
-                </table>
-              </div>
-
-              ${reviewNotes ? `
-              <div style="background-color: ${isApproved ? '#f0fdf4' : '#fef2f2'}; border-left: 4px solid ${statusColor}; padding: 16px; border-radius: 4px; margin-bottom: 24px;">
-                <p style="color: #374151; font-size: 14px; font-weight: 600; margin: 0 0 8px;">Reviewer Notes:</p>
-                <p style="color: #4b5563; font-size: 14px; margin: 0; white-space: pre-wrap;">${reviewNotes}</p>
-              </div>
+      renderEmail({
+        branding,
+        heading: `Form ${statusLabel}`,
+        greeting: `Hi ${profile.full_name || 'there'},`,
+        bodyHtml: `
+          <p style="margin:0 0 16px;">
+            Your form submission has been <strong style="color: ${statusColor};">${status}</strong>.
+          </p>
+          <div style="background-color: #f9fafb; border-radius: 8px; padding: 20px; margin-bottom: 16px;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <td style="padding: 8px 0; color: #6b7280; font-size: 14px; width: 100px;">Form:</td>
+                <td style="padding: 8px 0; color: #111827; font-size: 14px; font-weight: 600;">${formName}</td>
+              </tr>
+              ${buildingName ? `
+              <tr>
+                <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Building:</td>
+                <td style="padding: 8px 0; color: #111827; font-size: 14px; font-weight: 600;">${buildingName}</td>
+              </tr>
               ` : ''}
-              
-              <p style="color: #6b7280; font-size: 14px; margin: 0;">
-                Log in to the Building Ops platform to view full details.
-              </p>
-            </div>
-            
-            <!-- Footer -->
-            <div style="background-color: #f9fafb; padding: 16px 32px; text-align: center; border-top: 1px solid #e5e7eb;">
-              <p style="color: #9ca3af; font-size: 12px; margin: 0;">
-                This is an automated notification from Building Ops.
-              </p>
-            </div>
+              <tr>
+                <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Reviewed by:</td>
+                <td style="padding: 8px 0; color: #111827; font-size: 14px;">${reviewerName}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Date:</td>
+                <td style="padding: 8px 0; color: #111827; font-size: 14px;">${formattedTime}</td>
+              </tr>
+            </table>
           </div>
-        </body>
-        </html>
-      `
+          ${reviewNotes ? `
+          <div style="background-color: ${isApproved ? '#f0fdf4' : '#fef2f2'}; border-left: 4px solid ${statusColor}; padding: 16px; border-radius: 4px; margin-bottom: 16px;">
+            <p style="color: #374151; font-size: 14px; font-weight: 600; margin: 0 0 8px;">Reviewer Notes:</p>
+            <p style="color: #4b5563; font-size: 14px; margin: 0; white-space: pre-wrap;">${reviewNotes}</p>
+          </div>
+          ` : ''}`,
+        ctaText: "View full details",
+        ctaUrl: `${APP_URL}/forms`,
+      })
     );
 
     console.log("Review notification email sent successfully:", emailResponse);

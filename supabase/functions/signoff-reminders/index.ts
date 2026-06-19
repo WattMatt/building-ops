@@ -1,32 +1,34 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { Branding, loadBranding, renderEmail } from "../_shared/email.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const SIGNOFF_SECRET = Deno.env.get("SIGNOFF_REMINDERS_SECRET");
+const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-signoff-secret",
 };
 
-async function sendEmail(to: string[], subject: string, html: string) {
+async function sendEmail(from: string, to: string[], subject: string, html: string) {
   if (to.length === 0) return;
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${RESEND_API_KEY}` },
-    body: JSON.stringify({ from: "Building Ops <notifications@buildingops.app>", to, subject, html }),
+    body: JSON.stringify({ from, to, subject, html }),
   });
   if (!res.ok) console.error("Resend error:", await res.text());
 }
 
-const shell = (heading: string, color: string, body: string) => `
-  <!DOCTYPE html><html><head><meta charset="utf-8"></head>
-  <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f4f4f5;margin:0;padding:20px;">
-    <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-      <div style="background:${color};padding:24px;text-align:center;"><h1 style="color:#fff;margin:0;font-size:22px;">${heading}</h1></div>
-      <div style="padding:32px;color:#374151;font-size:15px;">${body}<p style="margin-top:24px;"><a href="https://buildingops.app/my-signoffs" style="display:inline-block;background:${color};color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;">Open sign-offs</a></p></div>
-    </div>
-  </body></html>`;
+const shell = (branding: Branding, heading: string, body: string) =>
+  renderEmail({
+    branding,
+    heading,
+    bodyHtml: body,
+    ctaText: "Open sign-offs",
+    ctaUrl: `${APP_URL}/my-signoffs`,
+  });
 
 serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -44,6 +46,8 @@ serve(async (req: Request): Promise<Response> => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
+    const branding = await loadBranding(supabase);
+    const fromAddress = `${branding.appName} <notifications@buildingops.app>`;
     const now = new Date();
     const nowIso = now.toISOString();
     const in48h = new Date(now.getTime() + 48 * 3600 * 1000).toISOString();
@@ -102,9 +106,10 @@ serve(async (req: Request): Promise<Response> => {
         expired++;
         const fn = await formName(r.submission_id);
         await sendEmail(
+          fromAddress,
           await getEscalationEmails(),
           `Sign-off overdue: ${fn}`,
-          shell("Sign-off overdue", "#ef4444", `<p>A sign-off request for <strong>${fn}</strong> has passed its due date and has been marked expired. Please reassign it if it is still required.</p>`),
+          shell(branding, "Sign-off overdue", `<p>A sign-off request for <strong>${fn}</strong> has passed its due date and has been marked expired. Please reassign it if it is still required.</p>`),
         );
         escalated++;
       } else if ((due.toISOString() <= in48h) && (!r.reminded_at || (r.reminded_at as string) < reminderCutoff)) {
@@ -112,9 +117,10 @@ serve(async (req: Request): Promise<Response> => {
         if (signer?.email) {
           const fn = await formName(r.submission_id);
           await sendEmail(
+            fromAddress,
             [signer.email],
             `Sign-off reminder: ${fn}`,
-            shell("Sign-off reminder", "#2563eb", `<p>Hi ${signer.full_name || "there"}, this is a reminder that <strong>${fn}</strong> is awaiting your signature and is due soon.</p>`),
+            shell(branding, "Sign-off reminder", `<p>Hi ${signer.full_name || "there"}, this is a reminder that <strong>${fn}</strong> is awaiting your signature and is due soon.</p>`),
           );
           await supabase.from("form_signoff_requests").update({ reminded_at: nowIso }).eq("id", r.id);
           reminded++;

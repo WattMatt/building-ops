@@ -1,12 +1,16 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { loadBranding, renderEmail } from "../_shared/email.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const SET_PASSWORD_URL = "https://buildingops.app/set-password";
+// Clone-correct and env-overridable. Falls back to the clone's OWN domain so
+// the setup link always points at this deployment, not the original app.
+const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
+const SET_PASSWORD_URL = `${APP_URL}/set-password`;
 const VALID_ROLES = ["admin", "manager", "user", "reviewer"];
 
 function json(body: unknown, status = 200) {
@@ -129,22 +133,25 @@ serve(async (req) => {
       if (delivery === "email") {
         const resendKey = Deno.env.get("RESEND_API_KEY");
         if (!resendKey) return json({ error: "RESEND_API_KEY not configured" }, 500);
+        const branding = await loadBranding(adminClient);
         const greeting = profile.full_name ? `Hi ${profile.full_name},` : "Hi,";
         const emailRes = await fetch("https://api.resend.com/emails", {
           method: "POST",
           headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({
-            from: "Building Ops <notifications@buildingops.app>",
+            from: `${branding.appName} <notifications@buildingops.app>`,
             to: [email],
-            subject: "Your Building Ops sign-in link",
-            html: `<div style="font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:480px;margin:0 auto;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;">
-<div style="background:#006d8f;padding:18px 32px;"><span style="color:#ffffff;font-size:18px;font-weight:700;">Building Ops</span></div>
-<div style="padding:28px 32px;color:#111827;font-size:14px;line-height:1.6;">
-<p style="margin:0 0 12px;">${greeting}</p>
-<p style="margin:0 0 20px;">Here is a fresh link to finish setting up your Building Ops account. Click it, choose a password, and you're in.</p>
-<p style="margin:0 0 24px;"><a href="${actionLink}" style="background:#006d8f;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-weight:600;display:inline-block;">Set your password</a></p>
-<p style="margin:0;color:#6b7280;font-size:12px;">This link is valid for 24 hours. If it expires, ask your administrator to send a new one.</p>
-</div></div>`,
+            subject: `Your ${branding.appName} sign-in link`,
+            html: renderEmail({
+              branding,
+              preheader: "Your fresh setup link",
+              heading: "Finish setting up your account",
+              greeting,
+              bodyHtml: `<p style="margin:0;">Here's a fresh link to finish setting up your ${branding.appName} account. Click below to choose a password and you're in.</p>`,
+              ctaText: "Set your password",
+              ctaUrl: actionLink,
+              footnote: "This link is valid for 24 hours. If it expires, ask your administrator to send a new one.",
+            }),
           }),
         });
         if (!emailRes.ok) {
@@ -177,11 +184,18 @@ serve(async (req) => {
     let tempPassword: string | null = null;
 
     if (mode === "invite") {
-      const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
-        data: fullName ? { full_name: fullName } : undefined,
-        redirectTo: SET_PASSWORD_URL,
+      // Create the account directly (email pre-confirmed) instead of
+      // inviteUserByEmail, which sends through Supabase's built-in mailer —
+      // frequently unconfigured on a cloned project and the usual cause of
+      // "sending an invite gives an error". The setup link is delivered below
+      // via Resend (the same proven path as "resend"), with a copyable-link
+      // fallback so onboarding never blocks on email.
+      const { data, error } = await adminClient.auth.admin.createUser({
+        email,
+        email_confirm: true,
+        user_metadata: fullName ? { full_name: fullName } : undefined,
       });
-      if (error || !data?.user) return json({ error: `Invite failed: ${error?.message ?? "unknown"}` }, 500);
+      if (error || !data?.user) return json({ error: `Create failed: ${error?.message ?? "unknown"}` }, 500);
       newUserId = data.user.id;
     } else {
       tempPassword = generatePassword(16);
@@ -230,7 +244,49 @@ serve(async (req) => {
     if (mode === "temp_password") {
       return json({ userId: newUserId, status: "temp_password", tempPassword });
     }
-    return json({ userId: newUserId, status: "invited" });
+
+    // Deliver the setup link WITHOUT depending on Supabase's built-in mailer:
+    // mint a recovery-grade link and email it via Resend. If email can't be
+    // sent (no key / send failure), hand the link back so the admin delivers
+    // it manually — onboarding must never block on email.
+    const { data: linkData, error: linkError } = await adminClient.auth.admin.generateLink({
+      type: "recovery",
+      email,
+      options: { redirectTo: SET_PASSWORD_URL },
+    });
+    const actionLink = linkData?.properties?.action_link;
+    if (linkError || !actionLink) {
+      return json({ error: `Setup link generation failed: ${linkError?.message ?? "unknown"}` }, 500);
+    }
+
+    let emailed = false;
+    const resendKey = Deno.env.get("RESEND_API_KEY");
+    if (resendKey) {
+      const branding = await loadBranding(adminClient);
+      const greeting = fullName ? `Hi ${fullName},` : "Hi,";
+      const emailRes = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: `${branding.appName} <notifications@buildingops.app>`,
+          to: [email],
+          subject: `Set up your ${branding.appName} account`,
+          html: renderEmail({
+            branding,
+            preheader: `You've been invited to ${branding.appName}`,
+            heading: `Welcome to ${branding.appName}`,
+            greeting,
+            bodyHtml: `<p style="margin:0;">You've been invited to ${branding.appName}. Click below to choose a password and finish setting up your account.</p>`,
+            ctaText: "Set your password",
+            ctaUrl: actionLink,
+            footnote: "This link is valid for 24 hours and can only be used once.",
+          }),
+        }),
+      });
+      emailed = emailRes.ok;
+    }
+
+    return json({ userId: newUserId, status: "invited", emailed, actionLink: emailed ? null : actionLink });
   } catch (e) {
     console.error("invite-user error:", e);
     return json({ error: "An unexpected error occurred" }, 500);
