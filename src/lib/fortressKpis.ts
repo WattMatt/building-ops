@@ -50,6 +50,7 @@ export const STATUS_CLASS: Record<KpiStatus, { ring: string; text: string; badge
 
 export const THRESHOLDS = {
   compliance: { good: 90, warn: 75 } as KpiThreshold,            // K1 / O1
+  taskCompletion: { good: 90, warn: 75 } as KpiThreshold,        // building task-completion %
   critical: { good: 95, warn: 85 } as KpiThreshold,              // O2
   inspectionPass: { good: 95, warn: 85 } as KpiThreshold,        // K2
   openActions: { good: 0, warn: 5, invert: true } as KpiThreshold, // K3 (lower better)
