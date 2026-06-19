@@ -34,7 +34,7 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
 
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<DocFilters>({ source: 'all', type: 'all', status: 'all', shop: 'all' });
-  const [groupBy, setGroupBy] = useState<GroupBy>('source');
+  const [groupBy, setGroupBy] = useState<GroupBy>('section');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -43,8 +43,11 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
   const managedRows = (list.data ?? []) as BuildingDocumentRow[];
   const all = useMemo(() => unifyDocuments(managedRows, il.data), [managedRows, il.data]);
   const visible = useMemo(() => applyFilters(searchDocuments(all, query), filters), [all, query, filters]);
-  const groups = useMemo(() => groupDocuments(visible, groupBy), [visible, groupBy]);
-  const flat = useMemo(() => groups.flatMap((g) => g.docs), [groups]);
+  const sections = useMemo(() => groupDocuments(visible, groupBy), [visible, groupBy]);
+  const flat = useMemo(
+    () => sections.flatMap((s) => s.subgroups.flatMap((sg) => sg.docs)),
+    [sections],
+  );
 
   const metaFor = (doc: UnifiedDocument | null): DocumentFormValues | null => {
     if (!doc?.managedId) return null;
@@ -200,7 +203,7 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
       )}
 
       <DocumentsTable
-        groups={groups}
+        sections={sections}
         flat={flat}
         canEdit={isAdminOrManager}
         selected={selected}

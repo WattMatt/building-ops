@@ -17,10 +17,12 @@ const doc = (over: Partial<UnifiedDocument>): UnifiedDocument => ({
   scope: 'building',
   shopNumber: null,
   tenantName: null,
+  shopName: null,
   issueDate: null,
   expiryDate: null,
   status: { label: 'Valid', kind: 'success' },
   sizeBytes: null,
+  categoryOrder: null,
   editable: true,
   managedId: 'x',
   storedUrl: null,
@@ -36,8 +38,10 @@ const docs: UnifiedDocument[] = [
     scope: 'shop',
     shopNumber: '14',
     tenantName: 'Boxer',
+    shopName: 'SHOP 14',
     typeValue: '01 coc',
     type: '01 COC',
+    categoryOrder: 1,
     status: { label: 'COC fail', kind: 'danger' },
   }),
   doc({
@@ -77,23 +81,36 @@ describe('applyFilters', () => {
   });
 });
 
-describe('groupDocuments', () => {
+describe('groupDocuments — section (nested)', () => {
+  it('orders sections Building → Shops → Site-level', () => {
+    const secs = groupDocuments(docs, 'section');
+    expect(secs.map((s) => s.label)).toEqual([
+      'Building documents',
+      'SHOP 14 · Boxer',
+      'Site-level documents',
+    ]);
+  });
+  it('renders managed docs flat but groups IL docs under a category sub-header', () => {
+    const secs = groupDocuments(docs, 'section');
+    expect(secs[0].subgroups.map((sg) => sg.label)).toEqual([null]); // building docs flat
+    expect(secs[1].subgroups[0].label).toBe('01 COC'); // shop docs under category
+    expect(secs[1].count).toBe(1);
+  });
+});
+
+describe('groupDocuments — flat modes', () => {
   it('groups by source with editable group first', () => {
-    const groups = groupDocuments(docs, 'source');
-    expect(groups.map((g) => g.label)).toEqual([
+    const secs = groupDocuments(docs, 'source');
+    expect(secs.map((s) => s.label)).toEqual([
       'Managed here (editable)',
       'Insight-linker (live, read-only)',
     ]);
-    expect(groups[0].docs.map((d) => d.key)).toEqual(['a']);
+    expect(secs[0].subgroups[0].docs.map((d) => d.key)).toEqual(['a']);
   });
-  it('returns a single group for "none"', () => {
-    const groups = groupDocuments(docs, 'none');
-    expect(groups).toHaveLength(1);
-    expect(groups[0].docs).toHaveLength(3);
-  });
-  it('sorts docs by name within a group', () => {
-    const groups = groupDocuments(docs, 'none');
-    expect(groups[0].docs.map((d) => d.name)).toEqual(['Fire Cert', 'SHOP14_COC', 'Site Plan']);
+  it('returns a single section for "none", sorted by name', () => {
+    const secs = groupDocuments(docs, 'none');
+    expect(secs).toHaveLength(1);
+    expect(secs[0].subgroups[0].docs.map((d) => d.name)).toEqual(['Fire Cert', 'SHOP14_COC', 'Site Plan']);
   });
 });
 

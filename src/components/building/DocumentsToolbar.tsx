@@ -116,15 +116,15 @@ export default function DocumentsToolbar({
       )}
 
       <div className="flex items-center gap-1">
-        <span className="text-sm text-muted-foreground">Group</span>
+        <span className="text-sm text-muted-foreground">Organise by</span>
         <Select value={groupBy} onValueChange={(v) => onGroupBy(v as GroupBy)}>
-          <SelectTrigger className="w-[130px]">
+          <SelectTrigger className="w-[175px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="section">Section → category</SelectItem>
+            <SelectItem value="type">Category</SelectItem>
             <SelectItem value="source">Source</SelectItem>
-            <SelectItem value="type">Type</SelectItem>
-            <SelectItem value="shop">Shop / scope</SelectItem>
             <SelectItem value="status">Status</SelectItem>
             <SelectItem value="none">Nothing</SelectItem>
           </SelectContent>

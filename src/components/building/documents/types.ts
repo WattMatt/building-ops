@@ -33,10 +33,12 @@ export interface UnifiedDocument {
   scope: DocScope;
   shopNumber: string | null;
   tenantName: string | null;
+  shopName: string | null; // insight-linker subsection name (stable shop-section identity)
   issueDate: string | null;
   expiryDate: string | null;
   status: DocStatus;
   sizeBytes: number | null;
+  categoryOrder: number | null; // insight-linker document_categories.order_index (sub-group order)
   editable: boolean; // true for managed; false for insight-linker
   managedId: string | null;
   storedUrl: string | null; // managed: file_url (resolve before use); IL: direct public URL
