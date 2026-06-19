@@ -75,6 +75,18 @@ describe('buildReportDoc — annual_inspection', () => {
   });
 });
 
+describe('buildReportDoc — title casing', () => {
+  it('uppercases the whole composed report title in the PDF header', () => {
+    const doc = buildReportDoc(
+      { title: 'Monthly OPS — Broll Centre — May 2026', report_period: '2026-05-01', report_type: 'ops_monthly', managers: [] },
+      { compliancePct: 100 },
+      { color: '#123456', orgName: 'Acme' },
+    );
+    const { text } = collect(doc);
+    expect(text).toContain('MONTHLY OPS — BROLL CENTRE — MAY 2026');
+  });
+});
+
 describe('buildReportDoc — ops_monthly + branding', () => {
   it('renders the building compliance % and compliance table', () => {
     const doc = buildReportDoc(

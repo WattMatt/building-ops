@@ -140,7 +140,8 @@ export default function FortressReportEditor() {
           <Button variant="ghost" size="sm" className="-ml-2 mb-1" onClick={() => navigate(`/buildings/${report.building_id}?tab=reports`)}>
             <ArrowLeft className="mr-2 h-4 w-4" /> Back to building
           </Button>
-          <h1 className="text-2xl font-semibold">{report.title}</h1>
+          {/* Building names always display uppercase; the name is baked into the composed title. */}
+          <h1 className="text-2xl font-semibold">{report.title?.toUpperCase()}</h1>
           <p className="text-sm text-muted-foreground">
             {REPORT_TYPE_LABELS[report.report_type]} · {formatPeriodLabel(report.report_period)}
           </p>

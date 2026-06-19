@@ -62,7 +62,8 @@ export function buildReportDoc(
   const titleStack: Content = {
     width: 'auto',
     stack: [
-      { text: report.title ?? 'Report', fontSize: 10, bold: true, color, alignment: 'right' },
+      // Building names always display uppercase; the name is baked into the composed title.
+      { text: (report.title ?? 'Report').toUpperCase(), fontSize: 10, bold: true, color, alignment: 'right' },
       { text: formatPeriodLabel(report.report_period ?? null), fontSize: 9, color: '#6b7280', alignment: 'right' },
     ],
   };
