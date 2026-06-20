@@ -30,6 +30,7 @@ export const REPORT_SECTIONS: Record<ReportType, SectionMeta[]> = {
   cm_monthly: [
     { key: 'building_overview', label: 'Building Overview', hint: 'Narrative.' },
     { key: 'local_resources', label: 'Local Resources', hint: 'CPF / Police / Authority contacts & meetings.' },
+    { key: 'report_checklist', label: 'General Checklist', hint: 'Roof/night/meter inspection dates + daily/weekly site checks.' },
     { key: 'building_turnover', label: 'Building Turnover', hint: 'Centre trading performance + computed growth.' },
     { key: 'turnover', label: 'Turnover', hint: 'Per-tenant trading density, COO, growth.' },
     { key: 'category_turnover', label: 'Top Categories', hint: 'Top-5 performing categories.' },
