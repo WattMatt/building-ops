@@ -78,7 +78,7 @@ export default function BuildingForm() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPosition, setLogoPosition] = useState<string>('top-left');
   const [avatarColor, setAvatarColor] = useState<string | null>(null);
-  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [uploadingLogo] = useState(false);
   const [assetManager, setAssetManager] = useState<ContactInfo>({ ...emptyContact });
   const [centreManagement, setCentreManagement] = useState<ContactInfo>({ ...emptyContact });
   const [securityContact, setSecurityContact] = useState<ContactInfo>({ ...emptyContact });

@@ -29,7 +29,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Upload, FileText, Trash2, Download, ExternalLink, Loader2 } from 'lucide-react';
+import { Upload, FileText, Trash2, ExternalLink, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 
@@ -385,11 +385,3 @@ function DocumentsTable({
     </Table>
   );
 }
-
-const DOCUMENT_TYPES_FOR_TABLE = [
-  { value: 'lease_agreement', label: 'Lease Agreement' },
-  { value: 'utility_account', label: 'Utility Account' },
-  { value: 'electrical_coc', label: 'Electrical COC' },
-  { value: 'handover_document', label: 'Handover Document' },
-  { value: 'other', label: 'Other' },
-];

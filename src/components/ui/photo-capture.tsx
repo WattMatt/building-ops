@@ -1,6 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Camera, Upload, X, ImagePlus, Loader2, Smartphone, Monitor } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Camera, X, ImagePlus, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import heic2any from 'heic2any';
@@ -144,7 +143,7 @@ export function PhotoCapture({
       return file;
     }
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const img = new Image();
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');

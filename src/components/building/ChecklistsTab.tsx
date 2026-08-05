@@ -39,11 +39,9 @@ import {
   addQuarters,
   addYears,
   eachDayOfInterval,
-  isSameDay,
   isSameMonth,
   isToday,
   isWithinInterval,
-  isBefore,
   isAfter,
 } from 'date-fns';
 import ReportIssueDialog from '@/components/checklists/ReportIssueDialog';
@@ -153,7 +151,7 @@ function getCurrentPeriodRange(frequency: TaskFrequency): { start: Date; end: Da
 }
 
 export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTabProps) {
-  const { user, isAdminOrManager } = useAuth();
+  const { isAdminOrManager } = useAuth();
   const [tasks, setTasks] = useState<TaskInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);

@@ -10,12 +10,11 @@ import {
   Wrench,
   AlertTriangle,
   Building2,
-  Calendar,
   ArrowRight,
   Loader2,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { format, differenceInDays, isPast, addDays } from 'date-fns';
+import { format, differenceInDays, addDays } from 'date-fns';
 
 interface ExpiringDocument {
   id: string;

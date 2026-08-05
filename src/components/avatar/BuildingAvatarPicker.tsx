@@ -2,16 +2,13 @@
  * Building-specific avatar picker with geometric patterns and color customization
  */
 
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { 
+import {
   getBuildingAvatars,
-  AVATAR_BACKGROUNDS,
-  AvatarOption,
-  parseAvatarUrl,
 } from '@/lib/avatars';
 import { AVATAR_COLORS } from '@/components/building/BuildingAvatar';
 import { Check, Shuffle, Building2, Palette } from 'lucide-react';

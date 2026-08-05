@@ -15,7 +15,6 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { Loader2, Upload, Palette, ImageIcon } from 'lucide-react';
 import { BuildingAvatarPicker } from '@/components/avatar/BuildingAvatarPicker';

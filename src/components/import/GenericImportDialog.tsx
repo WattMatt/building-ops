@@ -240,7 +240,7 @@ export function GenericImportDialog<T>({
   };
 
   const validateAndMapData = () => {
-    const mapped = parsedData.map((row, index) => 
+    const mapped = parsedData.map((row) =>
       validateRow(row, fieldMapping)
     ).map((record, index) => ({
       ...record,

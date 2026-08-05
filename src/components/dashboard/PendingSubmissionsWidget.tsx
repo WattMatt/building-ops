@@ -5,9 +5,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { FileText, ArrowRight, Clock, Loader2, AlertTriangle } from 'lucide-react';
+import { FileText, ArrowRight, Clock, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { format, formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
 
 interface PendingSubmission {
   id: string;

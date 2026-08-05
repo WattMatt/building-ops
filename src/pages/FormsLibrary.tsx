@@ -4,8 +4,6 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
   FileSpreadsheet,
-  Download,
-  Printer,
   Key,
   HardHat,
   ClipboardList,
@@ -22,7 +20,7 @@ import {
 import { FormPreviewDialog } from '@/components/forms/FormPreviewDialog';
 import { FillableFormDialog } from '@/components/forms/FillableFormDialog';
 import { FormSubmissionsDialog } from '@/components/forms/FormSubmissionsDialog';
-import { defaultFormFields, FormField } from '@/lib/formFields';
+import { defaultFormFields } from '@/lib/formFields';
 
 interface FormTemplate {
   id: string;

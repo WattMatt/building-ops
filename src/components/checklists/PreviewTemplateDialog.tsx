@@ -24,7 +24,7 @@ export interface PreviewItem {
   display_order: number;
 }
 
-export function TemplatePreviewBody({ template, items }: { template: PreviewTemplate; items: PreviewItem[] }) {
+export function TemplatePreviewBody({ items }: { template: PreviewTemplate; items: PreviewItem[] }) {
   const ordered = [...items].sort((a, b) => a.display_order - b.display_order);
 
   if (ordered.length === 0) {

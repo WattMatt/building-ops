@@ -13,7 +13,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   FileWarning,
   Wrench,
-  Building2,
   ArrowRight,
   Loader2,
   ShieldAlert,

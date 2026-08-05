@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, FileText, Wrench, ArrowRight, Clock, CheckCircle, ClipboardList } from 'lucide-react';
+import { AlertTriangle, FileText, Wrench, ArrowRight, CheckCircle, ClipboardList } from 'lucide-react';
 import { format, differenceInDays, isPast, isSameDay, subDays } from 'date-fns';
 
 interface OverviewWidgetsProps {
@@ -57,13 +56,6 @@ const ASSET_CATEGORY_LABELS: Record<string, string> = {
   generator: 'Generator',
   security: 'Security',
   other: 'Other',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  submitted: 'Pending Review',
-  reviewed: 'Reviewed',
-  approved: 'Approved',
-  rejected: 'Rejected',
 };
 
 export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWidgetsProps) {

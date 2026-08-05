@@ -50,7 +50,7 @@ function createColoredLine(color: string): any {
 }
 
 // Generate form field content for PDF
-function generateFieldContent(fields: FormField[], primaryColor: string): any[] {
+function generateFieldContent(fields: FormField[], _primaryColor: string): any[] {
   const content: any[] = [];
   let currentRow: any[] = [];
 

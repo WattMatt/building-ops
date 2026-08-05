@@ -27,7 +27,7 @@ import {
 import { MapPin, Building2, Layers, AlertCircle, X, Check, MousePointer } from 'lucide-react';
 import { BuildingMap, BuildingMarker } from '@/components/map/BuildingMap';
 import { MapSearchBox } from '@/components/map/MapSearchBox';
-import { MAP_STYLES, MapStyle } from '@/lib/mapbox';
+import { MapStyle } from '@/lib/mapbox';
 import { toast } from 'sonner';
 
 export default function MapView() {

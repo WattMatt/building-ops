@@ -31,7 +31,7 @@ import { format } from 'date-fns';
 import { Loader2, Eye, FileText, User, Building2, Calendar, Download, Image, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { useOrganization } from '@/hooks/useOrganization';
 import { generateFilledFormPdf } from '@/lib/pdfGenerator';
-import { defaultFormFields, FormField } from '@/lib/formFields';
+import { defaultFormFields } from '@/lib/formFields';
 import { toast } from 'sonner';
 
 interface FormTemplate {

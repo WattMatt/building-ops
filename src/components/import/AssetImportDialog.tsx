@@ -31,8 +31,6 @@ interface AssetData {
   status: string;
 }
 
-const VALID_CATEGORIES = ['hvac', 'electrical', 'plumbing', 'fire_safety', 'elevator', 'generator', 'security', 'other'];
-
 const ASSET_FIELDS: FieldConfig[] = [
   { key: 'name', label: 'Asset Name', required: true, aliases: ['asset', 'equipment', 'item'] },
   { key: 'category', label: 'Category', required: true, aliases: ['type', 'asset type', 'equipment type'] },
