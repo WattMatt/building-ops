@@ -11,12 +11,14 @@ export interface ProfessionalContact {
   email: string;
 }
 
+// Keys are persisted verbatim into buildings.professional_team and decoded by the
+// iOS reader with no key-mapping strategy — camelCase is pinned by SCHEMA_CONTRACT §2.1.
 export interface ProfessionalTeam {
   architect: ProfessionalContact;
-  civil_engineer: ProfessionalContact;
-  structural_engineer: ProfessionalContact;
-  electrical_engineer: ProfessionalContact;
-  wet_services_engineer: ProfessionalContact;
+  civilEngineer: ProfessionalContact;
+  structuralEngineer: ProfessionalContact;
+  electricalEngineer: ProfessionalContact;
+  wetServicesEngineer: ProfessionalContact;
 }
 
 interface ProfessionalFieldProps {
@@ -116,29 +118,29 @@ export default function ProfessionalTeamSection({ team, onChange }: Professional
         <ProfessionalField
           title="Civil Engineer"
           icon={<Ruler className="h-4 w-4 text-accent-foreground" />}
-          contact={team.civil_engineer}
-          onChange={(c) => onChange({ ...team, civil_engineer: c })}
+          contact={team.civilEngineer}
+          onChange={(c) => onChange({ ...team, civilEngineer: c })}
           idPrefix="civil"
         />
         <ProfessionalField
           title="Structural Engineer"
           icon={<HardHat className="h-4 w-4 text-warning" />}
-          contact={team.structural_engineer}
-          onChange={(c) => onChange({ ...team, structural_engineer: c })}
+          contact={team.structuralEngineer}
+          onChange={(c) => onChange({ ...team, structuralEngineer: c })}
           idPrefix="struct"
         />
         <ProfessionalField
           title="Electrical Engineer"
           icon={<Zap className="h-4 w-4 text-warning" />}
-          contact={team.electrical_engineer}
-          onChange={(c) => onChange({ ...team, electrical_engineer: c })}
+          contact={team.electricalEngineer}
+          onChange={(c) => onChange({ ...team, electricalEngineer: c })}
           idPrefix="elec-eng"
         />
         <ProfessionalField
           title="Wet Services Engineer"
           icon={<Droplets className="h-4 w-4 text-info" />}
-          contact={team.wet_services_engineer}
-          onChange={(c) => onChange({ ...team, wet_services_engineer: c })}
+          contact={team.wetServicesEngineer}
+          onChange={(c) => onChange({ ...team, wetServicesEngineer: c })}
           idPrefix="wet"
         />
       </CardContent>

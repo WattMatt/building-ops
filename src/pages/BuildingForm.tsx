@@ -47,10 +47,10 @@ const emptyMeterContact = { name: '', phone: '', email: '', contract_number: '' 
 const emptyProfessional: ProfessionalContact = { name: '', company: '', phone: '', email: '' };
 const emptyProfessionalTeam: ProfessionalTeam = {
   architect: { ...emptyProfessional },
-  civil_engineer: { ...emptyProfessional },
-  structural_engineer: { ...emptyProfessional },
-  electrical_engineer: { ...emptyProfessional },
-  wet_services_engineer: { ...emptyProfessional },
+  civilEngineer: { ...emptyProfessional },
+  structuralEngineer: { ...emptyProfessional },
+  electricalEngineer: { ...emptyProfessional },
+  wetServicesEngineer: { ...emptyProfessional },
 };
 const emptyTariff: UtilityTariff = { rate: '', unit: '', notes: '' };
 const emptyTariffs: UtilityTariffs = {
@@ -176,10 +176,10 @@ export default function BuildingForm() {
       if (teamData) {
         setProfessionalTeam({
           architect: teamData.architect || { ...emptyProfessional },
-          civil_engineer: teamData.civil_engineer || { ...emptyProfessional },
-          structural_engineer: teamData.structural_engineer || { ...emptyProfessional },
-          electrical_engineer: teamData.electrical_engineer || { ...emptyProfessional },
-          wet_services_engineer: teamData.wet_services_engineer || { ...emptyProfessional },
+          civilEngineer: teamData.civilEngineer || { ...emptyProfessional },
+          structuralEngineer: teamData.structuralEngineer || { ...emptyProfessional },
+          electricalEngineer: teamData.electricalEngineer || { ...emptyProfessional },
+          wetServicesEngineer: teamData.wetServicesEngineer || { ...emptyProfessional },
         });
       }
 

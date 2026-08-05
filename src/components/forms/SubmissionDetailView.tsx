@@ -226,19 +226,18 @@ export function SubmissionDetailView({
                 {isPhotoField ? (
                   <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {(value as string[]).map((url, i) => (
-                      <a
+                      <button
                         key={i}
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        type="button"
+                        onClick={() => openStorageFile(url)}
                         className="aspect-square rounded-lg overflow-hidden border hover:border-primary"
                       >
-                        <img
+                        <SignedImage
                           src={url}
                           alt={`Photo ${i + 1}`}
                           className="w-full h-full object-cover"
                         />
-                      </a>
+                      </button>
                     ))}
                   </div>
                 ) : (

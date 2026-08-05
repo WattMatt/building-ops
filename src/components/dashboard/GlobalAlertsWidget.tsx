@@ -40,6 +40,7 @@ export default function GlobalAlertsWidget() {
   const [loading, setLoading] = useState(true);
   const [expiringDocuments, setExpiringDocuments] = useState<ExpiringDocument[]>([]);
   const [overdueMaintenance, setOverdueMaintenance] = useState<OverdueMaintenance[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchAlerts();
@@ -47,12 +48,13 @@ export default function GlobalAlertsWidget() {
 
   const fetchAlerts = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const today = new Date();
       const thirtyDaysFromNow = addDays(today, 30);
 
       // Fetch expiring documents (within 30 days or expired)
-      const { data: documentsData } = await supabase
+      const { data: documentsData, error: documentsError } = await supabase
         .from('building_documents')
         .select(`
           id,
@@ -66,6 +68,8 @@ export default function GlobalAlertsWidget() {
         .lte('expiry_date', format(thirtyDaysFromNow, 'yyyy-MM-dd'))
         .order('expiry_date');
 
+      if (documentsError) throw documentsError;
+
       if (documentsData) {
         setExpiringDocuments(documentsData.map(doc => ({
           id: doc.id,
@@ -78,7 +82,7 @@ export default function GlobalAlertsWidget() {
       }
 
       // Fetch overdue maintenance (past next_service_date)
-      const { data: assetsData } = await supabase
+      const { data: assetsData, error: assetsError } = await supabase
         .from('building_assets')
         .select(`
           id,
@@ -91,6 +95,8 @@ export default function GlobalAlertsWidget() {
         .not('next_service_date', 'is', null)
         .lt('next_service_date', format(today, 'yyyy-MM-dd'))
         .order('next_service_date');
+
+      if (assetsError) throw assetsError;
 
       if (assetsData) {
         setOverdueMaintenance(assetsData.map(asset => ({
@@ -105,6 +111,8 @@ export default function GlobalAlertsWidget() {
       }
     } catch (error) {
       console.error('Error fetching global alerts:', error);
+      // A failed read must not collapse this card into the "no alerts" no-op.
+      setLoadError(error instanceof Error ? error.message : 'An unexpected error occurred.');
     } finally {
       setLoading(false);
     }
@@ -140,6 +148,34 @@ export default function GlobalAlertsWidget() {
       <Card>
         <CardContent className="flex items-center justify-center py-8">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Card className="border-destructive/50">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-destructive" />
+            <div>
+              <CardTitle>Global Alerts</CardTitle>
+              <CardDescription>Alerts could not be checked</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center justify-center py-6 text-center">
+            <p className="text-sm font-medium mb-1">Failed to load global alerts</p>
+            <p className="text-xs text-muted-foreground max-w-sm mb-4">
+              {loadError} Expiring documents and overdue maintenance across the portfolio are
+              not visible right now.
+            </p>
+            <Button onClick={() => fetchAlerts()} variant="outline" size="sm">
+              Try Again
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );

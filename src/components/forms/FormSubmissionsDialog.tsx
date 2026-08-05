@@ -435,14 +435,13 @@ export function FormSubmissionsDialog({
                         {isPhotoField ? (
                           <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                             {(value as string[]).map((url, photoIndex) => (
-                              <a
+                              <button
                                 key={photoIndex}
-                                href={url}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                                type="button"
+                                onClick={() => openStorageFile(url)}
                                 className="relative aspect-square rounded-lg overflow-hidden border hover:border-primary transition-colors group"
                               >
-                                <img
+                                <SignedImage
                                   src={url}
                                   alt={`Photo ${photoIndex + 1}`}
                                   className="w-full h-full object-cover"
@@ -450,7 +449,7 @@ export function FormSubmissionsDialog({
                                 <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                   <Eye className="h-5 w-5 text-white" />
                                 </div>
-                              </a>
+                              </button>
                             ))}
                           </div>
                         ) : (

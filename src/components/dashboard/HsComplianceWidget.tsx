@@ -3,7 +3,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { ShieldCheck, FileWarning, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { ShieldCheck, FileWarning, Loader2, AlertTriangle } from 'lucide-react';
 import { format, subDays } from 'date-fns';
 import { computeHsScores, scoreBand, type HsBuildingScore } from '@/lib/hsScore';
 
@@ -17,6 +18,7 @@ const BAND_STYLES: Record<string, string> = {
 export default function HsComplianceWidget() {
   const [loading, setLoading] = useState(true);
   const [scores, setScores] = useState<HsBuildingScore[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchScores();
@@ -24,31 +26,40 @@ export default function HsComplianceWidget() {
 
   const fetchScores = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const today = new Date();
       const windowStart = format(subDays(today, 30), 'yyyy-MM-dd');
       const todayStr = format(today, 'yyyy-MM-dd');
 
       // RLS scopes all three queries to the user's buildings automatically
-      const { data: buildings } = await supabase
+      const { data: buildings, error: buildingsError } = await supabase
         .from('buildings')
         .select('id, name')
         .order('name');
 
-      const { data: tasks } = await supabase
+      if (buildingsError) throw buildingsError;
+
+      const { data: tasks, error: tasksError } = await supabase
         .from('task_instances')
         .select('building_id, status, due_date, category')
         .not('category', 'is', null)
         .gte('due_date', windowStart)
         .lte('due_date', todayStr);
 
-      const { data: documents } = await supabase
+      if (tasksError) throw tasksError;
+
+      const { data: documents, error: documentsError } = await supabase
         .from('building_documents')
         .select('building_id, expiry_date');
+
+      if (documentsError) throw documentsError;
 
       setScores(computeHsScores(buildings || [], tasks || [], documents || [], today));
     } catch (error) {
       console.error('Error fetching H&S scores:', error);
+      // A failed read must not render as a compliance score of record.
+      setLoadError(error instanceof Error ? error.message : 'An unexpected error occurred.');
     } finally {
       setLoading(false);
     }
@@ -67,6 +78,17 @@ export default function HsComplianceWidget() {
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : loadError ? (
+          <div className="flex flex-col items-center justify-center py-6 text-center">
+            <AlertTriangle className="h-8 w-8 text-destructive mb-2" />
+            <p className="text-sm font-medium mb-1">Failed to load H&amp;S compliance</p>
+            <p className="text-xs text-muted-foreground max-w-sm mb-4">
+              {loadError} No score shown here can be treated as current.
+            </p>
+            <Button onClick={() => fetchScores()} variant="outline" size="sm">
+              Try Again
+            </Button>
           </div>
         ) : scores.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4 text-center">No buildings visible</p>

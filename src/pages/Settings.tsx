@@ -10,11 +10,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import {
-  Settings as SettingsIcon,
   Building2,
   Bell,
   Palette,
-  Shield,
   Upload,
   Loader2,
 } from 'lucide-react';
@@ -22,7 +20,7 @@ import { toast } from 'sonner';
 
 export default function Settings() {
   const { user, isAdmin, isAdminOrManager } = useAuth();
-  const { organization, loading: orgLoading } = useOrganization();
+  const { organization } = useOrganization();
   const [orgName, setOrgName] = useState('');
   const [orgEmail, setOrgEmail] = useState('');
   const [emailNotifications, setEmailNotifications] = useState(true);
@@ -33,6 +31,8 @@ export default function Settings() {
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingBranding, setIsSavingBranding] = useState(false);
+  const [isLoadingNotifications, setIsLoadingNotifications] = useState(true);
+  const [isSavingNotifications, setIsSavingNotifications] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load organization data
@@ -44,6 +44,49 @@ export default function Settings() {
       setPrimaryColor(organization.primary_color || '#2563eb');
     }
   }, [organization]);
+
+  // Load the signed-in user's notification preferences
+  // Keyed on the id, not the user object: AuthContext calls setUser on every
+  // auth event including TOKEN_REFRESHED, and a fresh object identity would
+  // refetch mid-edit and silently revert the user's unsaved toggles.
+  const userId = user?.id;
+
+  useEffect(() => {
+    if (!userId) return;
+
+    let cancelled = false;
+
+    const fetchNotifications = async () => {
+      setIsLoadingNotifications(true);
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('email_notifications, overdue_alerts, daily_digest')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (error) throw error;
+        if (cancelled) return;
+
+        if (data) {
+          setEmailNotifications(data.email_notifications ?? true);
+          setOverdueAlerts(data.overdue_alerts ?? true);
+          setDailyDigest(data.daily_digest ?? false);
+        }
+      } catch (error) {
+        if (import.meta.env.DEV) console.error('Error fetching notification preferences:', error);
+        if (!cancelled) toast.error('Failed to load notification preferences');
+      } finally {
+        if (!cancelled) setIsLoadingNotifications(false);
+      }
+    };
+
+    fetchNotifications();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   const handleSaveOrg = async () => {
     if (!organization) {
@@ -72,8 +115,38 @@ export default function Settings() {
     }
   };
 
-  const handleSaveNotifications = () => {
-    toast.success('Notification preferences saved');
+  const handleSaveNotifications = async () => {
+    if (!user) {
+      toast.error('You must be signed in to save preferences');
+      return;
+    }
+
+    setIsSavingNotifications(true);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .update({
+          email_notifications: emailNotifications,
+          overdue_alerts: overdueAlerts,
+          daily_digest: dailyDigest,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id)
+        .select('id');
+
+      if (error) throw error;
+      // An RLS-denied update succeeds with zero rows — treat that as a failure.
+      if (!data || data.length === 0) {
+        toast.error('Failed to save notification preferences');
+        return;
+      }
+      toast.success('Notification preferences saved');
+    } catch (error) {
+      if (import.meta.env.DEV) console.error('Error saving notifications:', error);
+      toast.error('Failed to save notification preferences');
+    } finally {
+      setIsSavingNotifications(false);
+    }
   };
 
   const handleSaveBranding = async () => {
@@ -267,6 +340,7 @@ export default function Settings() {
                   <Switch
                     checked={emailNotifications}
                     onCheckedChange={setEmailNotifications}
+                    disabled={isLoadingNotifications}
                   />
                 </div>
 
@@ -282,6 +356,7 @@ export default function Settings() {
                   <Switch
                     checked={overdueAlerts}
                     onCheckedChange={setOverdueAlerts}
+                    disabled={isLoadingNotifications}
                   />
                 </div>
 
@@ -297,11 +372,17 @@ export default function Settings() {
                   <Switch
                     checked={dailyDigest}
                     onCheckedChange={setDailyDigest}
+                    disabled={isLoadingNotifications}
                   />
                 </div>
               </div>
 
-              <Button onClick={handleSaveNotifications}>Save Preferences</Button>
+              <Button
+                onClick={handleSaveNotifications}
+                disabled={isLoadingNotifications || isSavingNotifications}
+              >
+                {isSavingNotifications ? 'Saving...' : 'Save Preferences'}
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

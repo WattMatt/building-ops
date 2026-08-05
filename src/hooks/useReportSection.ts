@@ -16,6 +16,19 @@ import { fdb, type FTableName } from '@/integrations/supabase/fortress-db';
 // keep the row shape at the call site and cast at the client boundary only.
 type Row = { id?: string; [k: string]: unknown };
 
+/**
+ * A delete the RLS policy refuses is not an error — PostgREST returns 204/[] with zero rows
+ * affected. The section DELETE policies are `is_admin()` while INSERT/UPDATE also allow
+ * managers, so a manager's row removals silently do nothing. Chaining `.select('id')` makes
+ * the affected rows observable so we can fail loudly instead of reporting a clean save.
+ */
+class RowsNotDeletedError extends Error {
+  constructor(attempted: number, deleted: number) {
+    super(`Only ${deleted} of ${attempted} rows were removed.`);
+    this.name = 'RowsNotDeletedError';
+  }
+}
+
 export function useReportSection<T extends Row>(table: FTableName, reportId: string | undefined) {
   const qc = useQueryClient();
   const key = ['fortress-section', table, reportId];
@@ -50,8 +63,10 @@ export function useReportSection<T extends Row>(table: FTableName, reportId: str
         if (error) throw error;
       }
       if (toDelete.length) {
-        const { error } = await (fdb.from(table) as any).delete().in('id', toDelete);
+        const { data: deleted, error } = await (fdb.from(table) as any).delete().in('id', toDelete).select('id');
         if (error) throw error;
+        const removed = (deleted ?? []).length;
+        if (removed < toDelete.length) throw new RowsNotDeletedError(toDelete.length, removed);
       }
     },
     onSuccess: () => {
@@ -60,16 +75,29 @@ export function useReportSection<T extends Row>(table: FTableName, reportId: str
     },
     onError: (e: unknown) => {
       if (import.meta.env.DEV) console.error(`Save ${table} failed:`, e);
+      if (e instanceof RowsNotDeletedError) {
+        // The upserts landed, so refetch to bring the undeleted rows back into the grid rather
+        // than leaving it showing a state the database does not have.
+        qc.invalidateQueries({ queryKey: key });
+        toast.error('Your edits were saved, but the removed rows could not be deleted — your role does not permit it. Ask an administrator to remove them.');
+        return;
+      }
       toast.error('Could not save this section. Please try again.');
     },
   });
 
   const removeRow = useCallback(
     async (id: string) => {
-      const { error } = await (fdb.from(table) as any).delete().eq('id', id);
+      const { data: deleted, error } = await (fdb.from(table) as any).delete().eq('id', id).select('id');
       if (error) {
         if (import.meta.env.DEV) console.error(`Delete ${table} row failed:`, error);
         toast.error('Could not remove that row.');
+        return;
+      }
+      if (!(deleted ?? []).length) {
+        if (import.meta.env.DEV) console.error(`Delete ${table} row affected 0 rows (RLS):`, id);
+        toast.error('Could not remove that row — your role does not permit deleting from this section.');
+        qc.invalidateQueries({ queryKey: key });
         return;
       }
       qc.invalidateQueries({ queryKey: key });

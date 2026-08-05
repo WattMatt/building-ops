@@ -54,16 +54,26 @@ export function useBuildingKpis(buildingId: string | undefined) {
       let trend: { period: string; pct: number | null }[] = [];
 
       if (ops) {
+        // compliance_critical_scores / compliance_section_scores are per-ASSESSMENT views with no
+        // report_id column — scoping them by building_id merges every reporting period's assessment
+        // into one card. Scope to the assessments belonging to the report being viewed.
+        const [assessmentRows, inspectionRows] = await Promise.all([
+          fdb.from('compliance_assessments').select('id').eq('report_id', ops.id).order('id'),
+          fdb.from('building_inspections').select('id').eq('report_id', ops.id).order('id'),
+        ]);
+        const assessmentIds = assessmentRows.data?.map((a) => a.id) ?? [];
+        const inspectionIds = inspectionRows.data?.map((b) => b.id) ?? [];
+
         const [scoreRows, critRows, secRows, respRows, inspRows, recov, readings, yields, master] = await Promise.all([
           fdb.from('compliance_scores').select('compliance_pct').eq('report_id', ops.id),
-          fdb.from('compliance_critical_scores').select('critical_pct').eq('building_id', bid),
-          fdb.from('compliance_section_scores').select('section_no,section_title,section_pct').eq('building_id', bid),
+          fdb.from('compliance_critical_scores').select('critical_pct').in('assessment_id', orNoMatch(assessmentIds)).order('assessment_id'),
+          fdb.from('compliance_section_scores').select('section_no,section_title,section_pct').in('assessment_id', orNoMatch(assessmentIds)).order('assessment_id'),
           fdb.from('compliance_responses').select('id,response,comment,template_item_id,issue_id,compliance_template_items(prompt,section_no,section_title)')
-            .in('assessment_id', (await fdb.from('compliance_assessments').select('id').eq('report_id', ops.id)).data?.map((a) => a.id) ?? ['00000000-0000-0000-0000-000000000000']),
+            .in('assessment_id', orNoMatch(assessmentIds)),
           fdb.from('inspection_responses').select('acceptable,action_required')
-            .in('inspection_id', (await fdb.from('building_inspections').select('id').eq('report_id', ops.id)).data?.map((b) => b.id) ?? ['00000000-0000-0000-0000-000000000000']),
+            .in('inspection_id', orNoMatch(inspectionIds)),
           fdb.from('expense_recoveries').select('ytd_expense,ytd_recovery').eq('report_id', ops.id),
-          fdb.from('utility_readings').select('meter_name,reading,utility,category').eq('report_id', ops.id),
+          fdb.from('utility_readings').select('meter_name,reading,utility,category,difference').eq('report_id', ops.id),
           fdb.from('utility_yields').select('source,pct_achieved').eq('report_id', ops.id),
           fdb.from('masterfile_items').select('on_file').eq('report_id', ops.id),
         ]);
@@ -103,12 +113,22 @@ export function useBuildingKpis(buildingId: string | undefined) {
         const k4 = ratioPct(rec, exp);
         kpis.push({ id: 'K4', label: 'Expense Recovery', value: k4, format: 'pct', status: classify(k4, THRESHOLDS.recovery), sub: k4 !== null ? `R${Math.round(rec).toLocaleString()} / R${Math.round(exp).toLocaleString()}` : undefined });
 
-        // K8 water bulk vs site total Δ
+        // K8 water bulk vs site total Δ — both readings must be water BULK meters on this report.
+        // The source workbook writes difference = -1 on a bulk row when the site has no verified
+        // bulk meter (sql/2026-06-14_09, sql/2026-06-18_04); differencing against that placeholder
+        // yields a huge false variance, so the KPI has no value rather than a red number.
         const rds = readings.data ?? [];
-        const bulk = rds.find((r) => r.utility === 'water' && r.meter_name === 'Bulk Check')?.reading;
-        const site = rds.find((r) => r.utility === 'water' && (r.meter_name ?? '').includes('Site Daily'))?.reading;
-        const k8 = waterDeltaPct(num(bulk), num(site));
-        kpis.push({ id: 'K8', label: 'Water Bulk Δ', value: k8, format: 'pct', status: classify(k8, THRESHOLDS.waterDelta) });
+        const waterBulk = rds.filter((r) => r.utility === 'water' && r.category === 'bulk');
+        const bulkRow = waterBulk.find((r) => (r.meter_name ?? '').trim() === 'Bulk Check');
+        const siteRow = waterBulk.find((r) => (r.meter_name ?? '').toLowerCase().includes('site daily'));
+        const bulkReading = num(bulkRow?.reading);
+        const bulkVerified = bulkReading !== null && bulkReading > 0 && num(bulkRow?.difference) !== -1;
+        const k8 = bulkVerified ? waterDeltaPct(bulkReading, num(siteRow?.reading)) : null;
+        kpis.push({
+          id: 'K8', label: 'Water Bulk Δ', value: k8, format: 'pct',
+          status: classify(k8, THRESHOLDS.waterDelta),
+          sub: !bulkVerified && bulkRow ? 'No verified bulk meter' : undefined,
+        });
 
         // K9 solar / K10 borehole yield
         const solar = num(yields.data?.find((y) => y.source === 'solar')?.pct_achieved ?? null);
@@ -117,10 +137,17 @@ export function useBuildingKpis(buildingId: string | undefined) {
         kpis.push({ id: 'K10', label: 'Borehole Yield', value: bore, format: 'pct', status: classify(bore, THRESHOLDS.yield) });
 
         // K12 masterfile completeness — on_file is a text column ('yes'/'no'), not a boolean.
+        // A register whose items are all still unanswered has not been captured; that is not a
+        // measured 0% and must not be scored (or coloured) as total failure.
         const mf = master.data ?? [];
         const onFile = mf.filter((m) => m.on_file === 'yes').length;
-        const k12 = ratioPct(onFile, mf.length);
-        kpis.push({ id: 'K12', label: 'Masterfile Complete', value: k12, format: 'pct', status: classify(k12, THRESHOLDS.masterfile), sub: mf.length ? `${onFile}/${mf.length}` : undefined });
+        const mfAnswered = mf.filter((m) => m.on_file === 'yes' || m.on_file === 'no').length;
+        const k12 = mfAnswered ? ratioPct(onFile, mf.length) : null;
+        kpis.push({
+          id: 'K12', label: 'Masterfile Complete', value: k12, format: 'pct',
+          status: classify(k12, THRESHOLDS.masterfile),
+          sub: mfAnswered ? `${onFile}/${mf.length}` : (mf.length ? 'Not captured' : undefined),
+        });
 
         // O5 Lowest Section — MIN section_pct across the building's section scores; sub = that section's no + title.
         const secWithPct = sectionScores.filter((s) => num(s.section_pct) !== null);
@@ -150,18 +177,28 @@ export function useBuildingKpis(buildingId: string | undefined) {
 
       if (cm) {
         const [turn, inc, tcomp, vac, arr, load] = await Promise.all([
-          fdb.from('tenant_turnover').select('annual_trading_density,annual_growth_pct,rank_band').eq('report_id', cm.id),
+          fdb.from('tenant_turnover').select('id,tenant_name,annual_trading_density,annual_growth_pct,rank_band').eq('report_id', cm.id),
           fdb.from('security_incidents').select('period,count').eq('report_id', cm.id),
           fdb.from('tenant_compliance').select('*').eq('report_id', cm.id),
           fdb.from('vacancies').select('area').eq('report_id', cm.id),
           fdb.from('tenant_arrears').select('closing_balance').eq('report_id', cm.id),
           fdb.from('loadshedding_log').select('hours').eq('report_id', cm.id),
         ]);
-        const dens = avg(turn.data, 'annual_trading_density');
+        // K5/K6 — tenant_turnover carries one row per tenant PER RANK BAND, so an anchor that is
+        // also a top-5 appears twice. Averaging the raw rows double-counts those tenants, and
+        // picking "the" anchor out of an unordered result returned a different tenant per reload.
+        const dens = avg(dedupeTenants(turn.data), 'annual_trading_density');
         kpis.push({ id: 'K5', label: 'Trading Density', value: dens, format: 'zar', status: 'info', sub: 'R/m²' });
-        const growth = num(turn.data?.find((t) => t.rank_band === 'anchor')?.annual_growth_pct ?? null);
-        const growthPct = growth !== null ? Math.round(growth * 1000) / 10 : null;
-        kpis.push({ id: 'K6', label: 'Anchor Growth', value: growthPct, format: 'pct', status: growthPct !== null ? (growthPct >= 0 ? 'good' : 'bad') : 'info' });
+        const anchors = dedupeTenants((turn.data ?? []).filter((t) => t.rank_band === 'anchor'));
+        const anchorGrowths = anchors.map((t) => num(t.annual_growth_pct)).filter((v): v is number => v !== null);
+        const growthPct = anchorGrowths.length
+          ? Math.round((anchorGrowths.reduce((a, b) => a + b, 0) / anchorGrowths.length) * 1000) / 10
+          : null;
+        kpis.push({
+          id: 'K6', label: 'Anchor Growth', value: growthPct, format: 'pct',
+          status: growthPct !== null ? (growthPct >= 0 ? 'good' : 'bad') : 'info',
+          sub: anchors.length ? anchors.map((t) => t.tenant_name).filter(Boolean).join(', ') : undefined,
+        });
         // K14 latest-period incidents
         const periods = [...new Set((inc.data ?? []).map((i) => i.period))].sort();
         const latest = periods[periods.length - 1];
@@ -188,10 +225,9 @@ export function useBuildingKpis(buildingId: string | undefined) {
         const k13 = ratioPct(tcYes, tcAnswered);
         kpis.push({ id: 'K13', label: 'Tenant Compliance', value: k13, format: 'pct', status: classify(k13, THRESHOLDS.tenantCompliance), sub: tcAnswered ? `${tcYes}/${tcAnswered}` : undefined });
 
-        // K7 Footfall MoM — month-over-month change in total monthly footfall across the building's cm reports.
-        // Needs ≥2 periods → null for a single report. Data-hygiene: footfall_counts has duplicate/ambiguous
-        // "Public Toilets"/"Total Toilets" entrance rows; to avoid double-counting we prefer a single 'Total'
-        // entrance row per report if present, else sum distinct entrances excluding the known duplicate label.
+        // K7 Footfall MoM — month-over-month change in total monthly footfall across the building's cm
+        // reports. Needs ≥2 periods → null for a single report. See totalFootfall() for how the mix of
+        // per-entrance and roll-up rows is collapsed to one non-double-counted total.
         const cmReports = await fdb.from('reports').select('id,report_period')
           .eq('building_id', bid).eq('report_type', 'cm_monthly').order('report_period');
         const footfallByPeriod = await Promise.all((cmReports.data ?? []).map(async (r) => {
@@ -238,13 +274,17 @@ export function useBuildingKpis(buildingId: string | undefined) {
 
       // K11 PPM Serviced — ppm_services on the latest approved ops report: the share of
       // services that have been serviced at least once (any 'done' month cell) over the
-      // report's 12-month window. null when there are no services (honest empty-state).
+      // report's 12-month window. null when there are no services (honest empty-state), and
+      // likewise when the register exists but not one month cell has been filled in yet —
+      // an uncaptured matrix is "no data", not a measured 0%.
       let k11: number | null = null; let k11Sub: string | undefined;
       if (ops) {
         const ppm = await fdb.from('ppm_services').select('months').eq('report_id', ops.id);
-        const { doneCount, total, pct } = ppmCompletion((ppm.data ?? []) as PpmServiceLike[]);
-        k11 = pct;
-        if (total > 0) k11Sub = `${doneCount}/${total}`;
+        const ppmRows = (ppm.data ?? []) as PpmServiceLike[];
+        const ppmCaptured = ppmRows.some((s) => Object.keys(s.months ?? {}).length > 0);
+        const { doneCount, total, pct } = ppmCompletion(ppmRows);
+        k11 = ppmCaptured ? pct : null;
+        if (total > 0) k11Sub = ppmCaptured ? `${doneCount}/${total}` : 'Not captured';
       }
       kpis.push({ id: 'K11', label: 'PPM Serviced', value: k11, format: 'pct', status: classify(k11, THRESHOLDS.ppm), sub: k11Sub });
 
@@ -274,30 +314,56 @@ function num(v: unknown): number | null {
 function sum(rows: any[] | null | undefined, key: string): number {
   return (rows ?? []).reduce((a, r) => a + (num(r[key]) ?? 0), 0);
 }
+/** `.in()` needs a non-empty list or PostgREST drops the filter and returns every row. */
+function orNoMatch(ids: string[]): string[] {
+  return ids.length ? ids : ['00000000-0000-0000-0000-000000000000'];
+}
+
+/** One tenant_turnover row per tenant. Sorted by tenant name first so the surviving row —
+ *  and therefore any KPI derived from it — is the same on every reload. */
+function dedupeTenants<T extends { id: string; tenant_name: string | null }>(rows: T[] | null | undefined): T[] {
+  const byTenant = new Map<string, T>();
+  const ordered = [...(rows ?? [])].sort((a, b) => (a.tenant_name ?? a.id).localeCompare(b.tenant_name ?? b.id));
+  for (const r of ordered) {
+    const key = (r.tenant_name ?? r.id).trim().toLowerCase();
+    if (!byTenant.has(key)) byTenant.set(key, r);
+  }
+  return [...byTenant.values()];
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function avg(rows: any[] | null | undefined, key: string): number | null {
   const vals = (rows ?? []).map((r) => num(r[key])).filter((v): v is number => v !== null);
   return vals.length ? Math.round((vals.reduce((a, b) => a + b, 0) / vals.length)) : null;
 }
 
-/** Total monthly footfall for one report, handling the known footfall_counts data-hygiene issue:
- *  the "Public Toilets" and "Total Toilets" entrance rows duplicate the same count. If a single
- *  'Total' entrance row exists, use it. Otherwise sum distinct entrances, dropping the duplicate
- *  "Total Toilets" label (it mirrors "Public Toilets"). Returns null if the result is ambiguous. */
+/** Total monthly footfall for one report.
+ *
+ *  footfall_counts mixes per-entrance counts with roll-up rows: AbaQulusi stores "Bus Rank" and
+ *  "Public Toilets: Centre" (the two turnstiles) alongside "Total Toilets" AND "Public Toilets",
+ *  both of which restate their sum. Adding every row therefore reports exactly twice the real
+ *  figure. So: dedupe by label, treat any label containing the word "total" as a roll-up, drop
+ *  entrance rows that merely restate a roll-up's count, and sum what is left — falling back to
+ *  the roll-up when the per-entrance rows are only a partial breakdown of it. */
 export function totalFootfall(rows: { entrance: string | null; month_count: number | null }[]): number | null {
-  const clean = rows.filter((r) => num(r.month_count) !== null);
-  if (!clean.length) return null;
-  const totalRow = clean.find((r) => (r.entrance ?? '').trim().toLowerCase() === 'total');
-  if (totalRow) return num(totalRow.month_count);
-  // Drop the known duplicate "Total Toilets" (mirrors "Public Toilets"); sum the remaining distinct entrances.
-  const seen = new Set<string>();
-  let total = 0;
-  for (const r of clean) {
-    const label = (r.entrance ?? '').trim();
-    if (label.toLowerCase() === 'total toilets') continue;
-    if (seen.has(label.toLowerCase())) continue; // ambiguous duplicate label → skip
-    seen.add(label.toLowerCase());
-    total += num(r.month_count)!;
+  const byLabel = new Map<string, number>();
+  const ordered = [...rows]
+    .filter((r) => num(r.month_count) !== null)
+    .sort((a, b) => (a.entrance ?? '').localeCompare(b.entrance ?? ''));
+  for (const r of ordered) {
+    const label = (r.entrance ?? '').trim().toLowerCase();
+    if (!byLabel.has(label)) byLabel.set(label, num(r.month_count)!);
   }
-  return total || null;
+  if (!byLabel.size) return null;
+
+  const isRollUp = (label: string) => /\btotals?\b/.test(label);
+  const rollUps = [...byLabel].filter(([label]) => isRollUp(label)).map(([, count]) => count);
+  const rollUpCounts = new Set(rollUps);
+  const entrances = [...byLabel]
+    .filter(([label, count]) => !isRollUp(label) && !rollUpCounts.has(count))
+    .map(([, count]) => count);
+
+  const entranceSum = entrances.reduce((a, b) => a + b, 0);
+  const largestRollUp = rollUps.length ? Math.max(...rollUps) : 0;
+  return Math.max(entranceSum, largestRollUp) || null;
 }

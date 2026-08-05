@@ -75,12 +75,15 @@ export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWid
   const [pendingCount, setPendingCount] = useState(0);
   const [totalThisWeek, setTotalThisWeek] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchData();
   }, [buildingId]);
 
   const fetchData = async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -159,6 +162,8 @@ export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWid
 
     } catch (error) {
       console.error('Error fetching overview data:', error);
+      // Never fall through to the "all clear" empty states on a failed read.
+      setLoadError(error instanceof Error ? error.message : 'An unexpected error occurred.');
     } finally {
       setLoading(false);
     }
@@ -225,6 +230,26 @@ export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWid
           </Card>
         ))}
       </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Card className="border-destructive/50">
+        <CardContent className="flex flex-col items-center justify-center py-12">
+          <div className="h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
+            <AlertTriangle className="h-6 w-6 text-destructive" />
+          </div>
+          <h3 className="text-lg font-semibold mb-2">Failed to load overview alerts</h3>
+          <p className="text-muted-foreground text-center mb-4 max-w-md">
+            {loadError} Document, maintenance and form status for this building could not be
+            checked — treat nothing here as confirmed.
+          </p>
+          <Button onClick={() => fetchData()} variant="outline">
+            Try Again
+          </Button>
+        </CardContent>
+      </Card>
     );
   }
 

@@ -219,20 +219,38 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
       };
 
       if (editingTenant) {
-        const { error } = await supabase
+        const { data: written, error } = await supabase
           .from('building_tenants')
           .update(tenantData)
-          .eq('id', editingTenant.id);
+          .eq('id', editingTenant.id)
+          .select('id');
 
         if (error) throw error;
+        // RLS denies return success with zero rows — don't claim a save that
+        // never landed.
+        if (!written || written.length === 0) {
+          throw new Error('Tenant was not updated (permission denied)');
+        }
         toast.success('Tenant updated successfully');
       } else {
-        const { error } = await supabase
+        // (building_id, shop_number) is unique, so re-adding an existing shop
+        // number updates that tenant instead of failing on the index.
+        const existing = tenants.some((t) => t.shop_number === tenantData.shop_number);
+
+        const { data: written, error } = await supabase
           .from('building_tenants')
-          .insert(tenantData);
+          .upsert(tenantData, { onConflict: 'building_id,shop_number' })
+          .select('id');
 
         if (error) throw error;
-        toast.success('Tenant created successfully');
+        if (!written || written.length === 0) {
+          throw new Error('Tenant was not saved (permission denied)');
+        }
+        toast.success(
+          existing
+            ? `Shop ${tenantData.shop_number} already existed — its details were updated`
+            : 'Tenant created successfully'
+        );
       }
 
       setIsDialogOpen(false);
@@ -240,7 +258,11 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
       fetchTenants();
     } catch (error: any) {
       console.error('Error saving tenant:', error);
-      toast.error(error.message || 'Failed to save tenant');
+      toast.error(
+        error?.code === '23505'
+          ? 'A tenant with that shop number already exists in this building'
+          : error.message || 'Failed to save tenant'
+      );
     } finally {
       setSaving(false);
     }

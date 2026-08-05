@@ -103,26 +103,52 @@ export default function CompleteTaskDialog({
         }
       }
 
-      // Create task completion record
-      const { error: completionError } = await supabase.from('task_completions').insert({
-        task_instance_id: taskId,
-        completed_by: user.id,
-        notes: notes.trim() || null,
-        signature_confirmed: signatureConfirmed,
-        photo_urls: photoUrls,
-      });
+      // Create task completion record. task_completions has a unique index on
+      // task_instance_id, so a double-click or a retry after a flaky network
+      // must be treated as already-done (23505 / DO NOTHING) rather than a
+      // failure — otherwise the status update below never runs and the
+      // instance is stranded at 'pending'.
+      const { data: inserted, error: completionError } = await supabase
+        .from('task_completions')
+        .upsert(
+          {
+            task_instance_id: taskId,
+            completed_by: user.id,
+            notes: notes.trim() || null,
+            signature_confirmed: signatureConfirmed,
+            photo_urls: photoUrls,
+          },
+          { onConflict: 'task_instance_id', ignoreDuplicates: true }
+        )
+        .select('id');
 
       if (completionError) throw completionError;
+
+      // Zero rows back means the conflict target already had a completion, so
+      // this submission was ignored. Say so rather than implying the notes and
+      // photos just captured were saved, and leave the existing completer's
+      // stamp on the instance intact.
+      if (!inserted || inserted.length === 0) {
+        toast.info('This task was already completed by someone else — your notes were not saved.');
+        resetForm();
+        onOpenChange(false);
+        onSuccess?.();
+        return;
+      }
 
       // Update task status to completed. Stamp completed_at/completed_by on the
       // instance too — Reports and the dashboard "completed today" KPI key off
       // task_instances.completed_at, which was previously left null on web.
-      const { error: updateError } = await supabase
+      const { data: updated, error: updateError } = await supabase
         .from('task_instances')
         .update({ status: 'completed', completed_at: new Date().toISOString(), completed_by: user.id })
-        .eq('id', taskId);
+        .eq('id', taskId)
+        .select('id');
 
       if (updateError) throw updateError;
+      if (!updated || updated.length === 0) {
+        throw new Error('Task status was not updated — your role does not permit it.');
+      }
 
       toast.success('Task completed successfully');
       resetForm();

@@ -2,6 +2,7 @@
  * Import dialog for building tenants from CSV/Excel files
  */
 
+import { useEffect, useRef } from 'react';
 import { TableCell } from '@/components/ui/table';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -49,7 +50,14 @@ export default function TenantImportDialog({
   buildingId,
   onImportComplete,
 }: TenantImportDialogProps) {
-  
+  // Per-run outcome tally. GenericImportDialog only counts success/failure, so the
+  // insert-vs-update split of a roster re-upload is tracked here.
+  const outcomes = useRef({ inserted: 0, updated: 0, failed: 0, errorShown: false });
+
+  useEffect(() => {
+    if (open) outcomes.current = { inserted: 0, updated: 0, failed: 0, errorShown: false };
+  }, [open]);
+
   const validateRow = (row: ParsedRow, fieldMapping: Record<string, string>): MappedRecord<TenantData> => {
     const errors: string[] = [];
     
@@ -83,18 +91,67 @@ export default function TenantImportDialog({
     };
   };
 
-  const importRecord = async (data: TenantData) => {
-    const { error } = await supabase.from('building_tenants').insert({
-      building_id: buildingId,
-      shop_number: data.shop_number,
-      shop_name: data.shop_name,
-      area: data.area,
-      contact_name: data.contact_name,
-      contact_phone: data.contact_phone,
-      contact_email: data.contact_email,
-    });
+  const recordFailure = (message: string) => {
+    outcomes.current.failed++;
+    // Surface the first failure immediately: the summary toast only fires when
+    // at least one row succeeded.
+    if (!outcomes.current.errorShown) {
+      outcomes.current.errorShown = true;
+      toast.error(`Tenant import error: ${message}`);
+    }
+  };
 
-    if (error) throw error;
+  const importRecord = async (data: TenantData) => {
+    // Re-uploading an updated roster is the normal use of this feature, so an
+    // existing (building_id, shop_number) must UPDATE rather than fail on
+    // building_tenants_building_shop_uniq. Resolved before the write so the
+    // reported added/updated counts are real and not guessed.
+    const { data: existing, error: lookupError } = await supabase
+      .from('building_tenants')
+      .select('id')
+      .eq('building_id', buildingId)
+      .eq('shop_number', data.shop_number)
+      .maybeSingle();
+
+    if (lookupError) {
+      recordFailure(lookupError.message);
+      throw lookupError;
+    }
+
+    const { data: written, error } = await supabase
+      .from('building_tenants')
+      .upsert(
+        {
+          building_id: buildingId,
+          shop_number: data.shop_number,
+          shop_name: data.shop_name,
+          area: data.area,
+          contact_name: data.contact_name,
+          contact_phone: data.contact_phone,
+          contact_email: data.contact_email,
+        },
+        { onConflict: 'building_id,shop_number' }
+      )
+      .select('id');
+
+    if (error) {
+      recordFailure(error.message);
+      throw error;
+    }
+
+    // RLS denies on write come back as success with zero rows — never report
+    // a row as imported without proof it landed.
+    if (!written || written.length === 0) {
+      const message = `Shop ${data.shop_number} was not saved (permission denied)`;
+      recordFailure(message);
+      throw new Error(message);
+    }
+
+    if (existing) {
+      outcomes.current.updated++;
+    } else {
+      outcomes.current.inserted++;
+    }
   };
 
   const renderPreviewColumns = (record: MappedRecord<TenantData>) => [
@@ -116,7 +173,15 @@ export default function TenantImportDialog({
       validateRow={validateRow}
       importRecord={importRecord}
       onImportComplete={() => {
-        toast.success('Tenants imported successfully');
+        const { inserted, updated, failed } = outcomes.current;
+        const summary = [`${inserted} added`, `${updated} updated`]
+          .concat(failed > 0 ? [`${failed} failed`] : [])
+          .join(', ');
+        if (failed > 0) {
+          toast.warning(`Tenant import finished: ${summary}`);
+        } else {
+          toast.success(`Tenant import finished: ${summary}`);
+        }
         onImportComplete();
       }}
       renderPreviewColumns={renderPreviewColumns}

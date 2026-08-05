@@ -18,6 +18,7 @@ import {
   Loader2,
   ShieldAlert,
   CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { format, differenceInDays, addDays } from 'date-fns';
@@ -38,6 +39,7 @@ interface BuildingAlert {
 export default function BuildingAlertsWidget() {
   const [loading, setLoading] = useState(true);
   const [buildingAlerts, setBuildingAlerts] = useState<BuildingAlert[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchBuildingAlerts();
@@ -45,6 +47,7 @@ export default function BuildingAlertsWidget() {
 
   const fetchBuildingAlerts = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const today = new Date();
       const todayStr = format(today, 'yyyy-MM-dd');
@@ -52,9 +55,11 @@ export default function BuildingAlertsWidget() {
       const sevenDaysFromNow = format(addDays(today, 7), 'yyyy-MM-dd');
 
       // Fetch buildings with their alerts
-      const { data: buildings } = await supabase
+      const { data: buildings, error: buildingsError } = await supabase
         .from('buildings')
         .select('id, name, logo_url');
+
+      if (buildingsError) throw buildingsError;
 
       if (!buildings) {
         setBuildingAlerts([]);
@@ -62,18 +67,22 @@ export default function BuildingAlertsWidget() {
       }
 
       // Fetch all relevant documents
-      const { data: documentsData } = await supabase
+      const { data: documentsData, error: documentsError } = await supabase
         .from('building_documents')
         .select('building_id, expiry_date')
         .not('expiry_date', 'is', null)
         .lte('expiry_date', thirtyDaysFromNow);
 
+      if (documentsError) throw documentsError;
+
       // Fetch all overdue/upcoming maintenance
-      const { data: assetsData } = await supabase
+      const { data: assetsData, error: assetsError } = await supabase
         .from('building_assets')
         .select('building_id, next_service_date')
         .not('next_service_date', 'is', null)
         .lte('next_service_date', sevenDaysFromNow);
+
+      if (assetsError) throw assetsError;
 
       // Aggregate alerts by building
       const alertsMap = new Map<string, BuildingAlert>();
@@ -159,6 +168,8 @@ export default function BuildingAlertsWidget() {
       setBuildingAlerts(buildingsWithAlerts);
     } catch (error) {
       console.error('Error fetching building alerts:', error);
+      // Never fall through to the "all buildings healthy" state on a failed read.
+      setLoadError(error instanceof Error ? error.message : 'An unexpected error occurred.');
     } finally {
       setLoading(false);
     }
@@ -180,6 +191,35 @@ export default function BuildingAlertsWidget() {
       <Card>
         <CardContent className="flex items-center justify-center py-8">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Card className="border-destructive/50">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="h-5 w-5 text-destructive" />
+            <div>
+              <CardTitle>Building Health</CardTitle>
+              <CardDescription>Status could not be checked</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center justify-center py-8 text-center">
+            <AlertTriangle className="h-10 w-10 text-destructive mb-2" />
+            <p className="text-sm font-medium mb-1">Failed to load building health</p>
+            <p className="text-xs text-muted-foreground max-w-sm mb-4">
+              {loadError} Expiring documents and overdue maintenance may exist but are not
+              visible.
+            </p>
+            <Button onClick={() => fetchBuildingAlerts()} variant="outline" size="sm">
+              Try Again
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );

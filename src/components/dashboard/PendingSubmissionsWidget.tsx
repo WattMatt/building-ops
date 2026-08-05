@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { FileText, ArrowRight, Clock, Loader2 } from 'lucide-react';
+import { FileText, ArrowRight, Clock, Loader2, AlertTriangle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { format, formatDistanceToNow } from 'date-fns';
 
@@ -23,18 +23,23 @@ export default function PendingSubmissionsWidget() {
   const [submissions, setSubmissions] = useState<PendingSubmission[]>([]);
   const [loading, setLoading] = useState(true);
   const [totalCount, setTotalCount] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchPendingSubmissions();
   }, []);
 
   const fetchPendingSubmissions = async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
       // Get count of all pending submissions
-      const { count } = await supabase
+      const { count, error: countError } = await supabase
         .from('form_submissions')
         .select('*', { count: 'exact', head: true })
         .eq('status', 'submitted');
+
+      if (countError) throw countError;
 
       setTotalCount(count || 0);
 
@@ -58,10 +63,12 @@ export default function PendingSubmissionsWidget() {
       if (data) {
         // Fetch submitter names
         const submitterIds = [...new Set(data.map(s => s.submitted_by))];
-        const { data: profiles } = await supabase
+        const { data: profiles, error: profilesError } = await supabase
           .from('profiles')
           .select('id, full_name, email')
           .in('id', submitterIds);
+
+        if (profilesError) throw profilesError;
 
         const profileMap = new Map(profiles?.map(p => [p.id, p.full_name || p.email]) || []);
 
@@ -77,6 +84,8 @@ export default function PendingSubmissionsWidget() {
       }
     } catch (error) {
       console.error('Error fetching pending submissions:', error);
+      // A failed read must not read as "nothing awaiting review".
+      setLoadError(error instanceof Error ? error.message : 'An unexpected error occurred.');
     } finally {
       setLoading(false);
     }
@@ -96,6 +105,31 @@ export default function PendingSubmissionsWidget() {
           {[1, 2, 3].map(i => (
             <Skeleton key={i} className="h-16 w-full" />
           ))}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Card className="border-destructive/50">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-destructive" />
+            Pending Form Submissions
+          </CardTitle>
+          <CardDescription>Review queue could not be checked</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col items-center justify-center py-6 text-center">
+            <p className="text-sm font-medium mb-1">Failed to load pending submissions</p>
+            <p className="text-xs text-muted-foreground max-w-sm mb-4">
+              {loadError} Forms may be awaiting review but are not visible right now.
+            </p>
+            <Button onClick={() => fetchPendingSubmissions()} variant="outline" size="sm">
+              Try Again
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );
