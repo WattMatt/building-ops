@@ -23,6 +23,8 @@ import {
 } from '@/components/ui/alert-dialog';
 import { AvatarPicker } from '@/components/avatar/AvatarPicker';
 import { ImageCropper } from '@/components/avatar/ImageCropper';
+import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter';
+import { gatePassword } from '@/lib/password-strength';
 import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare, Upload, Lock, Eye, EyeOff, Trash2, Crop } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -175,6 +177,15 @@ export default function Profile() {
 
     setIsChangingPassword(true);
     try {
+      // A5: strength + breach gate — runs before re-auth so a weak password
+      // never spends a sign-in attempt. Blocks weak (score < 2) or known-
+      // breached passwords; a failed breach check (network) does not block.
+      const gate = await gatePassword(newPassword);
+      if (!gate.ok) {
+        toast.error(gate.message ?? 'Please choose a stronger password');
+        return;
+      }
+
       // E4: re-authenticate with the current password before allowing a change,
       // so a hijacked session cannot silently rotate the credential.
       const email = user?.email;
@@ -704,6 +715,7 @@ export default function Profile() {
               <p className="text-xs text-muted-foreground">
                 Password must be at least 8 characters long
               </p>
+              <PasswordStrengthMeter password={newPassword} />
             </div>
 
             <div className="space-y-2">

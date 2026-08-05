@@ -7,6 +7,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useOrganization } from '@/hooks/useOrganization';
+import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter';
+import { gatePassword } from '@/lib/password-strength';
 import { toast } from 'sonner';
 import { ClipboardCheck, Loader2, MailCheck } from 'lucide-react';
 
@@ -154,6 +156,14 @@ export default function ResetPassword() {
 
     setIsSubmitting(true);
     try {
+      // A5: strength + breach gate. Blocks weak (score < 2) or known-breached
+      // passwords; a failed breach check (network) does not block.
+      const gate = await gatePassword(password);
+      if (!gate.ok) {
+        toast.error(gate.message ?? 'Please choose a stronger password');
+        return;
+      }
+
       const { data, error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
       toast.success('Password updated. You can now sign in.');
@@ -222,6 +232,7 @@ export default function ResetPassword() {
             <p className="text-xs text-muted-foreground">
               At least {MIN_PASSWORD_LENGTH} characters.
             </p>
+            <PasswordStrengthMeter password={password} />
           </div>
           <div className="space-y-2">
             <Label htmlFor="reset-confirm-password">Confirm password</Label>
