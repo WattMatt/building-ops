@@ -1,16 +1,44 @@
+// DEPLOY PREREQUISITES — this function is not on production yet, and the cron
+// path stays unauthorized until both of these are done:
+//   1. supabase secrets set EXPIRING_ALERTS_SECRET=<random> --project-ref qdzgkttiosahdfqresvz
+//   2. Register the pg_cron schedule that posts to this function with the same value in an
+//      `x-alerts-secret` header — mirror sql/2026-06-14_03_signoff_cron.sql, which does
+//      exactly this for `x-signoff-secret`.
+
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { Resend } from "https://esm.sh/resend@2.0.0";
 import { Branding, loadBranding, renderEmail } from "../_shared/email.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
-const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
+const APP_URL = (Deno.env.get("APP_URL") ?? "https://buildingops.app").replace(/\/+$/, "");
+const ALERTS_SECRET = Deno.env.get("EXPIRING_ALERTS_SECRET");
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+const EXTRA_ALLOW_HEADERS =
+  "x-alerts-secret, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version";
+
+function cors(req: Request): Record<string, string> {
+  const base = corsHeaders(req);
+  return {
+    ...base,
+    "Access-Control-Allow-Headers": `${base["Access-Control-Allow-Headers"]}, ${EXTRA_ALLOW_HEADERS}`,
+  };
+}
+
+/** Organization name is operator-supplied; keep it to characters that are safe
+ *  in the display-name part of an email `From` header. */
+function senderName(name: string): string {
+  return name.replace(/[^A-Za-z0-9 &.-]/g, "").trim().slice(0, 64) || "Building Ops";
+}
+
+function escapeHtml(s: unknown): string {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
 
 interface ExpiringDocument {
   id: string;
@@ -41,16 +69,47 @@ interface AlertSummary {
 const handler = async (req: Request): Promise<Response> => {
   console.log("notify-expiring-alerts function called");
 
+  const headers = cors(req);
+
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json", ...headers },
+    });
+
   // Handle CORS preflight requests
   if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
+    return new Response(null, { headers });
   }
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    
+
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Two accepted callers: the cron job (shared secret) or an admin triggering
+    // it by hand from the app (verified JWT). Anything else is rejected.
+    const secretHeader = req.headers.get("x-alerts-secret");
+    const cronAuthorized = Boolean(ALERTS_SECRET) && secretHeader === ALERTS_SECRET;
+
+    if (!cronAuthorized) {
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader) return json({ error: "unauthorized" }, 401);
+
+      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: { user: caller }, error: callerErr } = await userClient.auth.getUser();
+      if (callerErr || !caller) return json({ error: "unauthorized" }, 401);
+
+      const { data: callerRole, error: roleErr } = await supabase
+        .from("user_roles").select("role").eq("user_id", caller.id).maybeSingle();
+      if (roleErr || callerRole?.role !== "admin") {
+        return json({ error: "forbidden" }, 403);
+      }
+    }
 
     // Parse request body for options
     let notifyAdmins = true;
@@ -172,92 +231,92 @@ const handler = async (req: Request): Promise<Response> => {
     const totalAlerts = expiringDocuments.length + expiredDocuments.length + overdueMaintenance.length;
     console.log(`Total alerts: ${totalAlerts}`);
 
-    // If no alerts, return early
+    // If no alerts, return early. The summary itself is never returned to any
+    // caller — it is portfolio-wide confidential data.
     if (totalAlerts === 0) {
       console.log("No alerts to send");
-      return new Response(
-        JSON.stringify({ 
-          success: true, 
-          message: "No alerts to send",
-          summary: alertSummary 
-        }),
-        { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
-      );
+      return json({ success: true, totalAlerts: 0, recipientCount: 0 });
     }
 
-    // Fetch admin/manager emails if we need to notify
-    if (notifyAdmins && !dryRun) {
-      const { data: adminUsers, error: userError } = await supabase
+    let recipientCount = 0;
+
+    if (notifyAdmins) {
+      const { data: roleRows, error: roleError } = await supabase
         .from("user_roles")
-        .select(`
-          user_id,
-          role,
-          profiles!inner(email, full_name)
-        `)
+        .select("user_id")
         .in("role", ["admin", "manager"]);
 
-      if (userError) {
-        console.error("Error fetching admin users:", userError);
-        throw userError;
+      if (roleError) {
+        console.error("Error fetching admin roles:", roleError);
+        throw roleError;
       }
 
-      console.log(`Found ${adminUsers?.length || 0} admin/manager users to notify`);
+      const adminIds: string[] = [
+        ...new Set((roleRows || []).map((r: { user_id: string }) => r.user_id)),
+      ];
 
-      // Load org branding once for all recipients in this run.
-      const branding = await loadBranding(supabase);
+      const recipients: { email: string; full_name: string | null }[] = [];
 
-      // Send email to each admin/manager
-      for (const user of adminUsers || []) {
-        const profile = (user.profiles as unknown) as { email: string; full_name: string | null };
-        const recipientName = profile.full_name || "Admin";
-        const recipientEmail = profile.email;
+      if (adminIds.length > 0) {
+        // Respect the per-user notification preferences (NULL means opted in).
+        const { data: profiles, error: profileError } = await supabase
+          .from("profiles")
+          .select("email, full_name")
+          .in("id", adminIds)
+          .not("email_notifications", "is", false)
+          .not("overdue_alerts", "is", false);
 
-        console.log(`Sending alert email to ${recipientEmail}`);
+        if (profileError) {
+          console.error("Error fetching admin profiles:", profileError);
+          throw profileError;
+        }
 
-        const emailHtml = generateAlertEmailHtml(branding, recipientName, alertSummary);
+        for (const p of profiles || []) {
+          if (p.email) recipients.push({ email: p.email, full_name: p.full_name ?? null });
+        }
+      }
 
-        try {
-          const emailResponse = await resend.emails.send({
-            from: `${branding.appName} <alerts@buildingops.app>`,
-            to: [recipientEmail],
-            subject: `⚠️ ${totalAlerts} Building Alert${totalAlerts > 1 ? 's' : ''} Require Attention`,
-            html: emailHtml,
-          });
+      recipientCount = recipients.length;
 
-          console.log(`Email sent successfully to ${recipientEmail}:`, emailResponse);
-        } catch (emailError) {
-          console.error(`Failed to send email to ${recipientEmail}:`, emailError);
-          // Continue sending to other recipients
+      console.log(`Found ${recipientCount} opted-in admin/manager recipients`);
+
+      if (!dryRun) {
+        // Load org branding once for all recipients in this run.
+        const branding = await loadBranding(supabase);
+
+        for (const profile of recipients) {
+          const recipientName = profile.full_name || "Admin";
+          const recipientEmail = profile.email;
+
+          const emailHtml = generateAlertEmailHtml(branding, recipientName, alertSummary);
+
+          try {
+            await resend.emails.send({
+              from: `${senderName(branding.appName)} <alerts@buildingops.app>`,
+              to: [recipientEmail],
+              subject: `⚠️ ${totalAlerts} Building Alert${totalAlerts > 1 ? 's' : ''} Require Attention`,
+              html: emailHtml,
+            });
+            console.log("Alert email sent");
+          } catch (emailError) {
+            console.error("Failed to send alert email:", emailError);
+            // Continue sending to other recipients
+          }
         }
       }
     }
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: dryRun ? "Dry run completed" : "Alert notifications sent",
-        summary: alertSummary,
-        totalAlerts,
-        recipientCount: notifyAdmins && !dryRun ? (await getAdminCount(supabase)) : 0,
-      }),
-      { status: 200, headers: { "Content-Type": "application/json", ...corsHeaders } }
-    );
-  } catch (error: any) {
+    return json({
+      success: true,
+      dryRun,
+      totalAlerts,
+      recipientCount,
+    });
+  } catch (error) {
     console.error("Error in notify-expiring-alerts:", error);
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      { status: 500, headers: { "Content-Type": "application/json", ...corsHeaders } }
-    );
+    return json({ error: "An unexpected error occurred" }, 500);
   }
 };
-
-async function getAdminCount(supabase: any): Promise<number> {
-  const { count } = await supabase
-    .from("user_roles")
-    .select("*", { count: "exact", head: true })
-    .in("role", ["admin", "manager"]);
-  return count || 0;
-}
 
 function generateAlertEmailHtml(branding: Branding, recipientName: string, alerts: AlertSummary): string {
   const { expiringDocuments, expiredDocuments, overdueMaintenance } = alerts;
@@ -284,8 +343,8 @@ function generateAlertEmailHtml(branding: Branding, recipientName: string, alert
     for (const doc of expiredDocuments) {
       html += `
                   <tr style="border-top: 1px solid #fecaca;">
-                    <td style="padding: 12px; font-size: 14px; color: #374151;">${doc.name}</td>
-                    <td style="padding: 12px; font-size: 14px; color: #6b7280;">${doc.building_name}</td>
+                    <td style="padding: 12px; font-size: 14px; color: #374151;">${escapeHtml(doc.name)}</td>
+                    <td style="padding: 12px; font-size: 14px; color: #6b7280;">${escapeHtml(doc.building_name)}</td>
                     <td style="padding: 12px; font-size: 14px; color: #dc2626; font-weight: 500;">${Math.abs(doc.days_until_expiry)} days ago</td>
                   </tr>`;
     }
@@ -312,8 +371,8 @@ function generateAlertEmailHtml(branding: Branding, recipientName: string, alert
     for (const doc of expiringDocuments) {
       html += `
                   <tr style="border-top: 1px solid #fde68a;">
-                    <td style="padding: 12px; font-size: 14px; color: #374151;">${doc.name}</td>
-                    <td style="padding: 12px; font-size: 14px; color: #6b7280;">${doc.building_name}</td>
+                    <td style="padding: 12px; font-size: 14px; color: #374151;">${escapeHtml(doc.name)}</td>
+                    <td style="padding: 12px; font-size: 14px; color: #6b7280;">${escapeHtml(doc.building_name)}</td>
                     <td style="padding: 12px; font-size: 14px; color: #d97706; font-weight: 500;">${doc.days_until_expiry} days</td>
                   </tr>`;
     }
@@ -340,8 +399,8 @@ function generateAlertEmailHtml(branding: Branding, recipientName: string, alert
     for (const asset of overdueMaintenance) {
       html += `
                   <tr style="border-top: 1px solid #c4b5fd;">
-                    <td style="padding: 12px; font-size: 14px; color: #374151;">${asset.name}</td>
-                    <td style="padding: 12px; font-size: 14px; color: #6b7280;">${asset.building_name}</td>
+                    <td style="padding: 12px; font-size: 14px; color: #374151;">${escapeHtml(asset.name)}</td>
+                    <td style="padding: 12px; font-size: 14px; color: #6b7280;">${escapeHtml(asset.building_name)}</td>
                     <td style="padding: 12px; font-size: 14px; color: #7c3aed; font-weight: 500;">${asset.days_overdue} days</td>
                   </tr>`;
     }

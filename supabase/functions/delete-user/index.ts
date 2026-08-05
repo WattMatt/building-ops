@@ -1,26 +1,101 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { corsHeaders } from "../_shared/cors.ts";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+type AdminClient = ReturnType<typeof createClient>;
 
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
+/**
+ * Best-effort removal of the target's personal storage objects — the avatar
+ * only. Evidence photos under tenant-documents/photos/<uid> belong to the
+ * issues, task completions and form submissions that outlive the account, so
+ * they are never touched here.
+ */
+async function purgeUserStorage(adminClient: AdminClient, userId: string) {
+  const targets = [
+    { bucket: "avatars", prefix: userId },
+  ];
+
+  for (const { bucket, prefix } of targets) {
+    try {
+      const { data: objects, error: listErr } = await adminClient.storage
+        .from(bucket).list(prefix, { limit: 1000 });
+      if (listErr) {
+        console.error(`delete-user: storage list failed (${bucket}/${prefix}):`, listErr.message);
+        continue;
+      }
+      // Entries with a null id are sub-folders, not objects.
+      const paths = (objects ?? []).filter((o) => o.id !== null).map((o) => `${prefix}/${o.name}`);
+      if (paths.length === 0) continue;
+
+      const { error: rmErr } = await adminClient.storage.from(bucket).remove(paths);
+      if (rmErr) {
+        console.error(`delete-user: storage remove failed (${bucket}/${prefix}):`, rmErr.message);
+      }
+    } catch (e) {
+      console.error(`delete-user: storage purge failed (${bucket}/${prefix}):`, e);
+    }
+  }
+}
+
+/**
+ * user_roles can hold several rows per user (it carries building_id), so the
+ * role is read as a set, never as a single row. Returns null when the lookup
+ * failed — callers must treat that as "deny".
+ */
+async function hasAdminRole(adminClient: AdminClient, userId: string): Promise<boolean | null> {
+  const { data, error } = await adminClient
+    .from("user_roles").select("role").eq("user_id", userId);
+  if (error) {
+    console.error(`delete-user: role lookup failed (${userId}):`, error.message);
+    return null;
+  }
+  return (data ?? []).some((r) => r.role === "admin");
+}
+
+/**
+ * Admins who can still sign in, excluding `excludeUserId`. A deactivated admin
+ * is banned in auth, so counting their role rows would let the org drop to zero
+ * usable administrators. Returns null when the state cannot be established.
+ */
+async function countOtherActiveAdmins(
+  adminClient: AdminClient,
+  excludeUserId: string,
+): Promise<number | null> {
+  const { data: adminRows, error: rolesErr } = await adminClient
+    .from("user_roles").select("user_id").eq("role", "admin");
+  if (rolesErr) {
+    console.error("delete-user: admin role list failed:", rolesErr.message);
+    return null;
+  }
+
+  const ids = [...new Set((adminRows ?? []).map((r) => String(r.user_id)))]
+    .filter((id) => id !== excludeUserId);
+  if (ids.length === 0) return 0;
+
+  const { data: active, error: profileErr } = await adminClient
+    .from("profiles").select("id").in("id", ids).not("deactivated", "is", true);
+  if (profileErr) {
+    console.error("delete-user: active admin lookup failed:", profileErr.message);
+    return null;
+  }
+  return new Set((active ?? []).map((p) => String(p.id))).size;
 }
 
 /**
  * Admin hard-delete of ANOTHER user (distinct from delete-account, which is a
  * caller self-delete). Permanent and irreversible — the UI gates it behind a
  * typed-email confirmation. Guards mirror set-user-status: an admin cannot
- * delete themselves, and the last remaining admin cannot be deleted.
+ * delete themselves, and the last active admin cannot be deleted.
  */
 serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const cors = corsHeaders(req);
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { ...cors, "Content-Type": "application/json" },
+    });
+
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   try {
     const authHeader = req.headers.get("Authorization");
@@ -39,9 +114,8 @@ serve(async (req) => {
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
     // Authorize: caller must be an admin
-    const { data: callerRole } = await adminClient
-      .from("user_roles").select("role").eq("user_id", caller.id).maybeSingle();
-    if (!callerRole || callerRole.role !== "admin") {
+    const callerIsAdmin = await hasAdminRole(adminClient, caller.id);
+    if (callerIsAdmin !== true) {
       return json({ error: "Forbidden: admin role required" }, 403);
     }
 
@@ -53,36 +127,56 @@ serve(async (req) => {
     if (userId === caller.id) {
       return json({ error: "You cannot delete your own account" }, 400);
     }
-    const { data: target } = await adminClient
-      .from("user_roles").select("role").eq("user_id", userId).maybeSingle();
-    if (target?.role === "admin") {
-      const { count } = await adminClient
-        .from("user_roles").select("user_id", { count: "exact", head: true }).eq("role", "admin");
-      if ((count ?? 0) <= 1) return json({ error: "Cannot delete the last remaining admin" }, 400);
+    const targetIsAdmin = await hasAdminRole(adminClient, userId);
+    if (targetIsAdmin === null) {
+      return json({ error: "Unable to verify the target account" }, 403);
+    }
+    if (targetIsAdmin) {
+      const others = await countOtherActiveAdmins(adminClient, userId);
+      if (others === null) {
+        return json({ error: "Unable to verify the target account" }, 403);
+      }
+      if (others < 1) return json({ error: "Cannot delete the last remaining admin" }, 400);
     }
 
-    // Capture the email for the audit trail before the row is gone.
-    const { data: prof } = await adminClient
-      .from("profiles").select("email").eq("id", userId).maybeSingle();
-
-    // Explicit child cleanup (FKs mostly cascade from auth.users, but be sure).
-    await adminClient.from("user_buildings").delete().eq("user_id", userId);
-    await adminClient.from("user_roles").delete().eq("user_id", userId);
-    await adminClient.from("profiles").delete().eq("id", userId);
-
+    // Auth row first: while it exists the user can still sign in, so a failure
+    // part-way through must never leave them without a profile or role.
     const { error: delErr } = await adminClient.auth.admin.deleteUser(userId);
-    if (delErr) return json({ error: `Delete failed: ${delErr.message}` }, 500);
+    const alreadyGone = !!delErr &&
+      ((delErr as { status?: number }).status === 404 || /not.*found/i.test(delErr.message));
+    if (delErr && !alreadyGone) {
+      console.error("delete-user: auth delete failed:", delErr.message);
+      return json({ error: "Failed to delete user" }, 500);
+    }
+
+    // Only now that the account is gone for good: irreversible object removal
+    // must never run ahead of an operation that can still abort.
+    await purgeUserStorage(adminClient, userId);
+
+    // Sweep anything the auth.users cascade did not reach. The account is
+    // already unusable at this point, so failures are logged, not fatal.
+    const residual: Array<[string, string]> = [
+      ["user_buildings", "user_id"],
+      ["user_roles", "user_id"],
+      ["profiles", "id"],
+    ];
+    for (const [table, column] of residual) {
+      const { error } = await adminClient.from(table).delete().eq(column, userId);
+      if (error) {
+        console.error(`delete-user: residual cleanup failed on ${table}:`, error.message);
+      }
+    }
 
     // Audit (caller persists, so user_id FK is safe; entity_id records the target).
-    await adminClient.from("audit_logs").insert({
+    const { error: auditErr } = await adminClient.from("audit_logs").insert({
       action: "delete_user",
       entity_type: "user",
       entity_id: userId,
       user_id: caller.id,
-      // deleted user's email captured in the new_value-style note if the column exists
     });
+    if (auditErr) console.error("delete-user: audit insert failed:", auditErr.message);
 
-    return json({ status: "deleted", email: prof?.email ?? null });
+    return json({ status: "deleted", userId });
   } catch (e) {
     console.error("delete-user error:", e);
     return json({ error: "An unexpected error occurred" }, 500);

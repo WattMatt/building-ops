@@ -39,6 +39,20 @@ function escapeAttr(s: string): string {
 }
 
 /**
+ * Escape a value for interpolation into the HTML *text* of an email body.
+ * `renderEmail` does not escape `bodyHtml` (callers build markup there), so
+ * every dynamic value spliced into a body block must go through this first.
+ */
+export function escapeText(s: unknown): string {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
  * Render a polished, email-client-safe (table-based, inline styles) message.
  * `bodyHtml` is the pre-built paragraph block (caller controls copy).
  */
