@@ -3,6 +3,7 @@ import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useUserProfile } from '@/hooks/useUserProfile';
+import { recordAuthEvent } from '@/lib/auth-audit';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import {
   Sidebar,
@@ -130,6 +131,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const avatarUrl = profile?.avatar_url;
 
   const handleSignOut = async () => {
+    // C7: write the logout audit row BEFORE the session is revoked — after
+    // signOut the RLS self-attribution check (user_id = auth.uid()) would
+    // reject it. recordAuthEvent never throws and never blocks on failure.
+    await recordAuthEvent('auth.logout');
     await signOut();
     toast.success('Signed out successfully');
     navigate('/auth');

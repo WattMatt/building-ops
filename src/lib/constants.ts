@@ -6,7 +6,16 @@
 import type { Database } from '@/integrations/supabase/types';
 
 // Type exports from database
-export type AppRole = Database['public']['Enums']['app_role'];
+// AppRole is defined here (single source of truth) rather than derived from
+// Database['public']['Enums']: production has NO app_role enum — user_roles.role
+// is plain text and app_role() is a text-returning function (verified against
+// the 2026-08-05 prod DDL pull). Keep in sync with ROLE_OPTIONS below and the
+// invite-user edge function's accepted roles.
+export type AppRole = 'admin' | 'manager' | 'user' | 'reviewer';
+
+// Privilege order for deriving a user's effective role when user_roles holds
+// multiple rows (highest wins). Index 0 = most privileged.
+export const ROLE_PRECEDENCE: readonly AppRole[] = ['admin', 'manager', 'reviewer', 'user'] as const;
 export type TaskFrequency = Database['public']['Enums']['task_frequency'];
 export type TaskStatus = Database['public']['Enums']['task_status'];
 export type IssuePriority = Database['public']['Enums']['issue_priority'];

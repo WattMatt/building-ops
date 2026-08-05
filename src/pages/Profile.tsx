@@ -157,13 +157,14 @@ export default function Profile() {
   };
 
   const handleChangePassword = async () => {
-    if (!newPassword || !confirmPassword) {
+    if (!currentPassword || !newPassword || !confirmPassword) {
       toast.error('Please fill in all password fields');
       return;
     }
 
-    if (newPassword.length < 6) {
-      toast.error('Password must be at least 6 characters long');
+    // Aligned with SetPassword/ResetPassword (MIN_PASSWORD_LENGTH = 8).
+    if (newPassword.length < 8) {
+      toast.error('Password must be at least 8 characters long');
       return;
     }
 
@@ -174,6 +175,19 @@ export default function Profile() {
 
     setIsChangingPassword(true);
     try {
+      // E4: re-authenticate with the current password before allowing a change,
+      // so a hijacked session cannot silently rotate the credential.
+      const email = user?.email;
+      if (!email) throw new Error('No authenticated user');
+      const { error: reauthError } = await supabase.auth.signInWithPassword({
+        email,
+        password: currentPassword,
+      });
+      if (reauthError) {
+        toast.error('Current password is incorrect');
+        return;
+      }
+
       const { error } = await supabase.auth.updateUser({
         password: newPassword,
       });
@@ -181,6 +195,7 @@ export default function Profile() {
       if (error) throw error;
 
       toast.success('Password updated successfully');
+      setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (error: any) {
@@ -643,6 +658,31 @@ export default function Profile() {
         <CardContent className="space-y-6">
           <div className="grid gap-4">
             <div className="space-y-2">
+              <Label htmlFor="current-password">Current Password</Label>
+              <div className="relative">
+                <Input
+                  id="current-password"
+                  type={showCurrentPassword ? 'text' : 'password'}
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  placeholder="Enter current password"
+                  autoComplete="current-password"
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                We ask for your current password to confirm it's really you.
+              </p>
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="new-password">New Password</Label>
               <div className="relative">
                 <Input
@@ -662,7 +702,7 @@ export default function Profile() {
                 </button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Password must be at least 6 characters long
+                Password must be at least 8 characters long
               </p>
             </div>
 
@@ -689,9 +729,9 @@ export default function Profile() {
           </div>
 
           <div className="flex justify-end">
-            <Button 
-              onClick={handleChangePassword} 
-              disabled={isChangingPassword || !newPassword || !confirmPassword}
+            <Button
+              onClick={handleChangePassword}
+              disabled={isChangingPassword || !currentPassword || !newPassword || !confirmPassword}
             >
               {isChangingPassword ? (
                 <>

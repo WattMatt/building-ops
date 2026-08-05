@@ -1,9 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
-import type { Database } from '@/integrations/supabase/types';
-
-type AppRole = Database['public']['Enums']['app_role'];
+import { ROLE_PRECEDENCE, type AppRole } from '@/lib/constants';
+import { queryClient } from '@/lib/queryClient';
 
 export interface InviteUserPayload {
   email: string;
@@ -27,12 +26,19 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   role: AppRole | null;
+  /** All roles held by the user (user_roles can hold multiple rows per user). */
+  roles: AppRole[];
+  /** True when the role/profile fetch failed — role-gated routes must fail closed. */
+  authError: boolean;
   mustSetPassword: boolean;
+  onboardingCompleted: boolean;
   isRecovery: boolean;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, fullName?: string) => Promise<{ error: Error | null }>;
   clearMustSetPassword: () => Promise<void>;
+  /** Syncs in-memory state after the onboarding wizard has written onboarding_completed=true. */
+  markOnboardingComplete: () => void;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: Error | null }>;
   inviteUser: (payload: InviteUserPayload) => Promise<InviteUserResult>;
@@ -48,7 +54,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [role, setRole] = useState<AppRole | null>(null);
+  const [roles, setRoles] = useState<AppRole[]>([]);
+  const [authError, setAuthError] = useState(false);
   const [mustSetPassword, setMustSetPassword] = useState(false);
+  const [onboardingCompleted, setOnboardingCompleted] = useState(true);
   const [isRecovery, setIsRecovery] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -86,7 +95,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }, 0);
         } else {
           setRole(null);
+          setRoles([]);
+          setAuthError(false);
           setMustSetPassword(false);
+          setOnboardingCompleted(true);
         }
       }
     );
@@ -105,33 +117,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Derives the highest-privilege role from the raw user_roles rows.
+  // Unknown role strings are ignored; no rows (or only unknown ones) => null.
+  const deriveRoles = (rows: { role: string | null }[]): AppRole[] => {
+    const known = new Set(
+      rows
+        .map((r) => r.role)
+        .filter((r): r is AppRole => typeof r === 'string' && (ROLE_PRECEDENCE as readonly string[]).includes(r))
+    );
+    return ROLE_PRECEDENCE.filter((r) => known.has(r));
+  };
+
   const fetchUserRole = async (userId: string) => {
     try {
+      // user_roles can hold multiple rows per user (the table carries a
+      // building_id column), so fetch ALL rows and derive the highest role.
+      // Fail closed (A9): on error the role becomes null AND authError is set,
+      // so role-gated routes deny instead of defaulting to a privileged 'user'.
       const { data: roleData, error } = await supabase
         .from('user_roles')
         .select('role')
-        .eq('user_id', userId)
-        .single();
+        .eq('user_id', userId);
 
       if (error) {
         console.error('Error fetching user role:', error);
-        setRole('user'); // Default to user if role fetch fails
+        setRole(null);
+        setRoles([]);
+        setAuthError(true);
       } else {
-        setRole(roleData?.role ?? 'user');
+        const derived = deriveRoles(roleData ?? []);
+        setRoles(derived);
+        setRole(derived[0] ?? null); // null (no role rows) => role-gated routes deny
+        setAuthError(false);
       }
 
-      // First-login gate: read must_set_password from the user's own profile.
-      // The column may be absent from the generated types until they are
-      // regenerated, so select defensively and read it via a narrow cast.
-      const { data: profileData } = await supabase
+      // First-login + onboarding gates: read must_set_password and
+      // onboarding_completed from the user's own profile. The columns may be
+      // absent from the generated types until they are regenerated, so select
+      // defensively and read them via a narrow cast.
+      const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
-      setMustSetPassword(Boolean((profileData as { must_set_password?: boolean } | null)?.must_set_password));
+      const p = profileData as { must_set_password?: boolean; onboarding_completed?: boolean } | null;
+      setMustSetPassword(Boolean(p?.must_set_password));
+      // Missing row (no error, data null) => wizard shows and creates-or-surfaces
+      // the row (D4). Fetch ERROR => skip the UX gate rather than trapping the
+      // user; the role guard + RLS remain the security boundary.
+      setOnboardingCompleted(profileError ? true : p ? Boolean(p.onboarding_completed) : false);
     } catch (error) {
       console.error('Error fetching user role:', error);
-      setRole('user');
+      setRole(null);
+      setRoles([]);
+      setAuthError(true);
     } finally {
       setLoading(false);
     }
@@ -152,31 +191,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     throw new Error('Self-signup is disabled — contact your administrator');
   };
 
-  // Clears the first-login gate on the current user's own profile row, then
-  // syncs the in-memory state so ProtectedRoute stops bouncing to /set-password.
-  // Throws on failure so callers can keep the user on the page.
+  // Clears the first-login gate for the current user, then syncs the in-memory
+  // state so ProtectedRoute stops bouncing to /set-password. A DB trigger
+  // (2026-08-05_06_phase2_onboarding_standard.sql) blocks client-side writes to
+  // profiles.must_set_password, so the clear is routed through the
+  // clear-password-gate edge function: it validates the JWT, confirms a
+  // credential update just happened, and clears the flag server-side for THAT
+  // user only. Throws on failure so callers can keep the user on the page.
   const clearMustSetPassword = async () => {
-    const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
-    if (userError) throw userError;
-    if (!currentUser) throw new Error('No authenticated user');
-
-    const { error } = await supabase
-      .from('profiles')
-      // must_set_password is a real column; types.ts (supabase gen types)
-      // may lag behind the migration, so cast the patch.
-      .update({ must_set_password: false } as never)
-      .eq('id', currentUser.id);
-    if (error) throw error;
+    const { error } = await supabase.functions.invoke('clear-password-gate', {
+      body: {},
+    });
+    if (error) {
+      // Non-2xx responses surface the JSON body on error.context.
+      let message = error.message || 'Failed to clear the password gate';
+      try {
+        const body = await (error as { context?: Response }).context?.json?.();
+        if (body?.error) message = body.error;
+      } catch {
+        // keep the default message
+      }
+      throw new Error(message);
+    }
 
     setMustSetPassword(false);
   };
 
+  // The onboarding wizard writes onboarding_completed=true itself (own-profile
+  // update is allowed); this only syncs the in-memory gate state.
+  const markOnboardingComplete = () => {
+    setOnboardingCompleted(true);
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
+    // E3: purge the query cache so the next user (or a signed-out window)
+    // cannot see the outgoing user's cached data.
+    queryClient.clear();
     setUser(null);
     setSession(null);
     setRole(null);
+    setRoles([]);
+    setAuthError(false);
     setMustSetPassword(false);
+    setOnboardingCompleted(true);
   };
 
   const resetPassword = async (email: string) => {
@@ -232,12 +290,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         session,
         role,
+        roles,
+        authError,
         mustSetPassword,
+        onboardingCompleted,
         isRecovery,
         loading,
         signIn,
         signUp,
         clearMustSetPassword,
+        markOnboardingComplete,
         signOut,
         resetPassword,
         inviteUser,

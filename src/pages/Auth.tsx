@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrganization } from '@/hooks/useOrganization';
+import { recordAuthEvent } from '@/lib/auth-audit';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,6 +16,7 @@ const passwordSchema = z.string().min(1, 'Please enter your password');
 
 export default function Auth() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, signIn, loading } = useAuth();
   const { organization } = useOrganization();
 
@@ -25,12 +27,20 @@ export default function Auth() {
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
 
+  // E3/deep-link restore: ProtectedRoute stashes the page the user was heading
+  // for in location.state.from — return there after login instead of always
+  // landing on '/'. Only same-app paths are accepted: must start with a single
+  // '/' ('//host' would be treated as protocol-relative and leave the app).
+  const requested = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname;
+  const from =
+    requested && requested.startsWith('/') && !requested.startsWith('//') ? requested : '/';
+
   // Redirect if already logged in
   useEffect(() => {
     if (user && !loading) {
-      navigate('/');
+      navigate(from, { replace: true });
     }
-  }, [user, loading, navigate]);
+  }, [user, loading, navigate, from]);
 
   const validateLogin = () => {
     try {
@@ -60,8 +70,10 @@ export default function Auth() {
         toast.error(error.message);
       }
     } else {
+      // C7: audit successful logins (fire-and-forget; never blocks the UX).
+      void recordAuthEvent('auth.login');
       toast.success('Welcome back!');
-      navigate('/');
+      navigate(from);
     }
   };
 

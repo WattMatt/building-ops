@@ -1,4 +1,10 @@
-project_id = "xuqxnpipetruujcuuflq"
+# PRODUCTION. Was "xuqxnpipetruujcuuflq" (the near-empty Building Ops clone) from
+# 2026-06-17 until 2026-08-04, so every `supabase functions deploy` in that window
+# silently shipped to the clone. Production consequently never received
+# request-password-reset, and password recovery was dead for ~7 weeks.
+# Prefer an explicit target anyway:
+#   supabase functions deploy <fn> --project-ref qdzgkttiosahdfqresvz
+project_id = "qdzgkttiosahdfqresvz"
 
 [functions.delete-account]
 verify_jwt = false
@@ -11,6 +17,11 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.set-user-status]
+verify_jwt = false
+
+# Self-service clear of the first-login gate (validates the JWT itself, like
+# set-user-status; the profiles trigger blocks any client-side flag write).
+[functions.clear-password-gate]
 verify_jwt = false
 
 [functions.notify-form-submission]

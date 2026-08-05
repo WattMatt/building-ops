@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { formatBuildingName } from '@/lib/buildingName';
 import { useAuth, type InviteUserPayload } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { recordAuthEvent } from '@/lib/auth-audit';
 import { useBuildings } from '@/hooks/useBuildings';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -368,6 +369,10 @@ export default function UserManagement() {
         .eq('user_id', userId);
 
       if (error) throw error;
+
+      // C7: role changes were previously unaudited. Attributed to the acting
+      // admin; entity_id is the user whose role changed. Fire-and-forget.
+      void recordAuthEvent('user_role_change', { entityId: userId });
 
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))

@@ -1,7 +1,8 @@
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/components/ThemeProvider";
@@ -14,6 +15,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Auth from "./pages/Auth";
 import SetPassword from "./pages/SetPassword";
 import ResetPassword from "./pages/ResetPassword";
+import Onboarding from "./pages/Onboarding";
 import Dashboard from "./pages/Dashboard";
 import Buildings from "./pages/Buildings";
 import BuildingForm from "./pages/BuildingForm";
@@ -31,8 +33,6 @@ import Settings from "./pages/Settings";
 import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
 
-const queryClient = new QueryClient();
-
 const App = () => (
   <ErrorBoundary>
   <QueryClientProvider client={queryClient}>
@@ -48,6 +48,9 @@ const App = () => (
               <Route path="/auth" element={<Auth />} />
               <Route path="/set-password" element={<SetPassword />} />
               <Route path="/reset" element={<ResetPassword />} />
+              {/* First-run gate target (needs a session; enforces its own
+                  entry conditions — wrapping it in ProtectedRoute would loop) */}
+              <Route path="/onboarding" element={<Onboarding />} />
 
             {/* Protected Routes with Dashboard Layout */}
             <Route path="/" element={

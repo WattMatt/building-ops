@@ -65,7 +65,7 @@ function ResetShell({
  */
 export default function ResetPassword() {
   const navigate = useNavigate();
-  const { user, isRecovery } = useAuth();
+  const { user, isRecovery, clearMustSetPassword } = useAuth();
   const { organization } = useOrganization();
   const appName = organization?.name || 'Building Ops';
   const logoUrl = organization?.logo_url;
@@ -165,12 +165,13 @@ export default function ResetPassword() {
       // Choosing a password HERE also satisfies the first-login gate — without
       // this, invitees who used a reset link instead of the invite link kept
       // must_set_password=true and ProtectedRoute bounced them out of the app
-      // on every login ("login doesn't work").
+      // on every login ("login doesn't work"). Direct profile writes to the
+      // flag are now blocked by a DB trigger, so this goes through the
+      // clear-password-gate edge function (via AuthContext), which also syncs
+      // the in-memory gate state. It throws on failure — surfaced below so a
+      // still-gated user isn't silently bounced into a redirect loop.
       if (freshUser) {
-        await supabase
-          .from('profiles')
-          .update({ must_set_password: false } as never)
-          .eq('id', freshUser.id);
+        await clearMustSetPassword();
       }
       navigate(freshUser ? '/' : '/auth');
     } catch (error) {
