@@ -53,11 +53,28 @@ serve(async (req) => {
       return json({ error: "No recent password change — the gate stays set" }, 403);
     }
 
+    // Recency alone is not proof: admin.createUser stamps updated_at at creation,
+    // so a temp-password invitee who signs in within the window would satisfy it
+    // and clear the gate WITHOUT ever rotating the emailed credential — exactly
+    // what this gate exists to prevent. Require the credential change to be
+    // NEWER than the sign-in that produced this session; a password set after
+    // sign-in bumps updated_at past last_sign_in_at, whereas an untouched invite
+    // still carries its creation timestamp.
+    const lastSignInAt = authUser.user.last_sign_in_at
+      ? Date.parse(authUser.user.last_sign_in_at)
+      : NaN;
+    if (!Number.isFinite(lastSignInAt) || updatedAt <= lastSignInAt) {
+      return json({ error: "No password change since sign-in — the gate stays set" }, 403);
+    }
+
     const { error: updateErr } = await adminClient
       .from("profiles")
       .update({ must_set_password: false })
       .eq("id", caller.id);
-    if (updateErr) return json({ error: `Failed to clear the gate: ${updateErr.message}` }, 500);
+    if (updateErr) {
+      console.error("clear-password-gate update failed:", updateErr);
+      return json({ error: "Failed to clear the gate" }, 500);
+    }
 
     // Verified write (C5): read back and fail loud rather than reporting a
     // success the database does not reflect.
