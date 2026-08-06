@@ -198,10 +198,22 @@ export function buildReportDoc(
     }
   }
 
+  const headerTitle = (report.title ?? 'Report').toUpperCase();
   return {
     pageMargins: [40, 40, 40, 50],
     content,
     defaultStyle: { font: 'Roboto', fontSize: 9 },
+    // Repeating page header (standard C2): org name + report title on every
+    // page except page 1, which carries the cover-style logo/title band.
+    header: (cur: number) =>
+      cur === 1
+        ? undefined
+        : {
+            columns: [
+              { text: opts.orgName, fontSize: 8, color: '#9ca3af', margin: [40, 14, 0, 0] },
+              { text: headerTitle, fontSize: 8, color: '#9ca3af', alignment: 'right', margin: [0, 14, 40, 0] },
+            ],
+          },
     footer: (cur: number, total: number) => ({ text: `${cur} / ${total}`, alignment: 'center', fontSize: 8, color: '#9ca3af', margin: [0, 10, 0, 0] }),
   };
 }

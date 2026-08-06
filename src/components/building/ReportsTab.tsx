@@ -28,7 +28,7 @@ import { generateBuildingHsReport } from '@/lib/hsReportData';
 
 export default function ReportsTab({ buildingId, buildingName }: { buildingId: string; buildingName?: string }) {
   const navigate = useNavigate();
-  const { isAdminOrManager } = useAuth();
+  const { user, isAdminOrManager } = useAuth();
   const { data: reports, isLoading } = useFortressReports(buildingId);
   const { data: kpiData } = useBuildingKpis(buildingId);
   const hasApproved = !!kpiData?.ops || !!kpiData?.cm;
@@ -41,7 +41,7 @@ export default function ReportsTab({ buildingId, buildingName }: { buildingId: s
   const handleGenerateHs = async () => {
     setHsGenerating(true);
     try {
-      await generateBuildingHsReport({
+      const outcome = await generateBuildingHsReport({
         buildingId,
         buildingName: buildingName ?? 'Building',
         rangeStart: hsStart,
@@ -54,8 +54,17 @@ export default function ReportsTab({ buildingId, buildingName }: { buildingId: s
           phone: organization?.phone,
           email: organization?.email,
         },
+        persist: organization?.id && user ? { orgId: organization.id, userId: user.id } : undefined,
       });
-      toast.success('H&S Compliance Report downloaded');
+      // Download always succeeds by this point — report the persistence outcome too.
+      if (outcome.persisted === 'saved') {
+        toast.success('H&S Compliance Report downloaded and saved to Saved Reports');
+      } else if (outcome.persisted === 'failed') {
+        if (import.meta.env.DEV) console.error('H&S report persist failed:', outcome.error);
+        toast.warning('H&S Compliance Report downloaded, but could not be saved to Saved Reports');
+      } else {
+        toast.success('H&S Compliance Report downloaded');
+      }
       setHsOpen(false);
     } catch (error) {
       console.error('H&S report error:', error);
