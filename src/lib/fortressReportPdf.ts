@@ -25,6 +25,14 @@ function ppmMonthLabel(monthKey: string): string {
 
 export interface ReportBranding { name: string; primaryColor: string; logoUrl?: string | null }
 
+/** Rendered export handed back so the caller can persist it as an artifact. */
+export interface GeneratedFortressPdf {
+  blob: Blob;
+  fileName: string;
+  buildingId: string;
+  reportType: ReportType;
+}
+
 const FLAGGED = new Set(['poor', 'critical']);
 /** Cap embedded photos so the PDF stays a sane size (AbaQulusi annual = 121). */
 export const MAX_EMBEDDED_PHOTOS = 120;
@@ -72,7 +80,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-export async function generateReportPdf(reportId: string, branding: ReportBranding): Promise<void> {
+export async function generateReportPdf(reportId: string, branding: ReportBranding): Promise<GeneratedFortressPdf> {
   const color = /^#([a-f\d]{6})$/i.test(branding.primaryColor) ? branding.primaryColor : '#2563eb';
   const report = (await fdb.from('reports').select('*').eq('id', reportId).maybeSingle()).data;
   if (!report) throw new Error('report not found');
@@ -218,5 +226,9 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     data,
     { color, orgName: branding.name, logoDataUrl },
   );
-  pdfMake.createPdf(doc).download(`${(report.title ?? 'report').replace(/[^\w]+/g, '_')}.pdf`);
+  const fileName = `${(report.title ?? 'report').replace(/[^\w]+/g, '_')}.pdf`;
+  const pdf = pdfMake.createPdf(doc);
+  const blob = await pdf.getBlob();
+  await pdf.download(fileName); // re-uses the buffered render; keeps current UX
+  return { blob, fileName, buildingId: report.building_id, reportType: report.report_type as ReportType };
 }

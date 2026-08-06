@@ -1,9 +1,16 @@
 import { supabase } from '@/integrations/supabase/client';
 import { resolveStorageUrl } from '@/integrations/supabase/storage';
 import { generateHsCompliancePdf } from './pdfGenerator';
+import { saveReportArtifact } from './reportArtifacts';
 import type { HsTask, HsDocument } from './hsComplianceReport';
 
 const MAX_EMBEDDED_PHOTOS = 30;
+
+/** Outcome of the save-on-generate persistence step (download always happens). */
+export type HsReportPersistOutcome =
+  | { persisted: 'saved' }
+  | { persisted: 'failed'; error: string }
+  | { persisted: 'skipped' };
 
 export interface HsReportBranding {
   name: string;
@@ -18,6 +25,10 @@ export interface HsReportBranding {
  * Assemble one building's H&S evidence data over a date range and download a
  * branded PDF. Shared by the org Reports page (building picker) and the
  * per-building Reports tab so both produce an identical report.
+ *
+ * When `persist` is provided the rendered blob is also saved as a versioned
+ * report artifact (standard D1/D2). Persistence failing never blocks the
+ * download — the outcome is returned so callers can toast both results.
  */
 export async function generateBuildingHsReport(opts: {
   buildingId: string;
@@ -25,8 +36,9 @@ export async function generateBuildingHsReport(opts: {
   rangeStart: string; // yyyy-MM-dd
   rangeEnd: string;
   branding: HsReportBranding;
-}): Promise<void> {
-  const { buildingId, buildingName, rangeStart, rangeEnd, branding } = opts;
+  persist?: { orgId: string; userId: string };
+}): Promise<HsReportPersistOutcome> {
+  const { buildingId, buildingName, rangeStart, rangeEnd, branding, persist } = opts;
 
   const { data: taskRows, error: tasksError } = await supabase
     .from('task_instances')
@@ -90,7 +102,7 @@ export async function generateBuildingHsReport(opts: {
     }
   }
 
-  await generateHsCompliancePdf({
+  const { blob, fileName } = await generateHsCompliancePdf({
     buildingName,
     rangeStart,
     rangeEnd,
@@ -99,4 +111,16 @@ export async function generateBuildingHsReport(opts: {
     photoDataUrls,
     branding,
   });
+
+  if (!persist) return { persisted: 'skipped' };
+  const saved = await saveReportArtifact({
+    orgId: persist.orgId,
+    kind: 'hs_compliance',
+    blob,
+    fileName,
+    generatedBy: persist.userId,
+    buildingId,
+  });
+  if (!saved.ok) return { persisted: 'failed', error: saved.error };
+  return { persisted: 'saved' };
 }

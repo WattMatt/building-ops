@@ -87,6 +87,33 @@ describe('buildReportDoc — title casing', () => {
   });
 });
 
+describe('buildReportDoc — page furniture (standard C2)', () => {
+  const doc = buildReportDoc(
+    { title: 'Monthly OPS — Broll Centre — May 2026', report_period: '2026-05-01', report_type: 'ops_monthly', managers: [] },
+    { compliancePct: 90 },
+    { color: '#123456', orgName: 'Acme' },
+  );
+
+  it('keeps the running header off page 1 (cover-style band already there)', () => {
+    const header = doc.header as (cur: number) => unknown;
+    expect(typeof header).toBe('function');
+    expect(header(1)).toBeUndefined();
+  });
+
+  it('repeats org name + uppercased report title on pages 2+', () => {
+    const header = doc.header as (cur: number) => unknown;
+    const { text } = collect({ content: header(2) });
+    expect(text).toContain('Acme');
+    expect(text).toContain('MONTHLY OPS — BROLL CENTRE — MAY 2026');
+  });
+
+  it('keeps the page-number footer', () => {
+    const footer = doc.footer as (cur: number, total: number) => unknown;
+    const { text } = collect({ content: footer(3, 7) });
+    expect(text).toContain('3 / 7');
+  });
+});
+
 describe('buildReportDoc — ops_monthly + branding', () => {
   it('renders the building compliance % and compliance table', () => {
     const doc = buildReportDoc(

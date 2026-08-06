@@ -19,9 +19,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '@/contexts/AuthContext';
 import { computeHsScores } from '@/lib/hsScore';
 import { generatePortfolioSummaryPdf } from '@/lib/pdfGenerator';
+import { saveReportArtifact } from '@/lib/reportArtifacts';
 import { PortfolioComplianceCard } from '@/components/reports/fortress/PortfolioComplianceCard';
+import { SavedReportsCard } from '@/components/reports/SavedReportsCard';
 
 interface ReportStats {
   buildingsCount: number;
@@ -35,6 +39,8 @@ export default function Reports() {
     pendingIssues: 0,
   });
   const { organization } = useOrganization();
+  const { user } = useAuth();
+  const qc = useQueryClient();
   const [hsDialogOpen, setHsDialogOpen] = useState(false);
   const [hsBuildings, setHsBuildings] = useState<{ id: string; name: string }[]>([]);
   const [hsBuildingId, setHsBuildingId] = useState('');
@@ -58,7 +64,7 @@ export default function Reports() {
     setHsGenerating(true);
     try {
       const building = hsBuildings.find((b) => b.id === hsBuildingId)!;
-      await generateBuildingHsReport({
+      const outcome = await generateBuildingHsReport({
         buildingId: hsBuildingId,
         buildingName: building.name,
         rangeStart: hsStart,
@@ -71,8 +77,18 @@ export default function Reports() {
           phone: organization?.phone,
           email: organization?.email,
         },
+        persist: organization?.id && user ? { orgId: organization.id, userId: user.id } : undefined,
       });
-      toast.success('H&S Compliance Report downloaded');
+      // Download always succeeds by this point — report the persistence outcome too.
+      if (outcome.persisted === 'saved') {
+        toast.success('H&S Compliance Report downloaded and saved to Saved Reports');
+        qc.invalidateQueries({ queryKey: ['report-artifacts'] });
+      } else if (outcome.persisted === 'failed') {
+        if (import.meta.env.DEV) console.error('H&S report persist failed:', outcome.error);
+        toast.warning('H&S Compliance Report downloaded, but could not be saved to Saved Reports');
+      } else {
+        toast.success('H&S Compliance Report downloaded');
+      }
       setHsDialogOpen(false);
     } catch (error) {
       console.error('H&S report error:', error);
@@ -99,7 +115,7 @@ export default function Reports() {
         supabase.from('building_documents').select('building_id, expiry_date'),
       ]);
       const rows = computeHsScores(buildings || [], tasks || [], documents || [], today);
-      await generatePortfolioSummaryPdf({
+      const { blob, fileName } = await generatePortfolioSummaryPdf({
         rows,
         generatedAt: todayStr,
         branding: {
@@ -111,7 +127,25 @@ export default function Reports() {
           email: organization?.email,
         },
       });
-      toast.success('Portfolio summary downloaded');
+      // Download always succeeds by this point — persistence is best-effort on top.
+      if (organization?.id && user) {
+        const saved = await saveReportArtifact({
+          orgId: organization.id,
+          kind: 'portfolio_summary',
+          blob,
+          fileName,
+          generatedBy: user.id,
+        });
+        if (saved.ok) {
+          toast.success('Portfolio summary downloaded and saved to Saved Reports');
+          qc.invalidateQueries({ queryKey: ['report-artifacts'] });
+        } else {
+          if (import.meta.env.DEV) console.error('Portfolio summary persist failed:', saved.error);
+          toast.warning('Portfolio summary downloaded, but could not be saved to Saved Reports');
+        }
+      } else {
+        toast.success('Portfolio summary downloaded');
+      }
     } catch (error) {
       console.error('Portfolio report error:', error);
       toast.error('Failed to generate portfolio summary');
@@ -233,6 +267,9 @@ export default function Reports() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Saved report artifacts (versioned, private bucket, signed URLs) */}
+      <SavedReportsCard />
 
       {/* H&S Compliance Report Dialog */}
       <Dialog open={hsDialogOpen} onOpenChange={setHsDialogOpen}>

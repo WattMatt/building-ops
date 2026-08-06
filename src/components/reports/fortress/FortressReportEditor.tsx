@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useOrganization } from '@/hooks/useOrganization';
 import { generateReportPdf } from '@/lib/fortressReportPdf';
+import { saveReportArtifact, type ReportArtifactKind } from '@/lib/reportArtifacts';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -60,7 +61,28 @@ export default function FortressReportEditor() {
     setExporting(true);
     try {
       // Report header uses the organisation's configured name + logo (Settings).
-      await generateReportPdf(id, { name: organization?.name ?? '', primaryColor: organization?.primary_color ?? '#2563eb', logoUrl: organization?.logo_url ?? null });
+      const generated = await generateReportPdf(id, { name: organization?.name ?? '', primaryColor: organization?.primary_color ?? '#2563eb', logoUrl: organization?.logo_url ?? null });
+      // Download always succeeds by this point — persistence is best-effort on
+      // top (standard D2/D4), and the toast reports both outcomes.
+      if (organization?.id && user) {
+        const saved = await saveReportArtifact({
+          orgId: organization.id,
+          kind: `fortress_${generated.reportType}` satisfies ReportArtifactKind,
+          blob: generated.blob,
+          fileName: generated.fileName,
+          generatedBy: user.id,
+          sourceId: id,
+          buildingId: generated.buildingId,
+        });
+        if (saved.ok) {
+          toast.success('Report PDF downloaded and saved to Saved Reports.');
+        } else {
+          if (import.meta.env.DEV) console.error('Report persist failed:', saved.error);
+          toast.warning('Report PDF downloaded, but could not be saved to Saved Reports.');
+        }
+      } else {
+        toast.success('Report PDF downloaded.');
+      }
     } catch (e) {
       if (import.meta.env.DEV) console.error('PDF export failed:', e);
       toast.error('Could not generate the PDF.');
