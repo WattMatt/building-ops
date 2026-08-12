@@ -104,9 +104,12 @@ const handler = async (req: Request): Promise<Response> => {
       const { data: { user: caller }, error: callerErr } = await userClient.auth.getUser();
       if (callerErr || !caller) return json({ error: "unauthorized" }, 401);
 
-      const { data: callerRole, error: roleErr } = await supabase
-        .from("user_roles").select("role").eq("user_id", caller.id).maybeSingle();
-      if (roleErr || callerRole?.role !== "admin") {
+      // Array form, not maybeSingle: user_roles carries building_id and can hold
+      // several rows per user, which would make maybeSingle raise PGRST116 and
+      // lock out a legitimate admin.
+      const { data: callerRoles, error: roleErr } = await supabase
+        .from("user_roles").select("role").eq("user_id", caller.id);
+      if (roleErr || !callerRoles?.some((r: { role: string }) => r.role === "admin")) {
         return json({ error: "forbidden" }, 403);
       }
     }
