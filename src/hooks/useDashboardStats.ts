@@ -121,6 +121,20 @@ export function useDashboardStats(): UseDashboardStatsReturn {
           .limit(3),
       ]);
 
+      // supabase-js RESOLVES with { data: null, error } instead of rejecting, so
+      // without this the catch below can never fire: every `count || 0` would
+      // quietly become 0 and the dashboard would report an empty portfolio as
+      // fact during an outage.
+      const failed = [
+        buildingsResult,
+        pendingResult,
+        completedResult,
+        issuesResult,
+        tasksResult,
+        recentIssuesResult,
+      ].find((r) => r.error);
+      if (failed?.error) throw failed.error;
+
       const pendingCount = pendingResult.count || 0;
       const completedCount = completedResult.count || 0;
 

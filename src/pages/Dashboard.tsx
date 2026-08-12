@@ -49,8 +49,8 @@ const statusColors: Record<string, string> = {
 
 export default function Dashboard() {
   const { role, isAdminOrManager } = useAuth();
-  const { stats, upcomingTasks, recentIssues, loading } = useDashboardStats();
-  const { portfolioAvg, reportedCount, total } = usePortfolioCompliance();
+  const { stats, upcomingTasks, recentIssues, loading, error, refetch } = useDashboardStats();
+  const { portfolioAvg, reportedCount, total, isError: complianceError } = usePortfolioCompliance();
   const { profile, loading: profileLoading } = useUserProfile();
   const [profileNudgeDismissed, setProfileNudgeDismissed] = useState(
     () => localStorage.getItem('profileNudgeDismissed') === 'true'
@@ -136,6 +136,28 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* A failed load must never render as a portfolio of zeros: "Total
+          Buildings 0" reads as "you have no buildings", not "we couldn't ask". */}
+      {error && (
+        <Card className="border-destructive/50">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+              Dashboard could not be loaded
+            </CardTitle>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              Try Again
+            </Button>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground">
+              {error.message}. The counts below are unavailable — treat nothing on this
+              page as an accurate picture of your portfolio.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Stats Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
@@ -144,9 +166,9 @@ export default function Dashboard() {
             <Building2 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.buildings}</div>
+            <div className="text-2xl font-bold">{error ? '—' : stats.buildings}</div>
             <p className="text-xs text-muted-foreground">
-              In your portfolio
+              {error ? 'Unavailable' : 'In your portfolio'}
             </p>
           </CardContent>
         </Card>
@@ -157,9 +179,9 @@ export default function Dashboard() {
             <Clock className="h-4 w-4 text-warning" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.pendingTasks}</div>
+            <div className="text-2xl font-bold">{error ? '—' : stats.pendingTasks}</div>
             <p className="text-xs text-muted-foreground">
-              Due today
+              {error ? 'Unavailable' : 'Due today'}
             </p>
           </CardContent>
         </Card>
@@ -170,9 +192,9 @@ export default function Dashboard() {
             <CheckCircle2 className="h-4 w-4 text-success" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.completedToday}</div>
+            <div className="text-2xl font-bold">{error ? '—' : stats.completedToday}</div>
             <p className="text-xs text-muted-foreground">
-              Tasks finished
+              {error ? 'Unavailable' : 'Tasks finished'}
             </p>
           </CardContent>
         </Card>
@@ -183,9 +205,9 @@ export default function Dashboard() {
             <AlertTriangle className="h-4 w-4 text-destructive" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.openIssues}</div>
+            <div className="text-2xl font-bold">{error ? '—' : stats.openIssues}</div>
             <p className="text-xs text-muted-foreground">
-              Require attention
+              {error ? 'Unavailable' : 'Require attention'}
             </p>
           </CardContent>
         </Card>
@@ -205,7 +227,9 @@ export default function Dashboard() {
             <Progress value={portfolioAvg ?? 0} className="flex-1 h-3" />
           </div>
           <p className="text-sm text-muted-foreground mt-2">
-            {reportedCount} of {total} buildings reported
+            {complianceError
+              ? "Compliance scores couldn't be loaded — this is not a portfolio score."
+              : `${reportedCount} of ${total} buildings reported`}
           </p>
         </CardContent>
       </Card>
@@ -242,7 +266,11 @@ export default function Dashboard() {
             {upcomingTasks.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-center">
                 <CheckCircle2 className="h-10 w-10 text-success mb-2" />
-                <p className="text-sm text-muted-foreground">All caught up! No pending tasks.</p>
+                <p className="text-sm text-muted-foreground">
+                  {error
+                    ? "Upcoming tasks couldn't be loaded — tasks may be due."
+                    : 'All caught up! No pending tasks.'}
+                </p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -296,7 +324,11 @@ export default function Dashboard() {
             {recentIssues.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-8 text-center">
                 <CheckCircle2 className="h-10 w-10 text-success mb-2" />
-                <p className="text-sm text-muted-foreground">No open issues. Great job!</p>
+                <p className="text-sm text-muted-foreground">
+                  {error
+                    ? "Recent issues couldn't be loaded — open issues may exist."
+                    : 'No open issues. Great job!'}
+                </p>
               </div>
             ) : (
               <div className="space-y-4">

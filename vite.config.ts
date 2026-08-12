@@ -6,7 +6,9 @@ import path from "path";
 export default defineConfig(() => ({
   server: {
     host: "::",
-    port: 8080,
+    // 8080 stays the default; PORT lets a tool or CI pick a free one when 8080
+    // is already taken (Docker Desktop binds it on some machines).
+    port: Number(process.env.PORT) || 8080,
     hmr: {
       overlay: false,
     },

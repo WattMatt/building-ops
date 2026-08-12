@@ -96,6 +96,9 @@ export function usePortfolioCompliance() {
     queryKey: ['portfolio-compliance'],
     queryFn: async (): Promise<PortfolioCompliance> => {
       const bRes = await fdb.from('buildings').select('id,name').order('name');
+      // Without this the query "succeeds" with zero buildings on any failure, and
+      // the card reports "0 of 0 buildings reported" as if the portfolio were empty.
+      if (bRes.error) throw bRes.error;
       const buildings = (bRes.data ?? []) as { id: string; name: string | null }[];
 
       const rows = await Promise.all(
@@ -122,5 +125,6 @@ export function usePortfolioCompliance() {
     reportedCount: query.data?.reportedCount ?? 0,
     total: query.data?.total ?? 0,
     isLoading: query.isLoading,
+    isError: query.isError,
   };
 }
