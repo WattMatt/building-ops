@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useFortressReport, useReportLifecycle } from '@/hooks/useFortressReports';
 import { REPORT_SECTIONS, REPORT_STATUS_VARIANT, formatPeriodLabel, REQUIRED_SECTIONS, REQUIRED_SECTION_TABLE } from '@/lib/fortressReports';
+import { useReportSectionCounts } from '@/hooks/useReportSectionCounts';
 import { fdb, REPORT_TYPE_LABELS, type ReportStatus } from '@/integrations/supabase/fortress-db';
 import { getSectionComponent } from './sections/registry';
 
@@ -41,6 +42,10 @@ export default function FortressReportEditor() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => { setPreparedFor(report?.prepared_for ?? ''); }, [report?.prepared_for]);
+
+  // Row counts per section, so the navigator can show which tabs actually hold anything.
+  const { data: counts } = useReportSectionCounts(id, report?.building_id, report?.report_type);
+  const filledCount = counts ? Object.values(counts).filter((n) => (n ?? 0) > 0).length : 0;
 
   const savePreparedFor = async () => {
     if (!id || !report) return;
@@ -151,7 +156,12 @@ export default function FortressReportEditor() {
     actions.push({ label: 'Approve', icon: CheckCircle2, next: 'approved' });
     actions.push({ label: 'Reject', icon: XCircle, next: 'rejected', variant: 'destructive', needsNotes: true });
   }
-  if ((status === 'rejected' || status === 'approved') && isAdminOrManager) {
+  // Reopen is offered from every non-draft state. Without 'submitted' here a submitted
+  // report is a dead end: `editable` requires draft/rejected, so the only way back to
+  // editing was to Approve or Reject it first — which records a review decision nobody
+  // made just to fix a typo. This matters in bulk: reports loaded by an import all arrive
+  // as 'submitted'.
+  if (status !== 'draft' && isAdminOrManager) {
     actions.push({ label: 'Reopen as draft', icon: Undo2, next: 'draft', variant: 'outline' });
   }
 
@@ -217,21 +227,36 @@ export default function FortressReportEditor() {
         </Card>
       )}
 
-      <div className="grid gap-6 md:grid-cols-[220px_1fr]">
+      <div className="grid gap-6 md:grid-cols-[240px_1fr]">
         <nav className="space-y-1">
+          {counts && (
+            <p className="px-3 pb-2 text-xs text-muted-foreground">
+              {filledCount} of {sections.length} sections have content
+            </p>
+          )}
           {sections.map((s) => {
             const built = !!getSectionComponent(s.key);
+            const n = counts?.[s.key];
             return (
               <button
                 key={s.key}
                 onClick={() => setActiveKey(s.key)}
                 className={cn(
-                  'flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition-colors',
+                  'flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors',
                   current === s.key ? 'bg-muted font-medium' : 'hover:bg-muted/50',
+                  n === 0 && 'text-muted-foreground',
                 )}
               >
-                <span>{s.label}</span>
-                {!built && <span className="text-[10px] text-muted-foreground">soon</span>}
+                <span className="truncate">{s.label}</span>
+                {!built ? (
+                  <span className="text-[10px] text-muted-foreground">soon</span>
+                ) : n === null || n === undefined ? null : n > 0 ? (
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+                    {n}
+                  </span>
+                ) : (
+                  <span className="shrink-0 text-[10px] text-muted-foreground">empty</span>
+                )}
               </button>
             );
           })}
@@ -239,7 +264,26 @@ export default function FortressReportEditor() {
 
         <div>
           {SectionComp && current ? (
-            <SectionComp reportId={report.id} buildingId={report.building_id} readOnly={!editable} />
+            // A read-only section with no rows would otherwise render as a blank data-entry
+            // form — inputs the user cannot fill, and no hint that the data was simply never
+            // captured. Say so instead. Only when read-only: an editable empty section is
+            // exactly where someone goes to start entering.
+            !editable && counts?.[current] === 0 ? (
+              <Card>
+                <CardContent className="py-12 text-center text-sm text-muted-foreground">
+                  <p className="font-medium text-foreground">{currentMeta?.label}</p>
+                  <p className="mt-1">Nothing was captured for this section in this period.</p>
+                  {currentMeta?.hint && <p className="mt-2 text-xs">{currentMeta.hint}</p>}
+                  {isAdminOrManager && (
+                    <p className="mt-4 text-xs">
+                      Reopen this report as a draft to add it.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <SectionComp reportId={report.id} buildingId={report.building_id} readOnly={!editable} />
+            )
           ) : (
             <Card>
               <CardContent className="py-10 text-center text-sm text-muted-foreground">

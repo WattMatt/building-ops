@@ -19,9 +19,14 @@ import { computeBuildingPct } from '@/lib/fortressReports';
 
 const OHS_TEMPLATE_NAME = 'OHS Act Report';
 
-export function useComplianceSection(reportId: string | undefined, buildingId: string | undefined) {
+export function useComplianceSection(
+  reportId: string | undefined,
+  buildingId: string | undefined,
+  /** When true, viewing must not create anything — see the assessment block below. */
+  readOnly = false,
+) {
   const qc = useQueryClient();
-  const key = ['fortress-compliance', reportId];
+  const key = ['fortress-compliance', reportId, readOnly];
 
   const query = useQuery({
     queryKey: key,
@@ -53,6 +58,13 @@ export function useComplianceSection(reportId: string | undefined, buildingId: s
         .eq('report_id', reportId!)
         .maybeSingle();
       if (!assessment) {
+        // Reading a report must never write to it. This insert used to run inside the
+        // query, so merely OPENING the OHS tab created an assessment row — on reports the
+        // viewer had no right to edit — and because the submit gate counts rows in this
+        // very table, that made the gate pass on a report with no answers in it.
+        if (readOnly) {
+          return { template: tpl, items: items ?? [], assessmentId: null, responses: {} as Record<string, ComplianceResponse> };
+        }
         const { data: created, error: aErr } = await fdb
           .from('compliance_assessments')
           .insert({ id: crypto.randomUUID(), report_id: reportId!, building_id: buildingId!, template_id: tpl.id })

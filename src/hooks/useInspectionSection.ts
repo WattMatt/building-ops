@@ -42,9 +42,11 @@ export function useInspectionSection(
   reportId: string | undefined,
   buildingId: string | undefined,
   cadence: InspectionCadence,
+  /** When true, viewing must not create a building_inspections row. */
+  readOnly = false,
 ) {
   const qc = useQueryClient();
-  const key = ['fortress-inspection', cadence, reportId];
+  const key = ['fortress-inspection', cadence, reportId, readOnly];
 
   const query = useQuery({
     queryKey: key,
@@ -75,6 +77,11 @@ export function useInspectionSection(
         .eq('template_id', tpl.id)
         .maybeSingle();
       if (!inspection) {
+        // Reading a report must never write to it — opening this tab used to create the
+        // inspection row even on reports the viewer cannot edit.
+        if (readOnly) {
+          return { template: tpl, items: items ?? [], inspectionId: null, responses: {} as Record<string, InspectionResponse> };
+        }
         const { data: created, error: bErr } = await fdb
           .from('building_inspections')
           .insert({ id: crypto.randomUUID(), report_id: reportId!, building_id: buildingId!, template_id: tpl.id })

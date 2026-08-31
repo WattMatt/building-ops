@@ -30,7 +30,7 @@ const detailStr = (v: unknown): string => (v == null ? '' : String(v));
 const isFlagged = (c: unknown) => c === 'poor' || c === 'critical';
 
 export default function ConditionInspectionSection({ reportId, buildingId, readOnly }: SectionProps) {
-  const { items, responses, isLoading, setResponse } = useInspectionSection(reportId, buildingId, 'annual');
+  const { items, responses, isLoading, setResponse } = useInspectionSection(reportId, buildingId, 'annual', readOnly);
   const [active, setActive] = useState<string | null>(null);
 
   const addPhoto = async (it: InspectionTemplateItem, file: File) => {

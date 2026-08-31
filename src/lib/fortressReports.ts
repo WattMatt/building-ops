@@ -65,6 +65,55 @@ export const REQUIRED_SECTION_TABLE: Record<string, string> = {
 };
 
 /**
+ * Where each section's CONTENT lives, so we can tell a filled section from an empty one
+ * without opening it. Deliberately points at the table holding the user's answers, not at
+ * a parent/header row: `compliance_assessments` and `building_inspections` are created
+ * automatically the first time a tab is opened, so counting those would report every
+ * section as filled. `via` means the rows hang off that parent by report_id.
+ *
+ * `key: 'building'` marks a section whose rows are scoped to the building rather than the
+ * report (shop specs are versioned per tenant, not per month).
+ */
+export interface SectionSource {
+  table: string;
+  key: 'report' | 'building';
+  /** Parent table to resolve first; rows are then matched on `parentFk`. */
+  via?: { table: string; parentFk: string };
+  /** Only count rows matching this section_key (several sections share one table). */
+  sectionKey?: string;
+}
+
+export const SECTION_SOURCE: Record<string, SectionSource> = {
+  // OPS
+  operational_overview: { table: 'report_narratives', key: 'report' },
+  report_checklist: { table: 'report_checklist_items', key: 'report' },
+  ohs_compliance: { table: 'compliance_responses', key: 'report', via: { table: 'compliance_assessments', parentFk: 'assessment_id' } },
+  hazard_log: { table: 'hazard_log', key: 'report', via: { table: 'compliance_assessments', parentFk: 'assessment_id' } },
+  building_inspection: { table: 'inspection_responses', key: 'report', via: { table: 'building_inspections', parentFk: 'inspection_id' } },
+  expense_recoveries: { table: 'expense_recoveries', key: 'report' },
+  utilities: { table: 'utility_readings', key: 'report' },
+  ppm: { table: 'ppm_services', key: 'report' },
+  masterfile: { table: 'masterfile_items', key: 'report' },
+  // CM
+  building_overview: { table: 'report_narratives', key: 'report', sectionKey: 'building_overview' },
+  local_resources: { table: 'report_narratives', key: 'report', sectionKey: 'local_resources' },
+  building_turnover: { table: 'building_turnover', key: 'report' },
+  turnover: { table: 'tenant_turnover', key: 'report' },
+  category_turnover: { table: 'category_turnover', key: 'report' },
+  footfall_toilet: { table: 'footfall_counts', key: 'report' },
+  leasing: { table: 'vacancies', key: 'report' },
+  trading_arrears: { table: 'tenant_arrears', key: 'report' },
+  utility_management: { table: 'loadshedding_log', key: 'report' },
+  tenant_compliance: { table: 'tenant_compliance', key: 'report' },
+  shop_spec: { table: 'tenant_shop_spec', key: 'building' },
+  security_incidents: { table: 'security_incidents', key: 'report' },
+  // Annual
+  building_profile: { table: 'report_narratives', key: 'report', sectionKey: 'building_profile' },
+  condition_inspection: { table: 'inspection_responses', key: 'report', via: { table: 'building_inspections', parentFk: 'inspection_id' } },
+  capex: { table: 'capex_items', key: 'report' },
+};
+
+/**
  * Group-weighted OHS compliance %, N/A counts as a pass, only scored items count
  * (11_MARKING_AND_PERCENTAGES.md §1.5). Equivalent to the SQL compliance_scores view —
  * used for the live in-form preview before the persisted view reloads. Unanswered

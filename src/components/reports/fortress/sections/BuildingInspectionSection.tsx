@@ -16,7 +16,7 @@ const ACTIONS = [
 ];
 
 export default function BuildingInspectionSection({ reportId, buildingId, readOnly }: SectionProps) {
-  const { items, responses, isLoading, setResponse } = useInspectionSection(reportId, buildingId, 'monthly');
+  const { items, responses, isLoading, setResponse } = useInspectionSection(reportId, buildingId, 'monthly', readOnly);
 
   const grouped = useMemo(() => {
     const map = new Map<string, InspectionTemplateItem[]>();

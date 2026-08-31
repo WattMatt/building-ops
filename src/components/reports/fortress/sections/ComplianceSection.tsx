@@ -12,7 +12,7 @@ import type { SectionProps } from './types';
 
 export default function ComplianceSection({ reportId, buildingId, readOnly }: SectionProps) {
   const { items, responses, responseMap, isLoading, setResponse, liveBuildingPct, answered, scoredTotal } =
-    useComplianceSection(reportId, buildingId);
+    useComplianceSection(reportId, buildingId, readOnly);
 
   const grouped = useMemo(() => {
     const map = new Map<string, ComplianceTemplateItem[]>();

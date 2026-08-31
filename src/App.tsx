@@ -26,6 +26,7 @@ import NewIssue from "./pages/NewIssue";
 import MapView from "./pages/MapView";
 import Reports from "./pages/Reports";
 import FortressReportEditor from "./components/reports/fortress/FortressReportEditor";
+import FortressReports from "./pages/FortressReports";
 import FormsLibrary from "./pages/FormsLibrary";
 import MySignoffs from "./pages/MySignoffs";
 import UserManagement from "./pages/UserManagement";
@@ -101,6 +102,12 @@ const App = () => (
             <Route path="/reports" element={
               <ProtectedRoute allowedRoles={['admin', 'manager']}>
                 <DashboardLayout><Reports /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            {/* Static path first so it is never captured by the :id route below. */}
+            <Route path="/reports/fortress" element={
+              <ProtectedRoute>
+                <DashboardLayout><FortressReports /></DashboardLayout>
               </ProtectedRoute>
             } />
             <Route path="/reports/fortress/:id" element={

@@ -40,6 +40,7 @@ import {
   ChevronDown,
   MapPin,
   BarChart3,
+  FileText,
   FileSpreadsheet,
   PenLine,
   User,
@@ -88,6 +89,15 @@ const mainNavItems: NavItem[] = [
 
 const reportsNavItems: NavItem[] = [
   {
+    // The monthly OPS/CM and annual reports themselves. Previously reachable only by
+    // opening a building and finding its Reports tab, which meant no way to see a month
+    // across the portfolio at all.
+    title: 'Building Reports',
+    href: '/reports/fortress',
+    icon: <FileText className="w-4 h-4" />,
+  },
+  {
+    // Note: a different thing — H&S scoring and PDF evidence packs, not the reports above.
     title: 'Compliance Reports',
     href: '/reports',
     icon: <BarChart3 className="w-4 h-4" />,
