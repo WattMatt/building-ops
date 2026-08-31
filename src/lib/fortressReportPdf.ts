@@ -195,7 +195,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     // exported — a CM PDF was a cover page. Tenants are resolved with a second query
     // rather than an embedded select so this does not depend on FK relationship naming.
     const tenants = (await fdb.from('building_tenants')
-      .select('id,shop_number,name').eq('building_id', report.building_id)).data ?? [];
+      .select('id,shop_number,name,area').eq('building_id', report.building_id)).data ?? [];
     const tenantById = new Map(tenants.map((t) => [t.id, t]));
     const sortByShop = <T extends { shop: string }>(rows: T[]) =>
       rows.sort((a, b) => a.shop.localeCompare(b.shop, undefined, { numeric: true }));
@@ -215,7 +215,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
         return {
           shop: t?.shop_number ?? '',
           tenant: t?.name ?? '',
-          gla: null as number | null,
+          gla: t?.area == null ? null : Number(t.area),
           occupancyCert: r.occupancy_cert_no ?? null,
           cocNumber: r.electrical_coc_cert_no ?? null,
           cocDate: r.electrical_coc_date ?? null,
