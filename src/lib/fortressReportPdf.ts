@@ -81,6 +81,20 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+
+/**
+ * Unwrap a PostgREST result, failing loudly.
+ *
+ * Every read here used to be `(await …).data ?? []`, which turns a permissions change, a
+ * renamed column or a transient 5xx into an empty section. The PDF is then DOWNLOADED and
+ * SAVED as a versioned artifact that silently lacks that section — indistinguishable from
+ * a report the centre genuinely left blank. Better to fail the export and say why.
+ */
+function unwrap<T>(res: { data: T | null; error: { message: string } | null }, what: string): T | null {
+  if (res.error) throw new Error(`Could not load ${what} for this report: ${res.error.message}`);
+  return res.data;
+}
+
 export async function generateReportPdf(reportId: string, branding: ReportBranding): Promise<GeneratedFortressPdf> {
   const color = /^#([a-f\d]{6})$/i.test(branding.primaryColor) ? branding.primaryColor : '#2563eb';
   const report = (await fdb.from('reports').select('*').eq('id', reportId).maybeSingle()).data;
@@ -111,11 +125,11 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
         comment: r.comment ?? '',
       }));
     }
-    const rec = (await fdb.from('expense_recoveries').select('service,ytd_expense,ytd_recovery,pct_recovery').eq('report_id', reportId)).data ?? [];
+    const rec = unwrap(await fdb.from('expense_recoveries').select('service,ytd_expense,ytd_recovery,pct_recovery').eq('report_id', reportId), 'expense recoveries') ?? [];
     data.recoveries = rec.map((r) => ({ service: r.service ?? '', ytdExpense: r.ytd_expense, ytdRecovery: r.ytd_recovery, pctRecovery: r.pct_recovery == null ? '—' : `${Math.round(Number(r.pct_recovery) * 10) / 10}%` }));
 
-    const ppm = (await fdb.from('ppm_services').select('service_name,frequency,months,sort_order')
-      .eq('report_id', reportId).order('sort_order', { ascending: true, nullsFirst: false })).data ?? [];
+    const ppm = unwrap(await fdb.from('ppm_services').select('service_name,frequency,months,sort_order')
+      .eq('report_id', reportId).order('sort_order', { ascending: true, nullsFirst: false }), 'the PPM schedule') ?? [];
     data.ppm = ppm.map((p) => ({
       service: p.service_name ?? '',
       frequency: p.frequency ?? null,
@@ -133,9 +147,9 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
         'Service status is recorded in the source workbook as a cell colour with no legend, so no month can be reported as serviced or missed. The schedule itself is shown below.';
     }
 
-    const util = (await fdb.from('utility_readings')
+    const util = unwrap(await fdb.from('utility_readings')
       .select('utility,meter_name,reading,unit,category,pct_of_bulk,comment')
-      .eq('report_id', reportId)).data ?? [];
+      .eq('report_id', reportId), 'utility readings') ?? [];
     data.utilities = util.map((u) => ({
       utility: u.utility ?? null,
       meter: u.meter_name ?? '',
@@ -148,8 +162,8 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       comment: u.comment ?? null,
     }));
 
-    const mf = (await fdb.from('masterfile_items')
-      .select('document_label,on_file,comment').eq('report_id', reportId)).data ?? [];
+    const mf = unwrap(await fdb.from('masterfile_items')
+      .select('document_label,on_file,comment').eq('report_id', reportId), 'the masterfile register') ?? [];
     data.masterfile = mf.map((m) => ({
       document: m.document_label ?? '',
       onFile: m.on_file ?? 'unassessed',
@@ -159,21 +173,23 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
   }
 
   if (report.report_type === ('cm_monthly' as ReportType)) {
-    const turn = (await fdb.from('tenant_turnover').select('tenant_name,annual_trading_density,annual_growth_pct,rank_band').eq('report_id', reportId)).data ?? [];
+    const turn = unwrap(await fdb.from('tenant_turnover').select('tenant_name,annual_trading_density,annual_growth_pct,rank_band').eq('report_id', reportId), 'tenant turnover') ?? [];
     data.turnover = turn.map((t) => ({
       tenant: t.tenant_name ?? '',
       density: String(t.annual_trading_density ?? '—'),
       growth: t.annual_growth_pct != null ? `${Math.round(Number(t.annual_growth_pct) * 1000) / 10}%` : '—',
       band: t.rank_band ?? '',
     }));
-    const inc = (await fdb.from('security_incidents').select('count').eq('report_id', reportId)).data ?? [];
+    const inc = unwrap(await fdb.from('security_incidents').select('count').eq('report_id', reportId), 'security incidents') ?? [];
     data.incidentsTotal = inc.length ? inc.reduce((a, i) => a + (i.count ?? 0), 0) : null;
 
     // Tenant compliance and shop spec are the substance of a CM report and were never
     // exported — a CM PDF was a cover page. Tenants are resolved with a second query
     // rather than an embedded select so this does not depend on FK relationship naming.
-    const tenants = (await fdb.from('building_tenants')
-      .select('id,shop_number,name,area').eq('building_id', report.building_id)).data ?? [];
+    // The most consequential read in the CM branch: a failure here silently blanks the
+    // shop number and tenant name on EVERY row of all six tenant tables.
+    const tenants = unwrap(await fdb.from('building_tenants')
+      .select('id,shop_number,name,area').eq('building_id', report.building_id), 'the tenant register') ?? [];
     const tenantById = new Map(tenants.map((t) => [t.id, t]));
     const sortByShop = <T extends { shop: string }>(rows: T[]) =>
       rows.sort((a, b) => a.shop.localeCompare(b.shop, undefined, { numeric: true }));
@@ -190,7 +206,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     ] as const;
     const tc = (await fdb.from('tenant_compliance')
       .select(TC_COLS.join(','))
-      .eq('report_id', reportId)).data ?? [];
+      .eq('report_id', reportId), 'tenant compliance');
     if (tc.length) {
       type TcRow = Record<(typeof TC_COLS)[number], string | null>;
       data.tenantCompliance = sortByShop((tc as unknown as TcRow[]).map((r) => {
@@ -234,7 +250,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     ] as const;
     const ss = (await fdb.from('tenant_shop_spec')
       .select(SS_COLS.join(','))
-      .eq('building_id', report.building_id).eq('is_current', true)).data ?? [];
+      .eq('building_id', report.building_id).eq('is_current', true), 'shop specifications');
     if (ss.length) {
       type SsRow = Record<(typeof SS_COLS)[number], string | null>;
       data.shopSpec = sortByShop((ss as unknown as SsRow[]).map((r) => {
@@ -260,12 +276,12 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
   if (report.report_type === ('annual_inspection' as ReportType)) {
     const insp = (await fdb.from('building_inspections').select('id,template_id').eq('report_id', reportId).maybeSingle()).data;
     if (insp?.template_id) {
-      const items = (await fdb.from('inspection_template_items')
+      const items = unwrap(await fdb.from('inspection_template_items')
         .select('id,section_no,section_title,item_label,sort_order,field_set')
-        .eq('template_id', insp.template_id).order('sort_order')).data ?? [];
-      const resps = (await fdb.from('inspection_responses')
+        .eq('template_id', insp.template_id).order('sort_order'), 'the inspection template') ?? [];
+      const resps = unwrap(await fdb.from('inspection_responses')
         .select('template_item_id,condition_rating,recommendation,comment,capex_estimate,applicable,photo_urls,detail')
-        .eq('inspection_id', insp.id)).data ?? [];
+        .eq('inspection_id', insp.id), 'inspection responses') ?? [];
       const byItem = new Map(resps.map((r) => [r.template_item_id, r]));
 
       let embedded = 0;
@@ -319,7 +335,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       data.annualFlagged = flagged;
       data.annualCapexTotal = capexTotal || null;
     }
-    const capex = (await fdb.from('capex_items').select('description,estimate').eq('report_id', reportId)).data ?? [];
+    const capex = unwrap(await fdb.from('capex_items').select('description,estimate').eq('report_id', reportId), 'the capex register') ?? [];
     data.capex = capex.map((c: any) => ({ description: c.description ?? '', estimate: c.estimate ?? null }));
 
     try {
@@ -335,11 +351,11 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
   }
 
   // Building-inspection and OHS-act answers, grouped by the sheet section they came from.
-  const chk = (await fdb.from('report_checklist_items')
+  const chk = unwrap(await fdb.from('report_checklist_items')
     .select('section_key,item_key,response,value_text,value_date,comment,sort_order')
     .eq('report_id', reportId)
     .order('section_key', { ascending: true })
-    .order('sort_order', { ascending: true, nullsFirst: false })).data ?? [];
+    .order('sort_order', { ascending: true, nullsFirst: false }), 'the checklist') ?? [];
   const CHECKLIST_LABEL: Record<string, string> = {
     building_inspection: 'Building Inspection',
     ohs: 'OHS Act Report',
@@ -375,10 +391,10 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
 
   // Section narratives (all report types) — fetched generically so any section_key
   // renders (building_overview, loadshedding, maintenance_project, security_incidents, …).
-  const narr = (await fdb.from('report_narratives')
+  const narr = unwrap(await fdb.from('report_narratives')
     .select('section_key,heading,body,status_flag,sort_order')
     .eq('report_id', reportId)
-    .order('sort_order', { ascending: true, nullsFirst: false })).data ?? [];
+    .order('sort_order', { ascending: true, nullsFirst: false }), 'the narratives') ?? [];
   const narrKeys = new Set(narr.filter((n) => (n.body ?? '').trim() !== '').map((n) => n.section_key));
   data.narratives = narr
     .filter((n) => (n.body ?? '').trim() !== '')
