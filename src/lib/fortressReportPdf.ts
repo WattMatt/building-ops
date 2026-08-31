@@ -112,7 +112,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       }));
     }
     const rec = (await fdb.from('expense_recoveries').select('service,ytd_expense,ytd_recovery,pct_recovery').eq('report_id', reportId)).data ?? [];
-    data.recoveries = rec.map((r) => ({ service: r.service ?? '', ytdExpense: r.ytd_expense, ytdRecovery: r.ytd_recovery, pctRecovery: `${r.pct_recovery ?? '—'}%` }));
+    data.recoveries = rec.map((r) => ({ service: r.service ?? '', ytdExpense: r.ytd_expense, ytdRecovery: r.ytd_recovery, pctRecovery: r.pct_recovery == null ? '—' : `${Math.round(Number(r.pct_recovery) * 10) / 10}%` }));
 
     const ppm = (await fdb.from('ppm_services').select('service_name,frequency,months,sort_order')
       .eq('report_id', reportId).order('sort_order', { ascending: true, nullsFirst: false })).data ?? [];
@@ -156,44 +156,6 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       comment: m.comment ?? null,
     }));
 
-    // Building-inspection and OHS-act answers, grouped by the sheet section they came from.
-    const chk = (await fdb.from('report_checklist_items')
-      .select('section_key,item_key,response,value_text,comment,sort_order')
-      .eq('report_id', reportId)
-      .order('section_key', { ascending: true })
-      .order('sort_order', { ascending: true, nullsFirst: false })).data ?? [];
-    const CHECKLIST_LABEL: Record<string, string> = {
-      building_inspection: 'Building Inspection',
-      ohs: 'OHS Act Report',
-      general: 'General',
-    };
-    // OHS answers are keyed by clause number. The source sheet writes them with commas
-    // ("2,6,2") while the OHS template numbers them with dots ("2.6.2"), so without this
-    // normalisation the section prints ~57 rows of bare codes and no question text —
-    // unreadable, and indistinguishable from a fault. 55 of 60 numeric codes resolve.
-    const promptByNo = new Map<string, string>();
-    try {
-      const tplItems = (await fdb.from('compliance_template_items').select('item_no,prompt')).data ?? [];
-      for (const t of tplItems) if (t.item_no) promptByNo.set(String(t.item_no), t.prompt ?? '');
-    } catch { /* prompts are an enrichment; the codes still print without them */ }
-    const resolveItem = (key: string): string => {
-      const prompt = promptByNo.get(key.replace(/,/g, '.'));
-      return prompt ? `${key.replace(/,/g, '.')} — ${prompt}` : key;
-    };
-
-    const grouped = new Map<string, { item: string; response: string | null; value: string | null; comment: string | null }[]>();
-    for (const c of chk) {
-      const label = CHECKLIST_LABEL[c.section_key ?? ''] ?? (c.section_key ?? 'Other');
-      const arr = grouped.get(label) ?? [];
-      arr.push({
-        item: resolveItem(c.item_key ?? ''),
-        response: c.response ?? null,
-        value: c.value_text ?? null,
-        comment: c.comment ?? null,
-      });
-      grouped.set(label, arr);
-    }
-    data.checklist = [...grouped.entries()].map(([sectionName, items]) => ({ section: sectionName, items }));
   }
 
   if (report.report_type === ('cm_monthly' as ReportType)) {
@@ -343,12 +305,52 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     } catch { /* electrical compliance is best-effort; never block the PDF */ }
   }
 
+  // Building-inspection and OHS-act answers, grouped by the sheet section they came from.
+  const chk = (await fdb.from('report_checklist_items')
+    .select('section_key,item_key,response,value_text,comment,sort_order')
+    .eq('report_id', reportId)
+    .order('section_key', { ascending: true })
+    .order('sort_order', { ascending: true, nullsFirst: false })).data ?? [];
+  const CHECKLIST_LABEL: Record<string, string> = {
+    building_inspection: 'Building Inspection',
+    ohs: 'OHS Act Report',
+    general: 'General',
+  };
+  // OHS answers are keyed by clause number. The source sheet writes them with commas
+  // ("2,6,2") while the OHS template numbers them with dots ("2.6.2"), so without this
+  // normalisation the section prints ~57 rows of bare codes and no question text —
+  // unreadable, and indistinguishable from a fault. 55 of 60 numeric codes resolve.
+  const promptByNo = new Map<string, string>();
+  try {
+    const tplItems = (await fdb.from('compliance_template_items').select('item_no,prompt')).data ?? [];
+    for (const t of tplItems) if (t.item_no) promptByNo.set(String(t.item_no), t.prompt ?? '');
+  } catch { /* prompts are an enrichment; the codes still print without them */ }
+  const resolveItem = (key: string): string => {
+    const prompt = promptByNo.get(key.replace(/,/g, '.'));
+    return prompt ? `${key.replace(/,/g, '.')} — ${prompt}` : key;
+  };
+
+  const grouped = new Map<string, { item: string; response: string | null; value: string | null; comment: string | null }[]>();
+  for (const c of chk) {
+    const label = CHECKLIST_LABEL[c.section_key ?? ''] ?? (c.section_key ?? 'Other');
+    const arr = grouped.get(label) ?? [];
+    arr.push({
+      item: resolveItem(c.item_key ?? ''),
+      response: c.response ?? null,
+      value: c.value_text ?? null,
+      comment: c.comment ?? null,
+    });
+    grouped.set(label, arr);
+  }
+  data.checklist = [...grouped.entries()].map(([sectionName, items]) => ({ section: sectionName, items }));
+
   // Section narratives (all report types) — fetched generically so any section_key
   // renders (building_overview, loadshedding, maintenance_project, security_incidents, …).
   const narr = (await fdb.from('report_narratives')
-    .select('heading,body,status_flag,sort_order')
+    .select('section_key,heading,body,status_flag,sort_order')
     .eq('report_id', reportId)
     .order('sort_order', { ascending: true, nullsFirst: false })).data ?? [];
+  const narrKeys = new Set(narr.filter((n) => (n.body ?? '').trim() !== '').map((n) => n.section_key));
   data.narratives = narr
     .filter((n) => (n.body ?? '').trim() !== '')
     .map((n) => ({ heading: n.heading ?? '', body: n.body ?? '', statusFlag: n.status_flag ?? null }));
@@ -378,7 +380,9 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
 
     // Sections with no in-memory data are COUNTED rather than assumed empty: hardcoding
     // them false makes the "not captured" list state things that were never checked.
-    const countRows = async (tbl: string): Promise<number> => {
+    // null = could not be determined. Returning 0 on error would print
+    // "carries no entries for this period" for a section we simply failed to read.
+    const countRows = async (tbl: string): Promise<number | null> => {
       try {
         const c = fdb as unknown as {
           from(t: string): { select(c: 'id', o: { count: 'exact'; head: true }): {
@@ -386,7 +390,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
         };
         const { count } = await c.from(tbl).select('id', { count: 'exact', head: true }).eq('report_id', reportId);
         return count ?? 0;
-      } catch { return 0; }
+      } catch { return null; }
     };
     const [nCatTurn, nFootfall, nVacancies, nArrears, nLoadshed, nChecklistRows, nBuildingTurn] = await Promise.all([
       countRows('category_turnover'), countRows('footfall_counts'), countRows('vacancies'),
@@ -396,7 +400,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
 
     const filled: Record<string, boolean> = {
       operational_overview: !!data.narratives?.length,
-      report_checklist: nChecklistRows > 0,
+      report_checklist: nChecklistRows !== 0,
       ohs_compliance: !!(data.compliance?.length || data.compliancePct != null || hasOhsAnswers),
       hazard_log: hazardCount > 0,
       building_inspection: hasInspection,
@@ -404,19 +408,19 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       utilities: !!data.utilities?.length,
       ppm: !!data.ppm?.length,
       masterfile: !!data.masterfile?.length,
-      building_overview: !!data.narratives?.length,
-      local_resources: !!data.narratives?.length,
-      building_turnover: nBuildingTurn > 0,
+      building_overview: narrKeys.has('building_overview'),
+      local_resources: narrKeys.has('local_resources'),
+      building_turnover: nBuildingTurn !== 0,
       turnover: !!data.turnover?.length,
-      category_turnover: nCatTurn > 0,
-      footfall_toilet: nFootfall > 0,
-      leasing: nVacancies > 0,
-      trading_arrears: nArrears > 0,
-      utility_management: nLoadshed > 0,
+      category_turnover: nCatTurn !== 0,
+      footfall_toilet: nFootfall !== 0,
+      leasing: nVacancies !== 0,
+      trading_arrears: nArrears !== 0,
+      utility_management: nLoadshed !== 0,
       tenant_compliance: !!data.tenantCompliance?.length,
       shop_spec: !!data.shopSpec?.length,
       security_incidents: data.incidentsTotal != null,
-      building_profile: !!data.narratives?.length,
+      building_profile: narrKeys.has('building_profile'),
       condition_inspection: !!data.annualSections?.length,
       capex: !!data.capex?.length,
       electrical_compliance: !!data.electricalCompliance?.length,
