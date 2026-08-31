@@ -30,7 +30,7 @@ export default function FortressReportEditor() {
   const navigate = useNavigate();
   const { user, role, isAdminOrManager } = useAuth();
   const isReviewer = role === 'reviewer';
-  const { organization } = useOrganization();
+  const { organization, loading: orgLoading } = useOrganization();
   const { data: report, isLoading } = useFortressReport(id);
   const lifecycle = useReportLifecycle(id!);
   const qc = useQueryClient();
@@ -88,7 +88,15 @@ export default function FortressReportEditor() {
           toast.warning('Report PDF downloaded, but could not be saved to Saved Reports.');
         }
       } else {
-        toast.success('Report PDF downloaded.');
+        // Persistence needs the org (for the version chain) and the user (RLS requires
+        // generated_by = auth.uid()). Saying only "downloaded" here would let a silent
+        // skip read as a complete success, so name what did not happen.
+        if (import.meta.env.DEV) console.warn('Artifact not saved:', { orgLoading, hasOrg: !!organization?.id, hasUser: !!user });
+        toast.warning(
+          orgLoading
+            ? 'Report PDF downloaded. It was not saved to Saved Reports because the organisation was still loading — try again in a moment.'
+            : 'Report PDF downloaded, but it was not saved to Saved Reports.',
+        );
       }
     } catch (e) {
       if (import.meta.env.DEV) console.error('PDF export failed:', e);

@@ -142,7 +142,9 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       reading: u.reading == null ? null : Number(u.reading),
       unit: u.unit ?? null,
       category: u.category ?? null,
-      pctOfBulk: u.pct_of_bulk == null ? null : Number(u.pct_of_bulk),
+      // numeric comes back as a string from PostgREST; round so a repeating decimal
+      // does not print as "0.8638239339752407%".
+      pctOfBulk: u.pct_of_bulk == null ? null : Math.round(Number(u.pct_of_bulk) * 10) / 10,
       comment: u.comment ?? null,
     }));
 
@@ -165,12 +167,26 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       ohs: 'OHS Act Report',
       general: 'General',
     };
+    // OHS answers are keyed by clause number. The source sheet writes them with commas
+    // ("2,6,2") while the OHS template numbers them with dots ("2.6.2"), so without this
+    // normalisation the section prints ~57 rows of bare codes and no question text —
+    // unreadable, and indistinguishable from a fault. 55 of 60 numeric codes resolve.
+    const promptByNo = new Map<string, string>();
+    try {
+      const tplItems = (await fdb.from('compliance_template_items').select('item_no,prompt')).data ?? [];
+      for (const t of tplItems) if (t.item_no) promptByNo.set(String(t.item_no), t.prompt ?? '');
+    } catch { /* prompts are an enrichment; the codes still print without them */ }
+    const resolveItem = (key: string): string => {
+      const prompt = promptByNo.get(key.replace(/,/g, '.'));
+      return prompt ? `${key.replace(/,/g, '.')} — ${prompt}` : key;
+    };
+
     const grouped = new Map<string, { item: string; response: string | null; value: string | null; comment: string | null }[]>();
     for (const c of chk) {
       const label = CHECKLIST_LABEL[c.section_key ?? ''] ?? (c.section_key ?? 'Other');
       const arr = grouped.get(label) ?? [];
       arr.push({
-        item: c.item_key ?? '',
+        item: resolveItem(c.item_key ?? ''),
         response: c.response ?? null,
         value: c.value_text ?? null,
         comment: c.comment ?? null,
@@ -360,9 +376,27 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       }
     } catch { /* a missing hazard table must not block the export */ }
 
+    // Sections with no in-memory data are COUNTED rather than assumed empty: hardcoding
+    // them false makes the "not captured" list state things that were never checked.
+    const countRows = async (tbl: string): Promise<number> => {
+      try {
+        const c = fdb as unknown as {
+          from(t: string): { select(c: 'id', o: { count: 'exact'; head: true }): {
+            eq(col: string, v: string): PromiseLike<{ count: number | null }> } };
+        };
+        const { count } = await c.from(tbl).select('id', { count: 'exact', head: true }).eq('report_id', reportId);
+        return count ?? 0;
+      } catch { return 0; }
+    };
+    const [nCatTurn, nFootfall, nVacancies, nArrears, nLoadshed, nChecklistRows, nBuildingTurn] = await Promise.all([
+      countRows('category_turnover'), countRows('footfall_counts'), countRows('vacancies'),
+      countRows('tenant_arrears'), countRows('loadshedding_log'), countRows('report_checklist_items'),
+      countRows('building_turnover'),
+    ]);
+
     const filled: Record<string, boolean> = {
       operational_overview: !!data.narratives?.length,
-      report_checklist: !!data.checklist?.length,
+      report_checklist: nChecklistRows > 0,
       ohs_compliance: !!(data.compliance?.length || data.compliancePct != null || hasOhsAnswers),
       hazard_log: hazardCount > 0,
       building_inspection: hasInspection,
@@ -372,13 +406,13 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       masterfile: !!data.masterfile?.length,
       building_overview: !!data.narratives?.length,
       local_resources: !!data.narratives?.length,
-      building_turnover: !!data.turnover?.length,
+      building_turnover: nBuildingTurn > 0,
       turnover: !!data.turnover?.length,
-      category_turnover: false,
-      footfall_toilet: false,
-      leasing: false,
-      trading_arrears: false,
-      utility_management: false,
+      category_turnover: nCatTurn > 0,
+      footfall_toilet: nFootfall > 0,
+      leasing: nVacancies > 0,
+      trading_arrears: nArrears > 0,
+      utility_management: nLoadshed > 0,
       tenant_compliance: !!data.tenantCompliance?.length,
       shop_spec: !!data.shopSpec?.length,
       security_incidents: data.incidentsTotal != null,

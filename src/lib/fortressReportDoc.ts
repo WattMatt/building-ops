@@ -142,7 +142,7 @@ export function buildReportDoc(
     if (data.utilities && data.utilities.length) {
       section('Utilities');
       note('Readings are as recorded on the meter. Percentages are recomputed from the raw readings.');
-      content.push(table(['Meter', 'Utility', 'Reading', 'Unit', 'Category', '% of bulk', 'Comment'],
+      content.push(compactTable(['Meter', 'Utility', 'Reading', 'Unit', 'Category', '% of bulk', 'Comment'],
         data.utilities.map((u) => [
           u.meter,
           u.utility ?? '—',
@@ -152,7 +152,7 @@ export function buildReportDoc(
           u.pctOfBulk == null ? '' : `${u.pctOfBulk}%`,
           u.comment ?? '',
         ]),
-        ['*', 'auto', 'auto', 'auto', 'auto', 'auto', '*']));
+        ['*', 42, 44, 26, 54, 38, '*']));
     }
 
     if (data.recoveries && data.recoveries.length) {
@@ -193,24 +193,25 @@ export function buildReportDoc(
     }
     if (data.tenantCompliance && data.tenantCompliance.length) {
       section('Tenant OHS & Housekeeping');
-      content.push(table(
-        ['Shop', 'Tenant', 'GLA', 'Occup. cert', 'COC #', 'COC date', 'HVAC recs', 'Sprinkler', 'Smoke det.', 'Evac plan'],
+      // 324pt of fixed columns + 40pt gutters leaves ~151pt for the tenant name.
+      content.push(compactTable(
+        ['Shop', 'Tenant', 'GLA', 'Occup.', 'COC no.', 'COC date', 'HVAC', 'Sprnk', 'Smoke', 'Evac'],
         data.tenantCompliance.map((t) => [
           t.shop, t.tenant, t.gla == null ? '' : String(t.gla),
           t.occupancyCert ?? '', t.cocNumber ?? '', t.cocDate ?? '',
           t.hvacRecords ?? '', t.sprinkler ?? '', t.smokeDetection ?? '', t.evacPlan ?? '',
         ]),
-        ['auto', '*', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto']));
+        [34, '*', 26, 46, 54, 44, 30, 30, 30, 30]));
     }
     if (data.shopSpec && data.shopSpec.length) {
       section('Shop Specification');
-      content.push(table(
-        ['Shop', 'Tenant', 'Phase', 'Amps', 'Generator', 'HVAC', 'Lighting'],
+      content.push(compactTable(
+        ['Shop', 'Tenant', 'Phase', 'Amps', 'Gen.', 'HVAC', 'Lighting'],
         data.shopSpec.map((s) => [
           s.shop, s.tenant, s.phase ?? '', s.actualAmps ?? '',
           s.generator ?? '', s.hvac ?? '', s.lighting ?? '',
         ]),
-        ['auto', '*', 'auto', 'auto', 'auto', '*', '*']));
+        [34, 92, 46, 34, 28, '*', '*']));
     }
     if (data.incidentsTotal != null) {
       section('Security Incidents');
@@ -266,7 +267,7 @@ export function buildReportDoc(
       content.push({
         table: {
           headerRows: 1,
-          widths: ['auto', '*', 'auto', 'auto', 'auto', 'auto', 'auto', '*'],
+          widths: [34, '*', 56, 40, 40, 44, 44, '*'],
           body: [
             ['Shop', 'Tenant', 'COC #', 'Type', 'Status', 'Issued', 'Expires', 'Certificate'].map((h) => ({ text: h, bold: true, fontSize: 8, fillColor: '#f3f4f6' })),
             ...data.electricalCompliance.map((r) => [
@@ -365,6 +366,47 @@ function table(headers: string[], rows: string[][], widths: (string | number)[])
       ],
     },
     layout: 'lightHorizontalLines',
+    margin: [0, 4, 0, 12],
+  };
+}
+
+/**
+ * A table for many narrow columns.
+ *
+ * pdfmake will not shrink an `auto` column below its natural width: once the columns plus
+ * their gutters exceed the 515pt text block, it draws the overflow off the right edge of
+ * the paper rather than wrapping. The ten-column tenant matrix did exactly that. So wide
+ * tables get EXPLICIT widths that are known to sum inside the block, a smaller font, and
+ * tighter horizontal padding (pdfmake's default is 4pt each side — 80pt of pure gutter
+ * across ten columns).
+ */
+const USABLE_WIDTH = 515;
+function compactTable(headers: string[], rows: string[][], widths: (string | number)[]): Content {
+  const fixed = widths.reduce<number>((a, w) => a + (typeof w === 'number' ? w : 0), 0);
+  const gutters = widths.length * 4; // 2pt each side, per the layout below
+  if (fixed + gutters > USABLE_WIDTH && import.meta.env?.DEV) {
+    // Loud in dev rather than silently clipped in a client's PDF.
+    console.warn(`compactTable: fixed widths ${fixed}pt + ${gutters}pt gutters exceed ${USABLE_WIDTH}pt`);
+  }
+  return {
+    table: {
+      headerRows: 1,
+      widths,
+      body: [
+        headers.map((h) => ({ text: h, bold: true, fontSize: 6.5, fillColor: '#f3f4f6' })),
+        ...rows.map((r) => r.map((c) => ({ text: String(c ?? ''), fontSize: 6.5 }))),
+      ],
+    },
+    layout: {
+      ...({} as object),
+      paddingLeft: () => 2,
+      paddingRight: () => 2,
+      paddingTop: () => 2,
+      paddingBottom: () => 2,
+      hLineWidth: (i: number) => (i === 1 ? 1 : 0.5),
+      vLineWidth: () => 0,
+      hLineColor: () => '#e5e7eb',
+    },
     margin: [0, 4, 0, 12],
   };
 }
