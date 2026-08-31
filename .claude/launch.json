@@ -4,8 +4,12 @@
     {
       "name": "building-ops-dev",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "port": 8080
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
+      "port": 5177,
+      "autoPort": true
     }
   ]
 }

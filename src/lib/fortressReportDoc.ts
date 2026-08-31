@@ -46,6 +46,18 @@ export interface ReportData {
   // cm
   turnover?: { tenant: string; density: string; growth: string; band: string }[];
   incidentsTotal?: number | null;
+  /** Page 2 / Page 3 blocks. Ingested since the June drop; previously absent from the PDF. */
+  footfall?: { entrance: string; month: string; ytd: string; prevYtd: string; variance: string }[];
+  toiletFund?: { label: string; value: string }[];
+  vacancies?: { shop: string; area: string; budgetRelet: string; grossMandate: string; comment: string }[];
+  waitlist?: { tradingAs: string; contact: string; category: string; size: string; comment: string }[];
+  movements?: { tradingAs: string; type: string; vacateDate: string; prelim: string; takeOn: string; firstTrade: string; comment: string }[];
+  tradingBreaches?: { tenant: string; date: string; time: string; letterTo: string; comment: string }[];
+  arrears?: { tradingAs: string; deposit: string; balance: string; contact: string }[];
+  loadshedding?: { day: string; week: string; stage: string; hours: string; litres: string; dieselDate: string }[];
+  interruptions?: { date: string; type: string; start: string; end: string; hours: string; ref: string; comment: string }[];
+  incidentsByMonth?: { month: string; count: number }[];
+  incidentsByType?: { type: string; count: number }[];
   /**
    * Per-tenant OHS & housekeeping compliance — the substance of a CM report.
    *
@@ -212,6 +224,67 @@ export function buildReportDoc(
         data.turnover.map((t) => [t.tenant, t.density, t.growth, t.band]),
         ['*', 'auto', 'auto', 'auto']));
     }
+    if (data.footfall && data.footfall.length) {
+      section('Head Counts');
+      content.push(compactTable(
+        ['Entrance', 'Month count', 'YTD count', 'Previous YTD', 'Variance'],
+        data.footfall.map((f2) => [f2.entrance, f2.month, f2.ytd, f2.prevYtd, f2.variance]),
+        ['*', 78, 78, 82, 60], ['l', 'r', 'r', 'r', 'r']));
+    }
+    if (data.toiletFund && data.toiletFund.length) {
+      section('Toilet Fund');
+      content.push(compactTable(['Item', 'Value'],
+        data.toiletFund.map((t) => [t.label, t.value]), ['*', 120], ['l', 'r']));
+    }
+    if ((data.vacancies?.length || data.waitlist?.length || data.movements?.length)) {
+      section('Leasing');
+      if (data.vacancies?.length) {
+        note('Vacancies.');
+        content.push(compactTable(['Shop', 'Area (m²)', 'Budget relet R/m²', 'Gross mandate R/m²', 'Comment'],
+          data.vacancies.map((v) => [v.shop, v.area, v.budgetRelet, v.grossMandate, v.comment]),
+          [60, 56, 96, 104, '*'], ['l', 'r', 'r', 'r', 'l']));
+      }
+      if (data.waitlist?.length) {
+        note('Waiting list.');
+        content.push(compactTable(['Trading as', 'Contact', 'Category', 'Optimal size', 'Comment'],
+          data.waitlist.map((w) => [w.tradingAs, w.contact, w.category, w.size, w.comment]),
+          ['*', 92, 82, 66, '*']));
+      }
+      if (data.movements?.length) {
+        note('Tenant movements.');
+        content.push(compactTable(['Tenant', 'Type', 'Vacate / B-O', 'Prelim insp.', 'Take on / back', '1st trade', 'Comment'],
+          data.movements.map((m) => [m.tradingAs, m.type, m.vacateDate, m.prelim, m.takeOn, m.firstTrade, m.comment]),
+          ['*', 50, 60, 58, 66, 54, '*']));
+      }
+    }
+    if (data.tradingBreaches && data.tradingBreaches.length) {
+      section('Tenant Trading Hours');
+      note('Tenants not adhering to centre trading hours.');
+      content.push(compactTable(['Tenant', 'Date', 'Time', 'Letter sent to', 'Comment'],
+        data.tradingBreaches.map((t) => [t.tenant, t.date, t.time, t.letterTo, t.comment]),
+        ['*', 58, 46, 96, '*']));
+    }
+    if (data.arrears && data.arrears.length) {
+      section('Arrears');
+      content.push(compactTable(['Tenant', 'Deposit held', 'Closing balance', 'Contact'],
+        data.arrears.map((a) => [a.tradingAs, a.deposit, a.balance, a.contact]),
+        ['*', 78, 88, 110], ['l', 'r', 'r', 'l']));
+    }
+    if ((data.loadshedding?.length || data.interruptions?.length)) {
+      section('Utility Management');
+      if (data.loadshedding?.length) {
+        note('Loadshedding and diesel.');
+        content.push(compactTable(['Date', 'Week', 'Stage', 'Hours', 'Litres', 'Diesel purchased'],
+          data.loadshedding.map((l) => [l.day, l.week, l.stage, l.hours, l.litres, l.dieselDate]),
+          [66, 34, '*', 44, 46, 88], ['l', 'r', 'l', 'r', 'r', 'l']));
+      }
+      if (data.interruptions?.length) {
+        note('Municipal service interruptions.');
+        content.push(compactTable(['Date', 'Type', 'Start', 'End', 'Hours', 'Council ref', 'Comment'],
+          data.interruptions.map((i) => [i.date, i.type, i.start, i.end, i.hours, i.ref, i.comment]),
+          [62, 82, 42, 42, 38, 62, '*']));
+      }
+    }
     if (data.tenantCompliance && data.tenantCompliance.length) {
       // 29 captured columns cannot fit one A4 table, so they are split along the source
       // sheet's own groups. Splitting beats dropping: the previous single table carried
@@ -268,6 +341,18 @@ export function buildReportDoc(
     if (data.incidentsTotal != null) {
       section('Security Incidents');
       content.push({ text: `Total incidents: ${data.incidentsTotal}`, fontSize: 10, margin: [0, 0, 0, 4] });
+      // The matrix is 12 months x up to 28 types - far too wide for A4 - so it is shown
+      // along each axis instead. A bare total told the reader nothing actionable.
+      if (data.incidentsByMonth?.length) {
+        note('By month.');
+        content.push(compactTable(['Month', 'Incidents'],
+          data.incidentsByMonth.map((m) => [m.month, String(m.count)]), [120, 70], ['l', 'r']));
+      }
+      if (data.incidentsByType?.length) {
+        note('By type (categories with at least one incident).');
+        content.push(compactTable(['Incident type', 'Count'],
+          data.incidentsByType.map((t) => [t.type, String(t.count)]), ['*', 70], ['l', 'r']));
+      }
     }
   }
 

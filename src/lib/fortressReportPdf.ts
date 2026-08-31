@@ -180,8 +180,103 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       growth: t.annual_growth_pct != null ? `${Math.round(Number(t.annual_growth_pct) * 1000) / 10}%` : '—',
       band: t.rank_band ?? '',
     }));
-    const inc = unwrap(await fdb.from('security_incidents').select('count').eq('report_id', reportId), 'security incidents') ?? [];
+    const inc = unwrap(await fdb.from('security_incidents').select('count,period,incident_type').eq('report_id', reportId), 'security incidents') ?? [];
     data.incidentsTotal = inc.length ? inc.reduce((a, i) => a + (i.count ?? 0), 0) : null;
+    if (inc.length) {
+      // The matrix spans the whole financial year, so it is summarised along each axis
+      // rather than printed as a 12 x 28 grid that cannot fit the page.
+      const byMonth = new Map<string, number>();
+      const byType = new Map<string, number>();
+      for (const i of inc) {
+        const n = Number(i.count ?? 0);
+        const p = String(i.period ?? '').slice(0, 7);
+        if (p) byMonth.set(p, (byMonth.get(p) ?? 0) + n);
+        const t = String(i.incident_type ?? '');
+        if (t) byType.set(t, (byType.get(t) ?? 0) + n);
+      }
+      data.incidentsByMonth = [...byMonth.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([month, count]) => ({ month, count }));
+      data.incidentsByType = [...byType.entries()].filter(([, c]) => c > 0).sort((a, b) => b[1] - a[1])
+        .map(([type, count]) => ({ type: type.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()), count }));
+    }
+
+    // Page 2 / Page 3 blocks. These were ingested but had no route into the PDF, so a CM
+    // report printed its tenant tables and silently omitted head counts, leasing, trading
+    // hours, arrears and utilities entirely.
+    const numf = (v: unknown, dp = 0) => (v == null || v === '' ? '' : Number(v).toLocaleString('en-ZA', { minimumFractionDigits: dp, maximumFractionDigits: dp }));
+    const ff = unwrap(await fdb.from('footfall_counts')
+      .select('entrance,month_count,ytd_count,prev_ytd,variance_pct').eq('report_id', reportId), 'head counts') ?? [];
+    data.footfall = ff.map((f2) => ({
+      entrance: f2.entrance ?? '', month: numf(f2.month_count), ytd: numf(f2.ytd_count),
+      prevYtd: numf(f2.prev_ytd), variance: f2.variance_pct == null ? '' : `${Math.round(Number(f2.variance_pct) * 100) / 100}%`,
+    }));
+
+    const tf = unwrap(await fdb.from('toilet_fund')
+      .select('issued_bales,stock_on_hand_bales,actual_banked,budget,variance,profit_per_roll')
+      .eq('report_id', reportId), 'the toilet fund') ?? [];
+    if (tf.length) {
+      const t = tf[0];
+      data.toiletFund = ([
+        ['Issued (bales)', numf(t.issued_bales)], ['Stock on hand (bales)', numf(t.stock_on_hand_bales)],
+        ['Actual banked', numf(t.actual_banked, 2)], ['Budget', numf(t.budget, 2)],
+        ['Variance', numf(t.variance, 2)], ['Profit per roll', numf(t.profit_per_roll, 2)],
+      ] as [string, string][]).filter(([, v]) => v !== '').map(([label, value]) => ({ label, value }));
+    }
+
+    const vac = unwrap(await fdb.from('vacancies')
+      .select('shop_no,area,budget_relet_rpm,gross_mandate_rpm,comment').eq('report_id', reportId), 'vacancies') ?? [];
+    data.vacancies = vac.map((v) => ({
+      shop: v.shop_no ?? '', area: numf(v.area, 2), budgetRelet: numf(v.budget_relet_rpm, 2),
+      grossMandate: numf(v.gross_mandate_rpm, 2), comment: v.comment ?? '',
+    }));
+
+    const wl = unwrap(await fdb.from('leasing_waitlist')
+      .select('trading_as,contact,category,optimal_size,comment').eq('report_id', reportId), 'the waiting list') ?? [];
+    data.waitlist = wl.map((w) => ({
+      tradingAs: w.trading_as ?? '', contact: w.contact ?? '', category: w.category ?? '',
+      size: w.optimal_size ?? '', comment: w.comment ?? '',
+    }));
+
+    const mv = unwrap(await fdb.from('tenant_movements')
+      .select('trading_as,movement_type,vacate_or_bo_date,prelim_inspection_date,take_on_back_date,first_trade_date,comment')
+      .eq('report_id', reportId), 'tenant movements') ?? [];
+    data.movements = mv.map((m) => ({
+      tradingAs: m.trading_as ?? '', type: (m.movement_type ?? '').replace(/_/g, ' '),
+      vacateDate: m.vacate_or_bo_date ?? '', prelim: m.prelim_inspection_date ?? '',
+      takeOn: m.take_on_back_date ?? '', firstTrade: m.first_trade_date ?? '', comment: m.comment ?? '',
+    }));
+
+    const th = unwrap(await fdb.from('trading_hour_breaches')
+      .select('tenant_name,date,time,letter_sent_to,comment').eq('report_id', reportId), 'trading-hour breaches') ?? [];
+    data.tradingBreaches = th.map((t) => ({
+      tenant: t.tenant_name ?? '', date: t.date ?? '', time: (t.time ?? '').slice(0, 5),
+      letterTo: t.letter_sent_to ?? '', comment: t.comment ?? '',
+    }));
+
+    const ar = unwrap(await fdb.from('tenant_arrears')
+      .select('trading_as,deposit_held,closing_balance,contact').eq('report_id', reportId), 'arrears') ?? [];
+    data.arrears = ar.map((a) => ({
+      tradingAs: a.trading_as ?? '', deposit: numf(a.deposit_held, 2),
+      balance: numf(a.closing_balance, 2), contact: a.contact ?? '',
+    }));
+
+    const ls = unwrap(await fdb.from('loadshedding_log')
+      .select('day,week_no,stage,hours,diesel_litres,diesel_date').eq('report_id', reportId), 'the loadshedding log') ?? [];
+    data.loadshedding = ls.map((l) => ({
+      day: l.day ?? '', week: l.week_no == null ? '' : String(l.week_no), stage: l.stage ?? '',
+      hours: l.hours == null ? '' : String(Math.round(Number(l.hours) * 100) / 100),
+      litres: numf(l.diesel_litres), dieselDate: l.diesel_date ?? '',
+    }));
+
+    const si = unwrap(await fdb.from('service_interruptions')
+      .select('date,interruption_type,start_time,end_time,total_hours,council_ref,comment')
+      .eq('report_id', reportId), 'service interruptions') ?? [];
+    data.interruptions = si.map((i) => ({
+      date: i.date ?? '', type: i.interruption_type ?? '', start: (i.start_time ?? '').slice(0, 5),
+      end: (i.end_time ?? '').slice(0, 5),
+      hours: i.total_hours == null ? '' : String(Math.round(Number(i.total_hours) * 100) / 100),
+      ref: i.council_ref ?? '', comment: i.comment ?? '',
+    }));
 
     // Tenant compliance and shop spec are the substance of a CM report and were never
     // exported — a CM PDF was a cover page. Tenants are resolved with a second query
@@ -341,8 +436,15 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
         data.annualCapexTotal = capexTotal || null;
       }
     }
-    const capex = unwrap(await fdb.from('capex_items').select('description,estimate').eq('report_id', reportId), 'the capex register') ?? [];
-    data.capex = capex.map((c: any) => ({ description: c.description ?? '', estimate: c.estimate ?? null }));
+    // The column is `item`, not `description` - selecting a column that does not exist
+    // makes PostgREST reject the whole request, so the Capex Register would have failed
+    // for any report that actually had capex rows. It reads empty today only because the
+    // table is empty. `motivation` is the item's justification and prints beside it.
+    const capex = unwrap(await fdb.from('capex_items').select('item,motivation,estimate').eq('report_id', reportId), 'the capex register') ?? [];
+    data.capex = capex.map((c: any) => ({
+      description: [c.item, c.motivation].filter(Boolean).join(' — ') || '',
+      estimate: c.estimate ?? null,
+    }));
 
     try {
       const elec = await fetchReportElectricalCompliance(report.building_id);

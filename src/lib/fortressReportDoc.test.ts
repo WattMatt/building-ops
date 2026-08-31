@@ -276,3 +276,83 @@ describe('buildReportDoc — export completeness', () => {
     expect(allText(cmDoc({ emptySections: [] }))).not.toContain('Not captured this period');
   });
 });
+
+/*
+ * The Page 2 / Page 3 blocks.
+ *
+ * These were ingested from the June drop and then had no route into the PDF: a CM report
+ * printed its tenant tables and silently omitted head counts, leasing, trading hours,
+ * arrears and utilities. Each assertion below corresponds to one such omission.
+ */
+describe('buildReportDoc — CM Page 2 / Page 3 sections', () => {
+  const full = cmDoc({
+    footfall: [{ entrance: 'BUS RANK', month: '73,832', ytd: '143,870', prevYtd: '141,550', variance: '2%' }],
+    toiletFund: [{ label: 'Issued (bales)', value: '122' }],
+    vacancies: [{ shop: 'Shop 12', area: '250', budgetRelet: '95', grossMandate: '110', comment: 'agent mandated' }],
+    waitlist: [{ tradingAs: 'Sportscene', contact: '082', category: 'Fashion', size: '300m²', comment: '' }],
+    movements: [{ tradingAs: 'KFC', type: 'new', vacateDate: '2025-09-22', prelim: '', takeOn: '', firstTrade: '2025-11-01', comment: '' }],
+    tradingBreaches: [{ tenant: 'Bargain Books', date: '2026-06-04', time: '17:30', letterTo: 'Head office', comment: 'closed early' }],
+    arrears: [{ tradingAs: 'Nizams', deposit: '361,088.52', balance: '100,000.00', contact: '083' }],
+    loadshedding: [{ day: '2026-06-22', week: '4', stage: 'Power failure', hours: '4', litres: '470', dieselDate: '2026-06-22' }],
+    interruptions: [{ date: '2026-06-20', type: 'Power failure', start: '23:00', end: '02:30', hours: '3.5', ref: 'No Ref.', comment: 'main supply' }],
+    incidentsTotal: 33,
+    incidentsByMonth: [{ month: '2025-07', count: 33 }],
+    incidentsByType: [{ type: 'Public indecency', count: 14 }],
+  });
+  const t = allText(full);
+
+  it('prints head counts and the toilet fund', () => {
+    expect(t).toContain('Head Counts');
+    expect(t).toContain('BUS RANK');
+    expect(t).toContain('Toilet Fund');
+    expect(t).toContain('Issued (bales)');
+  });
+
+  it('prints all three leasing blocks under one heading', () => {
+    expect(t).toContain('Leasing');
+    expect(t).toContain('Shop 12');        // vacancies
+    expect(t).toContain('Sportscene');     // waiting list
+    expect(t).toContain('KFC');            // movements
+  });
+
+  it('prints trading-hour breaches and arrears', () => {
+    expect(t).toContain('Tenant Trading Hours');
+    expect(t).toContain('Bargain Books');
+    expect(t).toContain('Arrears');
+    expect(t).toContain('Nizams');
+  });
+
+  it('prints loadshedding and municipal interruptions', () => {
+    expect(t).toContain('Utility Management');
+    expect(t).toContain('Power failure');
+    expect(t).toContain('No Ref.');
+  });
+
+  it('breaks the incident matrix down by month and by type, not just a total', () => {
+    expect(t).toContain('Total incidents: 33');
+    expect(t).toContain('2025-07');
+    expect(t).toContain('Public indecency');
+  });
+
+  it('omits every block that carries no rows, rather than printing empty tables', () => {
+    const bare = allText(cmDoc({ turnover: [] }));
+    for (const heading of ['Head Counts', 'Toilet Fund', 'Tenant Trading Hours', 'Arrears', 'Utility Management'])
+      expect(bare).not.toContain(heading);
+  });
+
+  it('keeps every new table inside the 515pt text block', () => {
+    const over: string[] = [];
+    const visit = (n: any): void => {
+      if (n == null) return;
+      if (Array.isArray(n)) { n.forEach(visit); return; }
+      if (typeof n !== 'object') return;
+      if (n.table?.widths) {
+        const fixed = n.table.widths.reduce((a: number, w: any) => a + (typeof w === 'number' ? w : 0), 0);
+        if (fixed + n.table.widths.length * 4 > 515) over.push(`${n.table.widths.length} cols / ${fixed}pt`);
+      }
+      Object.values(n).forEach(visit);
+    };
+    visit(full.content);
+    expect(over).toEqual([]);
+  });
+});
