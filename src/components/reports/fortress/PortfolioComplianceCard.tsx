@@ -22,7 +22,7 @@ function PctBadge({ value, threshold }: { value: number | null; threshold: typeo
 }
 
 export function PortfolioComplianceCard() {
-  const { rows, portfolioAvg, reportedCount, total, isLoading } = usePortfolioCompliance();
+  const { rows, portfolioAvg, reportedCount, scoredCount, total, isLoading } = usePortfolioCompliance();
 
   if (isLoading) {
     return (
@@ -41,7 +41,8 @@ export function PortfolioComplianceCard() {
       <CardHeader>
         <CardTitle>Portfolio OHS Compliance</CardTitle>
         <CardDescription>
-          Latest approved monthly OPS compliance score per building.
+          Latest filed monthly OPS report per building. A score needs a completed OHS
+          Act Compliance section, so a filed report can appear here without one.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -51,16 +52,13 @@ export function PortfolioComplianceCard() {
             {portfolioAvg === null ? '—' : `${portfolioAvg}%`}
           </p>
           <p className="text-sm text-muted-foreground">
-            {reportedCount} of {total} buildings reported
+            {reportedCount} of {total} buildings have filed a report
+            {scoredCount !== reportedCount && ` · ${scoredCount} scored`}
           </p>
         </div>
 
         {total === 0 ? (
           <p className="text-sm text-muted-foreground">No buildings available.</p>
-        ) : reportedCount === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No building has an approved monthly OPS report yet.
-          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -103,7 +101,9 @@ export function PortfolioComplianceCard() {
                         </>
                       ) : (
                         <td className="py-2 text-muted-foreground" colSpan={4}>
-                          No approved report
+                          {r.period
+                            ? `Report filed for ${r.period}${r.status ? ` (${r.status})` : ''} — OHS section not completed, so there is no score`
+                            : 'No report filed'}
                         </td>
                       )}
                     </tr>

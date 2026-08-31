@@ -2,13 +2,15 @@
  * Portfolio OHS compliance rollup (audit finding H1, spec KPI O9).
  *
  * One row per building the user can see (RLS scopes the `buildings` query). For each
- * building we read its LATEST APPROVED `ops_monthly` report and pull, straight from the
+ * building we read its LATEST FILED `ops_monthly` report and pull, straight from the
  * Fortress SQL views/tables (never client math that can drift):
  *   - compliancePct      = compliance_scores.compliance_pct for that report
  *   - criticalPct        = compliance_critical_scores.critical_pct for that report's assessment
  *   - openNonCompliances = count of compliance_responses.response='no' for that assessment
  *   - period             = the report's report_period
- * Buildings with no approved ops report → all null / period null (never fabricated).
+ *   - status             = that report's lifecycle status, so a filed-but-unapproved
+ *                          report is distinguishable from no report at all
+ * Buildings with no filed ops report → all null / period null (never fabricated).
  *
  * O9 (portfolioAvg) = mean of the non-null compliancePct values across buildings,
  * rounded to 1dp; null when no building has a score.
@@ -25,12 +27,17 @@ export interface PortfolioComplianceRow {
   criticalPct: number | null;
   openNonCompliances: number | null;
   period: string | null;
+  /** Lifecycle status of the report the figures came from; null when none was found. */
+  status: string | null;
 }
 
 export interface PortfolioCompliance {
   rows: PortfolioComplianceRow[];
   portfolioAvg: number | null;
+  /** Buildings that have FILED an ops report (regardless of whether it is scored). */
   reportedCount: number;
+  /** Buildings that additionally have a compliance SCORE — the average's denominator. */
+  scoredCount: number;
   total: number;
 }
 
@@ -48,15 +55,23 @@ async function buildingRow(buildingId: string, name: string): Promise<PortfolioC
     criticalPct: null,
     openNonCompliances: null,
     period: null,
+    status: null,
   };
 
-  // Latest APPROVED ops_monthly report for this building.
+  // Latest FILED ops_monthly report for this building.
+  //
+  // This used to require status='approved', which made the portfolio look empty whenever
+  // reports had been filed but not yet signed off: a bulk import lands 30+ reports as
+  // 'submitted', and every one of those buildings rendered as "No approved report" — the
+  // same words the card uses for a building that filed nothing at all. A submitted report
+  // has been filed; it just has not been signed off. The row now carries its status so the
+  // card can say which, instead of the reader having to assume.
   const repRes = await fdb
     .from('reports')
-    .select('id,report_period')
+    .select('id,report_period,status')
     .eq('building_id', buildingId)
     .eq('report_type', 'ops_monthly')
-    .eq('status', 'approved')
+    .in('status', ['submitted', 'reviewed', 'approved'])
     .order('report_period', { ascending: false })
     .limit(1);
   const report = repRes.data?.[0];
@@ -88,6 +103,7 @@ async function buildingRow(buildingId: string, name: string): Promise<PortfolioC
     criticalPct,
     openNonCompliances,
     period: (report.report_period as string | null) ?? null,
+    status: (report.status as string | null) ?? null,
   };
 }
 
@@ -113,7 +129,10 @@ export function usePortfolioCompliance() {
       return {
         rows,
         portfolioAvg,
-        reportedCount: scored.length,
+        // "Reported" means a report exists, not that it produced a score. Counting scores
+        // here made the headline read "2 of 47 buildings reported" while 35 had filed.
+        reportedCount: rows.filter((r) => r.period !== null).length,
+        scoredCount: scored.length,
         total: rows.length,
       };
     },
@@ -123,6 +142,7 @@ export function usePortfolioCompliance() {
     rows: query.data?.rows ?? [],
     portfolioAvg: query.data?.portfolioAvg ?? null,
     reportedCount: query.data?.reportedCount ?? 0,
+    scoredCount: query.data?.scoredCount ?? 0,
     total: query.data?.total ?? 0,
     isLoading: query.isLoading,
     isError: query.isError,
