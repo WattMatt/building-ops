@@ -307,7 +307,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
 
   // Building-inspection and OHS-act answers, grouped by the sheet section they came from.
   const chk = (await fdb.from('report_checklist_items')
-    .select('section_key,item_key,response,value_text,comment,sort_order')
+    .select('section_key,item_key,response,value_text,value_date,comment,sort_order')
     .eq('report_id', reportId)
     .order('section_key', { ascending: true })
     .order('sort_order', { ascending: true, nullsFirst: false })).data ?? [];

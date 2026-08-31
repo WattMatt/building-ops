@@ -133,7 +133,7 @@ export function buildReportDoc(
       section('Building Inspection & OHS Act');
       for (const grp of data.checklist) {
         content.push({ text: grp.section, fontSize: 11, bold: true, color, margin: [0, 8, 0, 4] });
-        content.push(table(['Item', 'Answer', 'Action', 'Comment'],
+        content.push(table(['Item', 'Response', 'Detail', 'Comment'],
           grp.items.map((i) => [i.item, i.response ?? '—', i.value ?? '', i.comment ?? '']),
           ['*', 'auto', 'auto', '*']));
       }
@@ -152,14 +152,16 @@ export function buildReportDoc(
           u.pctOfBulk == null ? '' : `${u.pctOfBulk}%`,
           u.comment ?? '',
         ]),
-        ['*', 42, 44, 26, 54, 38, '*']));
+        ['*', 42, 44, 26, 54, 38, '*'],
+        ['l', 'l', 'r', 'l', 'l', 'r', 'l']));
     }
 
     if (data.recoveries && data.recoveries.length) {
       section('Expense Recoveries');
       content.push(table(['Service', 'YTD Expense', 'YTD Recovery', '% Rec'],
         data.recoveries.map((r) => [r.service, formatZAR(r.ytdExpense), formatZAR(r.ytdRecovery), r.pctRecovery]),
-        ['*', 'auto', 'auto', 'auto']));
+        ['*', 'auto', 'auto', 'auto'],
+        ['l', 'r', 'r', 'r']));
     }
 
     if (data.ppm && data.ppm.length) {
@@ -201,7 +203,8 @@ export function buildReportDoc(
           t.occupancyCert ?? '', t.cocNumber ?? '', t.cocDate ?? '',
           t.hvacRecords ?? '', t.sprinkler ?? '', t.smokeDetection ?? '', t.evacPlan ?? '',
         ]),
-        [34, '*', 26, 46, 54, 44, 30, 30, 30, 30]));
+        [34, '*', 26, 46, 54, 44, 30, 30, 30, 30],
+        ['l', 'l', 'r', 'l', 'l', 'l', 'l', 'l', 'l', 'l']));
     }
     if (data.shopSpec && data.shopSpec.length) {
       section('Shop Specification');
@@ -258,7 +261,8 @@ export function buildReportDoc(
       section('Capex Register');
       content.push(table(['Description', 'Estimate'],
         data.capex.map((c) => [c.description, formatZAR(c.estimate)]),
-        ['*', 'auto']));
+        ['*', 'auto'],
+        ['l', 'r']));
     }
 
     if (data.electricalCompliance && data.electricalCompliance.length) {
@@ -355,14 +359,21 @@ function photoRows(photos: EmbeddedPhoto[]): Content[] {
   return rows;
 }
 
-function table(headers: string[], rows: string[][], widths: (string | number)[]): Content {
+/** 'r' right-aligns that column — use it for money, areas, readings and percentages. */
+type Align = ('l' | 'r')[];
+const alignOf = (a: Align | undefined, i: number) => (a?.[i] === 'r' ? 'right' as const : undefined);
+
+function table(headers: string[], rows: string[][], widths: (string | number)[], align?: Align): Content {
   return {
     table: {
       headerRows: 1,
+      // Never split a row across a page break: a wrapped comment cell otherwise leaves its
+      // label stranded at the foot of one page and its value at the head of the next.
+      dontBreakRows: true,
       widths,
       body: [
-        headers.map((h) => ({ text: h, bold: true, fontSize: 8, fillColor: '#f3f4f6' })),
-        ...rows.map((r) => r.map((c) => ({ text: String(c ?? ''), fontSize: 8 }))),
+        headers.map((h, i) => ({ text: h, bold: true, fontSize: 8, fillColor: '#f3f4f6', alignment: alignOf(align, i) })),
+        ...rows.map((r) => r.map((c, i) => ({ text: String(c ?? ''), fontSize: 8, alignment: alignOf(align, i) }))),
       ],
     },
     layout: 'lightHorizontalLines',
@@ -381,7 +392,7 @@ function table(headers: string[], rows: string[][], widths: (string | number)[])
  * across ten columns).
  */
 const USABLE_WIDTH = 515;
-function compactTable(headers: string[], rows: string[][], widths: (string | number)[]): Content {
+function compactTable(headers: string[], rows: string[][], widths: (string | number)[], align?: Align): Content {
   const fixed = widths.reduce<number>((a, w) => a + (typeof w === 'number' ? w : 0), 0);
   const gutters = widths.length * 4; // 2pt each side, per the layout below
   if (fixed + gutters > USABLE_WIDTH && import.meta.env?.DEV) {
@@ -391,10 +402,11 @@ function compactTable(headers: string[], rows: string[][], widths: (string | num
   return {
     table: {
       headerRows: 1,
+      dontBreakRows: true,
       widths,
       body: [
-        headers.map((h) => ({ text: h, bold: true, fontSize: 6.5, fillColor: '#f3f4f6' })),
-        ...rows.map((r) => r.map((c) => ({ text: String(c ?? ''), fontSize: 6.5 }))),
+        headers.map((h, i) => ({ text: h, bold: true, fontSize: 6.5, fillColor: '#f3f4f6', alignment: alignOf(align, i) })),
+        ...rows.map((r) => r.map((c, i) => ({ text: String(c ?? ''), fontSize: 6.5, alignment: alignOf(align, i) }))),
       ],
     },
     layout: {
