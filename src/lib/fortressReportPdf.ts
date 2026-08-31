@@ -331,9 +331,15 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
         });
         sectionMap.set(title, arr);
       }
-      data.annualSections = [...sectionMap.entries()].map(([title, its]) => ({ title, items: its }));
-      data.annualFlagged = flagged;
-      data.annualCapexTotal = capexTotal || null;
+      // An inspection row can exist with no responses at all (the row is created the
+      // moment someone opens the tab). Rendering the template anyway prints every item as
+      // a blank line, which reads as "inspected, all fine" rather than "not inspected".
+      // Leave the section unset so it is named under "Not captured this period" instead.
+      if (resps.length) {
+        data.annualSections = [...sectionMap.entries()].map(([title, its]) => ({ title, items: its }));
+        data.annualFlagged = flagged;
+        data.annualCapexTotal = capexTotal || null;
+      }
     }
     const capex = unwrap(await fdb.from('capex_items').select('description,estimate').eq('report_id', reportId), 'the capex register') ?? [];
     data.capex = capex.map((c: any) => ({ description: c.description ?? '', estimate: c.estimate ?? null }));

@@ -138,9 +138,18 @@ export async function saveReportArtifact(
   const sourceId = input.sourceId ?? null;
   const buildingId = input.buildingId ?? null;
 
-  // 1) Next version in the (org, kind, source) chain.
+  // 1) Next version in the (org, kind, source) chain — or (org, kind, building) for a
+  //    kind that has no source row. The H&S report is per BUILDING and carries no
+  //    source_id, so keying on source_id alone put every building in one chain:
+  //    generating building B's pack marked building A's as superseded, and versions
+  //    counted up across unrelated buildings. Scope by building when there is no source.
   let versionQuery = client.from('report_artifacts').select('version').eq('org_id', orgId).eq('kind', kind);
-  versionQuery = sourceId ? versionQuery.eq('source_id', sourceId) : versionQuery.is('source_id', null);
+  if (sourceId) {
+    versionQuery = versionQuery.eq('source_id', sourceId);
+  } else {
+    versionQuery = versionQuery.is('source_id', null);
+    versionQuery = buildingId ? versionQuery.eq('building_id', buildingId) : versionQuery.is('building_id', null);
+  }
   const { data: prior, error: versionError } = await versionQuery.order('version', { ascending: false }).limit(1);
   if (versionError) {
     return { ok: false, error: `Could not read report history: ${versionError.message}` };
@@ -181,7 +190,7 @@ export async function saveReportArtifact(
     return { ok: false, error: `Could not record the report: ${insertError?.message ?? 'no row returned'}${orphanNote}` };
   }
 
-  // 4) Supersede prior issued versions of the same (kind, source). Best-effort:
+  // 4) Supersede prior issued versions of the same chain. Best-effort:
   //    the new artifact is already safely issued; a failure here only leaves an
   //    older row still marked issued.
   let supersede = client
@@ -189,7 +198,13 @@ export async function saveReportArtifact(
     .update({ status: 'superseded', superseded_by: artifact.id })
     .eq('org_id', orgId)
     .eq('kind', kind);
-  supersede = sourceId ? supersede.eq('source_id', sourceId) : supersede.is('source_id', null);
+  if (sourceId) {
+    supersede = supersede.eq('source_id', sourceId);
+  } else {
+    supersede = supersede.is('source_id', null);
+    // Must mirror the version scope above, or one building's pack supersedes another's.
+    supersede = buildingId ? supersede.eq('building_id', buildingId) : supersede.is('building_id', null);
+  }
   const { error: supersedeError } = await supersede.eq('status', 'issued').neq('id', artifact.id);
   if (supersedeError) {
     return { ok: true, artifact, supersedeWarning: `Prior versions were not marked superseded: ${supersedeError.message}` };

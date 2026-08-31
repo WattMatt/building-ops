@@ -159,19 +159,30 @@ describe('saveReportArtifact — happy path', () => {
     });
     expect(recorded.inserted[0].file_path).toBe(recorded.uploads[0].path);
 
-    // Supersede: prior issued rows of the same (kind, source) chain only.
+    // Supersede: prior issued rows of the same chain only. hs_compliance has no
+    // source_id and is per BUILDING, so the chain must also be scoped by building_id —
+    // without that filter, generating building B's pack supersedes building A's.
     expect(recorded.supersedes).toHaveLength(1);
     expect(recorded.supersedes[0].patch).toEqual({ status: 'superseded', superseded_by: 'new-artifact-id' });
     expect(recorded.supersedes[0].filters).toEqual([
       'eq:org_id=org-1',
       'eq:kind=hs_compliance',
       'is:source_id=null',
+      'eq:building_id=building-1',
       'eq:status=issued',
       'neq:id=new-artifact-id',
     ]);
 
     // Fail-closed path never ran.
     expect(recorded.removed).toHaveLength(0);
+  });
+
+  it('keeps each building on its own version chain when there is no source_id', async () => {
+    // Two buildings, same kind, no source: neither may supersede the other.
+    const a = makeMockClient({ priorVersion: 2 });
+    await saveReportArtifact({ ...INPUT, buildingId: 'building-A' }, a.client);
+    expect(a.recorded.supersedes[0].filters).toContain('eq:building_id=building-A');
+    expect(a.recorded.supersedes[0].filters).not.toContain('eq:building_id=building-B');
   });
 
   it('starts the version chain at 1 and filters by source_id when provided', async () => {
