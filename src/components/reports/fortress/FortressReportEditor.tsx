@@ -21,6 +21,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useFortressReport, useReportLifecycle } from '@/hooks/useFortressReports';
 import { REPORT_SECTIONS, REPORT_STATUS_VARIANT, formatPeriodLabel, REQUIRED_SECTIONS, REQUIRED_SECTION_TABLE } from '@/lib/fortressReports';
 import { useReportSectionCounts } from '@/hooks/useReportSectionCounts';
+import { ReportSavedVersions } from '@/components/reports/fortress/ReportSavedVersions';
 import { fdb, REPORT_TYPE_LABELS, type ReportStatus } from '@/integrations/supabase/fortress-db';
 import { getSectionComponent } from './sections/registry';
 
@@ -80,6 +81,7 @@ export default function FortressReportEditor() {
           buildingId: generated.buildingId,
         });
         if (saved.ok) {
+          qc.invalidateQueries({ queryKey: ['report-artifacts', id] });
           toast.success('Report PDF downloaded and saved to Saved Reports.');
         } else {
           if (import.meta.env.DEV) console.error('Report persist failed:', saved.error);
@@ -294,6 +296,8 @@ export default function FortressReportEditor() {
           )}
         </div>
       </div>
+
+      <ReportSavedVersions reportId={report.id} />
 
       <Dialog open={reviewOpen !== null} onOpenChange={(o) => !o && setReviewOpen(null)}>
         <DialogContent>

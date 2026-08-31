@@ -32,9 +32,37 @@ export interface ReportData {
   compliance?: { itemNo: string; prompt: string; mark: string; comment: string }[];
   recoveries?: { service: string; ytdExpense: number | null; ytdRecovery: number | null; pctRecovery: string }[];
   ppm?: { service: string; frequency: string | null; servicedMonths: string[] }[];
+  /** Set when PPM months carry no recorded status, so the export says so rather than printing "—". */
+  ppmStatusNote?: string | null;
+  /** Meter readings. Percentages are recomputed upstream, never read from the sheet. */
+  utilities?: {
+    utility: string | null; meter: string; reading: number | null; unit: string | null;
+    category: string | null; pctOfBulk: number | null; comment: string | null;
+  }[];
+  /** Document completeness register. */
+  masterfile?: { document: string; onFile: string; comment: string | null }[];
+  /** Building-inspection and OHS-act answers, grouped by their sheet section. */
+  checklist?: { section: string; items: { item: string; response: string | null; value: string | null; comment: string | null }[] }[];
   // cm
   turnover?: { tenant: string; density: string; growth: string; band: string }[];
   incidentsTotal?: number | null;
+  /** Per-tenant OHS & housekeeping compliance — the substance of a CM report. */
+  tenantCompliance?: {
+    shop: string; tenant: string; gla: number | null; occupancyCert: string | null;
+    cocNumber: string | null; cocDate: string | null; hvacRecords: string | null;
+    sprinkler: string | null; smokeDetection: string | null; evacPlan: string | null;
+  }[];
+  /** Per-tenant shop specification. */
+  shopSpec?: {
+    shop: string; tenant: string; phase: string | null; actualAmps: string | null;
+    generator: string | null; hvac: string | null; lighting: string | null;
+  }[];
+  /**
+   * Sections this report type is expected to carry that hold no rows. Printed as an
+   * explicit list so a short report is legibly incomplete rather than silently truncated —
+   * a reader must never have to guess whether a section was omitted or simply empty.
+   */
+  emptySections?: string[];
   // annual
   annualSections?: AnnualSection[];
   annualFlagged?: number;
@@ -82,24 +110,76 @@ export function buildReportDoc(
 
   const section = (t: string) => content.push({ text: t, fontSize: 13, bold: true, color: '#111827', margin: [0, 12, 0, 4] });
 
+  const note = (t: string) =>
+    content.push({ text: t, fontSize: 9, italics: true, color: '#6b7280', margin: [0, 0, 0, 6] });
+
   if (report.report_type === ('ops_monthly' as ReportType)) {
-    section('OHS Act Compliance');
-    content.push({ text: `Building Compliance: ${data.compliancePct ?? '—'}%`, fontSize: 16, bold: true, color, margin: [0, 0, 0, 6] });
-    if (data.compliance && data.compliance.length) {
-      content.push(table(['Item', 'Prompt', 'Y/N/A', 'Comment'],
-        data.compliance.slice(0, 80).map((r) => [r.itemNo, r.prompt, r.mark, r.comment]),
-        ['auto', '*', 'auto', 'auto']));
+    // The compliance percentage is only meaningful once the OHS section has been answered.
+    // Printing "Building Compliance: 0%" for a report whose OHS section was never completed
+    // states a failing score that nobody measured.
+    if (data.compliancePct != null || (data.compliance && data.compliance.length)) {
+      section('OHS Act Compliance');
+      if (data.compliancePct != null) {
+        content.push({ text: `Building Compliance: ${data.compliancePct}%`, fontSize: 16, bold: true, color, margin: [0, 0, 0, 6] });
+      }
+      if (data.compliance && data.compliance.length) {
+        content.push(table(['Item', 'Prompt', 'Y/N/A', 'Comment'],
+          data.compliance.map((r) => [r.itemNo, r.prompt, r.mark, r.comment]),
+          ['auto', '*', 'auto', 'auto']));
+      }
     }
+
+    if (data.checklist && data.checklist.length) {
+      section('Building Inspection & OHS Act');
+      for (const grp of data.checklist) {
+        content.push({ text: grp.section, fontSize: 11, bold: true, color, margin: [0, 8, 0, 4] });
+        content.push(table(['Item', 'Answer', 'Action', 'Comment'],
+          grp.items.map((i) => [i.item, i.response ?? '—', i.value ?? '', i.comment ?? '']),
+          ['*', 'auto', 'auto', '*']));
+      }
+    }
+
+    if (data.utilities && data.utilities.length) {
+      section('Utilities');
+      note('Readings are as recorded on the meter. Percentages are recomputed from the raw readings.');
+      content.push(table(['Meter', 'Utility', 'Reading', 'Unit', 'Category', '% of bulk', 'Comment'],
+        data.utilities.map((u) => [
+          u.meter,
+          u.utility ?? '—',
+          u.reading == null ? '—' : String(u.reading),
+          u.unit ?? '',
+          u.category ?? '—',
+          u.pctOfBulk == null ? '' : `${u.pctOfBulk}%`,
+          u.comment ?? '',
+        ]),
+        ['*', 'auto', 'auto', 'auto', 'auto', 'auto', '*']));
+    }
+
     if (data.recoveries && data.recoveries.length) {
       section('Expense Recoveries');
       content.push(table(['Service', 'YTD Expense', 'YTD Recovery', '% Rec'],
         data.recoveries.map((r) => [r.service, formatZAR(r.ytdExpense), formatZAR(r.ytdRecovery), r.pctRecovery]),
         ['*', 'auto', 'auto', 'auto']));
     }
+
     if (data.ppm && data.ppm.length) {
       section('PPM Schedule');
+      if (data.ppmStatusNote) note(data.ppmStatusNote);
       content.push(table(['Service', 'Frequency', 'Months serviced'],
-        data.ppm.map((p) => [p.service, p.frequency ?? '—', p.servicedMonths.length ? p.servicedMonths.join(', ') : '—']),
+        data.ppm.map((p) => [
+          p.service,
+          p.frequency ?? '—',
+          p.servicedMonths.length ? p.servicedMonths.join(', ') : (data.ppmStatusNote ? 'not recorded' : '—'),
+        ]),
+        ['*', 'auto', '*']));
+    }
+
+    if (data.masterfile && data.masterfile.length) {
+      section('Masterfile');
+      const onFile = data.masterfile.filter((m) => m.onFile === 'yes').length;
+      note(`${onFile} of ${data.masterfile.length} documents on file.`);
+      content.push(table(['Document', 'On file', 'Comment'],
+        data.masterfile.map((m) => [m.document, m.onFile, m.comment ?? '']),
         ['*', 'auto', '*']));
     }
   }
@@ -110,6 +190,27 @@ export function buildReportDoc(
       content.push(table(['Tenant', 'Density (R/m²)', 'Growth %', 'Band'],
         data.turnover.map((t) => [t.tenant, t.density, t.growth, t.band]),
         ['*', 'auto', 'auto', 'auto']));
+    }
+    if (data.tenantCompliance && data.tenantCompliance.length) {
+      section('Tenant OHS & Housekeeping');
+      content.push(table(
+        ['Shop', 'Tenant', 'GLA', 'Occup. cert', 'COC #', 'COC date', 'HVAC recs', 'Sprinkler', 'Smoke det.', 'Evac plan'],
+        data.tenantCompliance.map((t) => [
+          t.shop, t.tenant, t.gla == null ? '' : String(t.gla),
+          t.occupancyCert ?? '', t.cocNumber ?? '', t.cocDate ?? '',
+          t.hvacRecords ?? '', t.sprinkler ?? '', t.smokeDetection ?? '', t.evacPlan ?? '',
+        ]),
+        ['auto', '*', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto', 'auto']));
+    }
+    if (data.shopSpec && data.shopSpec.length) {
+      section('Shop Specification');
+      content.push(table(
+        ['Shop', 'Tenant', 'Phase', 'Amps', 'Generator', 'HVAC', 'Lighting'],
+        data.shopSpec.map((s) => [
+          s.shop, s.tenant, s.phase ?? '', s.actualAmps ?? '',
+          s.generator ?? '', s.hvac ?? '', s.lighting ?? '',
+        ]),
+        ['auto', '*', 'auto', 'auto', 'auto', '*', '*']));
     }
     if (data.incidentsTotal != null) {
       section('Security Incidents');
@@ -196,6 +297,21 @@ export function buildReportDoc(
       if (n.heading) content.push({ text: n.heading, fontSize: 11, bold: true, color, margin: [0, 8, 0, 2] });
       if (n.body) content.push({ text: n.body, fontSize: 9, color: '#374151', margin: [0, 0, 0, 4], preserveLeadingSpaces: true });
     }
+  }
+
+  // Name the sections this report type expects but which hold nothing. Without this a
+  // report that is 2 sections long looks the same as one that is complete, and the reader
+  // has no way to tell an omission from an empty section.
+  if (data.emptySections && data.emptySections.length) {
+    section('Not captured this period');
+    content.push({
+      text: 'These sections of the report carry no entries for this period:',
+      fontSize: 9, color: '#6b7280', margin: [0, 0, 0, 4],
+    });
+    content.push({
+      ul: data.emptySections.map((s) => ({ text: s, fontSize: 9, color: '#374151' })),
+      margin: [0, 0, 0, 6],
+    });
   }
 
   const headerTitle = (report.title ?? 'Report').toUpperCase();

@@ -139,3 +139,92 @@ describe('buildReportDoc — ops_monthly + branding', () => {
     expect(text).toContain('Acme Holdings');
   });
 });
+
+/*
+ * Export completeness (added when the export was rebuilt).
+ *
+ * Each of these corresponds to a way the export was previously wrong: CM reports exported
+ * as a bare cover page, OPS reports claimed a 0% compliance score nobody had measured, and
+ * a report missing eleven sections looked identical to a complete one.
+ */
+const OPTS = { color: '#0b5f5e', orgName: 'Building Ops' };
+const opsDoc = (data: ReportData) =>
+  buildReportDoc({ title: 'X — Operations', report_period: '2026-06-01', report_type: 'ops_monthly', managers: [] }, data, OPTS);
+const cmDoc = (data: ReportData) =>
+  buildReportDoc({ title: 'X — CM', report_period: '2026-06-01', report_type: 'cm_monthly', managers: [] }, data, OPTS);
+
+/** Every string anywhere in the definition, including cells `collect` does not descend into. */
+function allText(doc: unknown): string {
+  const out: string[] = [];
+  const visit = (n: unknown): void => {
+    if (n == null) return;
+    if (typeof n === 'string' || typeof n === 'number') { out.push(String(n)); return; }
+    if (Array.isArray(n)) { n.forEach(visit); return; }
+    if (typeof n === 'object') Object.values(n as Record<string, unknown>).forEach(visit);
+  };
+  visit(doc);
+  return out.join('\n');
+}
+
+describe('buildReportDoc — export completeness', () => {
+  it('does not claim a compliance score when the OHS section was never completed', () => {
+    const t = allText(opsDoc({ compliancePct: null, compliance: [] }));
+    expect(t).not.toContain('Building Compliance');
+  });
+
+  it('exports utilities, masterfile and the inspection checklist', () => {
+    const t = allText(opsDoc({
+      utilities: [{ utility: 'water', meter: 'Bulk Check', reading: 1166, unit: 'KL', category: 'bulk', pctOfBulk: null, comment: null }],
+      masterfile: [{ document: 'Zoning certificate', onFile: 'yes', comment: null }],
+      checklist: [{ section: 'Building Inspection', items: [{ item: 'STRUCTURE / Basement', response: 'yes', value: null, comment: null }] }],
+    }));
+    expect(t).toContain('Utilities');
+    expect(t).toContain('Bulk Check');
+    expect(t).toContain('Masterfile');
+    expect(t).toContain('Zoning certificate');
+    expect(t).toContain('STRUCTURE / Basement');
+  });
+
+  it('counts documents on file in the masterfile note', () => {
+    const t = allText(opsDoc({
+      masterfile: [
+        { document: 'A', onFile: 'yes', comment: null },
+        { document: 'B', onFile: 'no', comment: null },
+        { document: 'C', onFile: 'unassessed', comment: null },
+      ],
+    }));
+    expect(t).toContain('1 of 3 documents on file.');
+  });
+
+  it('says the PPM status is unrecorded rather than printing an empty schedule', () => {
+    const t = allText(opsDoc({
+      ppm: [{ service: 'Aircon minor', frequency: 'Monthly', servicedMonths: [] }],
+      ppmStatusNote: 'Service status is recorded in the source workbook as a cell colour with no legend.',
+    }));
+    expect(t).toContain('Aircon minor');
+    expect(t).toContain('no legend');
+    expect(t).toContain('not recorded');
+  });
+
+  it('exports CM tenant compliance and shop spec (previously a bare cover page)', () => {
+    const t = allText(cmDoc({
+      tenantCompliance: [{
+        shop: '2', tenant: 'ACKERMANS', gla: 704, occupancyCert: '2023/74',
+        cocNumber: 'M0247625', cocDate: '2023-09-27', hvacRecords: 'yes',
+        sprinkler: 'yes', smokeDetection: 'yes', evacPlan: 'na',
+      }],
+      shopSpec: [{ shop: '2', tenant: 'ACKERMANS', phase: '3 - Three phase', actualAmps: '160A', generator: 'yes', hvac: 'DP', lighting: 'L-LED' }],
+    }));
+    expect(t).toContain('Tenant OHS & Housekeeping');
+    expect(t).toContain('ACKERMANS');
+    expect(t).toContain('M0247625');
+    expect(t).toContain('Shop Specification');
+    expect(t).toContain('160A');
+  });
+
+  it('names the sections that carry nothing, and omits the block when none do', () => {
+    expect(allText(cmDoc({ emptySections: ['Building Turnover', 'Leasing'] }))).toContain('Not captured this period');
+    expect(allText(cmDoc({ emptySections: ['Building Turnover', 'Leasing'] }))).toContain('Leasing');
+    expect(allText(cmDoc({ emptySections: [] }))).not.toContain('Not captured this period');
+  });
+});

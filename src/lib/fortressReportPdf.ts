@@ -12,6 +12,7 @@ import { resolveStorageUrl } from '@/integrations/supabase/storage';
 import { buildReportDoc, MARK, type ReportData, type EmbeddedPhoto, type AnnualItem } from '@/lib/fortressReportDoc';
 import { ANNUAL_FIELD_SETS } from '@/lib/annualFieldSets';
 import { doneMonths, type PpmCell } from '@/lib/ppmStatus';
+import { REPORT_SECTIONS } from '@/lib/fortressReports';
 import { fetchReportElectricalCompliance } from '@/integrations/supabase/insight-linker';
 
 pdfMake.vfs = pdfFonts.vfs;
@@ -120,6 +121,63 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       frequency: p.frequency ?? null,
       servicedMonths: doneMonths({ months: p.months as Record<string, PpmCell> }).map(ppmMonthLabel),
     }));
+    // doneMonths() counts only status === 'done'. A schedule whose month cells carry no
+    // status at all (the source records it as a fill colour, which has no agreed meaning
+    // yet) would otherwise print a full table of "—" and read as "nothing was serviced".
+    const anyStatus = ppm.some((p) => {
+      const m = (p.months ?? {}) as Record<string, PpmCell>;
+      return Object.values(m).some((c) => c && c.status != null);
+    });
+    if (ppm.length && !anyStatus) {
+      data.ppmStatusNote =
+        'Service status is recorded in the source workbook as a cell colour with no legend, so no month can be reported as serviced or missed. The schedule itself is shown below.';
+    }
+
+    const util = (await fdb.from('utility_readings')
+      .select('utility,meter_name,reading,unit,category,pct_of_bulk,comment')
+      .eq('report_id', reportId)).data ?? [];
+    data.utilities = util.map((u) => ({
+      utility: u.utility ?? null,
+      meter: u.meter_name ?? '',
+      reading: u.reading == null ? null : Number(u.reading),
+      unit: u.unit ?? null,
+      category: u.category ?? null,
+      pctOfBulk: u.pct_of_bulk == null ? null : Number(u.pct_of_bulk),
+      comment: u.comment ?? null,
+    }));
+
+    const mf = (await fdb.from('masterfile_items')
+      .select('document_label,on_file,comment').eq('report_id', reportId)).data ?? [];
+    data.masterfile = mf.map((m) => ({
+      document: m.document_label ?? '',
+      onFile: m.on_file ?? 'unassessed',
+      comment: m.comment ?? null,
+    }));
+
+    // Building-inspection and OHS-act answers, grouped by the sheet section they came from.
+    const chk = (await fdb.from('report_checklist_items')
+      .select('section_key,item_key,response,value_text,comment,sort_order')
+      .eq('report_id', reportId)
+      .order('section_key', { ascending: true })
+      .order('sort_order', { ascending: true, nullsFirst: false })).data ?? [];
+    const CHECKLIST_LABEL: Record<string, string> = {
+      building_inspection: 'Building Inspection',
+      ohs: 'OHS Act Report',
+      general: 'General',
+    };
+    const grouped = new Map<string, { item: string; response: string | null; value: string | null; comment: string | null }[]>();
+    for (const c of chk) {
+      const label = CHECKLIST_LABEL[c.section_key ?? ''] ?? (c.section_key ?? 'Other');
+      const arr = grouped.get(label) ?? [];
+      arr.push({
+        item: c.item_key ?? '',
+        response: c.response ?? null,
+        value: c.value_text ?? null,
+        comment: c.comment ?? null,
+      });
+      grouped.set(label, arr);
+    }
+    data.checklist = [...grouped.entries()].map(([sectionName, items]) => ({ section: sectionName, items }));
   }
 
   if (report.report_type === ('cm_monthly' as ReportType)) {
@@ -132,6 +190,64 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     }));
     const inc = (await fdb.from('security_incidents').select('count').eq('report_id', reportId)).data ?? [];
     data.incidentsTotal = inc.length ? inc.reduce((a, i) => a + (i.count ?? 0), 0) : null;
+
+    // Tenant compliance and shop spec are the substance of a CM report and were never
+    // exported — a CM PDF was a cover page. Tenants are resolved with a second query
+    // rather than an embedded select so this does not depend on FK relationship naming.
+    const tenants = (await fdb.from('building_tenants')
+      .select('id,shop_number,name').eq('building_id', report.building_id)).data ?? [];
+    const tenantById = new Map(tenants.map((t) => [t.id, t]));
+    const sortByShop = <T extends { shop: string }>(rows: T[]) =>
+      rows.sort((a, b) => a.shop.localeCompare(b.shop, undefined, { numeric: true }));
+
+    const tc = (await fdb.from('tenant_compliance')
+      .select('tenant_id,occupancy_cert_no,electrical_coc_cert_no,electrical_coc_date,hvac_records_current,fire_sprinkler_annual,smoke_detection_annual_service,evac_plan_displayed')
+      .eq('report_id', reportId)).data ?? [];
+    if (tc.length) {
+      type TcRow = {
+        tenant_id: string; occupancy_cert_no: string | null; electrical_coc_cert_no: string | null;
+        electrical_coc_date: string | null; hvac_records_current: string | null;
+        fire_sprinkler_annual: string | null; smoke_detection_annual_service: string | null;
+        evac_plan_displayed: string | null;
+      };
+      data.tenantCompliance = sortByShop((tc as TcRow[]).map((r) => {
+        const t = tenantById.get(r.tenant_id);
+        return {
+          shop: t?.shop_number ?? '',
+          tenant: t?.name ?? '',
+          gla: null as number | null,
+          occupancyCert: r.occupancy_cert_no ?? null,
+          cocNumber: r.electrical_coc_cert_no ?? null,
+          cocDate: r.electrical_coc_date ?? null,
+          hvacRecords: r.hvac_records_current ?? null,
+          sprinkler: r.fire_sprinkler_annual ?? null,
+          smokeDetection: r.smoke_detection_annual_service ?? null,
+          evacPlan: r.evac_plan_displayed ?? null,
+        };
+      }));
+    }
+
+    const ss = (await fdb.from('tenant_shop_spec')
+      .select('tenant_id,db_phase,actual_amps,generator_connection,hvac_units,lighting_type')
+      .eq('building_id', report.building_id).eq('is_current', true)).data ?? [];
+    if (ss.length) {
+      type SsRow = {
+        tenant_id: string; db_phase: string | null; actual_amps: string | null;
+        generator_connection: string | null; hvac_units: string | null; lighting_type: string | null;
+      };
+      data.shopSpec = sortByShop((ss as SsRow[]).map((r) => {
+        const t = tenantById.get(r.tenant_id);
+        return {
+          shop: t?.shop_number ?? '',
+          tenant: t?.name ?? '',
+          phase: r.db_phase ?? null,
+          actualAmps: r.actual_amps ?? null,
+          generator: r.generator_connection ?? null,
+          hvac: r.hvac_units ?? null,
+          lighting: r.lighting_type ?? null,
+        };
+      }));
+    }
   }
 
   if (report.report_type === ('annual_inspection' as ReportType)) {
@@ -220,6 +336,60 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
   data.narratives = narr
     .filter((n) => (n.body ?? '').trim() !== '')
     .map((n) => ({ heading: n.heading ?? '', body: n.body ?? '', statusFlag: n.status_flag ?? null }));
+
+  // Name the sections this report type expects but which carry nothing, so a short PDF is
+  // legibly incomplete instead of looking like the whole report.
+  {
+    const hasInspection = !!data.checklist?.some((g) => g.section === 'Building Inspection');
+    const hasOhsAnswers = !!data.checklist?.some((g) => g.section === 'OHS Act Report');
+    let hazardCount = 0;
+    try {
+      const asm = (await fdb.from('compliance_assessments').select('id').eq('report_id', reportId)).data ?? [];
+      if (asm.length) {
+        const hazard = fdb as unknown as {
+          from(t: 'hazard_log'): {
+            select(c: 'id', o: { count: 'exact'; head: true }): {
+              in(col: string, vals: string[]): PromiseLike<{ count: number | null }>;
+            };
+          };
+        };
+        const { count } = await hazard.from('hazard_log')
+          .select('id', { count: 'exact', head: true })
+          .in('assessment_id', asm.map((a) => a.id));
+        hazardCount = count ?? 0;
+      }
+    } catch { /* a missing hazard table must not block the export */ }
+
+    const filled: Record<string, boolean> = {
+      operational_overview: !!data.narratives?.length,
+      report_checklist: !!data.checklist?.length,
+      ohs_compliance: !!(data.compliance?.length || data.compliancePct != null || hasOhsAnswers),
+      hazard_log: hazardCount > 0,
+      building_inspection: hasInspection,
+      expense_recoveries: !!data.recoveries?.length,
+      utilities: !!data.utilities?.length,
+      ppm: !!data.ppm?.length,
+      masterfile: !!data.masterfile?.length,
+      building_overview: !!data.narratives?.length,
+      local_resources: !!data.narratives?.length,
+      building_turnover: !!data.turnover?.length,
+      turnover: !!data.turnover?.length,
+      category_turnover: false,
+      footfall_toilet: false,
+      leasing: false,
+      trading_arrears: false,
+      utility_management: false,
+      tenant_compliance: !!data.tenantCompliance?.length,
+      shop_spec: !!data.shopSpec?.length,
+      security_incidents: data.incidentsTotal != null,
+      building_profile: !!data.narratives?.length,
+      condition_inspection: !!data.annualSections?.length,
+      capex: !!data.capex?.length,
+      electrical_compliance: !!data.electricalCompliance?.length,
+    };
+    const expected = REPORT_SECTIONS[report.report_type as ReportType] ?? [];
+    data.emptySections = expected.filter((s) => !filled[s.key]).map((s) => s.label);
+  }
 
   const doc = buildReportDoc(
     { title: report.title, report_period: report.report_period, report_type: report.report_type as ReportType, managers },

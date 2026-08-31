@@ -18,6 +18,28 @@ import type { ReportType } from '@/integrations/supabase/fortress-db';
 /** null = could not be determined (missing table / query error), never silently 0. */
 export type SectionCounts = Record<string, number | null>;
 
+/*
+ * Section tables are chosen at runtime from SECTION_SOURCE, so the generated per-table
+ * types cannot apply. Rather than reach for `any`, this is the narrow slice of the client
+ * this file actually uses — the same approach reportArtifacts.ts takes for a table that is
+ * not in the generated types.
+ */
+interface PgErrLike { message: string }
+interface CountBuilder extends PromiseLike<{ count: number | null; error: PgErrLike | null }> {
+  eq(column: string, value: string | boolean): CountBuilder;
+  in(column: string, values: string[]): CountBuilder;
+}
+interface IdBuilder extends PromiseLike<{ data: { id: string }[] | null; error: PgErrLike | null }> {
+  eq(column: string, value: string): IdBuilder;
+}
+interface DynamicTableClient {
+  from(table: string): {
+    select(columns: 'id', opts: { count: 'exact'; head: true }): CountBuilder;
+    select(columns: 'id'): IdBuilder;
+  };
+}
+const dyn = fdb as unknown as DynamicTableClient;
+
 async function countFor(
   key: string,
   reportId: string,
@@ -30,14 +52,14 @@ async function countFor(
     if (src.via) {
       const ids = parentIds.get(src.via.table) ?? [];
       if (!ids.length) return 0;
-      const { count, error } = await (fdb as any)
+      const { count, error } = await dyn
         .from(src.table)
         .select('id', { count: 'exact', head: true })
         .in(src.via.parentFk, ids);
       if (error) throw error;
       return count ?? 0;
     }
-    let q = (fdb as any).from(src.table).select('id', { count: 'exact', head: true });
+    let q = dyn.from(src.table).select('id', { count: 'exact', head: true });
     q = src.key === 'building' ? q.eq('building_id', buildingId) : q.eq('report_id', reportId);
     if (src.table === 'tenant_shop_spec') q = q.eq('is_current', true);
     if (src.sectionKey) q = q.eq('section_key', src.sectionKey);
@@ -74,8 +96,8 @@ export function useReportSectionCounts(
       await Promise.all(
         parentTables.map(async (t) => {
           try {
-            const { data } = await (fdb as any).from(t).select('id').eq('report_id', rid);
-            parentIds.set(t, (data ?? []).map((r: { id: string }) => r.id));
+            const { data } = await dyn.from(t).select('id').eq('report_id', rid);
+            parentIds.set(t, (data ?? []).map((r) => r.id));
           } catch {
             parentIds.set(t, []);
           }

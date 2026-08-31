@@ -212,6 +212,30 @@ export async function listReportArtifacts(
   return { data: data ?? [], error: null };
 }
 
+/**
+ * The saved PDFs for ONE source report, newest first.
+ *
+ * Separate from listReportArtifacts rather than an extra parameter on it, so the existing
+ * positional (limit, client) signature and its callers stay untouched. Used by the report
+ * editor to show a report its own issued versions — without this, a generated PDF is only
+ * findable on the portfolio-wide Saved Reports card, with no route back from the report
+ * that produced it.
+ */
+export async function listReportArtifactsForSource(
+  sourceId: string,
+  limit = 20,
+  client: ReportArtifactsClient = defaultClient
+): Promise<{ data: ReportArtifactRow[]; error: string | null }> {
+  const { data, error } = await client
+    .from('report_artifacts')
+    .select('*')
+    .eq('source_id', sourceId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) return { data: [], error: error.message };
+  return { data: data ?? [], error: null };
+}
+
 /** Short-lived signed URL for preview (inline) or download (attachment). */
 export async function createArtifactSignedUrl(
   filePath: string,
