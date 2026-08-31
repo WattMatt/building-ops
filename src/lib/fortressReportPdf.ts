@@ -446,16 +446,31 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       estimate: c.estimate ?? null,
     }));
 
-    try {
-      const elec = await fetchReportElectricalCompliance(report.building_id);
-      if (elec.linked && elec.rows.length) {
-        data.electricalCompliance = elec.rows.map((r) => ({
-          shop_number: r.shop_number ?? '', tenant_name: r.tenant_name ?? '',
-          coc_number: r.coc_number ?? '', coc_type: r.coc_type ?? '', coc_status: r.coc_status ?? '',
-          coc_issue_date: r.coc_issue_date ?? '', coc_expiry_date: r.coc_expiry_date ?? '', certificate_url: r.certificate_url ?? '', certificate_name: r.certificate_name ?? '',
-        }));
-      }
-    } catch { /* electrical compliance is best-effort; never block the PDF */ }
+  }
+
+  // ---- Electrical compliance (live, insight-linker) --------------------------------
+  // Runs for EVERY report type. It used to sit inside the annual_inspection branch, so
+  // 69 of 72 reports in production could never show it — and annual is the type almost
+  // never produced. insight-linker is the system of record for CoC.
+  //
+  // Nulls are preserved rather than coerced to '': the renderer distinguishes "no
+  // certificate on file" from "" and prints an em-dash, and `filled` below needs to see
+  // that a table of rows carries no actual CoC data.
+  try {
+    const elec = await fetchReportElectricalCompliance(report.building_id);
+    data.electricalLinked = elec.linked;
+    if (elec.linked) {
+      data.electricalCompliance = elec.rows.map((r) => ({
+        shop_number: r.shop_number ?? '', tenant_name: r.tenant_name ?? '',
+        coc_number: r.coc_number, coc_type: r.coc_type, coc_status: r.coc_status,
+        coc_issue_date: r.coc_issue_date, coc_expiry_date: r.coc_expiry_date,
+        certificate_url: r.certificate_url ?? '', certificate_name: r.certificate_name ?? '',
+      }));
+    }
+  } catch (e) {
+    // A read failure must not print as "carries no entries for this period" in a
+    // downloaded, versioned artifact — that is the same lie `unwrap` exists to prevent.
+    data.electricalError = (e as Error)?.message ?? 'Electrical compliance could not be read.';
   }
 
   // Building-inspection and OHS-act answers, grouped by the sheet section they came from.
@@ -576,7 +591,12 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       building_profile: narrKeys.has('building_profile'),
       condition_inspection: !!data.annualSections?.length,
       capex: !!data.capex?.length,
-      electrical_compliance: !!data.electricalCompliance?.length,
+      // Rows exist but every CoC field is null on 781 of 1265 shops portfolio-wide. A
+      // table of blank cells is absence, not content — counting it as filled excluded it
+      // from "Not captured this period" and told the reader everything was fine.
+      electrical_compliance: !!data.electricalCompliance?.some(
+        (r) => r.coc_number || r.coc_status || r.coc_type || r.coc_issue_date,
+      ),
     };
     const expected = REPORT_SECTIONS[report.report_type as ReportType] ?? [];
     data.emptySections = expected.filter((s) => !filled[s.key]).map((s) => s.label);

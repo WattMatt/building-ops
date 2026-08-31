@@ -356,3 +356,64 @@ describe('buildReportDoc — CM Page 2 / Page 3 sections', () => {
     expect(over).toEqual([]);
   });
 });
+
+/*
+ * Electrical compliance: the four states insight-linker can be in.
+ *
+ * Previously the PDF rendered a table only when rows existed, and coerced every null to
+ * ''. So "not linked", "linked but the site has no shops", and "the live read failed"
+ * were one indistinguishable silence, and a table whose CoC columns were entirely blank
+ * (781 of 1,265 shops portfolio-wide) printed as though it were complete data.
+ */
+describe('buildReportDoc — electrical compliance states', () => {
+  const annual = (data: ReportData) =>
+    buildReportDoc({ title: 'X', report_period: '2026-06-01', report_type: 'annual_inspection', managers: [] }, data, OPTS);
+
+  it('says the building is not linked, rather than printing nothing', () => {
+    const t = allText(annual({ electricalLinked: false }));
+    expect(t).toContain('Electrical Compliance');
+    expect(t).toContain('not linked to an insight-linker site');
+  });
+
+  it('distinguishes "linked but no shops recorded" from "not linked"', () => {
+    const t = allText(annual({ electricalLinked: true, electricalCompliance: [] }));
+    expect(t).toContain('no shops are recorded');
+    expect(t).not.toContain('not linked to an insight-linker site');
+  });
+
+  it('reports a failed live read as a failure, never as absent data', () => {
+    const t = allText(annual({ electricalError: 'statement timeout' }));
+    expect(t).toContain('could not be read');
+    expect(t).toContain('statement timeout');
+    expect(t).not.toContain('no shops are recorded');
+  });
+
+  it('renders an em-dash for every missing CoC field instead of a blank cell', () => {
+    const t = allText(annual({
+      electricalLinked: true,
+      electricalCompliance: [{
+        shop_number: 'S1', tenant_name: 'Acme',
+        coc_number: null, coc_type: null, coc_status: null,
+        coc_issue_date: null, coc_expiry_date: null,
+        certificate_url: '', certificate_name: '',
+      }],
+    }));
+    expect(t).toContain('Acme');
+    expect(t).toContain('—');
+  });
+
+  it('still prints real values when they are present', () => {
+    const t = allText(annual({
+      electricalLinked: true,
+      electricalCompliance: [{
+        shop_number: 'S1', tenant_name: 'Acme',
+        coc_number: 'COC-99', coc_type: 'Electrical', coc_status: 'Pass',
+        coc_issue_date: '2026-01-15', coc_expiry_date: null,
+        certificate_url: 'https://example.test/c.pdf', certificate_name: 'c.pdf',
+      }],
+    }));
+    expect(t).toContain('COC-99');
+    expect(t).toContain('Pass');
+    expect(t).toContain('2026-01-15');
+  });
+});

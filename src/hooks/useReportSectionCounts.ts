@@ -49,7 +49,17 @@ async function countFor(
   const src = SECTION_SOURCE[key];
   if (!src) return null;
   try {
-    if (src.via) {
+    // Live sections have no report-scoped table; ask the RPC how many rows it returns.
+    // A thrown RPC falls through to the catch below and reports null (unknown), never 0.
+    if (src.rpc) {
+      const { data, error } = await (fdb as unknown as {
+        rpc(name: string, args: Record<string, string>): Promise<{ data: unknown; error: unknown }>;
+      }).rpc(src.rpc, { p_building_id: buildingId });
+      if (error) throw error;
+      const rows = (data as { rows?: unknown[] } | null)?.rows;
+      return Array.isArray(rows) ? rows.length : 0;
+    }
+    if (src.via && src.table) {
       const ids = parentIds.get(src.via.table) ?? [];
       if (!ids.length) return 0;
       const { count, error } = await dyn
@@ -59,6 +69,7 @@ async function countFor(
       if (error) throw error;
       return count ?? 0;
     }
+    if (!src.table) return null;
     let q = dyn.from(src.table).select('id', { count: 'exact', head: true });
     q = src.key === 'building' ? q.eq('building_id', buildingId) : q.eq('report_id', reportId);
     if (src.table === 'tenant_shop_spec') q = q.eq('is_current', true);

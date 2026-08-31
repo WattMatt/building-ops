@@ -26,6 +26,7 @@ export const REPORT_SECTIONS: Record<ReportType, SectionMeta[]> = {
     { key: 'utilities', label: 'Utilities', hint: 'Meter readings + borehole/solar yields.' },
     { key: 'ppm', label: 'PPM', hint: 'Planned maintenance status (read-only roll-up).' },
     { key: 'masterfile', label: 'Masterfile', hint: 'Document completeness register.' },
+    { key: 'electrical_compliance', label: 'Electrical Compliance', hint: 'Live per-shop Certificate of Compliance data from insight-linker.' },
   ],
   cm_monthly: [
     { key: 'building_overview', label: 'Building Overview', hint: 'Narrative.' },
@@ -41,6 +42,7 @@ export const REPORT_SECTIONS: Record<ReportType, SectionMeta[]> = {
     { key: 'tenant_compliance', label: 'Tenant OHS & HK', hint: 'Per-tenant compliance matrix.' },
     { key: 'shop_spec', label: 'Shop Spec', hint: 'Per-tenant shop specification (versioned).' },
     { key: 'security_incidents', label: 'Security Incidents', hint: 'Monthly incident counts by type.' },
+    { key: 'electrical_compliance', label: 'Electrical Compliance', hint: 'Live per-shop Certificate of Compliance data from insight-linker.' },
   ],
   annual_inspection: [
     { key: 'building_profile', label: 'Building Profile', hint: 'Property profile (§3) — feeds the building KPIs.' },
@@ -75,7 +77,10 @@ export const REQUIRED_SECTION_TABLE: Record<string, string> = {
  * report (shop specs are versioned per tenant, not per month).
  */
 export interface SectionSource {
-  table: string;
+  /** Table to count rows in. Omitted for sections fed by a live RPC. */
+  table?: string;
+  /** Building-scoped RPC returning `{ rows: [...] }`; counted instead of a table. */
+  rpc?: string;
   key: 'report' | 'building';
   /** Parent table to resolve first; rows are then matched on `parentFk`. */
   via?: { table: string; parentFk: string };
@@ -107,6 +112,11 @@ export const SECTION_SOURCE: Record<string, SectionSource> = {
   tenant_compliance: { table: 'tenant_compliance', key: 'report' },
   shop_spec: { table: 'tenant_shop_spec', key: 'building' },
   security_incidents: { table: 'security_incidents', key: 'report' },
+  // Live from insight-linker via RPC, not a report-scoped table. `rpc` tells the count
+  // hook to call report_electrical_compliance rather than counting rows — without an
+  // entry here the hook short-circuits to null and the section can never read as filled,
+  // which is why annual reports were permanently stuck at "3 of 4 sections have content".
+  electrical_compliance: { rpc: 'report_electrical_compliance', key: 'building' },
   // Annual
   building_profile: { table: 'report_narratives', key: 'report', sectionKey: 'building_profile' },
   condition_inspection: { table: 'inspection_responses', key: 'report', via: { table: 'building_inspections', parentFk: 'inspection_id' } },

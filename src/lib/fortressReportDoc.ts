@@ -99,7 +99,18 @@ export interface ReportData {
   annualFlagged?: number;
   annualCapexTotal?: number | null;
   capex?: { description: string; estimate: number | null }[];
-  electricalCompliance?: { shop_number: string; tenant_name: string; coc_number: string; coc_type: string; coc_status: string; coc_issue_date: string; coc_expiry_date: string; certificate_url: string; certificate_name: string }[];
+  electricalCompliance?: {
+    shop_number: string; tenant_name: string;
+    // Nullable on purpose: null means "no certificate recorded", which must render as an
+    // em-dash and must NOT count as content. Coercing to '' erased that distinction.
+    coc_number: string | null; coc_type: string | null; coc_status: string | null;
+    coc_issue_date: string | null; coc_expiry_date: string | null;
+    certificate_url: string; certificate_name: string;
+  }[];
+  /** Whether the building is linked to an insight-linker site at all. */
+  electricalLinked?: boolean;
+  /** Set when the live read FAILED — distinct from "linked but nothing recorded". */
+  electricalError?: string | null;
   // all types — section narratives (report_narratives), e.g. building overview,
   // loadshedding, maintenance/project items, centre security incidents commentary
   narratives?: { heading: string; body: string; statusFlag?: string | null }[];
@@ -399,6 +410,18 @@ export function buildReportDoc(
         ['l', 'r']));
     }
 
+    if (data.electricalError) {
+      // A failed read is not "no data". Say so, in the artifact.
+      section('Electrical Compliance');
+      content.push({ text: `Live insight-linker data could not be read at generation time: ${data.electricalError}`, fontSize: 8, italics: true, color: '#b91c1c', margin: [0, 0, 0, 4] });
+    } else if (data.electricalLinked === false) {
+      section('Electrical Compliance');
+      content.push({ text: 'This building is not linked to an insight-linker site, so no live certificate data is available.', fontSize: 8, italics: true, color: '#6b7280', margin: [0, 0, 0, 4] });
+    } else if (data.electricalLinked && !data.electricalCompliance?.length) {
+      // Linked, but the source site records no shops — a different fact from "not linked".
+      section('Electrical Compliance');
+      content.push({ text: 'Linked to insight-linker, but no shops are recorded against this site.', fontSize: 8, italics: true, color: '#6b7280', margin: [0, 0, 0, 4] });
+    }
     if (data.electricalCompliance && data.electricalCompliance.length) {
       section('Electrical Compliance');
       content.push({ text: 'Live snapshot from insight-linker at generation time.', fontSize: 8, italics: true, color: '#6b7280', margin: [0, 0, 0, 4] });
@@ -414,11 +437,13 @@ export function buildReportDoc(
             ...data.electricalCompliance.map((r) => [
               { text: r.shop_number || '', fontSize: 6.5 },
               { text: r.tenant_name || '', fontSize: 6.5 },
-              { text: r.coc_number || '', fontSize: 6.5 },
-              { text: r.coc_type || '', fontSize: 6.5 },
-              { text: r.coc_status || '', fontSize: 6.5 },
-              { text: r.coc_issue_date || '', fontSize: 6.5 },
-              { text: r.coc_expiry_date || '', fontSize: 6.5 },
+              // Em-dash, matching ElectricalComplianceSection's own convention: a blank
+              // cell reads as "not yet filled in", an em-dash as "nothing on record".
+              { text: r.coc_number ?? '—', fontSize: 6.5 },
+              { text: r.coc_type ?? '—', fontSize: 6.5 },
+              { text: r.coc_status ?? '—', fontSize: 6.5 },
+              { text: r.coc_issue_date ?? '—', fontSize: 6.5 },
+              { text: r.coc_expiry_date ?? '—', fontSize: 6.5 },
               r.certificate_url
                 ? { text: r.certificate_name || 'View', link: r.certificate_url, fontSize: 8, color: '#2563eb', decoration: 'underline' }
                 : { text: '—', fontSize: 8 },
