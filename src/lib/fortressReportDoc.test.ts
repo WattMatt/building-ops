@@ -206,20 +206,68 @@ describe('buildReportDoc — export completeness', () => {
     expect(t).toContain('not recorded');
   });
 
-  it('exports CM tenant compliance and shop spec (previously a bare cover page)', () => {
+  it('exports every captured CM tenant column, grouped so each table fits the page', () => {
     const t = allText(cmDoc({
       tenantCompliance: [{
-        shop: '2', tenant: 'ACKERMANS', gla: 704, occupancyCert: '2023/74',
-        cocNumber: 'M0247625', cocDate: '2023-09-27', hvacRecords: 'yes',
-        sprinkler: 'yes', smokeDetection: 'yes', evacPlan: 'na',
+        shop: '2', tenant: 'ACKERMANS', gla: 704,
+        occupancyCert: '2023/74', cocNumber: 'M0247625', cocDate: '2023-09-27', leaseClause: '7.7',
+        hvacResponsibility: 'LL', hvacRecords: 'yes', hvacHandover: '12/2024',
+        generatorResponsibility: 'll', generatorRecords: 'yes',
+        sprinklerDedicated: 'yes', sprinklerWeekly: 'yes', sprinklerAnnual: 'na', sprinkler3yr: 'no',
+        smokeExtractionDedicated: 'yes', smokeExtractionService: 'yes',
+        smokeDetectionDedicated: 'yes', smokeDetectionService: 'na', handheldFire: 'yes',
+        ohsRisks: 'Y', evacPlan: 'na', foodExtraction: 'yes',
+        greaseTrap: 'yes', fireBlanket: 'no', gasCoc: 'na', flammableLiquid: 'yes',
       }],
-      shopSpec: [{ shop: '2', tenant: 'ACKERMANS', phase: '3 - Three phase', actualAmps: '160A', generator: 'yes', hvac: 'DP', lighting: 'L-LED' }],
+      shopSpec: [{
+        shop: '2', tenant: 'ACKERMANS', phase: '3 - Three phase', actualAmps: '160A', leaseAmps: '160A',
+        generator: 'yes', hvac: 'DP', hvacBtu: '4x 7500', hvacGas: 'R410A',
+        lighting: 'L-LED', shopfront: 'DD- Double door', rollerShutter: 'G',
+      }],
     }));
+    // the four compliance groups and the two shop-spec groups all render
     expect(t).toContain('Tenant OHS & Housekeeping');
-    expect(t).toContain('ACKERMANS');
-    expect(t).toContain('M0247625');
+    expect(t).toContain('Certificates and occupancy.');
+    expect(t).toContain('HVAC and generators.');
+    expect(t).toContain('Fire equipment.');
+    expect(t).toContain('OHS act risks and food tenants.');
     expect(t).toContain('Shop Specification');
-    expect(t).toContain('160A');
+    // values from every group, i.e. nothing is dropped on the way to the page
+    expect(t).toContain('M0247625');      // certificates
+    expect(t).toContain('12/2024');       // hvac handover
+    expect(t).toContain('4x 7500');       // hvac btu — was dropped entirely
+    expect(t).toContain('DD- Double door'); // shopfront — was dropped entirely
+    expect(t).toContain('7.7');           // lease clause — was dropped entirely
+  });
+
+  it('keeps every table inside the printable width', () => {
+    const doc: any = cmDoc({
+      tenantCompliance: [{
+        shop: '1', tenant: 'B', gla: 1, occupancyCert: 'a', cocNumber: 'b', cocDate: 'c', leaseClause: 'd',
+        hvacResponsibility: 'e', hvacRecords: 'f', hvacHandover: 'g', generatorResponsibility: 'h',
+        generatorRecords: 'i', sprinklerDedicated: 'j', sprinklerWeekly: 'k', sprinklerAnnual: 'l',
+        sprinkler3yr: 'm', smokeExtractionDedicated: 'n', smokeExtractionService: 'o',
+        smokeDetectionDedicated: 'p', smokeDetectionService: 'q', handheldFire: 'r', ohsRisks: 's',
+        evacPlan: 't', foodExtraction: 'u', greaseTrap: 'v', fireBlanket: 'w', gasCoc: 'x', flammableLiquid: 'y',
+      }],
+      shopSpec: [{ shop: '1', tenant: 'B', phase: 'a', actualAmps: 'b', leaseAmps: 'c', generator: 'd',
+        hvac: 'e', hvacBtu: 'f', hvacGas: 'g', lighting: 'h', shopfront: 'i', rollerShutter: 'j' }],
+    });
+    // pdfmake draws overflow off the paper rather than wrapping, so fixed widths plus
+    // gutters must fit the 515pt text block. This is the guard the review found missing.
+    const over: string[] = [];
+    const visit = (n: any): void => {
+      if (n == null) return;
+      if (Array.isArray(n)) { n.forEach(visit); return; }
+      if (typeof n !== 'object') return;
+      if (n.table?.widths) {
+        const fixed = n.table.widths.reduce((a: number, w: any) => a + (typeof w === 'number' ? w : 0), 0);
+        if (fixed + n.table.widths.length * 4 > 515) over.push(`${n.table.widths.length} cols / ${fixed}pt`);
+      }
+      Object.values(n).forEach(visit);
+    };
+    visit(doc.content);
+    expect(over).toEqual([]);
   });
 
   it('names the sections that carry nothing, and omits the block when none do', () => {

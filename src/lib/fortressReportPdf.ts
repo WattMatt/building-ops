@@ -178,51 +178,80 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     const sortByShop = <T extends { shop: string }>(rows: T[]) =>
       rows.sort((a, b) => a.shop.localeCompare(b.shop, undefined, { numeric: true }));
 
+    const TC_COLS = [
+      'tenant_id', 'occupancy_cert_no', 'electrical_coc_cert_no', 'electrical_coc_date', 'lease_clause_no',
+      'hvac_responsibility', 'hvac_records_current', 'hvac_handover_month',
+      'generator_responsibility', 'generator_records_current',
+      'sprinkler_dedicated', 'fire_sprinkler_weekly', 'fire_sprinkler_annual', 'fire_sprinkler_3yr',
+      'smoke_extraction_dedicated', 'smoke_extraction_annual_service',
+      'smoke_detection_dedicated', 'smoke_detection_annual_service', 'handheld_fire_current',
+      'ohs_risks', 'evac_plan_displayed', 'food_extraction_cert', 'grease_trap_clean',
+      'fire_blanket', 'gas_coc', 'flammable_liquid_cert',
+    ] as const;
     const tc = (await fdb.from('tenant_compliance')
-      .select('tenant_id,occupancy_cert_no,electrical_coc_cert_no,electrical_coc_date,hvac_records_current,fire_sprinkler_annual,smoke_detection_annual_service,evac_plan_displayed')
+      .select(TC_COLS.join(','))
       .eq('report_id', reportId)).data ?? [];
     if (tc.length) {
-      type TcRow = {
-        tenant_id: string; occupancy_cert_no: string | null; electrical_coc_cert_no: string | null;
-        electrical_coc_date: string | null; hvac_records_current: string | null;
-        fire_sprinkler_annual: string | null; smoke_detection_annual_service: string | null;
-        evac_plan_displayed: string | null;
-      };
-      data.tenantCompliance = sortByShop((tc as TcRow[]).map((r) => {
-        const t = tenantById.get(r.tenant_id);
+      type TcRow = Record<(typeof TC_COLS)[number], string | null>;
+      data.tenantCompliance = sortByShop((tc as unknown as TcRow[]).map((r) => {
+        const t = tenantById.get(r.tenant_id as string);
         return {
           shop: t?.shop_number ?? '',
           tenant: t?.name ?? '',
           gla: t?.area == null ? null : Number(t.area),
-          occupancyCert: r.occupancy_cert_no ?? null,
-          cocNumber: r.electrical_coc_cert_no ?? null,
-          cocDate: r.electrical_coc_date ?? null,
-          hvacRecords: r.hvac_records_current ?? null,
-          sprinkler: r.fire_sprinkler_annual ?? null,
-          smokeDetection: r.smoke_detection_annual_service ?? null,
-          evacPlan: r.evac_plan_displayed ?? null,
+          occupancyCert: r.occupancy_cert_no,
+          cocNumber: r.electrical_coc_cert_no,
+          cocDate: r.electrical_coc_date,
+          leaseClause: r.lease_clause_no,
+          hvacResponsibility: r.hvac_responsibility,
+          hvacRecords: r.hvac_records_current,
+          hvacHandover: r.hvac_handover_month,
+          generatorResponsibility: r.generator_responsibility,
+          generatorRecords: r.generator_records_current,
+          sprinklerDedicated: r.sprinkler_dedicated,
+          sprinklerWeekly: r.fire_sprinkler_weekly,
+          sprinklerAnnual: r.fire_sprinkler_annual,
+          sprinkler3yr: r.fire_sprinkler_3yr,
+          smokeExtractionDedicated: r.smoke_extraction_dedicated,
+          smokeExtractionService: r.smoke_extraction_annual_service,
+          smokeDetectionDedicated: r.smoke_detection_dedicated,
+          smokeDetectionService: r.smoke_detection_annual_service,
+          handheldFire: r.handheld_fire_current,
+          ohsRisks: r.ohs_risks,
+          evacPlan: r.evac_plan_displayed,
+          foodExtraction: r.food_extraction_cert,
+          greaseTrap: r.grease_trap_clean,
+          fireBlanket: r.fire_blanket,
+          gasCoc: r.gas_coc,
+          flammableLiquid: r.flammable_liquid_cert,
         };
       }));
     }
 
+    const SS_COLS = [
+      'tenant_id', 'db_phase', 'actual_amps', 'lease_amps', 'generator_connection',
+      'hvac_units', 'hvac_btu', 'hvac_gas', 'lighting_type', 'shopfront_type', 'roller_shutter_type',
+    ] as const;
     const ss = (await fdb.from('tenant_shop_spec')
-      .select('tenant_id,db_phase,actual_amps,generator_connection,hvac_units,lighting_type')
+      .select(SS_COLS.join(','))
       .eq('building_id', report.building_id).eq('is_current', true)).data ?? [];
     if (ss.length) {
-      type SsRow = {
-        tenant_id: string; db_phase: string | null; actual_amps: string | null;
-        generator_connection: string | null; hvac_units: string | null; lighting_type: string | null;
-      };
-      data.shopSpec = sortByShop((ss as SsRow[]).map((r) => {
-        const t = tenantById.get(r.tenant_id);
+      type SsRow = Record<(typeof SS_COLS)[number], string | null>;
+      data.shopSpec = sortByShop((ss as unknown as SsRow[]).map((r) => {
+        const t = tenantById.get(r.tenant_id as string);
         return {
           shop: t?.shop_number ?? '',
           tenant: t?.name ?? '',
-          phase: r.db_phase ?? null,
-          actualAmps: r.actual_amps ?? null,
-          generator: r.generator_connection ?? null,
-          hvac: r.hvac_units ?? null,
-          lighting: r.lighting_type ?? null,
+          phase: r.db_phase,
+          actualAmps: r.actual_amps,
+          leaseAmps: r.lease_amps,
+          generator: r.generator_connection,
+          hvac: r.hvac_units,
+          hvacBtu: r.hvac_btu,
+          hvacGas: r.hvac_gas,
+          lighting: r.lighting_type,
+          shopfront: r.shopfront_type,
+          rollerShutter: r.roller_shutter_type,
         };
       }));
     }

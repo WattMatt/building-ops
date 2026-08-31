@@ -46,16 +46,35 @@ export interface ReportData {
   // cm
   turnover?: { tenant: string; density: string; growth: string; band: string }[];
   incidentsTotal?: number | null;
-  /** Per-tenant OHS & housekeeping compliance — the substance of a CM report. */
+  /**
+   * Per-tenant OHS & housekeeping compliance — the substance of a CM report.
+   *
+   * All 29 captured columns, because exporting a subset silently discards the client's
+   * answers: the seven-column version shipped 26% of what the app captures. They are
+   * rendered as four narrow tables mirroring the source sheet's own groups, since 29
+   * columns cannot fit A4 in one table.
+   */
   tenantCompliance?: {
-    shop: string; tenant: string; gla: number | null; occupancyCert: string | null;
-    cocNumber: string | null; cocDate: string | null; hvacRecords: string | null;
-    sprinkler: string | null; smokeDetection: string | null; evacPlan: string | null;
+    shop: string; tenant: string; gla: number | null;
+    // certificates
+    occupancyCert: string | null; cocNumber: string | null; cocDate: string | null; leaseClause: string | null;
+    // hvac + generators
+    hvacResponsibility: string | null; hvacRecords: string | null; hvacHandover: string | null;
+    generatorResponsibility: string | null; generatorRecords: string | null;
+    // fire equipment
+    sprinklerDedicated: string | null; sprinklerWeekly: string | null; sprinklerAnnual: string | null; sprinkler3yr: string | null;
+    smokeExtractionDedicated: string | null; smokeExtractionService: string | null;
+    smokeDetectionDedicated: string | null; smokeDetectionService: string | null;
+    handheldFire: string | null;
+    // ohs risks + food tenants
+    ohsRisks: string | null; evacPlan: string | null; foodExtraction: string | null;
+    greaseTrap: string | null; fireBlanket: string | null; gasCoc: string | null; flammableLiquid: string | null;
   }[];
-  /** Per-tenant shop specification. */
+  /** Per-tenant shop specification — all captured columns, in two narrow tables. */
   shopSpec?: {
-    shop: string; tenant: string; phase: string | null; actualAmps: string | null;
-    generator: string | null; hvac: string | null; lighting: string | null;
+    shop: string; tenant: string; phase: string | null; actualAmps: string | null; leaseAmps: string | null;
+    generator: string | null; hvac: string | null; hvacBtu: string | null; hvacGas: string | null;
+    lighting: string | null; shopfront: string | null; rollerShutter: string | null;
   }[];
   /**
    * Sections this report type is expected to carry that hold no rows. Printed as an
@@ -194,27 +213,57 @@ export function buildReportDoc(
         ['*', 'auto', 'auto', 'auto']));
     }
     if (data.tenantCompliance && data.tenantCompliance.length) {
+      // 29 captured columns cannot fit one A4 table, so they are split along the source
+      // sheet's own groups. Splitting beats dropping: the previous single table carried
+      // seven columns and silently discarded three quarters of the client's answers.
+      const tc = data.tenantCompliance;
       section('Tenant OHS & Housekeeping');
-      // 324pt of fixed columns + 40pt gutters leaves ~151pt for the tenant name.
+      note('Certificates and occupancy.');
       content.push(compactTable(
-        ['Shop', 'Tenant', 'GLA', 'Occup.', 'COC no.', 'COC date', 'HVAC', 'Sprnk', 'Smoke', 'Evac'],
-        data.tenantCompliance.map((t) => [
-          t.shop, t.tenant, t.gla == null ? '' : String(t.gla),
-          t.occupancyCert ?? '', t.cocNumber ?? '', t.cocDate ?? '',
-          t.hvacRecords ?? '', t.sprinkler ?? '', t.smokeDetection ?? '', t.evacPlan ?? '',
-        ]),
-        [34, '*', 26, 46, 54, 44, 30, 30, 30, 30],
-        ['l', 'l', 'r', 'l', 'l', 'l', 'l', 'l', 'l', 'l']));
+        ['Shop', 'Tenant', 'GLA', 'Occupancy cert', 'Electrical COC no.', 'COC date', 'Lease clause'],
+        tc.map((t) => [t.shop, t.tenant, t.gla == null ? '' : String(t.gla),
+          t.occupancyCert ?? '', t.cocNumber ?? '', t.cocDate ?? '', t.leaseClause ?? '']),
+        [34, '*', 28, 70, 76, 48, 60],
+        ['l', 'l', 'r', 'l', 'l', 'l', 'l']));
+
+      note('HVAC and generators.');
+      content.push(compactTable(
+        ['Shop', 'Tenant', 'HVAC resp.', 'HVAC records', 'HVAC handover', 'Gen. resp.', 'Gen. records'],
+        tc.map((t) => [t.shop, t.tenant, t.hvacResponsibility ?? '', t.hvacRecords ?? '',
+          t.hvacHandover ?? '', t.generatorResponsibility ?? '', t.generatorRecords ?? '']),
+        [34, '*', 52, 54, 60, 48, 52]));
+
+      note('Fire equipment. Sprinkler and smoke systems: D = dedicated, then service records.');
+      content.push(compactTable(
+        ['Shop', 'Tenant', 'Sprnk D', 'Weekly', 'Annual', '3-yr', 'Ext. D', 'Ext. svc', 'Det. D', 'Det. svc', 'Handheld'],
+        tc.map((t) => [t.shop, t.tenant, t.sprinklerDedicated ?? '', t.sprinklerWeekly ?? '',
+          t.sprinklerAnnual ?? '', t.sprinkler3yr ?? '', t.smokeExtractionDedicated ?? '',
+          t.smokeExtractionService ?? '', t.smokeDetectionDedicated ?? '', t.smokeDetectionService ?? '',
+          t.handheldFire ?? '']),
+        [30, '*', 30, 30, 30, 24, 28, 30, 28, 30, 34]));
+
+      note('OHS act risks and food tenants.');
+      content.push(compactTable(
+        ['Shop', 'Tenant', 'OHS risks', 'Evac plan', 'Food extr.', 'Grease trap', 'Fire blanket', 'Gas COC', 'Flammable'],
+        tc.map((t) => [t.shop, t.tenant, t.ohsRisks ?? '', t.evacPlan ?? '', t.foodExtraction ?? '',
+          t.greaseTrap ?? '', t.fireBlanket ?? '', t.gasCoc ?? '', t.flammableLiquid ?? '']),
+        [30, '*', 46, 40, 40, 42, 44, 34, 40]));
     }
     if (data.shopSpec && data.shopSpec.length) {
+      const ss = data.shopSpec;
       section('Shop Specification');
+      note('Electrical.');
       content.push(compactTable(
-        ['Shop', 'Tenant', 'Phase', 'Amps', 'Gen.', 'HVAC', 'Lighting'],
-        data.shopSpec.map((s) => [
-          s.shop, s.tenant, s.phase ?? '', s.actualAmps ?? '',
-          s.generator ?? '', s.hvac ?? '', s.lighting ?? '',
-        ]),
-        [34, 92, 46, 34, 28, '*', '*']));
+        ['Shop', 'Tenant', 'Phase', 'Actual amps', 'Lease amps', 'Generator'],
+        ss.map((s2) => [s2.shop, s2.tenant, s2.phase ?? '', s2.actualAmps ?? '', s2.leaseAmps ?? '', s2.generator ?? '']),
+        [34, '*', 70, 54, 54, 44]));
+
+      note('HVAC, lighting and shopfront.');
+      content.push(compactTable(
+        ['Shop', 'Tenant', 'HVAC units', 'BTU', 'Gas', 'Lighting', 'Shopfront', 'Shutters'],
+        ss.map((s2) => [s2.shop, s2.tenant, s2.hvac ?? '', s2.hvacBtu ?? '', s2.hvacGas ?? '',
+          s2.lighting ?? '', s2.shopfront ?? '', s2.rollerShutter ?? '']),
+        [30, 64, '*', 60, 40, '*', 56, 46]));
     }
     if (data.incidentsTotal != null) {
       section('Security Incidents');
@@ -271,24 +320,33 @@ export function buildReportDoc(
       content.push({
         table: {
           headerRows: 1,
-          widths: [34, '*', 56, 40, 40, 44, 44, '*'],
+          // Explicit widths + the compact layout: with pdfmake's default 8pt-a-side
+          // gutters, eight columns spend 128pt on padding alone and the last column is
+          // pushed off the paper. 30+92+52+34+38+40+40+60 = 386, +32pt gutters = 418.
+          widths: [30, 92, 52, 34, 38, 40, 40, 60],
           body: [
-            ['Shop', 'Tenant', 'COC #', 'Type', 'Status', 'Issued', 'Expires', 'Certificate'].map((h) => ({ text: h, bold: true, fontSize: 8, fillColor: '#f3f4f6' })),
+            ['Shop', 'Tenant', 'COC #', 'Type', 'Status', 'Issued', 'Expires', 'Certificate'].map((h) => ({ text: h, bold: true, fontSize: 6.5, fillColor: '#f3f4f6' })),
             ...data.electricalCompliance.map((r) => [
-              { text: r.shop_number || '', fontSize: 8 },
-              { text: r.tenant_name || '', fontSize: 8 },
-              { text: r.coc_number || '', fontSize: 8 },
-              { text: r.coc_type || '', fontSize: 8 },
-              { text: r.coc_status || '', fontSize: 8 },
-              { text: r.coc_issue_date || '', fontSize: 8 },
-              { text: r.coc_expiry_date || '', fontSize: 8 },
+              { text: r.shop_number || '', fontSize: 6.5 },
+              { text: r.tenant_name || '', fontSize: 6.5 },
+              { text: r.coc_number || '', fontSize: 6.5 },
+              { text: r.coc_type || '', fontSize: 6.5 },
+              { text: r.coc_status || '', fontSize: 6.5 },
+              { text: r.coc_issue_date || '', fontSize: 6.5 },
+              { text: r.coc_expiry_date || '', fontSize: 6.5 },
               r.certificate_url
                 ? { text: r.certificate_name || 'View', link: r.certificate_url, fontSize: 8, color: '#2563eb', decoration: 'underline' }
                 : { text: '—', fontSize: 8 },
             ]),
           ],
         },
-        layout: 'lightHorizontalLines',
+        layout: {
+          paddingLeft: () => 2, paddingRight: () => 2,
+          paddingTop: () => 2, paddingBottom: () => 2,
+          hLineWidth: (r: number) => (r === 1 ? 1 : 0.5),
+          vLineWidth: () => 0,
+          hLineColor: () => '#e5e7eb',
+        },
         margin: [0, 4, 0, 12],
       } as Content);
     }
