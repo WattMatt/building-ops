@@ -156,7 +156,7 @@ export default function PpmSection({ reportId, buildingId, readOnly }: SectionPr
   return (
     <SectionCard
       title="PPM"
-      hint="Planned preventive maintenance schedule. Set each service's monthly status across the fiscal year."
+      hint="Planned preventive maintenance schedule. Click a month cell to cycle its status — changes save immediately."
       readOnly={readOnly}
       headerAccessory={<span className="text-sm text-muted-foreground">{services.length} {services.length === 1 ? 'service' : 'services'}</span>}
     >

@@ -198,7 +198,7 @@ export default function ConditionInspectionSection({ reportId, buildingId, readO
   return (
     <SectionCard
       title="Condition Inspection"
-      hint="Annual inspection across 33 sections. Pick a section; each item shows its own field set plus condition, recommendation and capex."
+      hint="Annual inspection across 33 sections. Pick a section; each item shows its own field set plus condition, recommendation and capex. Changes save automatically, and photos you attach print in the exported PDF."
       headerAccessory={totalFlagged > 0 ? <Badge variant="destructive">{totalFlagged} flagged</Badge> : undefined}
     >
       {isLoading ? (

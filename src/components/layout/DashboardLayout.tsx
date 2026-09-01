@@ -5,6 +5,7 @@ import { useOrganization } from '@/hooks/useOrganization';
 import { useUserProfile } from '@/hooks/useUserProfile';
 import { recordAuthEvent } from '@/lib/auth-audit';
 import { ThemeToggle } from '@/components/ThemeToggle';
+import { HintsToggle } from '@/components/HintsToggle';
 import {
   Sidebar,
   SidebarContent,
@@ -298,7 +299,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         <main className="flex-1 flex flex-col min-w-0">
           <header className="h-12 sm:h-14 border-b bg-card flex items-center justify-between px-3 sm:px-4 shrink-0">
             <SidebarTrigger />
-            <ThemeToggle />
+            <div className="flex items-center gap-1">
+              <HintsToggle />
+              <ThemeToggle />
+            </div>
           </header>
           <div className="flex-1 p-3 sm:p-4 lg:p-6 overflow-auto">
             {children}

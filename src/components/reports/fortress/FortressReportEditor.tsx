@@ -24,6 +24,7 @@ import { useReportSectionCounts } from '@/hooks/useReportSectionCounts';
 import { ReportSavedVersions } from '@/components/reports/fortress/ReportSavedVersions';
 import { fdb, REPORT_TYPE_LABELS, type ReportStatus } from '@/integrations/supabase/fortress-db';
 import { getSectionComponent } from './sections/registry';
+import { Hint } from '@/components/ui/hint';
 
 export default function FortressReportEditor() {
   const { id } = useParams<{ id: string }>();
@@ -100,7 +101,10 @@ export default function FortressReportEditor() {
       }
     } catch (e) {
       if (import.meta.env.DEV) console.error('PDF export failed:', e);
-      toast.error('Could not generate the PDF.');
+      // generateReportPdf fails loudly with a named cause (which table could not be
+      // read). A generic toast here muted that — surface it so the user can act.
+      const msg = e instanceof Error && e.message ? ` ${e.message}` : '';
+      toast.error(`Could not generate the PDF.${msg}`);
     } finally {
       setExporting(false);
     }
@@ -127,6 +131,34 @@ export default function FortressReportEditor() {
   const editable = (status === 'draft' || status === 'rejected') && (isAuthor || isAdminOrManager);
   const SectionComp = current ? getSectionComponent(current) : undefined;
   const currentMeta = sections.find((s) => s.key === current);
+
+  // One-line workflow hint per status + role, so nobody has to reverse-engineer the
+  // lifecycle from which buttons happen to appear. Coaching only — rendered through
+  // <Hint>, so experienced users can switch it off from the header lightbulb.
+  const statusHint = (() => {
+    switch (status) {
+      case 'draft':
+        return editable
+          ? 'Fill in each section, then Submit for review. Each section saves on its own.'
+          : 'Draft in progress — waiting on the author to complete and submit it.';
+      case 'submitted':
+        return isReviewer || isAdminOrManager
+          ? 'Look through the sections, then Mark reviewed, Approve, or Reject with a note for the author.'
+          : 'Locked while awaiting review. An admin or manager can reopen it as a draft.';
+      case 'reviewed':
+        return isAdminOrManager
+          ? 'Reviewed — Approve to finalise it, or Reject to return it to the author with a note.'
+          : 'Reviewed — waiting for a manager to approve.';
+      case 'rejected':
+        return isAuthor || isAdminOrManager
+          ? 'Returned for changes — fix the sections, then Re-submit for review.'
+          : 'Returned to the author for changes.';
+      case 'approved':
+        return 'Approved and locked. An admin or manager can reopen it as a draft if changes are needed.';
+      default:
+        return null;
+    }
+  })();
 
   const transition = (next: ReportStatus, notes?: string) => {
     lifecycle.mutate({ status: next, reviewNotes: notes }, { onSuccess: () => { setReviewOpen(null); setReviewNotes(''); } });
@@ -188,16 +220,19 @@ export default function FortressReportEditor() {
             {REPORT_TYPE_LABELS[report.report_type]} · {formatPeriodLabel(report.report_period)}
           </p>
           {editable ? (
-            <div className="mt-2 flex items-center gap-2">
-              <Label htmlFor="prepared-for" className="text-xs text-muted-foreground">Prepared for</Label>
-              <Input
-                id="prepared-for"
-                className="h-8 w-56"
-                placeholder="e.g. Capital Propfund"
-                value={preparedFor}
-                onChange={(e) => setPreparedFor(e.target.value)}
-                onBlur={savePreparedFor}
-              />
+            <div className="mt-2">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="prepared-for" className="text-xs text-muted-foreground">Prepared for</Label>
+                <Input
+                  id="prepared-for"
+                  className="h-8 w-56"
+                  placeholder="e.g. Capital Propfund"
+                  value={preparedFor}
+                  onChange={(e) => setPreparedFor(e.target.value)}
+                  onBlur={savePreparedFor}
+                />
+              </div>
+              <Hint icon={false} className="mt-1">Printed on the PDF cover under the managers.</Hint>
             </div>
           ) : (
             report.prepared_for && (
@@ -228,6 +263,8 @@ export default function FortressReportEditor() {
           })}
         </div>
       </div>
+
+      {statusHint && <Hint className="-mt-2">{statusHint}</Hint>}
 
       {report.review_notes && status === 'rejected' && (
         <Card className="border-destructive/40">
@@ -283,7 +320,7 @@ export default function FortressReportEditor() {
                 <CardContent className="py-12 text-center text-sm text-muted-foreground">
                   <p className="font-medium text-foreground">{currentMeta?.label}</p>
                   <p className="mt-1">Nothing was captured for this section in this period.</p>
-                  {currentMeta?.hint && <p className="mt-2 text-xs">{currentMeta.hint}</p>}
+                  {currentMeta?.hint && <Hint className="mt-2 justify-center">{currentMeta.hint}</Hint>}
                   {isAdminOrManager && (
                     <p className="mt-4 text-xs">
                       Reopen this report as a draft to add it.

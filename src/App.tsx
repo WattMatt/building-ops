@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { HintsProvider } from "@/hooks/useHints";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { OrganizationThemeProvider } from "@/components/OrganizationThemeProvider";
 import ProtectedRoute from "@/components/ProtectedRoute";
@@ -43,6 +44,7 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <AuthProvider>
+            <HintsProvider>
             <OrganizationThemeProvider>
             <Routes>
               {/* Public routes (outside ProtectedRoute) */}
@@ -144,6 +146,7 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
             </Routes>
             </OrganizationThemeProvider>
+            </HintsProvider>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>
