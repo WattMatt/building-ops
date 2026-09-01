@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { loadBranding, renderEmail } from "../_shared/email.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
@@ -15,31 +16,64 @@ async function sendEmail(from: string, to: string[], subject: string, html: stri
   return res.json();
 }
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-
 interface CompleteNotification {
   submissionId: string;
 }
 
 serve(async (req: Request): Promise<Response> => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const cors = corsHeaders(req);
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
+    // Authorize the caller: this function had NO internal auth and did not verify the
+    // sign-off was actually complete, so any project-JWT holder could email "all
+    // signatures collected" for any submission — a forged compliance signal. Identify
+    // the caller and require they be party to the sign-off (or an admin/manager).
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) return json({ error: "No authorization header" }, 401);
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user: caller }, error: callerErr } = await userClient.auth.getUser();
+    if (callerErr || !caller) return json({ error: "Invalid or expired token" }, 401);
+
+    const supabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { submissionId }: CompleteNotification = await req.json();
-    if (!submissionId) throw new Error("Missing submissionId");
+    if (!submissionId) return json({ error: "Missing submissionId" }, 400);
 
     const { data: submission } = await supabase
       .from("form_submissions")
-      .select("form_name, building_id, submitted_by")
+      .select("form_name, building_id, submitted_by, signoff_status")
       .eq("id", submissionId)
       .single();
-    if (!submission) throw new Error("Submission not found");
+    if (!submission) return json({ error: "Submission not found" }, 404);
+
+    // All sign-off requests for this submission — used for authorization and recipients.
+    const { data: requests } = await supabase
+      .from("form_signoff_requests")
+      .select("assigned_by, assigned_to")
+      .eq("submission_id", submissionId);
+    const allRequests = requests ?? [];
+
+    // Authorize: admin/manager, or a party to this sign-off (submitter / requester / signer).
+    const { data: callerRoles } = await supabase
+      .from("user_roles").select("role").eq("user_id", caller.id);
+    const isManager = (callerRoles ?? []).some((r) => r.role === "admin" || r.role === "manager");
+    const isParty = submission.submitted_by === caller.id
+      || allRequests.some((r) => r.assigned_by === caller.id || r.assigned_to === caller.id);
+    if (!isManager && !isParty) {
+      return json({ error: "Forbidden: you are not part of this sign-off" }, 403);
+    }
+
+    // Verify the sign-off truly is complete before announcing it. The DB trigger is the
+    // system of record for completion (the client reads the same column), so trust it
+    // rather than re-deriving from request rows — refuse to emit a false
+    // "all signatures collected" signal for an incomplete sign-off.
+    if (submission.signoff_status !== "complete") {
+      return json({ error: "Sign-off is not complete", complete: false }, 409);
+    }
 
     let buildingName = "";
     if (submission.building_id) {
@@ -50,17 +84,10 @@ serve(async (req: Request): Promise<Response> => {
     // Recipients: the submitter + every distinct requester (assigned_by) on the sign-off.
     const recipientIds = new Set<string>();
     if (submission.submitted_by) recipientIds.add(submission.submitted_by);
-    const { data: requests } = await supabase
-      .from("form_signoff_requests")
-      .select("assigned_by")
-      .eq("submission_id", submissionId);
-    (requests || []).forEach((r) => r.assigned_by && recipientIds.add(r.assigned_by));
+    allRequests.forEach((r) => r.assigned_by && recipientIds.add(r.assigned_by));
 
     if (recipientIds.size === 0) {
-      return new Response(JSON.stringify({ success: true, notified: 0 }), {
-        status: 200,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      });
+      return json({ success: true, notified: 0 });
     }
 
     const { data: profiles } = await supabase
@@ -69,10 +96,7 @@ serve(async (req: Request): Promise<Response> => {
       .in("id", Array.from(recipientIds));
     const emails = (profiles || []).map((p) => p.email).filter(Boolean) as string[];
     if (emails.length === 0) {
-      return new Response(JSON.stringify({ success: true, notified: 0, message: "No recipient emails" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      });
+      return json({ success: true, notified: 0, message: "No recipient emails" });
     }
 
     const formName = submission.form_name ?? "a form";
@@ -92,15 +116,9 @@ serve(async (req: Request): Promise<Response> => {
       }),
     );
 
-    return new Response(JSON.stringify({ success: true, notified: emails.length }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
-    });
+    return json({ success: true, notified: emails.length });
   } catch (error) {
     console.error("notify-signoff-complete error:", error);
-    return new Response(JSON.stringify({ error: (error as Error).message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
-    });
+    return json({ error: (error as Error).message }, 500);
   }
 });

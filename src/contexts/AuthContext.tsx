@@ -43,6 +43,7 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<{ error: Error | null }>;
   inviteUser: (payload: InviteUserPayload) => Promise<InviteUserResult>;
   setUserStatus: (userId: string, action: 'deactivate' | 'reactivate') => Promise<void>;
+  setUserRole: (userId: string, newRole: AppRole) => Promise<void>;
   isAdmin: boolean;
   isManager: boolean;
   isAdminOrManager: boolean;
@@ -280,6 +281,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // Role changes go through an admin-verified edge function (never a raw client
+  // write), so the last-admin and self-demotion guards cannot be bypassed and a
+  // zero-row update can no longer report success.
+  const setUserRole = async (userId: string, newRole: AppRole) => {
+    const { error } = await supabase.functions.invoke('set-user-role', {
+      body: { userId, role: newRole },
+    });
+    if (error) {
+      let message = error.message || 'Failed to update user role';
+      try {
+        const body = await (error as { context?: Response }).context?.json?.();
+        if (body?.error) message = body.error;
+      } catch {
+        // keep the default message
+      }
+      throw new Error(message);
+    }
+  };
+
   const isAdmin = role === 'admin';
   const isManager = role === 'manager';
   const isAdminOrManager = isAdmin || isManager;
@@ -304,6 +324,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         resetPassword,
         inviteUser,
         setUserStatus,
+        setUserRole,
         isAdmin,
         isManager,
         isAdminOrManager,

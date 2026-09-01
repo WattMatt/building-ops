@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { loadBranding, renderEmail } from "../_shared/email.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
@@ -15,32 +16,46 @@ async function sendEmail(from: string, to: string[], subject: string, html: stri
   return res.json();
 }
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
-
 interface SignoffRequestNotification {
   requestId: string;
   reminder?: boolean;
 }
 
 serve(async (req: Request): Promise<Response> => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const cors = corsHeaders(req);
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
-    const { requestId, reminder }: SignoffRequestNotification = await req.json();
-    if (!requestId) throw new Error("Missing requestId");
+    // Authorize the caller: this function had NO internal auth — any holder of a project
+    // JWT could spam sign-off request emails for any requestId. Identify the caller, then
+    // require they be the request's requester (assigned_by) or an admin/manager.
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) return json({ error: "No authorization header" }, 401);
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user: caller }, error: callerErr } = await userClient.auth.getUser();
+    if (callerErr || !caller) return json({ error: "Invalid or expired token" }, 401);
+
+    const supabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { requestId }: SignoffRequestNotification = await req.json();
+    if (!requestId) return json({ error: "Missing requestId" }, 400);
 
     const { data: request, error: reqErr } = await supabase
       .from("form_signoff_requests")
       .select("id, submission_id, assigned_to, assigned_by, due_at, instructions")
       .eq("id", requestId)
       .single();
-    if (reqErr || !request) throw new Error("Sign-off request not found");
+    if (reqErr || !request) return json({ error: "Sign-off request not found" }, 404);
+
+    const { data: callerRoles } = await supabase
+      .from("user_roles").select("role").eq("user_id", caller.id);
+    const isManager = (callerRoles ?? []).some((r) => r.role === "admin" || r.role === "manager");
+    if (!isManager && request.assigned_by !== caller.id) {
+      return json({ error: "Forbidden: you did not raise this sign-off request" }, 403);
+    }
 
     const { data: submission } = await supabase
       .from("form_submissions")
@@ -60,10 +75,7 @@ serve(async (req: Request): Promise<Response> => {
       .eq("id", request.assigned_to)
       .single();
     if (!signer?.email) {
-      return new Response(JSON.stringify({ success: true, notified: 0, message: "Signer has no email" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      });
+      return json({ success: true, notified: 0, message: "Signer has no email" });
     }
 
     let requesterName = "A manager";
@@ -76,7 +88,7 @@ serve(async (req: Request): Promise<Response> => {
     const due = request.due_at
       ? new Date(request.due_at).toLocaleString("en-ZA", { dateStyle: "medium", timeZone: "Africa/Johannesburg" })
       : null;
-    const heading = reminder ? "Sign-off reminder" : "Sign-off requested";
+    const heading = "Sign-off requested";
 
     const branding = await loadBranding(supabase);
 
@@ -97,15 +109,9 @@ serve(async (req: Request): Promise<Response> => {
       }),
     );
 
-    return new Response(JSON.stringify({ success: true, notified: 1 }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
-    });
+    return json({ success: true, notified: 1 });
   } catch (error) {
     console.error("notify-signoff-request error:", error);
-    return new Response(JSON.stringify({ error: (error as Error).message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
-    });
+    return json({ error: (error as Error).message }, 500);
   }
 });

@@ -186,18 +186,24 @@ export default function Checklists() {
     if (!itemToDelete) return;
 
     try {
-      const { error } = await supabase
+      // Select the deleted row back: an RLS-denied delete returns no error and zero
+      // rows, which would otherwise refetch (item reappears) while the toast claims success.
+      const { data: deleted, error } = await supabase
         .from('template_items')
         .delete()
-        .eq('id', itemToDelete.id);
+        .eq('id', itemToDelete.id)
+        .select('id');
 
       if (error) throw error;
+      if (!deleted || deleted.length === 0) {
+        throw new Error('You do not have permission to delete this task.');
+      }
 
       toast.success('Task deleted successfully');
       fetchData();
     } catch (error) {
       console.error('Error deleting item:', error);
-      toast.error('Failed to delete task');
+      toast.error(error instanceof Error ? error.message : 'Failed to delete task');
     } finally {
       setDeleteDialogOpen(false);
       setItemToDelete(null);

@@ -272,17 +272,23 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
     if (!confirm(`Are you sure you want to delete ${tenant.shop_name}?`)) return;
 
     try {
-      const { error } = await supabase
+      // Select the deleted row back: an RLS-denied delete returns no error and zero
+      // rows, which would otherwise refetch (row reappears) while the toast claims success.
+      const { data: deleted, error } = await supabase
         .from('building_tenants')
         .delete()
-        .eq('id', tenant.id);
+        .eq('id', tenant.id)
+        .select('id');
 
       if (error) throw error;
+      if (!deleted || deleted.length === 0) {
+        throw new Error('You do not have permission to delete this tenant.');
+      }
       toast.success('Tenant deleted successfully');
       fetchTenants();
     } catch (error) {
       console.error('Error deleting tenant:', error);
-      toast.error('Failed to delete tenant');
+      toast.error(error instanceof Error ? error.message : 'Failed to delete tenant');
     }
   };
 

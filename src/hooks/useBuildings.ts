@@ -57,19 +57,26 @@ export function useBuildings(
 
   const deleteBuilding = useCallback(async (id: string): Promise<boolean> => {
     try {
-      const { error: deleteError } = await supabase
+      // Select the deleted row back: an RLS-denied delete returns no error and zero
+      // rows, so without this a forbidden delete toasts success and vanishes the
+      // building from the UI until the next reload.
+      const { data: deleted, error: deleteError } = await supabase
         .from('buildings')
         .delete()
-        .eq('id', id);
+        .eq('id', id)
+        .select('id');
 
       if (deleteError) throw deleteError;
+      if (!deleted || deleted.length === 0) {
+        throw new Error('You do not have permission to delete this building.');
+      }
 
       setBuildings((prev) => prev.filter((b) => b.id !== id));
       toast.success('Building deleted successfully');
       return true;
     } catch (err) {
       if (import.meta.env.DEV) console.error('Error deleting building:', err);
-      toast.error('Failed to delete building');
+      toast.error(err instanceof Error ? err.message : 'Failed to delete building');
       return false;
     }
   }, []);

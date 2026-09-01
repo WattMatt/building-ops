@@ -66,7 +66,12 @@ export function FormSubmissionsDialog({
   open,
   onOpenChange,
 }: FormSubmissionsDialogProps) {
-  const { user } = useAuth();
+  const { user, isAdminOrManager, role } = useAuth();
+  // Who may review a submission: admin/manager/reviewer, and never the person who
+  // submitted it. Previously the buttons rendered on submission status alone, so any
+  // user — including the submitter — saw Approve/Reject/Mark-reviewed. RLS is the hard
+  // boundary, but this stops the UI offering (and self-approving) actions it can't do.
+  const canReview = isAdminOrManager || role === 'reviewer';
   const queryClient = useQueryClient();
   const [selectedSubmission, setSelectedSubmission] = useState<SubmissionDetails | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -187,7 +192,9 @@ export function FormSubmissionsDialog({
     const newStatus = actionType === 'review' ? 'reviewed' : actionType === 'approve' ? 'approved' : 'rejected';
     
     try {
-      const { error } = await supabase
+      // Select the affected row back: an RLS-denied update returns no error and zero
+      // rows, which would otherwise toast success while nothing changed.
+      const { data: updated, error } = await supabase
         .from('form_submissions')
         .update({
           status: newStatus,
@@ -195,9 +202,13 @@ export function FormSubmissionsDialog({
           reviewed_at: reviewedAt,
           review_notes: actionNotes || null,
         })
-        .eq('id', selectedSubmission.id);
+        .eq('id', selectedSubmission.id)
+        .select('id');
 
       if (error) throw error;
+      if (!updated || updated.length === 0) {
+        throw new Error('You do not have permission to review this submission.');
+      }
 
       toast.success(`Submission ${actionType === 'review' ? 'marked as reviewed' : actionType === 'approve' ? 'approved' : 'rejected'}`);
       
@@ -359,8 +370,8 @@ export function FormSubmissionsDialog({
                 </div>
               )}
 
-              {/* Action Buttons for Pending Submissions */}
-              {selectedSubmission.status === 'submitted' && (
+              {/* Action Buttons for Pending Submissions — reviewers only, never the submitter */}
+              {selectedSubmission.status === 'submitted' && canReview && selectedSubmission.submitted_by !== user?.id && (
                 <div className="p-4 rounded-lg border-2 border-dashed border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700 mb-4">
                   <p className="text-sm text-amber-800 dark:text-amber-200 mb-3 font-medium">This submission requires review</p>
                   <div className="flex gap-2 flex-wrap">
@@ -392,8 +403,8 @@ export function FormSubmissionsDialog({
                 </div>
               )}
 
-              {/* Action buttons for reviewed submissions */}
-              {selectedSubmission.status === 'reviewed' && (
+              {/* Action buttons for reviewed submissions — reviewers only, never the submitter */}
+              {selectedSubmission.status === 'reviewed' && canReview && selectedSubmission.submitted_by !== user?.id && (
                 <div className="p-4 rounded-lg border bg-muted/30 mb-4">
                   <p className="text-sm text-muted-foreground mb-3">Final decision required</p>
                   <div className="flex gap-2">

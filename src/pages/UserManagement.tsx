@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { formatBuildingName } from '@/lib/buildingName';
 import { useAuth, type InviteUserPayload } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { recordAuthEvent } from '@/lib/auth-audit';
+import type { AppRole } from '@/lib/constants';
 import { useBuildings } from '@/hooks/useBuildings';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -99,7 +99,7 @@ const roleLabels: Record<string, string> = {
 };
 
 export default function UserManagement() {
-  const { isAdmin, inviteUser, setUserStatus, user: currentUser } = useAuth();
+  const { isAdmin, inviteUser, setUserStatus, setUserRole, user: currentUser } = useAuth();
   const { buildings, loading: buildingsLoading } = useBuildings();
   const [users, setUsers] = useState<UserWithRole[]>([]);
   const [loading, setLoading] = useState(true);
@@ -363,24 +363,17 @@ export default function UserManagement() {
 
   const handleRoleChange = async (userId: string, newRole: string) => {
     try {
-      const { error } = await supabase
-        .from('user_roles')
-        .update({ role: newRole as any })
-        .eq('user_id', userId);
-
-      if (error) throw error;
-
-      // C7: role changes were previously unaudited. Attributed to the acting
-      // admin; entity_id is the user whose role changed. Fire-and-forget.
-      void recordAuthEvent('user_role_change', { entityId: userId });
-
+      // Goes through the admin-verified set-user-role edge function, not a raw client
+      // write: it enforces the last-admin and self-demotion guards, audits server-side,
+      // and fails loudly on a zero-row update instead of falsely reporting success.
+      await setUserRole(userId, newRole as AppRole);
       setUsers((prev) =>
         prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
       );
       toast.success('User role updated');
     } catch (error) {
       if (import.meta.env.DEV) console.error('Error updating role:', error);
-      toast.error('Failed to update user role');
+      toast.error(error instanceof Error ? error.message : 'Failed to update user role');
     }
   };
 

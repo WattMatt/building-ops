@@ -68,10 +68,18 @@ serve(async (req) => {
 
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Authorize: caller must be an admin
-    const { data: callerRole } = await adminClient
-      .from("user_roles").select("role").eq("user_id", caller.id).maybeSingle();
-    if (!callerRole || callerRole.role !== "admin") {
+    // Authorize: caller must be an admin. Read roles as a SET, never maybeSingle():
+    // user_roles can hold several rows per user (it carries building_id), and
+    // maybeSingle() errors on >1 row — locking a legitimate multi-row admin out of the
+    // ONLY provisioning path (invite / resend / user-list status). Matches the
+    // set-based check in set-user-status and delete-user.
+    const { data: callerRoles, error: callerRolesErr } = await adminClient
+      .from("user_roles").select("role").eq("user_id", caller.id);
+    if (callerRolesErr) {
+      console.error("invite-user: caller role lookup failed:", callerRolesErr.message);
+      return json({ error: "Unable to verify your account" }, 403);
+    }
+    if (!(callerRoles ?? []).some((r) => r.role === "admin")) {
       return json({ error: "Forbidden: admin role required" }, 403);
     }
 
@@ -209,14 +217,33 @@ serve(async (req) => {
       newUserId = data.user.id;
     }
 
-    // Privileged upgrades (service role — bypasses RLS by design)
-    await adminClient.from("user_roles").upsert({ user_id: newUserId, role }, { onConflict: "user_id" });
+    // Privileged upgrades (service role — bypasses RLS by design). These writes were
+    // fire-and-forget: a failed role grant still returned "invited", leaving an account
+    // with no role — denied every role-gated route, mislabelled "user" in the admin
+    // list — while the admin believed provisioning succeeded. Verify each write and roll
+    // the invite back on failure so a half-provisioned account is never reported as a
+    // success (the must_set_password write below already follows this contract).
+    const rollback = async (reason: string) => {
+      // Best-effort cleanup so the email is free to re-invite and no orphan rows survive
+      // (the idempotency check keys on profiles.email, so a stray profile would wedge it).
+      await adminClient.from("user_buildings").delete().eq("user_id", newUserId);
+      await adminClient.from("user_roles").delete().eq("user_id", newUserId);
+      await adminClient.auth.admin.deleteUser(newUserId);
+      await adminClient.from("profiles").delete().eq("id", newUserId);
+      return json({ error: `Could not finish provisioning the account: ${reason}` }, 500);
+    };
+
+    const { error: roleErr } = await adminClient
+      .from("user_roles").upsert({ user_id: newUserId, role }, { onConflict: "user_id" });
+    if (roleErr) return await rollback(`role could not be set (${roleErr.message})`);
 
     if (buildingIds.length > 0) {
-      await adminClient.from("user_buildings").delete().eq("user_id", newUserId);
-      await adminClient.from("user_buildings").insert(
+      const { error: delErr } = await adminClient.from("user_buildings").delete().eq("user_id", newUserId);
+      if (delErr) return await rollback(`building access could not be reset (${delErr.message})`);
+      const { error: insErr } = await adminClient.from("user_buildings").insert(
         buildingIds.map((building_id) => ({ user_id: newUserId, building_id }))
       );
+      if (insErr) return await rollback(`building access could not be set (${insErr.message})`);
     }
 
     // Set the first-login gate. Use upsert (not a bare update) and VERIFY the
