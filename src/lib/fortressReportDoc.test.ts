@@ -75,6 +75,18 @@ describe('buildReportDoc — annual_inspection', () => {
   });
 });
 
+describe('buildReportDoc — prepared for', () => {
+  it('prints the "Prepared for" client on the cover when set', () => {
+    // The field was captured and saved in the editor but never reached the PDF.
+    const doc = buildReportDoc(
+      { title: 'OPS', report_period: '2026-06-01', report_type: 'ops_monthly', managers: ['A'], prepared_for: 'Capital Propfund' },
+      { compliancePct: 90 },
+      { color: '#123456', orgName: 'Acme' },
+    );
+    expect(collect(doc).text).toContain('Prepared for Capital Propfund');
+  });
+});
+
 describe('buildReportDoc — title casing', () => {
   it('uppercases the whole composed report title in the PDF header', () => {
     const doc = buildReportDoc(
@@ -415,5 +427,83 @@ describe('buildReportDoc — electrical compliance states', () => {
     expect(t).toContain('COC-99');
     expect(t).toContain('Pass');
     expect(t).toContain('2026-01-15');
+  });
+
+  it('renders electrical compliance for OPS and CM reports, not only annual', () => {
+    // REPORT_SECTIONS expects this section on every report type; rendering it only in
+    // the annual branch silently dropped live CoC data from 69 of 72 production reports.
+    const row = {
+      shop_number: 'S1', tenant_name: 'Acme', coc_number: 'COC-1', coc_type: 'Electrical',
+      coc_status: 'Pass', coc_issue_date: '2026-01-01', coc_expiry_date: null,
+      certificate_url: '', certificate_name: '',
+    };
+    for (const make of [opsDoc, cmDoc]) {
+      const t = allText(make({ electricalLinked: true, electricalCompliance: [row] }));
+      expect(t).toContain('Electrical Compliance');
+      expect(t).toContain('COC-1');
+    }
+  });
+});
+
+/*
+ * Sections that previously had a route into the app but none into the PDF: they were
+ * captured, counted as "filled" (so never listed under Not captured), and then omitted.
+ */
+describe('buildReportDoc — sections previously captured but never exported', () => {
+  it('renders the OPS hazard log, monthly building inspection, and borehole/solar yields', () => {
+    const t = allText(opsDoc({
+      hazards: [{ hazard: 'Loose paving at north entrance', correctiveAction: 'Re-lay pavers', status: 'in progress' }],
+      buildingInspection: [{ section: 'STRUCTURE', items: [{ label: 'Basement', acceptable: 'Yes', action: 'None', comment: null }] }],
+      utilityYields: [{ source: 'Borehole', predicted: '100 KL', actual: '80 KL', pctAchieved: '80%', comment: '' }],
+    }));
+    expect(t).toContain('Hazard Log');
+    expect(t).toContain('Loose paving at north entrance');
+    expect(t).toContain('Building Inspection');
+    expect(t).toContain('Basement');
+    expect(t).toContain('Borehole');
+    expect(t).toContain('80%');
+  });
+
+  it('renders CM building turnover, top categories, local resources and the general checklist', () => {
+    const t = allText(cmDoc({
+      buildingTurnover: [{ label: 'Current month total', value: '1,234.00' }],
+      categoryTurnover: [{ category: 'Fashion', monthly: '100.00', density: '50.00', rank: '1', comment: '' }],
+      localResources: [{ type: 'CPF', name: 'Ward 3 CPF', lastMeeting: '2026-05-12', frequency: 'Monthly', contact: 'S Dlamini', number: '082 000 0000' }],
+      checklist: [{ section: 'General', items: [{ item: 'Roof inspection', response: 'yes', value: '2026-06-14', comment: null }] }],
+    }));
+    expect(t).toContain('Building Turnover');
+    expect(t).toContain('Top Categories');
+    expect(t).toContain('Ward 3 CPF');
+    expect(t).toContain('General Checklist');
+    expect(t).toContain('Roof inspection');
+    expect(t).toContain('2026-06-14'); // a date answer (value_date) must survive to the page
+  });
+
+  it('renders incident narratives beside the axis summaries', () => {
+    const t = allText(cmDoc({
+      incidentsTotal: 2,
+      incidentNarratives: [{ period: '2026-06', type: 'Theft', narrative: 'Two laptops taken from storeroom.' }],
+    }));
+    expect(t).toContain('Two laptops taken from storeroom.');
+  });
+
+  it('says when photos on file are not embedded, instead of truncating silently', () => {
+    const annualDoc = buildReportDoc(
+      { title: 'X', report_period: '2026-06-01', report_type: 'annual_inspection', managers: [] },
+      { annualSections: [], annualPhotosTotal: 121, annualPhotosOmitted: 1 },
+      OPTS,
+    );
+    expect(allText(annualDoc)).toContain('1 of 121 photos');
+  });
+
+  it('extends the capex register with year, priority and status', () => {
+    const t = allText(buildReportDoc(
+      { title: 'X', report_period: '2026-06-01', report_type: 'annual_inspection', managers: [] },
+      { capex: [{ description: 'Roof replacement', estimate: 100, year: '2027', priority: 'High', status: 'Planned' }] },
+      OPTS,
+    ));
+    expect(t).toContain('2027');
+    expect(t).toContain('High');
+    expect(t).toContain('Planned');
   });
 });

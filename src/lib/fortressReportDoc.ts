@@ -41,11 +41,28 @@ export interface ReportData {
   }[];
   /** Document completeness register. */
   masterfile?: { document: string; onFile: string; comment: string | null }[];
+  /** OHS hazard log — potential hazard + corrective action, via the report's assessment. */
+  hazards?: { hazard: string; correctiveAction: string; status: string }[];
+  /** Borehole/solar yields — the second grid of the Utilities section. % is recomputed. */
+  utilityYields?: { source: string; predicted: string; actual: string; pctAchieved: string; comment: string }[];
+  /** Monthly building inspection (template walk-through): acceptable + action per item. */
+  buildingInspection?: {
+    section: string;
+    items: { label: string; acceptable: string | null; action: string | null; comment: string | null }[];
+  }[];
   /** Building-inspection and OHS-act answers, grouped by their sheet section. */
   checklist?: { section: string; items: { item: string; response: string | null; value: string | null; comment: string | null }[] }[];
   // cm
+  /** Centre trading performance — one record per report, shown as label/value pairs. */
+  buildingTurnover?: { label: string; value: string }[];
   turnover?: { tenant: string; density: string; growth: string; band: string }[];
+  /** Top performing categories by turnover. */
+  categoryTurnover?: { category: string; monthly: string; density: string; rank: string; comment: string }[];
+  /** CPF / Police / Authority contacts and meeting cadence. */
+  localResources?: { type: string; name: string; lastMeeting: string; frequency: string; contact: string; number: string }[];
   incidentsTotal?: number | null;
+  /** Free-text narratives captured against individual incident rows. */
+  incidentNarratives?: { period: string; type: string; narrative: string }[];
   /** Page 2 / Page 3 blocks. Ingested since the June drop; previously absent from the PDF. */
   footfall?: { entrance: string; month: string; ytd: string; prevYtd: string; variance: string }[];
   toiletFund?: { label: string; value: string }[];
@@ -98,7 +115,14 @@ export interface ReportData {
   annualSections?: AnnualSection[];
   annualFlagged?: number;
   annualCapexTotal?: number | null;
-  capex?: { description: string; estimate: number | null }[];
+  /** Photos on file for this inspection (embedded or not). */
+  annualPhotosTotal?: number;
+  /**
+   * Photos on file but NOT embedded (embed cap, or unreadable at generation time).
+   * Set only when > 0 so the PDF can say so — silent truncation reads as complete.
+   */
+  annualPhotosOmitted?: number;
+  capex?: { description: string; estimate: number | null; year?: string; priority?: string; status?: string }[];
   electricalCompliance?: {
     shop_number: string; tenant_name: string;
     // Nullable on purpose: null means "no certificate recorded", which must render as an
@@ -124,7 +148,12 @@ const PHOTOS_PER_ROW = 3;
 const PHOTO_W = 150;
 
 export function buildReportDoc(
-  report: { title?: string | null; report_period?: string | null; report_type: ReportType; managers?: string[] },
+  report: {
+    title?: string | null; report_period?: string | null; report_type: ReportType;
+    managers?: string[];
+    /** Client the report is addressed to — captured in the editor header, printed on the cover. */
+    prepared_for?: string | null;
+  },
   data: ReportData,
   opts: DocOptions,
 ): TDocumentDefinitions {
@@ -147,13 +176,33 @@ export function buildReportDoc(
   // when a logo is shown, still print the org name as a small caption line under it
   if (opts.logoDataUrl) content.splice(1, 0, { text: opts.orgName, fontSize: 9, color: '#6b7280', margin: [0, 2, 0, 0] });
   if (report.managers && report.managers.length) {
-    content.push({ text: report.managers.join('  ·  '), fontSize: 9, color: '#6b7280', margin: [0, 0, 0, 12] });
+    content.push({ text: report.managers.join('  ·  '), fontSize: 9, color: '#6b7280', margin: [0, 0, 0, report.prepared_for ? 2 : 12] });
+  }
+  // "Prepared for" was captured and saved in the editor but never reached the PDF —
+  // the whole reason the field exists is to print here.
+  if (report.prepared_for) {
+    content.push({ text: `Prepared for ${report.prepared_for}`, fontSize: 9, color: '#6b7280', margin: [0, 0, 0, 12] });
   }
 
   const section = (t: string) => content.push({ text: t, fontSize: 13, bold: true, color: '#111827', margin: [0, 12, 0, 4] });
 
   const note = (t: string) =>
     content.push({ text: t, fontSize: 9, italics: true, color: '#6b7280', margin: [0, 0, 0, 6] });
+
+  // Checklist answers exist on more than one report type (OPS ingests them, and the CM
+  // General Checklist section captures them in-app), so the renderer is shared — only the
+  // heading differs per type. Rendering it inside one type's branch silently dropped the
+  // other types' captured answers.
+  const renderChecklist = (heading: string) => {
+    if (!data.checklist || !data.checklist.length) return;
+    section(heading);
+    for (const grp of data.checklist) {
+      content.push({ text: grp.section, fontSize: 11, bold: true, color, margin: [0, 8, 0, 4] });
+      content.push(table(['Item', 'Response', 'Detail', 'Comment'],
+        grp.items.map((i) => [i.item, i.response ?? '—', i.value ?? '', i.comment ?? '']),
+        ['*', 'auto', 'auto', '*']));
+    }
+  };
 
   if (report.report_type === ('ops_monthly' as ReportType)) {
     // The compliance percentage is only meaningful once the OHS section has been answered.
@@ -171,31 +220,51 @@ export function buildReportDoc(
       }
     }
 
-    if (data.checklist && data.checklist.length) {
-      section('Building Inspection & OHS Act');
-      for (const grp of data.checklist) {
+    if (data.hazards && data.hazards.length) {
+      section('Hazard Log');
+      note('Potential hazards and their corrective actions.');
+      content.push(table(['Hazard', 'Corrective action', 'Status'],
+        data.hazards.map((h) => [h.hazard, h.correctiveAction, h.status]),
+        ['*', '*', 'auto']));
+    }
+
+    if (data.buildingInspection && data.buildingInspection.length) {
+      section('Building Inspection');
+      note('Monthly walk-through: acceptable per item, with any action required.');
+      for (const grp of data.buildingInspection) {
         content.push({ text: grp.section, fontSize: 11, bold: true, color, margin: [0, 8, 0, 4] });
-        content.push(table(['Item', 'Response', 'Detail', 'Comment'],
-          grp.items.map((i) => [i.item, i.response ?? '—', i.value ?? '', i.comment ?? '']),
+        content.push(table(['Item', 'Acceptable', 'Action required', 'Comment'],
+          grp.items.map((i) => [i.label, i.acceptable ?? '—', i.action ?? '', i.comment ?? '']),
           ['*', 'auto', 'auto', '*']));
       }
     }
 
-    if (data.utilities && data.utilities.length) {
+    renderChecklist('Building Inspection & OHS Act');
+
+    if (data.utilities?.length || data.utilityYields?.length) {
       section('Utilities');
-      note('Readings are as recorded on the meter. Percentages are recomputed from the raw readings.');
-      content.push(compactTable(['Meter', 'Utility', 'Reading', 'Unit', 'Category', '% of bulk', 'Comment'],
-        data.utilities.map((u) => [
-          u.meter,
-          u.utility ?? '—',
-          u.reading == null ? '—' : String(u.reading),
-          u.unit ?? '',
-          u.category ?? '—',
-          u.pctOfBulk == null ? '' : `${u.pctOfBulk}%`,
-          u.comment ?? '',
-        ]),
-        ['*', 42, 44, 26, 54, 38, '*'],
-        ['l', 'l', 'r', 'l', 'l', 'r', 'l']));
+      if (data.utilities?.length) {
+        note('Readings are as recorded on the meter. Percentages are recomputed from the raw readings.');
+        content.push(compactTable(['Meter', 'Utility', 'Reading', 'Unit', 'Category', '% of bulk', 'Comment'],
+          data.utilities.map((u) => [
+            u.meter,
+            u.utility ?? '—',
+            u.reading == null ? '—' : String(u.reading),
+            u.unit ?? '',
+            u.category ?? '—',
+            u.pctOfBulk == null ? '' : `${u.pctOfBulk}%`,
+            u.comment ?? '',
+          ]),
+          ['*', 42, 44, 26, 54, 38, '*'],
+          ['l', 'l', 'r', 'l', 'l', 'r', 'l']));
+      }
+      if (data.utilityYields?.length) {
+        note('Borehole / solar yields. % achieved is recomputed from the raw yields.');
+        content.push(compactTable(['Source', 'Predicted', 'Actual', '% achieved', 'Comment'],
+          data.utilityYields.map((y) => [y.source, y.predicted, y.actual, y.pctAchieved, y.comment]),
+          [70, 70, 70, 60, '*'],
+          ['l', 'r', 'r', 'r', 'l']));
+      }
     }
 
     if (data.recoveries && data.recoveries.length) {
@@ -229,11 +298,36 @@ export function buildReportDoc(
   }
 
   if (report.report_type === ('cm_monthly' as ReportType)) {
+    if (data.localResources && data.localResources.length) {
+      section('Local Resources');
+      note('CPF / Police / Authority contacts and meetings.');
+      content.push(compactTable(['Type', 'Name', 'Last meeting', 'Frequency', 'Contact', 'Number'],
+        data.localResources.map((r) => [r.type, r.name, r.lastMeeting, r.frequency, r.contact, r.number]),
+        [56, '*', 62, 60, 90, 70]));
+    }
+
+    renderChecklist('General Checklist');
+
+    if (data.buildingTurnover && data.buildingTurnover.length) {
+      section('Building Turnover');
+      note('Centre trading performance. Growth % is recomputed from the raw totals.');
+      content.push(compactTable(['Item', 'Value'],
+        data.buildingTurnover.map((r) => [r.label, r.value]), ['*', 140], ['l', 'r']));
+    }
+
     if (data.turnover && data.turnover.length) {
       section('Tenant Turnover');
       content.push(table(['Tenant', 'Density (R/m²)', 'Growth %', 'Band'],
         data.turnover.map((t) => [t.tenant, t.density, t.growth, t.band]),
         ['*', 'auto', 'auto', 'auto']));
+    }
+
+    if (data.categoryTurnover && data.categoryTurnover.length) {
+      section('Top Categories');
+      content.push(compactTable(['Category', 'Monthly turnover', 'Trading density', 'Rank', 'Comment'],
+        data.categoryTurnover.map((c) => [c.category, c.monthly, c.density, c.rank, c.comment]),
+        ['*', 80, 76, 34, '*'],
+        ['l', 'r', 'r', 'r', 'l']));
     }
     if (data.footfall && data.footfall.length) {
       section('Head Counts');
@@ -364,6 +458,11 @@ export function buildReportDoc(
         content.push(compactTable(['Incident type', 'Count'],
           data.incidentsByType.map((t) => [t.type, String(t.count)]), ['*', 70], ['l', 'r']));
       }
+      if (data.incidentNarratives?.length) {
+        note('Incident narratives.');
+        content.push(compactTable(['Month', 'Type', 'Narrative'],
+          data.incidentNarratives.map((n) => [n.period, n.type, n.narrative]), [50, 90, '*']));
+      }
     }
   }
 
@@ -375,6 +474,11 @@ export function buildReportDoc(
     if (data.annualFlagged != null) summary.push(`${data.annualFlagged} flagged (poor/critical)`);
     if (data.annualCapexTotal) summary.push(`Capex estimate: ${formatZAR(data.annualCapexTotal)}`);
     content.push({ text: summary.join('  ·  '), fontSize: 10, color: '#6b7280', margin: [0, 0, 0, 8] });
+    // Never truncate silently: a capped or unreadable photo set must be named, or the PDF
+    // reads as though it embeds everything on file.
+    if (data.annualPhotosOmitted) {
+      note(`${data.annualPhotosOmitted} of ${data.annualPhotosTotal ?? data.annualPhotosOmitted} photos on file are not embedded in this PDF (embed cap, or unreadable at generation time). They remain available in the app.`);
+    }
 
     for (const sec of data.annualSections ?? []) {
       content.push({ text: sec.title, fontSize: 11, bold: true, color, margin: [0, 8, 0, 4] });
@@ -404,12 +508,20 @@ export function buildReportDoc(
 
     if (data.capex && data.capex.length) {
       section('Capex Register');
-      content.push(table(['Description', 'Estimate'],
-        data.capex.map((c) => [c.description, formatZAR(c.estimate)]),
-        ['*', 'auto'],
-        ['l', 'r']));
+      content.push(table(['Description', 'Year', 'Priority', 'Status', 'Estimate'],
+        data.capex.map((c) => [c.description, c.year ?? '', c.priority ?? '', c.status ?? '', formatZAR(c.estimate)]),
+        ['*', 'auto', 'auto', 'auto', 'auto'],
+        ['l', 'l', 'l', 'l', 'r']));
     }
 
+    renderChecklist('Checklists');
+  }
+
+  // ---- Electrical compliance (all report types) ------------------------------------
+  // REPORT_SECTIONS expects this section on every report type, and the fetch runs for
+  // every type — rendering it only inside the annual branch silently dropped the live
+  // CoC data from OPS and CM PDFs while "Not captured this period" said nothing.
+  {
     if (data.electricalError) {
       // A failed read is not "no data". Say so, in the artifact.
       section('Electrical Compliance');
