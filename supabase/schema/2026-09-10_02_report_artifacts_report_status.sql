@@ -1,4 +1,4 @@
--- 2026-09-10_01_report_artifacts_report_status.sql
+-- 2026-09-10_02_report_artifacts_report_status.sql
 -- Record the lifecycle state of the source report at export time (finding E2), so a PDF
 -- issued from a draft is distinguishable from one issued after approval — in the app
 -- and in the version list. Nullable: pre-existing rows and non-Fortress kinds have none.
