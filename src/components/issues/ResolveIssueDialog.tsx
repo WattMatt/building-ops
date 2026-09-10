@@ -18,9 +18,16 @@ import { useAuth } from '@/contexts/AuthContext';
 import { postIssueComment } from '@/lib/issueActivity';
 import { uploadIssuePhotos } from '@/lib/issuePhotos';
 
-interface Props { issueId: string; open: boolean; onOpenChange: (o: boolean) => void; onResolved: () => void }
+interface Props {
+  issueId: string;
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  onResolved: () => void;
+  /** Pass when rendered inside another open ResponsiveDialog so the phone sheet stacks correctly. */
+  nested?: boolean;
+}
 
-export function ResolveIssueDialog({ issueId, open, onOpenChange, onResolved }: Props) {
+export function ResolveIssueDialog({ issueId, open, onOpenChange, onResolved, nested }: Props) {
   const { user } = useAuth();
   const [note, setNote] = useState('');
   const [photos, setPhotos] = useState<PhotoFile[]>([]);
@@ -50,7 +57,7 @@ export function ResolveIssueDialog({ issueId, open, onOpenChange, onResolved }: 
   };
 
   return (
-    <ResponsiveDialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
+    <ResponsiveDialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)} nested={nested}>
       <ResponsiveDialogContent>
         <ResponsiveDialogHeader>
           <ResponsiveDialogTitle>Resolve this issue</ResponsiveDialogTitle>
@@ -60,7 +67,7 @@ export function ResolveIssueDialog({ issueId, open, onOpenChange, onResolved }: 
         <PhotoCapture photos={photos} onPhotosChange={setPhotos} maxPhotos={3} size="sm" disabled={busy} label="Photo of the fix (optional)" />
         <ResponsiveDialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
-          <Button onClick={resolve} disabled={busy || !note.trim()} className="w-full sm:w-auto">
+          <Button onClick={resolve} disabled={busy || !note.trim()}>
             {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Resolve
           </Button>
         </ResponsiveDialogFooter>

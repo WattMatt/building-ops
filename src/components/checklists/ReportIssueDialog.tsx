@@ -6,6 +6,7 @@ import {
   ResponsiveDialog,
   ResponsiveDialogContent,
   ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from '@/components/ui/responsive-dialog';
@@ -220,7 +221,7 @@ export default function ReportIssueDialog({
             size="md"
           />
 
-          <div className="flex justify-end gap-3 pt-4">
+          <ResponsiveDialogFooter className="gap-3 pt-4">
             <Button
               type="button"
               variant="outline"
@@ -229,11 +230,11 @@ export default function ReportIssueDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={loading} className="w-full sm:w-auto gap-2">
+            <Button type="submit" disabled={loading} className="gap-2">
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
               Report Issue
             </Button>
-          </div>
+          </ResponsiveDialogFooter>
         </form>
       </ResponsiveDialogContent>
     </ResponsiveDialog>

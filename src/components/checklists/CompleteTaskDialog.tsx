@@ -5,6 +5,7 @@ import {
   ResponsiveDialog,
   ResponsiveDialogContent,
   ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
   ResponsiveDialogHeader,
   ResponsiveDialogTitle,
 } from '@/components/ui/responsive-dialog';
@@ -221,7 +222,7 @@ export default function CompleteTaskDialog({
             </div>
           )}
 
-          <div className="flex justify-end gap-3 pt-2">
+          <ResponsiveDialogFooter className="gap-3 pt-2">
             <Button
               type="button"
               variant="outline"
@@ -230,11 +231,11 @@ export default function CompleteTaskDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={loading} className="w-full sm:w-auto gap-2">
+            <Button type="submit" disabled={loading} className="gap-2">
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
               Complete Task
             </Button>
-          </div>
+          </ResponsiveDialogFooter>
         </form>
       </ResponsiveDialogContent>
     </ResponsiveDialog>

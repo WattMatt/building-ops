@@ -294,6 +294,7 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
         </div>
 
         <ResolveIssueDialog
+          nested
           issueId={issue.id}
           open={resolveOpen}
           onOpenChange={setResolveOpen}
