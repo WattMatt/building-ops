@@ -12,7 +12,10 @@ import { Branding, loadBranding, renderEmail } from "../_shared/email.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { adminAndManagerIds, createNotifications } from "../_shared/notify.ts";
 
-const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
+// Lazy: the Resend constructor throws without a key, which used to crash the whole function
+// at module load on projects that have no RESEND_API_KEY (staging). Inbox rows never need it.
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 const APP_URL = (Deno.env.get("APP_URL") ?? "https://buildingops.app").replace(/\/+$/, "");
 const ALERTS_SECRET = Deno.env.get("EXPIRING_ALERTS_SECRET");
 
@@ -415,6 +418,7 @@ const handler = async (req: Request): Promise<Response> => {
           const emailHtml = generateAlertEmailHtml(branding, recipientName, alertSummary);
 
           try {
+            if (!resend) { console.warn("RESEND_API_KEY not set; alert email skipped"); break; }
             await resend.emails.send({
               from: `${senderName(branding.appName)} <alerts@buildingops.app>`,
               to: [recipientEmail],
