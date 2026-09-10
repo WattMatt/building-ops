@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Camera, X, ImagePlus, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -112,24 +113,7 @@ export function PhotoCapture({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-
-  // Detect mobile device
-  useEffect(() => {
-    const checkMobile = () => {
-      const userAgent = navigator.userAgent || navigator.vendor;
-      const isMobileDevice = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
-        userAgent.toLowerCase()
-      );
-      // Also check for touch capability as a secondary indicator
-      const hasTouchScreen = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-      setIsMobile(isMobileDevice || (hasTouchScreen && window.innerWidth < 768));
-    };
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
+  const isMobile = useIsMobile();
 
   const remainingSlots = maxPhotos - photos.length;
   const canAddMore = remainingSlots > 0 && !disabled;
@@ -511,22 +495,8 @@ export function SinglePhotoCapture({
   compressionQuality = 0.85,
 }: SinglePhotoCaptureProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isMobile, setIsMobile] = useState(false);
+  const isMobile = useIsMobile();
   const [isCompressing, setIsCompressing] = useState(false);
-
-  useEffect(() => {
-    const checkMobile = () => {
-      const userAgent = navigator.userAgent || navigator.vendor;
-      const isMobileDevice = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
-        userAgent.toLowerCase()
-      );
-      setIsMobile(isMobileDevice || window.innerWidth < 768);
-    };
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
 
   const compressImage = useCallback(async (file: File): Promise<File> => {
     // Skip compression for small files or if disabled

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { formatBuildingName } from '@/lib/buildingName';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -52,6 +52,14 @@ export default function BuildingDetails() {
     setActiveTab(tab);
     setSearchParams((prev) => { prev.set('tab', tab); return prev; }, { replace: true });
   };
+
+  // On phones the tab strip scrolls horizontally; keep the active tab in view
+  // (deep links like ?tab=documents land on a tab that starts off-screen).
+  // `loading` is a dep because the strip only mounts once the building has loaded.
+  const tabsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    tabsRef.current?.querySelector<HTMLElement>('[data-state="active"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }, [activeTab, loading]);
 
   useEffect(() => {
     if (id) fetchBuilding(id);
@@ -178,40 +186,46 @@ export default function BuildingDetails() {
 
       {/* Tabs - Mobile optimized with icons */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        <TabsList className="w-full">
-          <TabsTrigger value="overview" className="flex-1 sm:flex-none">
+        <TabsList ref={tabsRef} className="w-full flex-nowrap justify-start overflow-x-auto overflow-y-hidden whitespace-nowrap snap-x scroll-px-3 sm:flex-wrap sm:overflow-visible [&::-webkit-scrollbar]:hidden">
+          <TabsTrigger value="overview" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
             <span className="hidden sm:inline">Overview</span>
             <span className="sm:hidden">Info</span>
           </TabsTrigger>
-          <TabsTrigger value="checklists" className="flex-1 sm:flex-none">
+          <TabsTrigger value="checklists" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
             <span className="hidden sm:inline">Checklists</span>
             <span className="sm:hidden">Tasks</span>
           </TabsTrigger>
-          <TabsTrigger value="forms" className="flex-1 sm:flex-none">Forms</TabsTrigger>
-          <TabsTrigger value="reports" className="flex-1 sm:flex-none">Reports</TabsTrigger>
-          <TabsTrigger value="tenants" className="flex-1 sm:flex-none">Tenants</TabsTrigger>
-          <TabsTrigger value="assets" className="flex-1 sm:flex-none">Assets</TabsTrigger>
-          <TabsTrigger value="maintenance" className="flex-1 sm:flex-none">
+          <TabsTrigger value="forms" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Forms</TabsTrigger>
+          <TabsTrigger value="reports" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Reports</TabsTrigger>
+          <TabsTrigger value="tenants" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Tenants</TabsTrigger>
+          <TabsTrigger value="assets" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Assets</TabsTrigger>
+          <TabsTrigger value="maintenance" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
             <span className="hidden sm:inline">Maintenance</span>
             <span className="sm:hidden">Maint.</span>
           </TabsTrigger>
-          <TabsTrigger value="electrical" className="flex-1 sm:flex-none">
+          <TabsTrigger value="electrical" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
             <span className="hidden sm:inline">Electrical &amp; Compliance</span>
             <span className="sm:hidden">Elec.</span>
           </TabsTrigger>
-          <TabsTrigger value="documents" className="flex-1 sm:flex-none">
+          <TabsTrigger value="documents" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
             <span className="hidden sm:inline">Documents</span>
             <span className="sm:hidden">Docs</span>
           </TabsTrigger>
-          <TabsTrigger value="notes" className="flex-1 sm:flex-none">Notes</TabsTrigger>
+          <TabsTrigger value="notes" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Notes</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="space-y-6 mt-6">
-          {/* Alert Widgets */}
-          <OverviewWidgets buildingId={building.id} onTabChange={setActiveTab} />
+        <TabsContent value="overview" className="mt-6">
+          {/* Phone-first order: alert widgets, then contacts (score chips live in the
+              header). A flex column with gap-6 renders the same as the old block stack
+              on desktop, so the order-* classes only need resetting at sm. */}
+          <div className="flex flex-col gap-6">
+            {/* Alert Widgets */}
+            <div className="order-1 sm:order-none">
+              <OverviewWidgets buildingId={building.id} onTabChange={setActiveTab} />
+            </div>
 
-          {/* Contacts Grid */}
-          <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+            {/* Contacts Grid */}
+            <div className="order-2 sm:order-none grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
             {/* Asset Manager */}
             <Card>
               <CardHeader className="pb-3">
@@ -304,6 +318,7 @@ export default function BuildingDetails() {
                 )}
               </CardContent>
             </Card>
+          </div>
           </div>
         </TabsContent>
 
