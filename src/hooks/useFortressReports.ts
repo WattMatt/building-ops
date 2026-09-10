@@ -268,6 +268,31 @@ export function useReportLifecycle(reportId: string) {
   });
 }
 
+/**
+ * Why delete_empty_report refused, by SQLSTATE (2026-09-14_01): the code is the contract, the message is
+ * prose for the log. Older builds of the function raise everything as 42501 with a distinguishing message,
+ * so the substring match stays as a fallback.
+ */
+export const DISCARD_ERROR_CODES: Record<string, string> = {
+  '42501': 'Only an admin can discard a draft.',
+  P0002: 'That report no longer exists.',
+  PR001: 'Only a draft can be discarded.',
+  PR002: 'This draft has saved PDF versions and cannot be discarded.',
+  PR003: 'This draft has saved content. Clear its sections before discarding it.',
+};
+
+export function discardErrorMessage(e: unknown): string {
+  const { code, message } = (e as { code?: string; message?: string } | null) ?? {};
+  if (code && DISCARD_ERROR_CODES[code]) return DISCARD_ERROR_CODES[code];
+  const msg = message ?? '';
+  return msg.includes('saved row') ? DISCARD_ERROR_CODES.PR003
+    : msg.includes('PDF versions') ? DISCARD_ERROR_CODES.PR002
+    : msg.includes('only a draft') ? DISCARD_ERROR_CODES.PR001
+    : msg.includes('not found') ? DISCARD_ERROR_CODES.P0002
+    : msg.includes('admin only') ? DISCARD_ERROR_CODES['42501']
+    : 'Could not discard the draft.';
+}
+
 /** Admin only: deletes a draft that holds no content (delete_empty_report, 2026-09-14_01). */
 export function useDiscardDraft() {
   const qc = useQueryClient();
@@ -275,7 +300,7 @@ export function useDiscardDraft() {
     mutationFn: async (reportId: string): Promise<string> => {
       // delete_empty_report is not yet in the generated types; regenerate after the migration ships.
       const { error } = await (fdb as unknown as {
-        rpc(fn: string, args: Record<string, string>): Promise<{ error: { message: string } | null }>;
+        rpc(fn: string, args: Record<string, string>): Promise<{ error: { message: string; code?: string } | null }>;
       }).rpc('delete_empty_report', { p_report: reportId });
       if (error) throw error;
       return reportId;
@@ -286,14 +311,9 @@ export function useDiscardDraft() {
     },
     onError: (e: unknown) => {
       if (import.meta.env.DEV) console.error('Discard draft failed:', e);
-      const msg = (e as { message?: string })?.message ?? '';
-      toast.error(
-        msg.includes('saved row') ? 'This draft has saved content. Clear its sections before discarding it.'
-        : msg.includes('PDF versions') ? 'This draft has saved PDF versions and cannot be discarded.'
-        : msg.includes('admin only') ? 'Only an admin can discard a draft.'
-        : msg.includes('only a draft') ? 'Only a draft can be discarded.'
-        : 'Could not discard the draft.',
-      );
+      // Gone already: the list is stale, so refresh it along with the message.
+      if ((e as { code?: string } | null)?.code === 'P0002') qc.invalidateQueries({ queryKey: REPORTS_KEY });
+      toast.error(discardErrorMessage(e));
     },
   });
 }

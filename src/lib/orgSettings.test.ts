@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_ORG_SETTINGS, parseOrgSettings } from './orgSettings';
+import { DEFAULT_ORG_SETTINGS, obj, parseOrgSettings } from './orgSettings';
 
 describe('parseOrgSettings', () => {
   it('returns the defaults for null, {}, arrays and garbage', () => {
@@ -22,5 +22,13 @@ describe('parseOrgSettings', () => {
   it('trims distribution_from and nulls an empty one', () => {
     expect(parseOrgSettings({ distribution_from: '  Ops Team  ' }).distribution_from).toBe('Ops Team');
     expect(parseOrgSettings({ distribution_from: '   ' }).distribution_from).toBeNull();
+  });
+});
+
+describe('obj', () => {
+  it('passes a plain object through and turns anything else into {}', () => {
+    const o = { a: 1 };
+    expect(obj(o)).toBe(o);
+    for (const v of [null, undefined, [], 'x', 42, true]) expect(obj(v)).toEqual({});
   });
 });

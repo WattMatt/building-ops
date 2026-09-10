@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildCoverage, periodMatches, previousMonthPeriod, summaryLine } from './reportCoverage';
+import { DEFAULT_REPORT_TYPES, buildCoverage, periodMatches, previousMonthPeriod, summaryLine } from './reportCoverage';
 
 const b = (id: string, types = ['ops_monthly', 'cm_monthly']) => ({ id, name: id.toUpperCase(), report_types: types });
 const r = (id: string, building_id: string, report_type: string, report_period: string, status: string) => ({ id, building_id, report_type, report_period, status });
@@ -42,6 +42,26 @@ describe('buildCoverage', () => {
     expect(summary.ops_monthly).toMatchObject({ approved: 1, draft: 1, missing: 1 });
     expect(summary.cm_monthly).toMatchObject({ missing: 2, na: 0 });
     expect(summary.annual_inspection).toMatchObject({ approved: 1 });
+  });
+  it('a rejected report ranks above a draft for the same cell', () => {
+    const { rows } = buildCoverage([b('a')], [
+      r('r1', 'a', 'ops_monthly', '2026-08-01', 'draft'),
+      r('r2', 'a', 'ops_monthly', '2026-08-01', 'rejected'),
+    ], '2026-08-01');
+    expect(rows[0].cells.ops_monthly).toEqual({ status: 'rejected', reportId: 'r2' });
+  });
+  it('a report in an unknown status reads as missing, with no link', () => {
+    const { rows, summary } = buildCoverage([b('a')], [r('r1', 'a', 'ops_monthly', '2026-08-01', 'archived')], '2026-08-01');
+    expect(rows[0].cells.ops_monthly).toEqual({ status: 'missing', reportId: null });
+    expect(summary.ops_monthly.missing).toBe(1);
+  });
+  it('a building that owes nothing is all n/a and its types are "nothing due"', () => {
+    const { rows, summary } = buildCoverage([b('a', [])], [r('r1', 'a', 'ops_monthly', '2026-08-01', 'approved')], '2026-08-01');
+    for (const cell of Object.values(rows[0].cells)) expect(cell).toEqual({ status: 'na', reportId: null });
+    for (const type of ['ops_monthly', 'cm_monthly', 'annual_inspection'] as const) expect(summaryLine(summary[type])).toBe('nothing due');
+  });
+  it('DEFAULT_REPORT_TYPES matches the column default: the two monthlies', () => {
+    expect(DEFAULT_REPORT_TYPES).toEqual(['ops_monthly', 'cm_monthly']);
   });
   it('summaryLine omits zeros and n/a', () => {
     expect(summaryLine({ missing: 12, na: 3, draft: 0, submitted: 4, reviewed: 0, approved: 31, rejected: 0 })).toBe('31 approved · 4 submitted · 12 missing');

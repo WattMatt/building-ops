@@ -7,6 +7,8 @@ import type { ReportType } from '@/integrations/supabase/fortress-db';
 import { todayInOperatingTz } from '@/lib/myWork';
 
 export const COVERAGE_TYPES: ReportType[] = ['ops_monthly', 'cm_monthly', 'annual_inspection'];
+/** What a building owes when buildings.report_types is absent — the column default in 2026-09-14_01. */
+export const DEFAULT_REPORT_TYPES: ReportType[] = ['ops_monthly', 'cm_monthly'];
 export const COVERAGE_TYPE_LABELS: Record<ReportType, string> = { ops_monthly: 'OPS', cm_monthly: 'CM', annual_inspection: 'Annual' };
 
 /** `na` = the building does not owe this type (buildings.report_types). */
@@ -51,8 +53,10 @@ export function buildCoverage(buildings: CoverageBuilding[], reports: CoverageRe
       const best = reports
         .filter((r) => r.building_id === b.id && r.report_type === type && periodMatches(type, r.report_period, period))
         .sort((a, c) => (RANK[c.status] ?? 0) - (RANK[a.status] ?? 0))[0];
-      const status: CoverageStatus = best && best.status in RANK ? (best.status as CoverageStatus) : 'missing';
-      cells[type] = { status, reportId: best?.id ?? null };
+      // A report in a status this build does not know is not offered as the cell's link either.
+      const known = best && best.status in RANK ? best : null;
+      const status: CoverageStatus = known ? (known.status as CoverageStatus) : 'missing';
+      cells[type] = { status, reportId: known?.id ?? null };
       summary[type][status] += 1;
     }
     return { buildingId: b.id, name: b.name, cells };

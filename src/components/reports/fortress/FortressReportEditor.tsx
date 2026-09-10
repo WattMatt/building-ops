@@ -22,11 +22,20 @@ import { useDiscardDraft, useFortressReport, useReportLifecycle } from '@/hooks/
 import { REPORT_SECTIONS, REPORT_STATUS_VARIANT, formatPeriodLabel, REQUIRED_SECTIONS, REQUIRED_SECTION_TABLE } from '@/lib/fortressReports';
 import { useReportSectionCounts } from '@/hooks/useReportSectionCounts';
 import { ReportSavedVersions } from '@/components/reports/fortress/ReportSavedVersions';
+import { DiscardDraftDialog } from '@/components/reports/fortress/DiscardDraftDialog';
 import { fdb, REPORT_TYPE_LABELS, type ReportStatus, type ReportType } from '@/integrations/supabase/fortress-db';
 import { getSectionComponent } from './sections/registry';
 import { dirtySections, useDirtyCount } from './dirtySections';
 import { Hint } from '@/components/ui/hint';
 import { track } from '@/lib/analytics';
+
+// REQUIRED_SECTION_TABLE names section tables as strings, so the count probe uses a narrow structural client
+// instead of the typed one (which would demand a literal table name).
+interface SectionCountClient {
+  from(table: string): {
+    select(cols: string, opts: { count: 'exact'; head: true }): { eq(col: string, value: string | undefined): Promise<{ count: number | null }> };
+  };
+}
 
 export default function FortressReportEditor() {
   const { id } = useParams<{ id: string }>();
@@ -44,6 +53,7 @@ export default function FortressReportEditor() {
   const [reviewNotes, setReviewNotes] = useState('');
   const [exporting, setExporting] = useState(false);
   const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
+  const [discardOpen, setDiscardOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Unsaved section edits (D1). Only the active section is mounted, so any dirty grid
@@ -227,7 +237,7 @@ export default function FortressReportEditor() {
       for (const k of REQUIRED_SECTIONS[report.report_type as keyof typeof REQUIRED_SECTIONS] ?? []) {
         const table = REQUIRED_SECTION_TABLE[k];
         if (!table) continue;
-        const { count } = await (fdb as any).from(table).select('id', { count: 'exact', head: true }).eq('report_id', id);
+        const { count } = await (fdb as unknown as SectionCountClient).from(table).select('id', { count: 'exact', head: true }).eq('report_id', id);
         if (!count) missing.push(metas.find((s) => s.key === k)?.label ?? k);
       }
       if (missing.length) { toast.error(`Add at least one entry to: ${missing.join(', ')}`); return; }
@@ -296,14 +306,14 @@ export default function FortressReportEditor() {
         <div className="flex items-center gap-2">
           <Badge variant={REPORT_STATUS_VARIANT[status] ?? 'outline'} className="capitalize">{status}</Badge>
           {status === 'draft' && isAdmin && (
-            <Button variant="ghost" size="sm" disabled={discard.isPending}
-              onClick={() => {
-                if (!window.confirm('Discard this empty draft? Only a draft with no saved content can be discarded.')) return;
-                discard.mutate(report.id, { onSuccess: () => navigate(`/buildings/${report.building_id}?tab=reports`) });
-              }}>
-              <Trash2 className="mr-2 h-4 w-4" />
-              Discard draft
-            </Button>
+            <>
+              <Button variant="ghost" size="sm" className="min-h-11" disabled={discard.isPending} onClick={() => setDiscardOpen(true)}>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Discard draft
+              </Button>
+              <DiscardDraftDialog open={discardOpen} onOpenChange={setDiscardOpen} pending={discard.isPending}
+                onConfirm={() => discard.mutate(report.id, { onSuccess: () => navigate(`/buildings/${report.building_id}?tab=reports`) })} />
+            </>
           )}
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
             {exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileDown className="mr-2 h-4 w-4" />}

@@ -27,7 +27,7 @@ export function FeatureFlagsCard({ canEdit }: { canEdit: boolean }) {
     <Card>
       <CardHeader>
         <CardTitle>Features</CardTitle>
-        <CardDescription>Switch on the features this organization uses.</CardDescription>
+        <CardDescription>Switch on the features this organization uses. Changes save immediately.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {FEATURE_NAMES.map((name) => (

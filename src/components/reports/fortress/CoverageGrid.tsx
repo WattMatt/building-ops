@@ -1,6 +1,8 @@
 /**
  * Portfolio coverage for one period: rows = buildings, columns = report types, cell = status chip.
- * Admins can mark which types a building owes (so "missing" is honest) and discard an empty draft.
+ * Admins and managers can mark which types a building owes (so "missing" is honest); only an admin can
+ * discard an empty draft — the same gates as the buildings RLS and delete_empty_report. Discarding is
+ * confirmed by the page's DiscardDraftDialog: this grid only reports which draft was asked for.
  */
 import { MoreHorizontal, Trash2 } from 'lucide-react';
 import type { ReportType } from '@/integrations/supabase/fortress-db';
@@ -17,7 +19,10 @@ export interface CoverageGridProps {
   period: string;
   rows: CoverageRow[];
   summary: CoverageSummary;
-  isAdmin: boolean;
+  /** Admin or manager: the "This building owes" menu. */
+  canEditTypes: boolean;
+  /** Admin only: the discard button on a draft cell. */
+  canDiscard: boolean;
   onOpenReport: (reportId: string) => void;
   onOpenBuilding: (buildingId: string) => void;
   onDiscardDraft: (reportId: string) => void;
@@ -25,7 +30,7 @@ export interface CoverageGridProps {
   discarding?: boolean;
 }
 
-export function CoverageGrid({ period, rows, summary, isAdmin, onOpenReport, onOpenBuilding, onDiscardDraft, onSetReportTypes, discarding }: CoverageGridProps) {
+export function CoverageGrid({ period, rows, summary, canEditTypes, canDiscard, onOpenReport, onOpenBuilding, onDiscardDraft, onSetReportTypes, discarding }: CoverageGridProps) {
   return (
     <Card>
       <CardHeader className="space-y-2">
@@ -42,7 +47,7 @@ export function CoverageGrid({ period, rows, summary, isAdmin, onOpenReport, onO
             <TableRow>
               <TableHead>Building</TableHead>
               {COVERAGE_TYPES.map((t) => <TableHead key={t}>{COVERAGE_TYPE_LABELS[t]}</TableHead>)}
-              {isAdmin && <TableHead className="w-12"><span className="sr-only">Report types</span></TableHead>}
+              {canEditTypes && <TableHead className="w-12"><span className="sr-only">Report types</span></TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -54,7 +59,13 @@ export function CoverageGrid({ period, rows, summary, isAdmin, onOpenReport, onO
                   {COVERAGE_TYPES.map((t) => {
                     const cell = row.cells[t];
                     if (cell.status === 'na') {
-                      return <TableCell key={t}><span className="text-muted-foreground" title="Not required for this building">—</span></TableCell>;
+                      return (
+                        <TableCell key={t}>
+                          <span className="text-muted-foreground" title="Not required for this building">
+                            <span aria-hidden="true">—</span><span className="sr-only">Not required</span>
+                          </span>
+                        </TableCell>
+                      );
                     }
                     const reportId = cell.reportId;
                     return (
@@ -71,7 +82,7 @@ export function CoverageGrid({ period, rows, summary, isAdmin, onOpenReport, onO
                               {cell.status}
                             </Badge>
                           </button>
-                          {isAdmin && cell.status === 'draft' && reportId && (
+                          {canDiscard && cell.status === 'draft' && reportId && (
                             <Button variant="ghost" size="icon" className="h-11 w-11" title="Discard this empty draft"
                               aria-label={`Discard ${COVERAGE_TYPE_LABELS[t]} draft for ${row.name}`} disabled={discarding}
                               onClick={() => onDiscardDraft(reportId)}>
@@ -82,7 +93,7 @@ export function CoverageGrid({ period, rows, summary, isAdmin, onOpenReport, onO
                       </TableCell>
                     );
                   })}
-                  {isAdmin && (
+                  {canEditTypes && (
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
@@ -94,6 +105,7 @@ export function CoverageGrid({ period, rows, summary, isAdmin, onOpenReport, onO
                           <DropdownMenuLabel>This building owes</DropdownMenuLabel>
                           {COVERAGE_TYPES.map((t) => (
                             <DropdownMenuCheckboxItem key={t} className="min-h-11" checked={owed.includes(t)}
+                              onSelect={(e) => e.preventDefault()}
                               onCheckedChange={(on) => onSetReportTypes(row.buildingId, on ? [...owed, t] : owed.filter((x) => x !== t))}>
                               {COVERAGE_TYPE_LABELS[t]}
                             </DropdownMenuCheckboxItem>

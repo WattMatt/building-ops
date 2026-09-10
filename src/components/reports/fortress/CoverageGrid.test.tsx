@@ -16,7 +16,7 @@ const period = '2026-08-01';
 function renderGrid(over: Partial<React.ComponentProps<typeof CoverageGrid>> = {}) {
   const { rows, summary } = buildCoverage(buildings, reports, period);
   const props = {
-    period, rows, summary, isAdmin: true,
+    period, rows, summary, canEditTypes: true, canDiscard: true,
     onOpenReport: vi.fn(), onOpenBuilding: vi.fn(), onDiscardDraft: vi.fn(), onSetReportTypes: vi.fn(),
     ...over,
   };
@@ -45,16 +45,26 @@ describe('CoverageGrid', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Discard OPS draft for Beta Plaza' }));
     expect(p.onDiscardDraft).toHaveBeenCalledWith('r2');
   });
-  it('hides admin controls for non-admins', () => {
-    renderGrid({ isAdmin: false });
+  it('hides both controls for a viewer', () => {
+    renderGrid({ canEditTypes: false, canDiscard: false });
     expect(screen.queryByRole('button', { name: /Discard/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /Report types for/ })).toBeNull();
+    expect(screen.queryByText('Report types')).toBeNull();
+  });
+  it('a manager gets the report-types menu but not Discard', () => {
+    renderGrid({ canEditTypes: true, canDiscard: false });
+    expect(screen.getByRole('button', { name: 'Report types for Alpha Mall' })).toBeInTheDocument();
+    expect(screen.getByText('Report types')).toHaveClass('sr-only');
+    expect(screen.queryByRole('button', { name: /Discard/ })).toBeNull();
   });
   it('renders a dash for a type the building does not owe', () => {
     renderGrid();
     // Alpha: annual; Beta: CM + annual.
     const dashes = screen.getAllByTitle('Not required for this building');
     expect(dashes).toHaveLength(3);
-    for (const d of dashes) expect(d).toHaveTextContent('—');
+    for (const d of dashes) {
+      expect(d).toHaveTextContent('—');
+      expect(d).toHaveTextContent('Not required');
+    }
   });
 });

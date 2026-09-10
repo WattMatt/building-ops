@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import type { RealtimeChannel, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import type { Tables } from '@/integrations/supabase/types';
+import { ORG_SETTINGS_KEY } from '@/hooks/useOrgSettings';
 
 type Organization = Tables<'organizations'>;
 // organization_branding (id, name, logo_url, primary_color) is a view for signed-out branding; it is not yet in
@@ -11,49 +14,76 @@ interface BrandingClient {
 }
 
 export function useOrganization() {
+  const qc = useQueryClient();
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchOrganization = async () => {
+    let cancelled = false;
+    // null until the first read has seen the session; afterwards "was the last read anonymous?".
+    let wasAnon: boolean | null = null;
+    let channel: RealtimeChannel | null = null;
+
+    // The organizations table is authenticated-only, so a signed-out client would only ever get
+    // CHANNEL_ERROR from it: subscribe while a session exists, tear down when it goes.
+    const syncRealtime = (hasSession: boolean) => {
+      if (hasSession && !channel) {
+        channel = supabase
+          .channel('organization-changes')
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'organizations' }, (payload) => {
+            if (!payload.new || cancelled) return;
+            setOrganization(payload.new as Organization);
+            // The settings editors read through useOrgSettings; a row change from elsewhere must reach them too.
+            if ('settings' in payload.new) void qc.invalidateQueries({ queryKey: ORG_SETTINGS_KEY });
+          })
+          .subscribe();
+      } else if (!hasSession && channel) {
+        supabase.removeChannel(channel);
+        channel = null;
+      }
+    };
+
+    const fetchOrganization = async (session: Session | null) => {
+      wasAnon = !session;
+      syncRealtime(!!session);
       try {
-        const { data: { session } } = await supabase.auth.getSession();
         if (session) {
           const { data, error } = await supabase.from('organizations').select('*').limit(1).maybeSingle();
           if (error) throw error;
-          setOrganization(data);
+          if (!cancelled) setOrganization(data);
         } else {
           const { data, error } = await (supabase.from('organization_branding' as 'organizations') as unknown as BrandingClient)
             .select('id,name,logo_url,primary_color').limit(1).maybeSingle();
           if (error) throw error;
-          setOrganization(data ? ({ ...data, email: null, created_at: null, updated_at: null } as Organization) : null);
+          if (!cancelled) setOrganization(data ? ({ ...data, email: null, created_at: null, updated_at: null } as Organization) : null);
         }
       } catch (error) {
         if (import.meta.env.DEV) console.error('Error fetching organization:', error);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
-    void fetchOrganization();
+    void (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!cancelled) await fetchOrganization(session);
+    })();
 
-    // Signing in swaps the branding view for the full row (and its settings); signing out swaps back.
-    const { data: auth } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') void fetchOrganization();
+    // Signing in swaps the branding view for the full row (and its settings); signing out swaps back. Any
+    // event that keeps the same shape (token refresh, user update) changes nothing this hook reads.
+    const { data: auth } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (cancelled) return;
+      const nowAnon = !session;
+      if (wasAnon !== null && wasAnon === nowAnon) return;
+      void fetchOrganization(session);
     });
 
-    const channel = supabase
-      .channel('organization-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'organizations' }, (payload) => {
-        if (payload.new) setOrganization(payload.new as Organization);
-      })
-      .subscribe();
-
     return () => {
+      cancelled = true;
       auth.subscription.unsubscribe();
-      supabase.removeChannel(channel);
+      syncRealtime(false);
     };
-  }, []);
+  }, [qc]);
 
   return { organization, loading };
 }

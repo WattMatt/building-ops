@@ -13,7 +13,7 @@ const state = vi.hoisted(() => ({
   calls: [] as RecordedCall[],
   queries: [] as { table: string; calls: RecordedCall[] }[],
   result: (() => ({ data: [], error: null })) as (table: string, calls: RecordedCall[]) => QueryResult,
-  rpc: vi.fn<(...args: unknown[]) => Promise<{ error: { message: string } | null }>>(async () => ({ error: null })),
+  rpc: vi.fn<(...args: unknown[]) => Promise<{ error: { message: string; code?: string } | null }>>(async () => ({ error: null })),
 }));
 
 vi.mock('@/integrations/supabase/client', () => {
@@ -49,7 +49,7 @@ vi.mock('@/hooks/useReportPpm', async () => {
   return { describeSeed: actual.describeSeed, seedPpmFromPlan: seedMock.seedPpmFromPlan };
 });
 
-import { useCreateReport, useCarryForwardReport, useDiscardDraft, PPM_SEED_FAILED_MESSAGE } from './useFortressReports';
+import { useCreateReport, useCarryForwardReport, useDiscardDraft, useSetBuildingReportTypes, discardErrorMessage, PPM_SEED_FAILED_MESSAGE } from './useFortressReports';
 
 let qc: QueryClient;
 const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: qc }, children);
@@ -157,10 +157,60 @@ describe('useDiscardDraft', () => {
     expect(state.rpc).toHaveBeenCalledWith('delete_empty_report', { p_report: 'rep1' });
     expect(toastMock.success).toHaveBeenCalledWith('Draft discarded.');
   });
-  it('maps the "saved rows" refusal to plain copy', async () => {
+  it('maps the "saved rows" refusal to plain copy when only the message is available', async () => {
     state.rpc.mockResolvedValueOnce({ error: { message: 'delete_empty_report: this draft has 3 saved row(s); clear its sections before discarding it' } });
     const { result } = renderHook(() => useDiscardDraft(), { wrapper });
     await act(async () => { await result.current.mutateAsync('rep1').catch(() => {}); });
     expect(toastMock.error).toHaveBeenCalledWith('This draft has saved content. Clear its sections before discarding it.');
+  });
+  it('maps by SQLSTATE first, whatever the message says', async () => {
+    state.rpc.mockResolvedValueOnce({ error: { code: 'PR002', message: 'delete_empty_report: refused' } });
+    const { result } = renderHook(() => useDiscardDraft(), { wrapper });
+    await act(async () => { await result.current.mutateAsync('rep1').catch(() => {}); });
+    expect(toastMock.error).toHaveBeenCalledWith('This draft has saved PDF versions and cannot be discarded.');
+  });
+  it('a report that is already gone refreshes the list', async () => {
+    state.rpc.mockResolvedValueOnce({ error: { code: 'P0002', message: 'delete_empty_report: report not found' } });
+    const invalidate = vi.spyOn(qc, 'invalidateQueries');
+    const { result } = renderHook(() => useDiscardDraft(), { wrapper });
+    await act(async () => { await result.current.mutateAsync('rep1').catch(() => {}); });
+    expect(toastMock.error).toHaveBeenCalledWith('That report no longer exists.');
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['fortress-reports'] });
+  });
+});
+
+describe('discardErrorMessage', () => {
+  it('knows every code the function raises', () => {
+    expect(discardErrorMessage({ code: '42501', message: 'x' })).toBe('Only an admin can discard a draft.');
+    expect(discardErrorMessage({ code: 'P0002', message: 'x' })).toBe('That report no longer exists.');
+    expect(discardErrorMessage({ code: 'PR001', message: 'x' })).toBe('Only a draft can be discarded.');
+    expect(discardErrorMessage({ code: 'PR002', message: 'x' })).toBe('This draft has saved PDF versions and cannot be discarded.');
+    expect(discardErrorMessage({ code: 'PR003', message: 'x' })).toBe('This draft has saved content. Clear its sections before discarding it.');
+  });
+  it('falls back to the message, then to a generic line', () => {
+    expect(discardErrorMessage({ code: '42501', message: 'delete_empty_report: only a draft can be discarded (this report is approved)' })).toBe('Only an admin can discard a draft.');
+    expect(discardErrorMessage({ message: 'delete_empty_report: only a draft can be discarded (this report is approved)' })).toBe('Only a draft can be discarded.');
+    expect(discardErrorMessage({ message: 'delete_empty_report: admin only' })).toBe('Only an admin can discard a draft.');
+    expect(discardErrorMessage({ code: 'XX000', message: 'boom' })).toBe('Could not discard the draft.');
+    expect(discardErrorMessage(null)).toBe('Could not discard the draft.');
+  });
+});
+
+describe('useSetBuildingReportTypes', () => {
+  it('writes report_types on the building and refreshes the buildings list', async () => {
+    const invalidate = vi.spyOn(qc, 'invalidateQueries');
+    const { result } = renderHook(() => useSetBuildingReportTypes(), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ buildingId: 'b1', reportTypes: ['ops_monthly', 'annual_inspection'] }); });
+    const q = state.queries.find((x) => x.table === 'buildings' && has(x.calls, 'update'))!;
+    expect(q.calls.find((c) => c.method === 'update')!.args[0]).toEqual({ report_types: ['ops_monthly', 'annual_inspection'] });
+    expect(q.calls.find((c) => c.method === 'eq')!.args).toEqual(['id', 'b1']);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['buildings-for-reports'] });
+    expect(toastMock.error).not.toHaveBeenCalled();
+  });
+  it('a refused write says so', async () => {
+    state.result = (table) => table === 'buildings' ? { data: null, error: { message: 'permission denied' } } : { data: [], error: null };
+    const { result } = renderHook(() => useSetBuildingReportTypes(), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ buildingId: 'b1', reportTypes: [] }).catch(() => {}); });
+    expect(toastMock.error).toHaveBeenCalledWith('Could not update the report types for that building.');
   });
 });

@@ -15,8 +15,9 @@ import { useDiscardDraft, useFortressReports, useSetBuildingReportTypes } from '
 import { REPORT_TYPE_LABELS, type ReportType } from '@/integrations/supabase/fortress-db';
 import { REPORT_STATUS_VARIANT, formatPeriodLabel } from '@/lib/fortressReports';
 import { formatBuildingName } from '@/lib/buildingName';
-import { buildCoverage, previousMonthPeriod } from '@/lib/reportCoverage';
+import { DEFAULT_REPORT_TYPES, buildCoverage, previousMonthPeriod } from '@/lib/reportCoverage';
 import { CoverageGrid } from '@/components/reports/fortress/CoverageGrid';
+import { DiscardDraftDialog } from '@/components/reports/fortress/DiscardDraftDialog';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Hint } from '@/components/ui/hint';
@@ -29,7 +30,12 @@ const ALL = '__all__';
 
 export default function FortressReports() {
   const navigate = useNavigate();
+  const { isAdmin, isAdminOrManager } = useAuth();
   const { data: reports, isLoading, isError, error } = useFortressReports();
+  const discard = useDiscardDraft();
+  const setTypes = useSetBuildingReportTypes();
+  /** The draft the coverage grid asked to discard; the dialog confirms before anything is sent. */
+  const [discardId, setDiscardId] = useState<string | null>(null);
 
   const { data: buildings } = useQuery({
     queryKey: ['buildings-for-reports'],
@@ -47,7 +53,7 @@ export default function FortressReports() {
     return m;
   }, [buildings]);
 
-  const [period, setPeriod] = useState<string>(previousMonthPeriod());
+  const [period, setPeriod] = useState<string>(() => previousMonthPeriod());
   const [type, setType] = useState<string>(ALL);
   const [status, setStatus] = useState<string>(ALL);
   const [q, setQ] = useState('');
@@ -83,13 +89,10 @@ export default function FortressReports() {
   }, [reports, period, type, status, q, buildingName]);
 
   // Coverage for the selected period — the gap is as important as the list.
-  const { isAdmin } = useAuth();
-  const discard = useDiscardDraft();
-  const setTypes = useSetBuildingReportTypes();
   const coverage = useMemo(() => {
     if (period === ALL || !buildings?.length) return null;
     return buildCoverage(
-      buildings.map((b) => ({ id: b.id, name: b.name, report_types: b.report_types ?? ['ops_monthly', 'cm_monthly'] })),
+      buildings.map((b) => ({ id: b.id, name: b.name, report_types: b.report_types ?? DEFAULT_REPORT_TYPES })),
       (reports ?? []).map((r) => ({ id: r.id, building_id: r.building_id, report_type: r.report_type, report_period: r.report_period, status: r.status })),
       period,
     );
@@ -217,14 +220,17 @@ export default function FortressReports() {
           period={period}
           rows={coverage.rows}
           summary={coverage.summary}
-          isAdmin={isAdmin}
+          canEditTypes={isAdminOrManager}
+          canDiscard={isAdmin}
           discarding={discard.isPending}
           onOpenReport={(id) => navigate(`/reports/fortress/${id}`)}
           onOpenBuilding={(id) => navigate(`/buildings/${id}?tab=reports`)}
-          onDiscardDraft={(id) => { if (window.confirm('Discard this empty draft? Only a draft with no saved content can be discarded.')) discard.mutate(id); }}
+          onDiscardDraft={setDiscardId}
           onSetReportTypes={(buildingId, reportTypes) => setTypes.mutate({ buildingId, reportTypes })}
         />
       )}
+      <DiscardDraftDialog open={discardId !== null} onOpenChange={(open) => { if (!open) setDiscardId(null); }}
+        pending={discard.isPending} onConfirm={() => { if (discardId) discard.mutate(discardId); }} />
     </div>
   );
 }

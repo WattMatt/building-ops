@@ -42,7 +42,8 @@ function num(v: unknown, fallback: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
 }
 
-function obj(v: unknown): Record<string, unknown> {
+/** A plain object or `{}` — never an array, null or a scalar. Used by the save path to merge into the stored jsonb. */
+export function obj(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }
 

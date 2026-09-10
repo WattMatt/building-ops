@@ -17,6 +17,7 @@ describe('FeatureFlagsCard', () => {
     render(<FeatureFlagsCard canEdit />);
     expect(screen.getAllByRole('switch')).toHaveLength(3);
     expect(screen.getByRole('switch', { name: 'Share links' })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByText(/Changes save immediately/)).toBeInTheDocument();
   });
   it('saves the whole settings object with the toggled flag', async () => {
     render(<FeatureFlagsCard canEdit />);
