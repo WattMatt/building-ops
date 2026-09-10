@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SECTION_MAX, composeDigest } from '../../supabase/functions/_shared/digest';
+import { PUSH_NAME_MAX, SECTION_MAX, composeDigest, dueTodayPush } from '../../supabase/functions/_shared/digest';
 
 const TODAY = '2026-09-11';
 
@@ -121,5 +121,54 @@ describe('composeDigest', () => {
     });
     expect(sections![0].lines).toHaveLength(SECTION_MAX + 1);
     expect(sections![0].lines[SECTION_MAX]).toBe('…and 4 more');
+  });
+});
+
+describe('dueTodayPush', () => {
+  const task = (id: string, task_name: string, due_date: string) => ({ id, task_name, due_date, building_name: null });
+
+  it('returns null when nothing is due on or before today', () => {
+    expect(dueTodayPush([], TODAY)).toBeNull();
+    expect(dueTodayPush([task('t1', 'Later', '2026-09-20')], TODAY)).toBeNull();
+  });
+
+  it('names a single task due today', () => {
+    expect(dueTodayPush([task('t1', 'Roof inspection', TODAY)], TODAY)).toEqual({
+      title: '1 task due today',
+      body: 'Roof inspection',
+    });
+  });
+
+  it('quotes the first two names and an ellipsis for the rest', () => {
+    const tasks = [task('t1', 'A', TODAY), task('t2', 'B', TODAY), task('t3', 'C', TODAY), task('t4', 'D', TODAY)];
+    expect(dueTodayPush(tasks, TODAY)).toEqual({ title: '4 tasks due today', body: 'A · B …' });
+    // Exactly PUSH_NAME_MAX names get no trailer.
+    expect(dueTodayPush(tasks.slice(0, PUSH_NAME_MAX), TODAY)!.body).toBe('A · B');
+  });
+
+  it('leads with the overdue split when any task is late', () => {
+    const tasks = [
+      task('t1', 'Fire extinguisher check', '2026-09-09'),
+      task('t2', 'Roof inspection', '2026-09-10'),
+      task('t3', 'Generator run-up', TODAY),
+      task('t4', 'Lift service', TODAY),
+      task('t5', 'Pump test', TODAY),
+    ];
+    expect(dueTodayPush(tasks, TODAY)).toEqual({
+      title: '5 tasks due today',
+      body: '2 overdue · 3 due today — Fire extinguisher check · Roof inspection …',
+    });
+  });
+
+  it('says only "overdue" when nothing is due today itself', () => {
+    expect(dueTodayPush([task('t1', 'Old', '2026-09-01')], TODAY)).toEqual({
+      title: '1 task due today',
+      body: '1 overdue — Old',
+    });
+  });
+
+  it('ignores future tasks when counting and naming', () => {
+    const tasks = [task('t1', 'Now', TODAY), task('t2', 'Later', '2026-09-20')];
+    expect(dueTodayPush(tasks, TODAY)).toEqual({ title: '1 task due today', body: 'Now' });
   });
 });

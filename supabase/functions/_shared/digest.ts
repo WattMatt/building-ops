@@ -89,3 +89,37 @@ export function composeDigest(input: DigestInput): DigestSection[] | null {
 
   return sections.length ? sections : null;
 }
+
+/**
+ * Most task names a push body quotes. A notification is a glance, not a list: two names say
+ * "which ones" and the ellipsis says "and more"; the title carries the true count.
+ */
+export const PUSH_NAME_MAX = 2;
+
+/**
+ * The one `task_due_today` push the digest raises per person: everything they owe as of today
+ * (overdue included — it is still due). Returns `null` when nothing is due so the caller sends
+ * nothing at all rather than an empty nudge.
+ *
+ * Title: "N tasks due today" (singular handled). Body: the first two task names joined by ' · ',
+ * with ' …' when there are more; when any task is overdue the body leads with the split —
+ * "2 overdue · 3 due today — Roof inspection · Generator run-up …" — so the person knows the
+ * count includes things already late. `tasks` is expected in due-date order (as the digest
+ * query returns it), which puts the oldest overdue names first.
+ */
+export function dueTodayPush(tasks: DigestTask[], today: string): { title: string; body: string } | null {
+  const due = tasks.filter((t) => t.due_date <= today);
+  if (!due.length) return null;
+
+  const overdue = due.filter((t) => t.due_date < today).length;
+  const dueToday = due.length - overdue;
+  const title = `${due.length} ${plural(due.length, 'task', 'tasks')} due today`;
+
+  const names =
+    due.slice(0, PUSH_NAME_MAX).map((t) => t.task_name).join(' · ') + (due.length > PUSH_NAME_MAX ? ' …' : '');
+  if (!overdue) return { title, body: names };
+
+  // "2 overdue · 3 due today"; a person with only overdue work gets "2 overdue", never "0 due today".
+  const split = dueToday ? `${overdue} overdue · ${dueToday} due today` : `${overdue} overdue`;
+  return { title, body: `${split} — ${names}` };
+}

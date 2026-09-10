@@ -3,14 +3,25 @@
 // their inbox. Cron-triggered (pg_cron -> pg_net), so it is guarded by a shared secret rather
 // than a user JWT — the same shape as `signoff-reminders`.
 //
+// The same run also raises one `task_due_today` notification (inbox row + push, never an email
+// by rule) per person who has a live push device and `task_reminders` on — this is the only
+// place that kind is written. It runs before the email pass and is idempotent per day, so a
+// re-run of the cron never pushes twice.
+//
 // All the shaping lives in `../_shared/digest.ts` so it can be unit-tested from vitest
 // (src/lib/digest.test.ts); this file holds only the guard, the queries and the rendering.
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { escapeText, loadBranding, renderEmail } from "../_shared/email.ts";
 import { corsHeaders } from "../_shared/cors.ts";
-import { APP_URL, senderName, sendEmail } from "../_shared/notify.ts";
-import { composeDigest, type DigestIssue, type DigestSection, type DigestTask } from "../_shared/digest.ts";
+import { APP_URL, createNotifications, senderName, sendEmail } from "../_shared/notify.ts";
+import {
+  composeDigest,
+  dueTodayPush,
+  type DigestIssue,
+  type DigestSection,
+  type DigestTask,
+} from "../_shared/digest.ts";
 
 const DIGEST_SECRET = Deno.env.get("DAILY_DIGEST_SECRET");
 
@@ -23,6 +34,18 @@ function todayInJohannesburg(): string {
     day: "2-digit",
   }).format(new Date());
 }
+
+/**
+ * Midnight at the start of `today` (a `YYYY-MM-DD` from todayInJohannesburg) as an ISO instant,
+ * for the "already notified today" check. South Africa has no daylight saving, so the offset is
+ * a constant +02:00 rather than a timezone lookup.
+ */
+function startOfDayJohannesburgIso(today: string): string {
+  return new Date(`${today}T00:00:00+02:00`).toISOString();
+}
+
+/** A push subscription that has failed for this long is dead; the device would re-subscribe. */
+const FAILED_SUBSCRIPTION_TTL_DAYS = 30;
 
 /** Sections as `<h3>` + `<ul>` blocks. Every dynamic value goes through `escapeText`. */
 function renderSections(sections: DigestSection[]): string {
@@ -83,6 +106,108 @@ serve(async (req: Request): Promise<Response> => {
     );
     const nameFor = (id: string | null): string | null => (id ? buildingName.get(id) || null : null);
 
+    // ---- Push pass: one task_due_today per person with a live device --------------------
+    // Runs first so a slow email pass cannot delay the morning push. Nothing here throws out
+    // of the run: a push is a hint, the email is the record of the day.
+    let pushConsidered = 0;
+    let pushed = 0;
+    let pushFailed = 0;
+    try {
+      // Prune subscriptions the push service rejected (404/410 stamped `failed_at`) that have
+      // stayed dead for 30 days. Anything younger is left for the device to refresh.
+      const cutoff = new Date(Date.now() - FAILED_SUBSCRIPTION_TTL_DAYS * 86_400_000).toISOString();
+      const { error: pruneErr } = await supabase
+        .from("push_subscriptions")
+        .delete()
+        .lt("failed_at", cutoff);
+      if (pruneErr) console.error("daily-digest: push prune failed", pruneErr);
+
+      // Who can actually receive a push: distinct owners of a subscription not marked failed.
+      const { data: subRows, error: subErr } = await supabase
+        .from("push_subscriptions")
+        .select("user_id")
+        .is("failed_at", null);
+      if (subErr) throw new Error(`Could not read push subscriptions: ${subErr.message}`);
+      const subscriberIds = Array.from(
+        new Set((subRows ?? []).map((r: { user_id: string }) => r.user_id)),
+      );
+
+      // Then narrow to accounts that are active and have not turned task reminders off (null
+      // means opted in, matching governingFlag/shouldPush in _shared/notifyRules.ts). The
+      // email master switch is deliberately not consulted: it governs email only.
+      const { data: pushProfiles, error: pushProfErr } = subscriberIds.length
+        ? await supabase
+          .from("profiles")
+          .select("id")
+          .in("id", subscriberIds)
+          .not("deactivated", "is", true)
+          .not("task_reminders", "is", false)
+        : { data: [], error: null };
+      if (pushProfErr) throw new Error(`Could not read push recipients: ${pushProfErr.message}`);
+
+      const sinceMidnight = startOfDayJohannesburgIso(today);
+      for (const p of (pushProfiles ?? []) as { id: string }[]) {
+        pushConsidered++;
+        // One person's push must never abort the run (or the email pass): log and move on.
+        try {
+          // The same "what do I owe today" query the email digest uses below.
+          const { data: taskRows, error: taskErr } = await supabase
+            .from("task_instances")
+            .select("id, task_name, due_date, building_id")
+            .eq("assigned_to", p.id)
+            .in("status", ["pending", "overdue"])
+            .not("due_date", "is", null)
+            .lte("due_date", today)
+            .order("due_date");
+          if (taskErr) throw new Error(`Could not read due tasks: ${taskErr.message}`);
+
+          const tasks: DigestTask[] = (taskRows ?? []).map(
+            (t: { id: string; task_name: string | null; due_date: string; building_id: string | null }) => ({
+              id: t.id,
+              task_name: t.task_name ?? "Untitled task",
+              due_date: t.due_date,
+              building_name: nameFor(t.building_id),
+            }),
+          );
+          const push = dueTodayPush(tasks, today);
+          if (!push) continue;
+
+          // Idempotent per day: a cron re-run (or a manual retry) must not push twice. The
+          // inbox row is the ledger — if today's already exists, so did today's push.
+          const { count: alreadyToday, error: dupErr } = await supabase
+            .from("notifications")
+            .select("id", { count: "exact", head: true })
+            .eq("recipient_id", p.id)
+            .eq("kind", "task_due_today")
+            .gte("created_at", sinceMidnight);
+          if (dupErr) throw new Error(`Could not check today's notifications: ${dupErr.message}`);
+          if ((alreadyToday ?? 0) > 0) continue;
+
+          const result = await createNotifications(supabase, {
+            recipients: [p.id],
+            actorId: null,
+            actorName: null,
+            kind: "task_due_today",
+            entityType: "task",
+            entityId: null,
+            buildingId: null,
+            title: push.title,
+            body: push.body,
+            url: "/my-day",
+          }, branding);
+          pushed += result.pushed;
+        } catch (e) {
+          console.error("daily-digest: push recipient failed", p.id, e);
+          pushFailed++;
+        }
+      }
+    } catch (e) {
+      // A broken push pass is logged and counted; the email digest still goes out.
+      console.error("daily-digest: push pass failed", e);
+      pushFailed++;
+    }
+
+    // ---- Email pass -----------------------------------------------------------------------
     let considered = 0;
     let sent = 0;
     let skipped = 0;
@@ -159,8 +284,9 @@ serve(async (req: Request): Promise<Response> => {
       }
     }
 
-    // Counts only — never the digest payload.
-    return json({ considered, sent, skipped, failed });
+    // Counts only — never the digest payload. `pushed` is devices reached, not people:
+    // createNotifications fans one inbox row out to every live subscription the person has.
+    return json({ considered, sent, skipped, failed, pushConsidered, pushed, pushFailed });
   } catch (error) {
     console.error("daily-digest error:", error);
     return json({ error: "An unexpected error occurred" }, 500);
