@@ -29,8 +29,10 @@ export const dirtySections = {
 
 /** Report this grid's dirty state; clears itself on unmount. */
 export function useReportDirty(id: string, dirty: boolean) {
-  useEffect(() => { dirtySections.set(id, dirty); }, [id, dirty]);
-  useEffect(() => () => dirtySections.set(id, false), [id]);
+  useEffect(() => {
+    dirtySections.set(id, dirty);
+    return () => dirtySections.set(id, false);
+  }, [id, dirty]);
 }
 
 /** Number of grids with unsaved edits in the mounted section. */

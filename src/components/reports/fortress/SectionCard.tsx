@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 import { Hint } from '@/components/ui/hint';
+import { useReportDirty } from './dirtySections';
 
 interface SectionCardProps {
   title: string;
@@ -21,6 +22,8 @@ interface SectionCardProps {
 }
 
 export function SectionCard({ title, hint, headerAccessory, children, onSave, saving, dirty, readOnly }: SectionCardProps) {
+  // Every section reports through here, so grids and narrative sections alike guard unsaved edits (D1).
+  useReportDirty(title, !!dirty);
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">

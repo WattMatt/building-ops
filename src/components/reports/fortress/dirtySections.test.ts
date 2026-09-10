@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { dirtySections } from './dirtySections';
+import { renderHook } from '@testing-library/react';
+import { dirtySections, useReportDirty } from './dirtySections';
 
 describe('dirtySections store', () => {
   beforeEach(() => dirtySections.reset());
@@ -32,6 +33,29 @@ describe('dirtySections store', () => {
   it('reset clears everything', () => {
     dirtySections.set('a', true);
     dirtySections.reset();
+    expect(dirtySections.count()).toBe(0);
+  });
+});
+
+describe('useReportDirty hook', () => {
+  beforeEach(() => dirtySections.reset());
+
+  it('sets, updates, clears, and clears on unmount', () => {
+    const { rerender, unmount } = renderHook(({ dirty }: { dirty: boolean }) => useReportDirty('a', dirty), {
+      initialProps: { dirty: false },
+    });
+    expect(dirtySections.count()).toBe(0);
+
+    rerender({ dirty: true });
+    expect(dirtySections.count()).toBe(1);
+
+    rerender({ dirty: false });
+    expect(dirtySections.count()).toBe(0);
+
+    rerender({ dirty: true });
+    expect(dirtySections.count()).toBe(1);
+
+    unmount();
     expect(dirtySections.count()).toBe(0);
   });
 });
