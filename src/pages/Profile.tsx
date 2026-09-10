@@ -69,59 +69,73 @@ export default function Profile() {
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const userId = user?.id;
+
   useEffect(() => {
-    if (user) {
-      fetchProfile();
-    }
-  }, [user]);
+    if (!userId) return;
 
-  const fetchProfile = async () => {
-    if (!user) return;
+    let cancelled = false;
 
-    setIsLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('full_name, avatar_url, phone, email, email_notifications, overdue_alerts, daily_digest, issue_updates, task_reminders')
-        .eq('id', user.id)
-        .maybeSingle();
+    const fetchProfile = async () => {
+      setIsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('full_name, avatar_url, phone, email, email_notifications, overdue_alerts, daily_digest, issue_updates, task_reminders')
+          .eq('id', userId)
+          .maybeSingle();
 
-      if (error) throw error;
+        if (error) throw error;
 
-      if (data) {
-        setProfile(data);
-        setFullName(data.full_name || '');
-        setPhone(data.phone || '');
-        setAvatarUrl(data.avatar_url);
-        setEmailNotifications(data.email_notifications ?? true);
-        setOverdueAlerts(data.overdue_alerts ?? true);
-        setDailyDigest(data.daily_digest ?? false);
-        setIssueUpdates(data.issue_updates ?? true);
-        setTaskReminders(data.task_reminders ?? true);
+        if (data && !cancelled) {
+          setProfile(data);
+          setFullName(data.full_name || '');
+          setPhone(data.phone || '');
+          setAvatarUrl(data.avatar_url);
+          setEmailNotifications(data.email_notifications ?? true);
+          setOverdueAlerts(data.overdue_alerts ?? true);
+          setDailyDigest(data.daily_digest ?? false);
+          setIssueUpdates(data.issue_updates ?? true);
+          setTaskReminders(data.task_reminders ?? true);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          if (import.meta.env.DEV) console.error('Error fetching profile:', error);
+          toast.error('Failed to load profile');
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
-    } catch (error) {
-      if (import.meta.env.DEV) console.error('Error fetching profile:', error);
-      toast.error('Failed to load profile');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    };
+
+    fetchProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   const handleSaveProfile = async () => {
     if (!user) return;
 
     setIsSaving(true);
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
         .update({
           full_name: fullName.trim() || null,
           phone: phone.trim() || null,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', user.id);
+        .eq('id', user.id)
+        .select('id');
 
       if (error) throw error;
+      // An RLS-denied update succeeds with zero rows — treat that as a failure.
+      if (!data || data.length === 0) {
+        toast.error('Failed to save profile');
+        return;
+      }
       toast.success('Profile updated successfully');
     } catch (error) {
       if (import.meta.env.DEV) console.error('Error saving profile:', error);
@@ -136,7 +150,7 @@ export default function Profile() {
 
     setIsSavingNotifications(true);
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
         .update({
           email_notifications: emailNotifications,
@@ -146,9 +160,15 @@ export default function Profile() {
           task_reminders: taskReminders,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', user.id);
+        .eq('id', user.id)
+        .select('id');
 
       if (error) throw error;
+      // An RLS-denied update succeeds with zero rows — treat that as a failure.
+      if (!data || data.length === 0) {
+        toast.error('Failed to save notification preferences');
+        return;
+      }
       toast.success('Notification preferences saved');
     } catch (error) {
       if (import.meta.env.DEV) console.error('Error saving notifications:', error);
@@ -546,22 +566,23 @@ export default function Profile() {
             Notifications
           </CardTitle>
           <CardDescription>
-            Everything below also appears in your inbox in the app. These switches control email.
+            Alerts below also appear in your inbox in the app. These switches control email.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label className="flex items-center gap-2">
+                <Label htmlFor="notify-email-all" className="flex items-center gap-2">
                   <Mail className="h-4 w-4" />
-                  Email me at all
+                  Send me emails
                 </Label>
                 <p className="text-sm text-muted-foreground">
                   Turn this off to stop every email; the inbox still updates.
                 </p>
               </div>
               <Switch
+                id="notify-email-all"
                 checked={emailNotifications}
                 onCheckedChange={setEmailNotifications}
               />
@@ -571,51 +592,16 @@ export default function Profile() {
 
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4" />
-                  Overdue and expiring
-                </Label>
-                <p className="text-sm text-muted-foreground">
-                  Overdue sign-offs, expiring documents, and asset service due.
-                </p>
-              </div>
-              <Switch
-                checked={overdueAlerts}
-                onCheckedChange={setOverdueAlerts}
-              />
-            </div>
-
-            <Separator />
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4" />
-                  Daily digest
-                </Label>
-                <p className="text-sm text-muted-foreground">
-                  One email each morning with what's on my day.
-                </p>
-              </div>
-              <Switch
-                checked={dailyDigest}
-                onCheckedChange={setDailyDigest}
-              />
-            </div>
-
-            <Separator />
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label className="flex items-center gap-2">
+                <Label htmlFor="notify-issues" className="flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4" />
                   Issues and reports
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  Assignments, comments, mentions, and report reviews.
+                  Assignments, comments, mentions, report reviews, and form reviews.
                 </p>
               </div>
               <Switch
+                id="notify-issues"
                 checked={issueUpdates}
                 onCheckedChange={setIssueUpdates}
               />
@@ -625,17 +611,56 @@ export default function Profile() {
 
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label className="flex items-center gap-2">
+                <Label htmlFor="notify-tasks" className="flex items-center gap-2">
                   <CheckSquare className="h-4 w-4" />
                   Tasks and sign-offs
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  When a task or a sign-off is assigned to me.
+                  Tasks and sign-offs assigned to me, reminders, and when a sign-off I asked for is done.
                 </p>
               </div>
               <Switch
+                id="notify-tasks"
                 checked={taskReminders}
                 onCheckedChange={setTaskReminders}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="notify-overdue" className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4" />
+                  Overdue and expiring
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Overdue sign-offs, expiring documents, and asset service due.
+                </p>
+              </div>
+              <Switch
+                id="notify-overdue"
+                checked={overdueAlerts}
+                onCheckedChange={setOverdueAlerts}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="notify-digest" className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4" />
+                  Daily digest
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  One email each morning with what's on my day.
+                </p>
+              </div>
+              <Switch
+                id="notify-digest"
+                checked={dailyDigest}
+                onCheckedChange={setDailyDigest}
               />
             </div>
           </div>

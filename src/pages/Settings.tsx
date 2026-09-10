@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useOrganization } from '@/hooks/useOrganization';
@@ -158,7 +159,10 @@ export default function Settings() {
       <div>
         <h1 className="text-2xl font-bold">Settings</h1>
         <p className="text-muted-foreground">
-          Manage your organization and application preferences
+          Manage your organization.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Email notification settings are on <Link to="/profile" className="underline">your profile</Link>.
         </p>
       </div>
 
