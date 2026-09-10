@@ -1,5 +1,16 @@
 import 'fake-indexeddb/auto';
 import "@testing-library/jest-dom";
+import { vi } from "vitest";
+
+// `src/integrations/supabase/client.ts` throws at import time when these are unset, and CI
+// checks out the repo with no .env. Tests never talk to a real Supabase project (they mock
+// the client), so any placeholder works; only fill in what the local .env has not already.
+if (!import.meta.env.VITE_SUPABASE_URL) {
+  vi.stubEnv("VITE_SUPABASE_URL", "http://localhost:54321");
+}
+if (!import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY) {
+  vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "test-anon-key");
+}
 
 // This jsdom setup exposes no Web Storage (and Node's own `localStorage` global is
 // undefined without --localstorage-file). Give tests a real in-memory one so code
