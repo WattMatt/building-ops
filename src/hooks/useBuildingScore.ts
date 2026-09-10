@@ -2,12 +2,15 @@
  * Lightweight per-building score for the detail header. Two cheap reads (NOT the
  * ~30-query useBuildingKpis): OHS = compliance_scores.compliance_pct of the latest
  * APPROVED ops_monthly report (matches usePortfolioCompliance); Tasks = task
- * completion over the last 30 days. Read-through; nothing is written.
+ * completion over the last 30 days, bounded to `due_date <= today`: the generator now
+ * writes up to 90 days ahead, and a future pending task is not "not done". Read-through;
+ * nothing is written.
  */
 import { useQuery } from '@tanstack/react-query';
 import { fdb } from '@/integrations/supabase/fortress-db';
 import { supabase } from '@/integrations/supabase/client';
 import { taskCompletionPct } from '@/lib/buildingScore';
+import { todayInOperatingTz } from '@/lib/myWork';
 
 function num(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
@@ -29,7 +32,8 @@ export function useBuildingScore(buildingId: string | undefined) {
         fdb.from('reports').select('id,report_period')
           .eq('building_id', bid).eq('report_type', 'ops_monthly').eq('status', 'approved')
           .order('report_period', { ascending: false }).limit(1),
-        supabase.from('task_instances').select('status').eq('building_id', bid).gte('due_date', since),
+        supabase.from('task_instances').select('status').eq('building_id', bid)
+          .gte('due_date', since).lte('due_date', todayInOperatingTz()),
       ]);
 
       let ohsPct: number | null = null;

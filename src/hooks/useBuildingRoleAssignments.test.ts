@@ -20,7 +20,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@/integrations/supabase/client', () => {
-  const METHODS = ['select', 'eq', 'is', 'in', 'order', 'maybeSingle', 'upsert', 'delete', 'update'];
+  const METHODS = ['select', 'eq', 'is', 'in', 'or', 'order', 'maybeSingle', 'upsert', 'delete', 'update'];
   const from = (table: string): Chain => {
     const own: RecordedCall[] = [];
     const chain = {} as Chain;
@@ -144,8 +144,8 @@ describe('useBuildingRoleAssignments', () => {
     const base = state.result;
     state.result = (table, calls) => {
       if (table === 'task_instances' && has(calls, 'update')) {
-        const role = calls.find((c) => c.method === 'eq' && c.args[0] === 'responsible_role')?.args[1];
-        return role === 'user' ? { data: [{ id: 't1' }, { id: 't2' }], error: null } : { data: [{ id: 't3' }], error: null };
+        const isUser = calls.some((c) => c.method === 'or');
+        return isUser ? { data: [{ id: 't1' }, { id: 't2' }], error: null } : { data: [{ id: 't3' }], error: null };
       }
       return base(table, calls);
     };
@@ -161,7 +161,13 @@ describe('useBuildingRoleAssignments', () => {
       expect(has(u.calls, 'is', 'assigned_to', null)).toBe(true);
       expect(has(u.calls, 'select', 'id')).toBe(true);
     }
-    expect(has(updates[0].calls, 'update', { assigned_to: 'u1' }) && has(updates[0].calls, 'eq', 'responsible_role', 'user')).toBe(true);
+    // The `user` rule must match a null label too: `pendingByRole` counts null as 'user', and the
+    // count the panel shows and the rows this touches have to agree.
+    expect(has(updates[0].calls, 'update', { assigned_to: 'u1' })).toBe(true);
+    expect(has(updates[0].calls, 'or', 'responsible_role.is.null,responsible_role.eq.user')).toBe(true);
+    expect(has(updates[0].calls, 'eq', 'responsible_role', 'user')).toBe(false);
+    expect(has(updates[1].calls, 'eq', 'responsible_role', 'HVAC Contractor')).toBe(true);
+    expect(has(updates[1].calls, 'or')).toBe(false);
 
     expect(notifyMock).toHaveBeenCalledTimes(2);
     expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({
@@ -188,7 +194,7 @@ describe('useBuildingRoleAssignments', () => {
     expect(total).toBe(1);
     const updates = state.queries.filter((q) => q.table === 'task_instances' && has(q.calls, 'update'));
     expect(updates).toHaveLength(1);
-    expect(has(updates[0].calls, 'eq', 'responsible_role', 'user')).toBe(true);
+    expect(has(updates[0].calls, 'or', 'responsible_role.is.null,responsible_role.eq.user')).toBe(true);
     expect(notifyMock).toHaveBeenCalledTimes(1);
     expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({ recipients: ['u1'] }));
   });

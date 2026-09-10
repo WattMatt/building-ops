@@ -154,7 +154,7 @@ export function UpcomingTasks({ tasks, onComplete, onAssign, canAssign, members,
                             <button
                               type="button"
                               aria-label={`Change assignee for ${task.task_name}`}
-                              className="rounded hover:bg-muted"
+                              className="inline-flex min-h-11 items-center rounded hover:bg-muted"
                             >
                               {chip}
                             </button>

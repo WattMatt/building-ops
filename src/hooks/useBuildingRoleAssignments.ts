@@ -146,14 +146,16 @@ export function useBuildingRoleAssignments(buildingId: string | undefined): Buil
     const perPerson = new Map<string, { n: number; firstTaskId: string }>();
     for (const [role, userId] of rules) {
       if (!roles.includes(role)) continue;
-      const { data, error } = await supabase
+      let q = supabase
         .from('task_instances')
         .update({ assigned_to: userId })
         .eq('building_id', buildingId)
         .eq('status', 'pending')
-        .is('assigned_to', null)
-        .eq('responsible_role', role)
-        .select('id');
+        .is('assigned_to', null);
+      // `pendingByRole` reads a null label as 'user'; the update must match the same rows or
+      // the count the panel shows and the set this touches disagree.
+      q = role === 'user' ? q.or('responsible_role.is.null,responsible_role.eq.user') : q.eq('responsible_role', role);
+      const { data, error } = await q.select('id');
       if (error) throw new Error(error.message);
       if (!data?.length) continue;
       const cur = perPerson.get(userId);

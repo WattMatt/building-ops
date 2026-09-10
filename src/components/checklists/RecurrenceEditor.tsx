@@ -1,7 +1,9 @@
 /**
  * Edits a `RecurrenceRule` (src/lib/recurrence.ts): "Every N unit", the weekday chips for
- * weeks, the day-of-month and month pickers for months/years, the visibility lead, and a live
- * preview of the next six due dates so an admin sees what the rule means before saving.
+ * weeks, the day-of-month and month pickers for months/years, and a live preview of the next
+ * six due dates so an admin sees what the rule means before saving. The visibility lead
+ * ("Show N days before") is plumbed through but hidden unless `showLead` is set: nothing
+ * reads `lead` yet, so offering it would promise a behaviour the app does not have.
  *
  * Controlled: the parent owns the rule and receives `(rule, valid)` on every change.
  * `recurrenceProblem()` is exported so the parent can gate Save on the seeded rule too.
@@ -36,6 +38,8 @@ export interface RecurrenceEditorProps {
   onChange: (rule: RecurrenceRule, valid: boolean) => void;
   /** Prefix for the field ids so two editors on a page never collide. */
   idPrefix?: string;
+  /** Show the "Show N days before" row. Off until something consumes `lead`. */
+  showLead?: boolean;
 }
 
 const UNITS: readonly RecurrenceUnit[] = ['day', 'week', 'month', 'year'];
@@ -80,7 +84,7 @@ function withUnit(rule: RecurrenceRule, unit: RecurrenceUnit): RecurrenceRule {
 
 const unitLabel = (unit: RecurrenceUnit, n: number) => (n === 1 ? unit : `${unit}s`);
 
-export default function RecurrenceEditor({ value, onChange, idPrefix = 'recurrence' }: RecurrenceEditorProps) {
+export default function RecurrenceEditor({ value, onChange, idPrefix = 'recurrence', showLead = false }: RecurrenceEditorProps) {
   const problem = recurrenceProblem(value);
   const emit = (next: RecurrenceRule) => onChange(next, recurrenceProblem(next) === null);
 
@@ -196,24 +200,26 @@ export default function RecurrenceEditor({ value, onChange, idPrefix = 'recurren
         </div>
       )}
 
-      <div className="space-y-2">
-        <Label htmlFor={`${idPrefix}-lead`}>Visibility</Label>
-        <div className="flex items-center gap-2">
-          <span className="text-sm">Show</span>
-          <Input
-            id={`${idPrefix}-lead`}
-            aria-label="Days before"
-            type="number"
-            inputMode="numeric"
-            min={0}
-            max={60}
-            className="h-11 w-20"
-            value={value.lead === undefined ? 0 : Number.isNaN(value.lead) ? '' : value.lead}
-            onChange={(e) => emit({ ...value, lead: numberFrom(e.target.value) })}
-          />
-          <span className="text-sm">days before</span>
+      {showLead && (
+        <div className="space-y-2">
+          <Label htmlFor={`${idPrefix}-lead`}>Visibility</Label>
+          <div className="flex items-center gap-2">
+            <span className="text-sm">Show</span>
+            <Input
+              id={`${idPrefix}-lead`}
+              aria-label="Days before"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={60}
+              className="h-11 w-20"
+              value={value.lead === undefined ? 0 : Number.isNaN(value.lead) ? '' : value.lead}
+              onChange={(e) => emit({ ...value, lead: numberFrom(e.target.value) })}
+            />
+            <span className="text-sm">days before</span>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="rounded-md border bg-muted/40 p-3 text-sm">
         {problem === null ? (

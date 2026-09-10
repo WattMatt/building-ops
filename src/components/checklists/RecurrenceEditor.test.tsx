@@ -18,11 +18,12 @@ import RecurrenceEditor, { recurrenceProblem, formatIsoDay } from './RecurrenceE
 const onChange = vi.fn();
 
 /** The editor is controlled; this harness plays the parent so chips and inputs round-trip. */
-function Harness({ initial }: { initial: RecurrenceRule }) {
+function Harness({ initial, showLead }: { initial: RecurrenceRule; showLead?: boolean }) {
   const [rule, setRule] = useState(initial);
   return (
     <RecurrenceEditor
       value={rule}
+      showLead={showLead}
       onChange={(next, valid) => {
         onChange(next, valid);
         setRule(next);
@@ -63,9 +64,17 @@ describe('RecurrenceEditor', () => {
     expect(screen.getByRole('button', { name: 'Monday' })).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('changes the interval and the lead, flagging out-of-range values', () => {
+  it('hides the visibility lead until something consumes it (showLead off by default)', () => {
+    render(<Harness initial={{ ...weeklyMonday, lead: 7 }} />);
+    expect(screen.queryByLabelText('Days before')).toBeNull();
+    expect(screen.queryByText('Visibility')).toBeNull();
+    // The rule's lead is kept, not stripped, by the editor.
+    expect(screen.getByText('Weekly on Mon')).toBeInTheDocument();
+  });
+
+  it('changes the interval and (with showLead) the lead, flagging out-of-range values', () => {
     onChange.mockClear();
-    render(<Harness initial={weeklyMonday} />);
+    render(<Harness initial={weeklyMonday} showLead />);
     fireEvent.change(screen.getByLabelText('Every'), { target: { value: '2' } });
     expect(onChange).toHaveBeenLastCalledWith({ every: 2, unit: 'week', weekdays: [1] }, true);
     expect(screen.getByText('Every 2 weeks on Mon')).toBeInTheDocument();

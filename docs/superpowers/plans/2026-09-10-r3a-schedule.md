@@ -361,7 +361,13 @@ Deviations worth knowing:
 - Month/year rules anchor on the first occurrence on or after the start date, then step every N (a 6-monthly rule made
   on 10 Sep → 1 Oct, 1 Apr, 1 Oct), not on the start month; the fixture, SQL and TS all pin this.
 - `generate_scheduled_tasks` takes `(p_building, p_template, p_frequency, p_horizon_days)`; the role label is
-  `coalesce(nullif(item.responsible_party,''), nullif(template.responsible_role,''), 'user')` in SQL and the hook alike.
+  `coalesce(nullif(btrim(item.responsible_party),''), nullif(btrim(template.responsible_role),''), 'user')` in SQL and
+  the hook alike (trimmed, so a whitespace-only field is absent). `reschedule_template` regenerates with the cron's
+  90-day horizon.
+- KPIs (`useBuildingScore`, `useBuildingsScores`, `useDashboardStats`) are bounded to `due_date <= today`: with a 90-day
+  generation horizon a future pending task is not "not done". Saving an untouched legacy template keeps it legacy (no
+  `recurrence` written, no regenerate prompt) until someone deliberately edits the rule. `lead` ("Show N days before")
+  ships hidden behind `RecurrenceEditor`'s `showLead` until a consumer exists, and a lead-only diff never prompts.
 - The reschedule confirm counts the pending future tasks it will replace and opens after the sheet has closed on phones.
 - Archived templates cannot be applied or generated and drop out of "Who does what here".
 - `templateAppliesToBuilding([])` is false (matches SQL `= any('{}')`).
@@ -373,4 +379,4 @@ Deviations worth knowing:
 Follow-ups: `useIssues`-style pages still don't use the horizon; the digest email lists expiring documents AND the
 inbox now carries them (fine, no double email); `reschedule_template` re-ids replaced rows (notification `entity_id`s
 may dangle); a global `pointerCapture` shim in `src/test/setup.ts` would dedupe four tests; `TaskFrequency` is still
-declared in two places (`constants.ts`, `TasksList.tsx`).
+declared in five places (`constants.ts`, `TasksList.tsx`, `Checklists.tsx`, `TemplateItemDialog.tsx`, `ApplyTemplateDialog.tsx`).

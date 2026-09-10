@@ -177,7 +177,6 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
     setLoading(true);
     try {
       // Fetch tasks with their completions
-      // `assigned_to` is not in the generated types until the migration ships; narrow at the boundary.
       const { data: tasksRaw, error: tasksError } = await supabase
         .from('task_instances')
         .select(`
@@ -199,7 +198,7 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
 
       if (tasksError) throw tasksError;
 
-      const tasksData = tasksRaw as unknown as Array<Omit<TaskInstance, 'completion'>> | null;
+      const tasksData = tasksRaw;
 
       // Fetch completions for these tasks
       const taskIds = (tasksData || []).map(t => t.id);
@@ -226,10 +225,14 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
         ])
       );
 
+      // Nullable in the generated types; the generator always writes them, so narrow here.
       const formattedTasks: TaskInstance[] = (tasksData || []).map(task => ({
         ...task,
         frequency: task.frequency as TaskFrequency,
         status: task.status as TaskStatus,
+        requires_photo: task.requires_photo ?? false,
+        requires_signature: task.requires_signature ?? false,
+        responsible_role: task.responsible_role ?? 'user',
         completion: completionMap.get(task.id),
       }));
 

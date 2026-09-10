@@ -7,6 +7,12 @@
  * migration's trigger exists on an environment. Every write selects the row back: RLS denies
  * with zero rows and no error, which must read as "no permission", not "saved".
  *
+ * A legacy template (`recurrence` null) is edited as the seeded `ruleFromFrequency` rule, but
+ * that seed is only an approximation (weekly → Monday, quarterly → every 3 months from the
+ * 1st). Saving it untouched therefore sends NO `recurrence` and keeps the stored `frequency`:
+ * the template stays legacy, and its Sunday-due weekly tasks stay on Sunday, until someone
+ * deliberately changes the rule.
+ *
  * After an UPDATE that changed the effective rule, a confirm offers `reschedule_template`,
  * which replaces pending future tasks nobody has touched. The id is stashed and the confirm is
  * opened from an effect only once `open` is false and the sheet's close transition has run
@@ -87,8 +93,12 @@ const ROLE_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   ...responsibleParties.map((p) => ({ value: p, label: p })),
 ];
 
-const sameRule = (a: RecurrenceRule, b: RecurrenceRule) => JSON.stringify(normalise(a)) === JSON.stringify(normalise(b));
-/** Key order and defaults made stable so two equivalent rules compare equal. */
+/**
+ * Whether two rules produce the same due dates. `lead` is deliberately ignored: it shifts
+ * visibility only (and ships hidden), so a lead-only difference must never prompt a regenerate.
+ */
+export const sameRule = (a: RecurrenceRule, b: RecurrenceRule) => JSON.stringify(normalise(a)) === JSON.stringify(normalise(b));
+/** Key order made stable so two equivalent rules compare equal. */
 function normalise(r: RecurrenceRule) {
   return {
     every: r.every,
@@ -96,9 +106,12 @@ function normalise(r: RecurrenceRule) {
     weekdays: r.weekdays ? [...r.weekdays].sort((x, y) => x - y) : undefined,
     monthDay: r.monthDay,
     month: r.month,
-    lead: r.lead ?? 0,
   };
 }
+
+/** A legacy template whose seeded rule has not been changed: save it as legacy, not as a rule. */
+export const isUntouchedLegacy = (t: EditableTemplate | null, rule: RecurrenceRule): boolean =>
+  t != null && t.recurrence == null && sameRule(rule, ruleFromFrequency(t.frequency));
 
 /** The rule the editor starts from: the stored one, else the legacy bucket's equivalent. */
 export const effectiveRule = (t: EditableTemplate | null): RecurrenceRule =>
@@ -201,19 +214,23 @@ export default function TemplateDialog({ open, onOpenChange, template, onSaved, 
   const toggleType = (value: string, on: boolean) =>
     setBuildingTypes((prev) => (on ? [...new Set([...prev, value])] : prev.filter((v) => v !== value)));
 
+  const untouchedLegacy = isUntouchedLegacy(template, rule);
+
   const handleSave = async () => {
     if (problem) return;
     setSaving(true);
     try {
-      const fields = {
+      const base = {
         name: name.trim(),
         description: description.trim() || null,
-        recurrence: rule,
         responsible_role: role,
         applies_to_building_types: buildingTypes.length > 0 ? buildingTypes : null,
-        frequency: legacyFrequency(rule),
         is_active: true,
       };
+      // Untouched legacy: no `recurrence`, the stored bucket unchanged (see the header comment).
+      const fields = untouchedLegacy
+        ? { ...base, frequency: template!.frequency }
+        : { ...base, recurrence: rule, frequency: legacyFrequency(rule) };
 
       if (template) {
         const { data, error } = await supabase
@@ -226,7 +243,7 @@ export default function TemplateDialog({ open, onOpenChange, template, onSaved, 
         toast.success('Template updated');
         onSaved();
         onOpenChange(false);
-        if (!sameRule(effectiveRule(template), rule)) {
+        if (!untouchedLegacy && !sameRule(effectiveRule(template), rule)) {
           const id = template.id;
           setReschedule({ id, count: null, ready: false });
           void countReplaceablePending(id).then((count) => {
@@ -323,6 +340,11 @@ export default function TemplateDialog({ open, onOpenChange, template, onSaved, 
             <div className="space-y-2">
               <Label>Schedule</Label>
               <RecurrenceEditor value={rule} onChange={(next) => setRule(next)} idPrefix="template-recurrence" />
+              {untouchedLegacy && (
+                <p className="text-xs text-muted-foreground" data-testid="template-legacy-note">
+                  This template still uses the fixed {template!.frequency} schedule. Change the rule above to switch it to a custom one.
+                </p>
+              )}
               <Hint>Tasks are created on the dates in the preview for every building this template applies to.</Hint>
             </div>
 

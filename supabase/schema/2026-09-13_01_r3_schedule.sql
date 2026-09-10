@@ -211,9 +211,9 @@ create policy bra_write on public.building_role_assignments
 
 -- ============================================================
 -- 4) Generation v2: horizon + assignment. The role label is derived in one way everywhere in
---    this file: item responsible_party, else template responsible_role, else 'user' — with an
---    empty string treated as absent, so a blank form field never yields a '' label that no
---    building_role_assignments row can match. Templates with a recurrence rule get every
+--    this file: item responsible_party, else template responsible_role, else 'user' — with a
+--    blank (empty or whitespace-only, hence btrim) value treated as absent, so a blank form
+--    field never yields a '' or ' ' label that no building_role_assignments row can match. Templates with a recurrence rule get every
 --    occurrence in [today, today + horizon]; per-unit caps keep the row count sane
 --    (dailies 14 days ahead, weeklies 90, monthly and yearly 365) whatever p_horizon_days
 --    says. Legacy templates (recurrence null) keep the single scheduled_due_date row.
@@ -249,12 +249,12 @@ begin
     (building_id, template_item_id, task_name, task_description, frequency, responsible_role,
      status, due_date, requires_photo, requires_signature, assigned_to)
   select b.id, ti.id, ti.task_name, ti.task_description, ct.frequency,
-         coalesce(nullif(ti.responsible_party, ''), nullif(ct.responsible_role, ''), 'user'), 'pending', occ.due,
+         coalesce(nullif(btrim(ti.responsible_party), ''), nullif(btrim(ct.responsible_role), ''), 'user'), 'pending', occ.due,
          ti.requires_photo, ti.requires_signature,
          (select bra.user_id
             from public.building_role_assignments bra
            where bra.building_id = b.id
-             and bra.role = coalesce(nullif(ti.responsible_party, ''), nullif(ct.responsible_role, ''), 'user')
+             and bra.role = coalesce(nullif(btrim(ti.responsible_party), ''), nullif(btrim(ct.responsible_role), ''), 'user')
            limit 1)
     from public.checklist_templates ct
     join public.template_items ti on ti.template_id = ct.id
@@ -293,6 +293,8 @@ drop function if exists public.generate_scheduled_tasks(uuid, uuid, text);
 -- 5) After a rule change: drop the template's untouched future occurrences and regenerate.
 --    Untouched = pending, due after today, no completion, and assigned_to is null or equals
 --    what the building's role assignment would give — anything a person edited by hand stays.
+--    Regenerates with the same 90-day horizon the nightly cron uses (section 7), so a
+--    rescheduled template never carries more future rows than an untouched one.
 -- ============================================================
 create or replace function public.reschedule_template(p_template uuid)
 returns table (deleted integer, generated integer)
@@ -320,12 +322,12 @@ begin
           or t.assigned_to = (select bra.user_id
                                 from public.building_role_assignments bra
                                where bra.building_id = t.building_id
-                                 -- the same label generate_scheduled_tasks derives (empty = absent)
-                                 and bra.role = coalesce(nullif(ti.responsible_party, ''), nullif(ct.responsible_role, ''), 'user')
+                                 -- the same label generate_scheduled_tasks derives (blank = absent)
+                                 and bra.role = coalesce(nullif(btrim(ti.responsible_party), ''), nullif(btrim(ct.responsible_role), ''), 'user')
                                limit 1));
   get diagnostics v_del = row_count;
   for b in select id from public.buildings where public.can_access_building(id) loop
-    v_gen := v_gen + public.generate_scheduled_tasks(b.id, p_template, null, 365);
+    v_gen := v_gen + public.generate_scheduled_tasks(b.id, p_template, null, 90);
   end loop;
   return query select v_del, v_gen;
 end $$;

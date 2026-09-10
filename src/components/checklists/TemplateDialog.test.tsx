@@ -56,7 +56,7 @@ const toast = vi.hoisted(() => Object.assign(vi.fn(), { success: vi.fn(), error:
 vi.mock('sonner', () => ({ toast }));
 vi.mock('@/hooks/useHints', () => ({ useHints: () => ({ hintsEnabled: true, setHintsEnabled: vi.fn() }) }));
 
-import TemplateDialog, { archiveTemplate, type EditableTemplate } from './TemplateDialog';
+import TemplateDialog, { archiveTemplate, sameRule, type EditableTemplate } from './TemplateDialog';
 
 const weeklyTemplate: EditableTemplate = {
   id: 't1',
@@ -244,13 +244,49 @@ describe('TemplateDialog', () => {
     expect(db.rpc).not.toHaveBeenCalled();
   });
 
-  it('seeds a legacy template from its frequency and treats an untouched schedule as unchanged', async () => {
+  it('saving an untouched legacy template sends no recurrence, keeps its frequency, and never prompts', async () => {
     renderDialog({ ...weeklyTemplate, recurrence: null, frequency: 'monthly' });
+    // Seeded from the bucket so the editor has something to show...
     expect(screen.getByText('Monthly on the 1st')).toBeInTheDocument();
+    // ...and says so in plain words.
+    expect(screen.getByTestId('template-legacy-note')).toHaveTextContent(
+      'This template still uses the fixed monthly schedule. Change the rule above to switch it to a custom one.',
+    );
+    fireEvent.change(screen.getByLabelText('Name *'), { target: { value: 'Fire doors (all floors)' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(writes()).toHaveLength(1));
-    expect(writes()[0].payload).toMatchObject({ recurrence: { every: 1, unit: 'month', monthDay: 1 }, frequency: 'monthly' });
+    // The seed is only an approximation (weekly → Monday, quarterly → from the 1st): writing it
+    // would silently move the template's existing tasks. Legacy stays legacy.
+    expect(writes()[0].payload).toEqual({
+      name: 'Fire doors (all floors)',
+      description: 'Walk every escape route',
+      responsible_role: 'Security',
+      applies_to_building_types: ['office'],
+      frequency: 'monthly',
+      is_active: true,
+    });
+    expect(writes()[0].payload).not.toHaveProperty('recurrence');
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Template updated'));
+    await new Promise((r) => setTimeout(r, 600));
     expect(screen.queryByRole('heading', { name: 'Regenerate future tasks?' })).toBeNull();
+    expect(countReads()).toHaveLength(0);
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it('editing a legacy template’s weekday switches it to a rule and offers to regenerate', async () => {
+    renderDialog({ ...weeklyTemplate, recurrence: null, frequency: 'weekly' });
+    expect(screen.getByTestId('template-legacy-note')).toHaveTextContent('fixed weekly schedule');
+    fireEvent.click(screen.getByRole('button', { name: 'Wednesday' }));
+    expect(screen.queryByTestId('template-legacy-note')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(writes()).toHaveLength(1));
+    expect(writes()[0].payload).toMatchObject({ recurrence: { every: 1, unit: 'week', weekdays: [1, 3] }, frequency: 'weekly' });
+    expect(await screen.findByRole('heading', { name: 'Regenerate future tasks?' }, { timeout: 2000 })).toBeInTheDocument();
+  });
+
+  it('a rule-backed template shows no legacy note', () => {
+    renderDialog(weeklyTemplate);
+    expect(screen.queryByTestId('template-legacy-note')).toBeNull();
   });
 
   it('reads zero rows back as a permission problem and stays open', async () => {
@@ -260,6 +296,14 @@ describe('TemplateDialog', () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('You do not have permission to change this template.'));
     expect(onSaved).not.toHaveBeenCalled();
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+});
+
+describe('sameRule', () => {
+  it('ignores lead (visibility only, and hidden) so a lead-only diff never prompts a regenerate', () => {
+    expect(sameRule({ every: 1, unit: 'week', weekdays: [1], lead: 7 }, { every: 1, unit: 'week', weekdays: [1] })).toBe(true);
+    expect(sameRule({ every: 1, unit: 'week', weekdays: [3, 1] }, { every: 1, unit: 'week', weekdays: [1, 3] })).toBe(true);
+    expect(sameRule({ every: 1, unit: 'week', weekdays: [1] }, { every: 2, unit: 'week', weekdays: [1] })).toBe(false);
   });
 });
 
