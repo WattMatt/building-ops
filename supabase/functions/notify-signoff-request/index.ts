@@ -1,20 +1,8 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { loadBranding, renderEmail } from "../_shared/email.ts";
+import { escapeText } from "../_shared/email.ts";
 import { corsHeaders } from "../_shared/cors.ts";
-
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
-
-async function sendEmail(from: string, to: string[], subject: string, html: string) {
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${RESEND_API_KEY}` },
-    body: JSON.stringify({ from, to, subject, html }),
-  });
-  if (!res.ok) throw new Error(`Resend API error: ${await res.text()}`);
-  return res.json();
-}
+import { createNotifications } from "../_shared/notify.ts";
 
 interface SignoffRequestNotification {
   requestId: string;
@@ -69,15 +57,6 @@ serve(async (req: Request): Promise<Response> => {
       buildingName = b?.name ?? "";
     }
 
-    const { data: signer } = await supabase
-      .from("profiles")
-      .select("email, full_name")
-      .eq("id", request.assigned_to)
-      .single();
-    if (!signer?.email) {
-      return json({ success: true, notified: 0, message: "Signer has no email" });
-    }
-
     let requesterName = "A manager";
     if (request.assigned_by) {
       const { data: by } = await supabase.from("profiles").select("full_name, email").eq("id", request.assigned_by).single();
@@ -89,27 +68,28 @@ serve(async (req: Request): Promise<Response> => {
       ? new Date(request.due_at).toLocaleString("en-ZA", { dateStyle: "medium", timeZone: "Africa/Johannesburg" })
       : null;
     const heading = "Sign-off requested";
+    const instructions = request.instructions ? String(request.instructions) : null;
 
-    const branding = await loadBranding(supabase);
+    const result = await createNotifications(supabase, {
+      recipients: [request.assigned_to as string],
+      actorId: (request.assigned_by as string | null) ?? null,
+      actorName: requesterName,
+      kind: "signoff_requested",
+      entityType: "signoff_request",
+      entityId: request.id as string,
+      buildingId: (submission?.building_id as string | null) ?? null,
+      title: `${heading}: ${formName}`,
+      // The requester's instructions are the one thing the signer needs in the inbox row.
+      body: instructions,
+      url: "/my-signoffs",
+      subject: `${heading}: ${formName}`,
+      detailHtml: `
+          <p style="margin:0 0 16px;">${escapeText(requesterName)} has asked you to sign off on <strong>${escapeText(formName)}</strong>${buildingName ? ` for ${escapeText(buildingName)}` : ""}.</p>
+          ${due ? `<p style="margin:0 0 16px;">Please sign by <strong>${escapeText(due)}</strong>.</p>` : ""}`,
+      ctaText: "Review & sign",
+    });
 
-    await sendEmail(
-      `${branding.appName} <notifications@buildingops.app>`,
-      [signer.email],
-      `${heading}: ${formName}`,
-      renderEmail({
-        branding,
-        heading,
-        greeting: `Hi ${signer.full_name || "there"},`,
-        bodyHtml: `
-          <p style="margin:0 0 16px;">${requesterName} has asked you to sign off on <strong>${formName}</strong>${buildingName ? ` for ${buildingName}` : ""}.</p>
-          ${due ? `<p style="margin:0 0 16px;">Please sign by <strong>${due}</strong>.</p>` : ""}
-          ${request.instructions ? `<div style="background:#f9fafb;border-left:4px solid ${branding.color};padding:16px;border-radius:4px;margin:0 0 16px;color:#374151;">${request.instructions}</div>` : ""}`,
-        ctaText: "Review & sign",
-        ctaUrl: `${APP_URL}/my-signoffs`,
-      }),
-    );
-
-    return json({ success: true, notified: 1 });
+    return json({ success: true, ...result });
   } catch (error) {
     console.error("notify-signoff-request error:", error);
     return json({ error: (error as Error).message }, 500);

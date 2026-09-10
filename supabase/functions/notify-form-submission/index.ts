@@ -1,45 +1,14 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { escapeText, loadBranding, renderEmail } from "../_shared/email.ts";
+import { escapeText } from "../_shared/email.ts";
 import { corsHeaders } from "../_shared/cors.ts";
-
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-const APP_URL = (Deno.env.get("APP_URL") ?? "https://buildingops.app").replace(/\/+$/, "");
-
-async function sendEmail(from: string, to: string[], subject: string, html: string) {
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${RESEND_API_KEY}`,
-    },
-    body: JSON.stringify({
-      from,
-      to,
-      subject,
-      html,
-    }),
-  });
-
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`Resend API error: ${error}`);
-  }
-
-  return res.json();
-}
+import { adminAndManagerIds, createNotifications } from "../_shared/notify.ts";
 
 const UUID_RE = /^[0-9a-f-]{36}$/i;
 
 // This notification is only meaningful for a submission that was just created;
 // anything older is a replay and is dropped without mailing anyone.
 const FRESH_SUBMISSION_MS = 5 * 60 * 1000;
-
-/** Organization name is operator-supplied; keep it to characters that are safe
- *  in the display-name part of an email `From` header. */
-function senderName(name: string): string {
-  return name.replace(/[^A-Za-z0-9 &.-]/g, "").trim().slice(0, 64) || "Building Ops";
-}
 
 /**
  * Every value rendered into the email is read from the database with the
@@ -170,18 +139,8 @@ serve(async (req: Request): Promise<Response> => {
       submittedBy = submitter?.full_name || submitter?.email || submittedBy;
     }
 
-    // Get all admins and managers (they have access to all buildings)
-    const { data: adminManagerRoles, error: rolesError } = await supabase
-      .from("user_roles")
-      .select("user_id")
-      .in("role", ["admin", "manager"]);
-
-    if (rolesError) {
-      console.error("Error fetching admin/manager roles:", rolesError);
-      return json({ error: "Unable to send notification" }, 500);
-    }
-
-    const managerUserIds = adminManagerRoles?.map(r => r.user_id) || [];
+    // Admins and managers have access to every building, so they are the review queue.
+    const managerUserIds = await adminAndManagerIds(supabase);
     console.log(`Found ${managerUserIds.length} admins/managers`);
 
     if (managerUserIds.length === 0) {
@@ -189,43 +148,22 @@ serve(async (req: Request): Promise<Response> => {
       return json({ success: true, notified: 0, message: "No managers to notify" });
     }
 
-    // Get email addresses for these users from profiles
-    const { data: profiles, error: profilesError } = await supabase
-      .from("profiles")
-      .select("id, email, full_name")
-      .in("id", managerUserIds);
-
-    if (profilesError) {
-      console.error("Error fetching profiles:", profilesError);
-      return json({ error: "Unable to send notification" }, 500);
-    }
-
-    if (!profiles || profiles.length === 0) {
-      console.log("No profiles found for managers");
-      return json({ success: true, notified: 0, message: "No manager profiles found" });
-    }
-
-    const recipientEmails = profiles.map(p => p.email).filter(Boolean);
-    console.log(`Sending notifications to ${recipientEmails.length} recipients`);
-
-    if (recipientEmails.length === 0) {
-      return json({ success: true, notified: 0, message: "No valid email addresses" });
-    }
-
     // Format the submission time
     const formattedTime = formatTime(submission.created_at);
 
-    const branding = await loadBranding(supabase);
-
-    // Send email notification
-    const emailResponse = await sendEmail(
-      `${senderName(branding.appName)} <notifications@buildingops.app>`,
-      recipientEmails,
-      `New Form Submission: ${formName}`,
-      renderEmail({
-        branding,
-        heading: "New Form Submission",
-        bodyHtml: `
+    const result = await createNotifications(supabase, {
+      recipients: managerUserIds,
+      actorId: submission.submitted_by,
+      actorName: submission.submitted_by ? submittedBy : null,
+      kind: "form_submitted",
+      entityType: "form_submission",
+      entityId: submission.id,
+      buildingId: submission.building_id,
+      title: `New form submission: ${formName}`,
+      body: null,
+      url: "/forms",
+      subject: `New Form Submission: ${formName}`,
+      detailHtml: `
           <p style="margin:0 0 16px;">
             A new form has been submitted and requires your review.
           </p>
@@ -240,7 +178,7 @@ serve(async (req: Request): Promise<Response> => {
                 <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Building:</td>
                 <td style="padding: 8px 0; color: #111827; font-size: 14px; font-weight: 600;">${escapeText(buildingName)}</td>
               </tr>
-              ` : ''}
+              ` : ""}
               <tr>
                 <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Submitted by:</td>
                 <td style="padding: 8px 0; color: #111827; font-size: 14px;">${escapeText(submittedBy)}</td>
@@ -251,18 +189,12 @@ serve(async (req: Request): Promise<Response> => {
               </tr>
             </table>
           </div>`,
-        ctaText: "Review submission",
-        ctaUrl: `${APP_URL}/forms`,
-      })
-    );
-
-    console.log("Email sent successfully:", emailResponse);
-
-    return json({
-      success: true,
-      notified: recipientEmails.length,
-      message: `Notification sent to ${recipientEmails.length} manager(s)`,
+      ctaText: "Review submission",
     });
+
+    console.log("Submission notification processed:", result);
+
+    return json({ success: true, ...result });
 
   } catch (error) {
     console.error("Error in notify-form-submission:", error);

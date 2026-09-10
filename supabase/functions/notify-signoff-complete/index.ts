@@ -1,20 +1,8 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { loadBranding, renderEmail } from "../_shared/email.ts";
+import { escapeText } from "../_shared/email.ts";
 import { corsHeaders } from "../_shared/cors.ts";
-
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
-
-async function sendEmail(from: string, to: string[], subject: string, html: string) {
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${RESEND_API_KEY}` },
-    body: JSON.stringify({ from, to, subject, html }),
-  });
-  if (!res.ok) throw new Error(`Resend API error: ${await res.text()}`);
-  return res.json();
-}
+import { actorDisplayName, createNotifications } from "../_shared/notify.ts";
 
 interface CompleteNotification {
   submissionId: string;
@@ -87,36 +75,28 @@ serve(async (req: Request): Promise<Response> => {
     allRequests.forEach((r) => r.assigned_by && recipientIds.add(r.assigned_by));
 
     if (recipientIds.size === 0) {
-      return json({ success: true, notified: 0 });
-    }
-
-    const { data: profiles } = await supabase
-      .from("profiles")
-      .select("email, full_name")
-      .in("id", Array.from(recipientIds));
-    const emails = (profiles || []).map((p) => p.email).filter(Boolean) as string[];
-    if (emails.length === 0) {
-      return json({ success: true, notified: 0, message: "No recipient emails" });
+      return json({ success: true, inserted: 0, emailed: 0, skipped: 0 });
     }
 
     const formName = submission.form_name ?? "a form";
 
-    const branding = await loadBranding(supabase);
+    const result = await createNotifications(supabase, {
+      recipients: Array.from(recipientIds),
+      actorId: caller.id,
+      actorName: await actorDisplayName(supabase, caller.id),
+      kind: "signoff_complete",
+      entityType: "form_submission",
+      entityId: submissionId,
+      buildingId: (submission.building_id as string | null) ?? null,
+      title: `Sign-off complete: ${formName}`,
+      body: null,
+      url: "/forms",
+      subject: `Sign-off complete: ${formName}`,
+      detailHtml: `<p style="margin:0 0 16px;">All required signatures have been collected for <strong>${escapeText(formName)}</strong>${buildingName ? ` (${escapeText(buildingName)})` : ""}.</p>`,
+      ctaText: "View submission",
+    });
 
-    await sendEmail(
-      `${branding.appName} <notifications@buildingops.app>`,
-      emails,
-      `Sign-off complete: ${formName}`,
-      renderEmail({
-        branding,
-        heading: "Sign-off complete",
-        bodyHtml: `<p style="margin:0 0 16px;">All required signatures have been collected for <strong>${formName}</strong>${buildingName ? ` (${buildingName})` : ""}.</p>`,
-        ctaText: "View submission",
-        ctaUrl: `${APP_URL}/forms`,
-      }),
-    );
-
-    return json({ success: true, notified: emails.length });
+    return json({ success: true, ...result });
   } catch (error) {
     console.error("notify-signoff-complete error:", error);
     return json({ error: (error as Error).message }, 500);
