@@ -15,15 +15,19 @@ import {
   SlidersHorizontal,
   Upload,
   Loader2,
+  Send,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { SlaSettingsCard } from '@/components/settings/SlaSettingsCard';
 import { ReportDueDayCard } from '@/components/settings/ReportDueDayCard';
 import { FeatureFlagsCard } from '@/components/settings/FeatureFlagsCard';
+import { ReportDistributionCard } from '@/components/settings/ReportDistributionCard';
+import { useFeature } from '@/hooks/useOrgSettings';
 
 export default function Settings() {
   const { isAdmin, isAdminOrManager } = useAuth();
   const { organization } = useOrganization();
+  const schedulesOn = useFeature('report_schedules');
   const [orgName, setOrgName] = useState('');
   const [orgEmail, setOrgEmail] = useState('');
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
@@ -188,6 +192,12 @@ export default function Settings() {
               Operations
             </TabsTrigger>
           )}
+          {isAdminOrManager && schedulesOn && (
+            <TabsTrigger value="distribution">
+              <Send className="h-4 w-4 mr-2" />
+              Report distribution
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="organization">
@@ -344,6 +354,12 @@ export default function Settings() {
             <SlaSettingsCard canEdit={isAdmin} />
             <ReportDueDayCard canEdit={isAdmin} />
             <FeatureFlagsCard canEdit={isAdmin} />
+          </TabsContent>
+        )}
+
+        {isAdminOrManager && schedulesOn && (
+          <TabsContent value="distribution">
+            <ReportDistributionCard />
           </TabsContent>
         )}
       </Tabs>
