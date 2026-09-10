@@ -322,4 +322,39 @@ describe('offline replay', () => {
     expect(await listOps(UID)).toEqual([]);
     expect(await retryOp(UID, 'gone')).toEqual({ status: 'failed', error: 'This change is no longer queued.' });
   });
+
+  it('10. stopAt halts before the named op (nothing behind it touched); blocked is true only after a network stop', async () => {
+    const a = await enqueue(UID, complete('c1', 't1'), []);
+    const b = await enqueue(UID, complete('c2', 't2'), []);
+    const c = await enqueue(UID, complete('c3', 't3'), []);
+    state.rpc.mockImplementation(async (_name, args) => ok(args.p_completion_id as string));
+
+    // Clean run up to b: only a lands; b and c are untouched (still pending, no attempt counted).
+    expect(await replayAll(UID, { stopAt: b.id })).toEqual({ blocked: false });
+    expect(state.rpc.mock.calls.map(([, args]) => args.p_completion_id)).toEqual(['c1']);
+    expect((await listOps(UID)).map((o) => [o.id, o.status, o.attempts])).toEqual([[b.id, 'pending', 0], [c.id, 'pending', 0]]);
+    expect((await listOps(UID)).find((o) => o.id === a.id)).toBeUndefined();
+
+    // b cannot reach the server: the run is blocked, c (before the stop) is never tried.
+    state.rpc.mockClear();
+    state.rpc.mockRejectedValue(new TypeError('Failed to fetch'));
+    const d = await enqueue(UID, complete('c4', 't4'), []);
+    expect(await replayAll(UID, { stopAt: d.id })).toEqual({ blocked: true });
+    expect(state.rpc.mock.calls.map(([, args]) => args.p_completion_id)).toEqual(['c2']);
+    expect((await listOps(UID)).map((o) => [o.id, o.status, o.attempts])).toEqual([[b.id, 'pending', 1], [c.id, 'pending', 0], [d.id, 'pending', 0]]);
+
+    // Back online, no stopAt: everything drains in order and the run reports unblocked.
+    state.rpc.mockClear();
+    state.rpc.mockImplementation(async (_name, args) => ok(args.p_completion_id as string));
+    expect(await replayAll(UID)).toEqual({ blocked: false });
+    expect(state.rpc.mock.calls.map(([, args]) => args.p_completion_id)).toEqual(['c2', 'c3', 'c4']);
+    expect(await listOps(UID)).toEqual([]);
+
+    // A stopAt that is not in the queue (already discarded) stops nothing.
+    state.rpc.mockClear();
+    await enqueue(UID, complete('c5', 't5'), []);
+    expect(await replayAll(UID, { stopAt: 'gone' })).toEqual({ blocked: false });
+    expect(state.rpc.mock.calls.map(([, args]) => args.p_completion_id)).toEqual(['c5']);
+    expect(await listOps(UID)).toEqual([]);
+  });
 });

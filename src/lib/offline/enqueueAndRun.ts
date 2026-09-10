@@ -1,14 +1,19 @@
 import { enqueue } from './queue';
-import { runOne } from './replay';
+import { replayAll, runOne } from './replay';
 import type { OpPayload, QueuedPhoto, RunOutcome } from './types';
 
 /**
  * The one entry point the dialogs use, on- and offline. Persist first (so a crash or a closed
- * tab never loses the write), then try to run it right away when the browser thinks it is
- * online. The outcome tells the dialog which toast to show.
+ * tab never loses the write), then, when the browser thinks it is online, replay everything
+ * older that is still pending BEFORE running the new op: an issue_comment must never jump an
+ * issue_create that a transient network error left in the queue (it would fail its FK). If the
+ * older ops cannot reach the server the new one waits behind them. The outcome tells the dialog
+ * which toast to show for ITS op.
  */
 export async function enqueueAndRun(uid: string, payload: OpPayload, photos: QueuedPhoto[]): Promise<RunOutcome> {
   const op = await enqueue(uid, payload, photos);
   if (typeof navigator !== 'undefined' && !navigator.onLine) return { status: 'queued' };
+  const { blocked } = await replayAll(uid, { stopAt: op.id });
+  if (blocked) return { status: 'queued' };
   return runOne(op);
 }
