@@ -107,8 +107,8 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
         return;
       }
       setActivityError(null);
-      // photo_urls/mentions are not yet in the generated types; regenerate after the migration ships.
-      setActivity((acts as unknown as Activity[]) ?? []);
+      // photo_urls is jsonb (typed Json); the app only ever writes string[] there.
+      setActivity((acts ?? []) as Activity[]);
     } finally {
       setLoading(false);
     }

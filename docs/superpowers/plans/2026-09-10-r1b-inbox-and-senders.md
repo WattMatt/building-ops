@@ -821,7 +821,7 @@ git commit -m "Add a live smoke for the notify function and inbox visibility"
 
 - [ ] Deploy `notify`, `daily-digest`, and the five retrofitted functions; set `DAILY_DIGEST_SECRET`; apply the cron SQL with the real ref and secret on staging, then prod.
 - [ ] Run `npm run smoke:notifications` against staging, then add it to the `smoke` chain.
-- [ ] Regenerate `types.ts`, then drop the `'notifications' as never` casts in `useNotifications.ts`.
+- [x] Regenerate `types.ts`, then drop the `'notifications' as never` casts in `useNotifications.ts`.
 
 ---
 

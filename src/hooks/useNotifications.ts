@@ -22,8 +22,7 @@ const LIMIT = 50;
 /** Trailing debounce: markAllRead fans out one realtime event per row, and one refetch is enough. */
 const INVALIDATE_DEBOUNCE_MS = 150;
 
-// notifications is not yet in the generated types; regenerate after the migration ships.
-const table = () => supabase.from('notifications' as never) as any;
+const table = () => supabase.from('notifications');
 
 const rowsKeyFor = (uid: string | undefined) => [...KEY, uid];
 const countKeyFor = (uid: string | undefined) => [...KEY, 'unread-count', uid];
@@ -73,6 +72,7 @@ export function useNotifications() {
     queryKey: rowsKeyFor(uid),
     enabled: !!uid,
     queryFn: async (): Promise<NotificationRow[]> => {
+      if (!uid) return [];
       const { data, error } = await table()
         .select('id, kind, actor_name, title, body, url, read_at, created_at')
         .eq('recipient_id', uid)
@@ -89,6 +89,7 @@ export function useNotifications() {
     queryKey: countKeyFor(uid),
     enabled: !!uid,
     queryFn: async (): Promise<number> => {
+      if (!uid) return 0;
       const { count, error } = await table()
         .select('id', { count: 'exact', head: true })
         .eq('recipient_id', uid)

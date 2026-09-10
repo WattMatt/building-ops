@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.1"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -230,6 +230,68 @@ export type Database = {
           },
         ]
       }
+      building_inspections: {
+        Row: {
+          building_id: string
+          created_at: string
+          id: string
+          inspected_by: string | null
+          inspection_date: string | null
+          report_id: string | null
+          template_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          created_at?: string
+          id?: string
+          inspected_by?: string | null
+          inspection_date?: string | null
+          report_id?: string | null
+          template_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          created_at?: string
+          id?: string
+          inspected_by?: string | null
+          inspection_date?: string | null
+          report_id?: string | null
+          template_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "building_inspections_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "building_inspections_inspected_by_fkey"
+            columns: ["inspected_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "building_inspections_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "building_inspections_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "inspection_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       building_notes: {
         Row: {
           building_id: string
@@ -348,6 +410,60 @@ export type Database = {
           },
         ]
       }
+      building_turnover: {
+        Row: {
+          annual_trading_density: number | null
+          building_id: string
+          cm_comment: string | null
+          created_at: string
+          current_month_total: number | null
+          id: string
+          previous_year_month_total: number | null
+          report_id: string
+          spend_per_head: number | null
+          updated_at: string
+        }
+        Insert: {
+          annual_trading_density?: number | null
+          building_id: string
+          cm_comment?: string | null
+          created_at?: string
+          current_month_total?: number | null
+          id?: string
+          previous_year_month_total?: number | null
+          report_id: string
+          spend_per_head?: number | null
+          updated_at?: string
+        }
+        Update: {
+          annual_trading_density?: number | null
+          building_id?: string
+          cm_comment?: string | null
+          created_at?: string
+          current_month_total?: number | null
+          id?: string
+          previous_year_month_total?: number | null
+          report_id?: string
+          spend_per_head?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "building_turnover_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "building_turnover_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: true
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       buildings: {
         Row: {
           address: string | null
@@ -359,6 +475,7 @@ export type Database = {
           electrical_authority: Json | null
           emergency_contacts: Json | null
           id: string
+          il_site_id: string | null
           latitude: number | null
           logo_position: string | null
           logo_url: string | null
@@ -381,6 +498,7 @@ export type Database = {
           electrical_authority?: Json | null
           emergency_contacts?: Json | null
           id?: string
+          il_site_id?: string | null
           latitude?: number | null
           logo_position?: string | null
           logo_url?: string | null
@@ -403,6 +521,7 @@ export type Database = {
           electrical_authority?: Json | null
           emergency_contacts?: Json | null
           id?: string
+          il_site_id?: string | null
           latitude?: number | null
           logo_position?: string | null
           logo_url?: string | null
@@ -421,6 +540,117 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      capex_items: {
+        Row: {
+          building_id: string
+          created_at: string
+          estimate: number | null
+          id: string
+          item: string | null
+          motivation: string | null
+          priority: string | null
+          report_id: string | null
+          status: string | null
+          updated_at: string
+          year: number | null
+        }
+        Insert: {
+          building_id: string
+          created_at?: string
+          estimate?: number | null
+          id?: string
+          item?: string | null
+          motivation?: string | null
+          priority?: string | null
+          report_id?: string | null
+          status?: string | null
+          updated_at?: string
+          year?: number | null
+        }
+        Update: {
+          building_id?: string
+          created_at?: string
+          estimate?: number | null
+          id?: string
+          item?: string | null
+          motivation?: string | null
+          priority?: string | null
+          report_id?: string | null
+          status?: string | null
+          updated_at?: string
+          year?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capex_items_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "capex_items_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      category_turnover: {
+        Row: {
+          building_id: string
+          category: string
+          comment: string | null
+          created_at: string
+          id: string
+          monthly_turnover: number | null
+          rank: number | null
+          report_id: string
+          trading_density: number | null
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          category: string
+          comment?: string | null
+          created_at?: string
+          id?: string
+          monthly_turnover?: number | null
+          rank?: number | null
+          report_id: string
+          trading_density?: number | null
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          category?: string
+          comment?: string | null
+          created_at?: string
+          id?: string
+          monthly_turnover?: number | null
+          rank?: number | null
+          report_id?: string
+          trading_density?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "category_turnover_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "category_turnover_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
             referencedColumns: ["id"]
           },
         ]
@@ -468,6 +698,242 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      compliance_assessments: {
+        Row: {
+          assessed_at: string
+          assessed_by: string | null
+          building_id: string
+          created_at: string
+          id: string
+          report_id: string
+          template_id: string
+          updated_at: string
+        }
+        Insert: {
+          assessed_at?: string
+          assessed_by?: string | null
+          building_id: string
+          created_at?: string
+          id?: string
+          report_id: string
+          template_id: string
+          updated_at?: string
+        }
+        Update: {
+          assessed_at?: string
+          assessed_by?: string | null
+          building_id?: string
+          created_at?: string
+          id?: string
+          report_id?: string
+          template_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "compliance_assessments_assessed_by_fkey"
+            columns: ["assessed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "compliance_assessments_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "compliance_assessments_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: true
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "compliance_assessments_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "compliance_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      compliance_responses: {
+        Row: {
+          assessment_id: string
+          comment: string | null
+          created_at: string
+          id: string
+          issue_id: string | null
+          response: string | null
+          score: number | null
+          template_item_id: string
+          updated_at: string
+          value_text: string | null
+        }
+        Insert: {
+          assessment_id: string
+          comment?: string | null
+          created_at?: string
+          id?: string
+          issue_id?: string | null
+          response?: string | null
+          score?: number | null
+          template_item_id: string
+          updated_at?: string
+          value_text?: string | null
+        }
+        Update: {
+          assessment_id?: string
+          comment?: string | null
+          created_at?: string
+          id?: string
+          issue_id?: string | null
+          response?: string | null
+          score?: number | null
+          template_item_id?: string
+          updated_at?: string
+          value_text?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "compliance_responses_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "compliance_assessments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "compliance_responses_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "compliance_critical_scores"
+            referencedColumns: ["assessment_id"]
+          },
+          {
+            foreignKeyName: "compliance_responses_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "compliance_scores"
+            referencedColumns: ["assessment_id"]
+          },
+          {
+            foreignKeyName: "compliance_responses_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "compliance_section_scores"
+            referencedColumns: ["assessment_id"]
+          },
+          {
+            foreignKeyName: "compliance_responses_issue_id_fkey"
+            columns: ["issue_id"]
+            isOneToOne: false
+            referencedRelation: "issues"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "compliance_responses_template_item_id_fkey"
+            columns: ["template_item_id"]
+            isOneToOne: false
+            referencedRelation: "compliance_template_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      compliance_template_items: {
+        Row: {
+          created_at: string
+          group_code: string
+          group_weight: number
+          id: string
+          is_critical: boolean
+          is_scored: boolean
+          item_no: string | null
+          prompt: string
+          response_type: string
+          section_no: string
+          section_title: string | null
+          sort_order: number
+          template_id: string
+          updated_at: string
+          weight: number
+        }
+        Insert: {
+          created_at?: string
+          group_code?: string
+          group_weight?: number
+          id?: string
+          is_critical?: boolean
+          is_scored?: boolean
+          item_no?: string | null
+          prompt: string
+          response_type?: string
+          section_no: string
+          section_title?: string | null
+          sort_order?: number
+          template_id: string
+          updated_at?: string
+          weight?: number
+        }
+        Update: {
+          created_at?: string
+          group_code?: string
+          group_weight?: number
+          id?: string
+          is_critical?: boolean
+          is_scored?: boolean
+          item_no?: string | null
+          prompt?: string
+          response_type?: string
+          section_no?: string
+          section_title?: string | null
+          sort_order?: number
+          template_id?: string
+          updated_at?: string
+          weight?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "compliance_template_items_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "compliance_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      compliance_templates: {
+        Row: {
+          active: boolean
+          applies_to_building_types: string[] | null
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          active?: boolean
+          applies_to_building_types?: string[] | null
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          active?: boolean
+          applies_to_building_types?: string[] | null
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: []
       }
       contractor_documents: {
         Row: {
@@ -563,6 +1029,281 @@ export type Database = {
           },
         ]
       }
+      expense_recoveries: {
+        Row: {
+          budget_pct_recovery: number | null
+          building_id: string
+          comment: string | null
+          created_at: string
+          date_fault_repaired: string | null
+          date_fault_reported: string | null
+          fault_found: string | null
+          id: string
+          pct_recovery: number | null
+          records_uploaded: boolean | null
+          report_id: string | null
+          service: string | null
+          updated_at: string
+          ytd_expense: number | null
+          ytd_recovery: number | null
+        }
+        Insert: {
+          budget_pct_recovery?: number | null
+          building_id: string
+          comment?: string | null
+          created_at?: string
+          date_fault_repaired?: string | null
+          date_fault_reported?: string | null
+          fault_found?: string | null
+          id?: string
+          pct_recovery?: number | null
+          records_uploaded?: boolean | null
+          report_id?: string | null
+          service?: string | null
+          updated_at?: string
+          ytd_expense?: number | null
+          ytd_recovery?: number | null
+        }
+        Update: {
+          budget_pct_recovery?: number | null
+          building_id?: string
+          comment?: string | null
+          created_at?: string
+          date_fault_repaired?: string | null
+          date_fault_reported?: string | null
+          fault_found?: string | null
+          id?: string
+          pct_recovery?: number | null
+          records_uploaded?: boolean | null
+          report_id?: string | null
+          service?: string | null
+          updated_at?: string
+          ytd_expense?: number | null
+          ytd_recovery?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "expense_recoveries_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "expense_recoveries_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      footfall_counts: {
+        Row: {
+          building_id: string
+          created_at: string
+          entrance: string | null
+          id: string
+          month_count: number | null
+          prev_ytd: number | null
+          recon_variance: number | null
+          report_id: string | null
+          source: string | null
+          system_count: number | null
+          ticksheet_count: number | null
+          updated_at: string
+          variance_pct: number | null
+          ytd_count: number | null
+        }
+        Insert: {
+          building_id: string
+          created_at?: string
+          entrance?: string | null
+          id?: string
+          month_count?: number | null
+          prev_ytd?: number | null
+          recon_variance?: number | null
+          report_id?: string | null
+          source?: string | null
+          system_count?: number | null
+          ticksheet_count?: number | null
+          updated_at?: string
+          variance_pct?: number | null
+          ytd_count?: number | null
+        }
+        Update: {
+          building_id?: string
+          created_at?: string
+          entrance?: string | null
+          id?: string
+          month_count?: number | null
+          prev_ytd?: number | null
+          recon_variance?: number | null
+          report_id?: string | null
+          source?: string | null
+          system_count?: number | null
+          ticksheet_count?: number | null
+          updated_at?: string
+          variance_pct?: number | null
+          ytd_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "footfall_counts_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "footfall_counts_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      form_signatures: {
+        Row: {
+          confirmation_text: string
+          id: string
+          ip_address: string | null
+          method: string
+          notes: string | null
+          request_id: string
+          signature_url: string | null
+          signed_at: string
+          signer_id: string | null
+          submission_id: string
+          typed_name: string | null
+          user_agent: string | null
+        }
+        Insert: {
+          confirmation_text: string
+          id?: string
+          ip_address?: string | null
+          method: string
+          notes?: string | null
+          request_id: string
+          signature_url?: string | null
+          signed_at?: string
+          signer_id?: string | null
+          submission_id: string
+          typed_name?: string | null
+          user_agent?: string | null
+        }
+        Update: {
+          confirmation_text?: string
+          id?: string
+          ip_address?: string | null
+          method?: string
+          notes?: string | null
+          request_id?: string
+          signature_url?: string | null
+          signed_at?: string
+          signer_id?: string | null
+          submission_id?: string
+          typed_name?: string | null
+          user_agent?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_signatures_request_id_fkey"
+            columns: ["request_id"]
+            isOneToOne: false
+            referencedRelation: "form_signoff_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_signatures_signer_id_fkey"
+            columns: ["signer_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_signatures_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "form_submissions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      form_signoff_requests: {
+        Row: {
+          active: boolean
+          assigned_by: string | null
+          assigned_to: string
+          created_at: string
+          decline_reason: string | null
+          due_at: string | null
+          id: string
+          instructions: string | null
+          mode: string
+          reminded_at: string | null
+          sequence_order: number
+          status: string
+          submission_id: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          assigned_by?: string | null
+          assigned_to: string
+          created_at?: string
+          decline_reason?: string | null
+          due_at?: string | null
+          id?: string
+          instructions?: string | null
+          mode?: string
+          reminded_at?: string | null
+          sequence_order?: number
+          status?: string
+          submission_id: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          assigned_by?: string | null
+          assigned_to?: string
+          created_at?: string
+          decline_reason?: string | null
+          due_at?: string | null
+          id?: string
+          instructions?: string | null
+          mode?: string
+          reminded_at?: string | null
+          sequence_order?: number
+          status?: string
+          submission_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_signoff_requests_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_signoff_requests_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_signoff_requests_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "form_submissions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       form_submissions: {
         Row: {
           building_id: string | null
@@ -625,124 +1366,289 @@ export type Database = {
           },
         ]
       }
-      form_signoff_requests: {
+      hazard_log: {
         Row: {
-          active: boolean
-          assigned_by: string | null
-          assigned_to: string
+          assessment_id: string
+          building_id: string
+          corrective_action: string | null
           created_at: string
-          decline_reason: string | null
-          due_at: string | null
+          hazard: string | null
           id: string
-          instructions: string | null
-          mode: string
-          reminded_at: string | null
-          sequence_order: number
-          status: string
-          submission_id: string
+          sort_order: number
+          status: string | null
           updated_at: string
         }
         Insert: {
-          active?: boolean
-          assigned_by?: string | null
-          assigned_to: string
+          assessment_id: string
+          building_id: string
+          corrective_action?: string | null
           created_at?: string
-          decline_reason?: string | null
-          due_at?: string | null
+          hazard?: string | null
           id?: string
-          instructions?: string | null
-          mode?: string
-          reminded_at?: string | null
-          sequence_order?: number
-          status?: string
-          submission_id: string
+          sort_order?: number
+          status?: string | null
           updated_at?: string
         }
         Update: {
-          active?: boolean
-          assigned_by?: string | null
-          assigned_to?: string
+          assessment_id?: string
+          building_id?: string
+          corrective_action?: string | null
           created_at?: string
-          decline_reason?: string | null
-          due_at?: string | null
+          hazard?: string | null
           id?: string
-          instructions?: string | null
-          mode?: string
-          reminded_at?: string | null
-          sequence_order?: number
-          status?: string
-          submission_id?: string
+          sort_order?: number
+          status?: string | null
           updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "form_signoff_requests_submission_id_fkey"
-            columns: ["submission_id"]
+            foreignKeyName: "hazard_log_assessment_id_fkey"
+            columns: ["assessment_id"]
             isOneToOne: false
-            referencedRelation: "form_submissions"
+            referencedRelation: "compliance_assessments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "hazard_log_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "compliance_critical_scores"
+            referencedColumns: ["assessment_id"]
+          },
+          {
+            foreignKeyName: "hazard_log_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "compliance_scores"
+            referencedColumns: ["assessment_id"]
+          },
+          {
+            foreignKeyName: "hazard_log_assessment_id_fkey"
+            columns: ["assessment_id"]
+            isOneToOne: false
+            referencedRelation: "compliance_section_scores"
+            referencedColumns: ["assessment_id"]
+          },
+          {
+            foreignKeyName: "hazard_log_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
             referencedColumns: ["id"]
           },
         ]
       }
-      form_signatures: {
+      inspection_responses: {
         Row: {
-          confirmation_text: string
+          acceptable: string | null
+          action_required: string | null
+          applicable: boolean
+          capex_estimate: number | null
+          comment: string | null
+          condition_rating: string | null
+          created_at: string
+          detail: Json
           id: string
-          ip_address: string | null
-          method: string
-          notes: string | null
-          request_id: string
-          signed_at: string
-          signature_url: string | null
-          signer_id: string
-          submission_id: string
-          typed_name: string | null
-          user_agent: string | null
+          inspection_id: string
+          next_service_due: string | null
+          photo_urls: Json
+          recommendation: string | null
+          risk_level: string | null
+          template_item_id: string
+          updated_at: string
         }
         Insert: {
-          confirmation_text: string
+          acceptable?: string | null
+          action_required?: string | null
+          applicable?: boolean
+          capex_estimate?: number | null
+          comment?: string | null
+          condition_rating?: string | null
+          created_at?: string
+          detail?: Json
           id?: string
-          ip_address?: string | null
-          method: string
-          notes?: string | null
-          request_id: string
-          signed_at?: string
-          signature_url?: string | null
-          signer_id: string
-          submission_id: string
-          typed_name?: string | null
-          user_agent?: string | null
+          inspection_id: string
+          next_service_due?: string | null
+          photo_urls?: Json
+          recommendation?: string | null
+          risk_level?: string | null
+          template_item_id: string
+          updated_at?: string
         }
         Update: {
-          confirmation_text?: string
+          acceptable?: string | null
+          action_required?: string | null
+          applicable?: boolean
+          capex_estimate?: number | null
+          comment?: string | null
+          condition_rating?: string | null
+          created_at?: string
+          detail?: Json
           id?: string
-          ip_address?: string | null
-          method?: string
-          notes?: string | null
-          request_id?: string
-          signed_at?: string
-          signature_url?: string | null
-          signer_id?: string
-          submission_id?: string
-          typed_name?: string | null
-          user_agent?: string | null
+          inspection_id?: string
+          next_service_due?: string | null
+          photo_urls?: Json
+          recommendation?: string | null
+          risk_level?: string | null
+          template_item_id?: string
+          updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "form_signatures_request_id_fkey"
-            columns: ["request_id"]
+            foreignKeyName: "inspection_responses_inspection_id_fkey"
+            columns: ["inspection_id"]
             isOneToOne: false
-            referencedRelation: "form_signoff_requests"
+            referencedRelation: "building_inspections"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "form_signatures_submission_id_fkey"
-            columns: ["submission_id"]
+            foreignKeyName: "inspection_responses_template_item_id_fkey"
+            columns: ["template_item_id"]
             isOneToOne: false
-            referencedRelation: "form_submissions"
+            referencedRelation: "inspection_template_items"
             referencedColumns: ["id"]
           },
         ]
+      }
+      inspection_subitems: {
+        Row: {
+          building_id: string
+          created_at: string
+          detail: Json
+          id: string
+          inspection_response_id: string
+          item_type: string | null
+          label: string | null
+          quantity: number | null
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          created_at?: string
+          detail?: Json
+          id?: string
+          inspection_response_id: string
+          item_type?: string | null
+          label?: string | null
+          quantity?: number | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          created_at?: string
+          detail?: Json
+          id?: string
+          inspection_response_id?: string
+          item_type?: string | null
+          label?: string | null
+          quantity?: number | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inspection_subitems_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inspection_subitems_inspection_response_id_fkey"
+            columns: ["inspection_response_id"]
+            isOneToOne: false
+            referencedRelation: "inspection_responses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inspection_template_items: {
+        Row: {
+          allow_na: boolean
+          allows_photo: boolean
+          created_at: string
+          field_keys: Json
+          field_set: string
+          id: string
+          item_label: string | null
+          rating_type: string
+          section_no: string | null
+          section_title: string | null
+          sort_order: number
+          template_id: string
+          updated_at: string
+        }
+        Insert: {
+          allow_na?: boolean
+          allows_photo?: boolean
+          created_at?: string
+          field_keys?: Json
+          field_set?: string
+          id?: string
+          item_label?: string | null
+          rating_type?: string
+          section_no?: string | null
+          section_title?: string | null
+          sort_order?: number
+          template_id: string
+          updated_at?: string
+        }
+        Update: {
+          allow_na?: boolean
+          allows_photo?: boolean
+          created_at?: string
+          field_keys?: Json
+          field_set?: string
+          id?: string
+          item_label?: string | null
+          rating_type?: string
+          section_no?: string | null
+          section_title?: string | null
+          sort_order?: number
+          template_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inspection_template_items_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "inspection_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      inspection_templates: {
+        Row: {
+          active: boolean
+          cadence: string | null
+          created_at: string
+          id: string
+          name: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          active?: boolean
+          cadence?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          active?: boolean
+          cadence?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: []
       }
       issue_activity: {
         Row: {
@@ -752,6 +1658,7 @@ export type Database = {
           created_at: string
           id: string
           issue_id: string
+          mentions: string[]
           new_value: string | null
           old_value: string | null
           photo_urls: Json | null
@@ -764,6 +1671,7 @@ export type Database = {
           created_at?: string
           id?: string
           issue_id: string
+          mentions?: string[]
           new_value?: string | null
           old_value?: string | null
           photo_urls?: Json | null
@@ -776,6 +1684,7 @@ export type Database = {
           created_at?: string
           id?: string
           issue_id?: string
+          mentions?: string[]
           new_value?: string | null
           old_value?: string | null
           photo_urls?: Json | null
@@ -881,6 +1790,238 @@ export type Database = {
           },
         ]
       }
+      leasing_waitlist: {
+        Row: {
+          building_id: string
+          category: string | null
+          comment: string | null
+          contact: string | null
+          created_at: string
+          id: string
+          optimal_size: string | null
+          report_id: string | null
+          trading_as: string | null
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          category?: string | null
+          comment?: string | null
+          contact?: string | null
+          created_at?: string
+          id?: string
+          optimal_size?: string | null
+          report_id?: string | null
+          trading_as?: string | null
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          category?: string | null
+          comment?: string | null
+          contact?: string | null
+          created_at?: string
+          id?: string
+          optimal_size?: string | null
+          report_id?: string | null
+          trading_as?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leasing_waitlist_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leasing_waitlist_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      loadshedding_log: {
+        Row: {
+          building_id: string
+          created_at: string
+          day: string | null
+          diesel_date: string | null
+          diesel_litres: number | null
+          hours: number | null
+          id: string
+          report_id: string | null
+          stage: string | null
+          updated_at: string
+          week_no: number | null
+        }
+        Insert: {
+          building_id: string
+          created_at?: string
+          day?: string | null
+          diesel_date?: string | null
+          diesel_litres?: number | null
+          hours?: number | null
+          id?: string
+          report_id?: string | null
+          stage?: string | null
+          updated_at?: string
+          week_no?: number | null
+        }
+        Update: {
+          building_id?: string
+          created_at?: string
+          day?: string | null
+          diesel_date?: string | null
+          diesel_litres?: number | null
+          hours?: number | null
+          id?: string
+          report_id?: string | null
+          stage?: string | null
+          updated_at?: string
+          week_no?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "loadshedding_log_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "loadshedding_log_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      local_resources_contacts: {
+        Row: {
+          building_id: string
+          contact_number: string | null
+          contact_person: string | null
+          created_at: string
+          frequency: string | null
+          id: string
+          last_meeting_date: string | null
+          name: string | null
+          report_id: string
+          resource_type: string | null
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          contact_number?: string | null
+          contact_person?: string | null
+          created_at?: string
+          frequency?: string | null
+          id?: string
+          last_meeting_date?: string | null
+          name?: string | null
+          report_id: string
+          resource_type?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          contact_number?: string | null
+          contact_person?: string | null
+          created_at?: string
+          frequency?: string | null
+          id?: string
+          last_meeting_date?: string | null
+          name?: string | null
+          report_id?: string
+          resource_type?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "local_resources_contacts_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "local_resources_contacts_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      masterfile_items: {
+        Row: {
+          building_id: string
+          comment: string | null
+          created_at: string
+          document_id: string | null
+          document_label: string | null
+          id: string
+          on_file: string | null
+          report_id: string | null
+          responsible: string | null
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          comment?: string | null
+          created_at?: string
+          document_id?: string | null
+          document_label?: string | null
+          id?: string
+          on_file?: string | null
+          report_id?: string | null
+          responsible?: string | null
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          comment?: string | null
+          created_at?: string
+          document_id?: string | null
+          document_label?: string | null
+          id?: string
+          on_file?: string | null
+          report_id?: string | null
+          responsible?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "masterfile_items_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "masterfile_items_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "building_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "masterfile_items_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       media_attachments: {
         Row: {
           caption: string | null
@@ -941,6 +2082,76 @@ export type Database = {
         }
         Relationships: []
       }
+      notifications: {
+        Row: {
+          actor_id: string | null
+          actor_name: string | null
+          body: string | null
+          building_id: string | null
+          created_at: string
+          entity_id: string | null
+          entity_type: string
+          id: string
+          kind: string
+          read_at: string | null
+          recipient_id: string
+          title: string
+          url: string
+        }
+        Insert: {
+          actor_id?: string | null
+          actor_name?: string | null
+          body?: string | null
+          building_id?: string | null
+          created_at?: string
+          entity_id?: string | null
+          entity_type: string
+          id?: string
+          kind: string
+          read_at?: string | null
+          recipient_id: string
+          title: string
+          url: string
+        }
+        Update: {
+          actor_id?: string | null
+          actor_name?: string | null
+          body?: string | null
+          building_id?: string | null
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string
+          id?: string
+          kind?: string
+          read_at?: string | null
+          recipient_id?: string
+          title?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notifications_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organizations: {
         Row: {
           created_at: string | null
@@ -971,6 +2182,60 @@ export type Database = {
         }
         Relationships: []
       }
+      ppm_services: {
+        Row: {
+          building_id: string
+          comment: string | null
+          created_at: string
+          frequency: string | null
+          id: string
+          months: Json
+          report_id: string | null
+          service_name: string
+          sort_order: number | null
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          comment?: string | null
+          created_at?: string
+          frequency?: string | null
+          id?: string
+          months?: Json
+          report_id?: string | null
+          service_name: string
+          sort_order?: number | null
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          comment?: string | null
+          created_at?: string
+          frequency?: string | null
+          id?: string
+          months?: Json
+          report_id?: string | null
+          service_name?: string
+          sort_order?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ppm_services_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ppm_services_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -983,8 +2248,10 @@ export type Database = {
           id: string
           issue_updates: boolean | null
           must_set_password: boolean
+          onboarding_completed: boolean
           overdue_alerts: boolean | null
           phone: string | null
+          show_hints: boolean
           task_reminders: boolean | null
           updated_at: string | null
         }
@@ -999,8 +2266,10 @@ export type Database = {
           id: string
           issue_updates?: boolean | null
           must_set_password?: boolean
+          onboarding_completed?: boolean
           overdue_alerts?: boolean | null
           phone?: string | null
+          show_hints?: boolean
           task_reminders?: boolean | null
           updated_at?: string | null
         }
@@ -1015,12 +2284,427 @@ export type Database = {
           id?: string
           issue_updates?: boolean | null
           must_set_password?: boolean
+          onboarding_completed?: boolean
           overdue_alerts?: boolean | null
           phone?: string | null
+          show_hints?: boolean
           task_reminders?: boolean | null
           updated_at?: string | null
         }
         Relationships: []
+      }
+      report_artifacts: {
+        Row: {
+          building_id: string | null
+          created_at: string
+          file_name: string
+          file_path: string
+          generated_by: string
+          id: string
+          kind: string
+          org_id: string
+          report_status: string | null
+          size_bytes: number
+          source_id: string | null
+          status: string
+          superseded_by: string | null
+          version: number
+        }
+        Insert: {
+          building_id?: string | null
+          created_at?: string
+          file_name: string
+          file_path: string
+          generated_by?: string
+          id?: string
+          kind: string
+          org_id: string
+          report_status?: string | null
+          size_bytes: number
+          source_id?: string | null
+          status?: string
+          superseded_by?: string | null
+          version?: number
+        }
+        Update: {
+          building_id?: string | null
+          created_at?: string
+          file_name?: string
+          file_path?: string
+          generated_by?: string
+          id?: string
+          kind?: string
+          org_id?: string
+          report_status?: string | null
+          size_bytes?: number
+          source_id?: string | null
+          status?: string
+          superseded_by?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_artifacts_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_artifacts_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_artifacts_superseded_by_fkey"
+            columns: ["superseded_by"]
+            isOneToOne: false
+            referencedRelation: "report_artifacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      report_checklist_items: {
+        Row: {
+          building_id: string
+          comment: string | null
+          created_at: string
+          id: string
+          item_key: string
+          report_id: string
+          response: string | null
+          section_key: string
+          sort_order: number
+          updated_at: string
+          value_date: string | null
+          value_text: string | null
+        }
+        Insert: {
+          building_id: string
+          comment?: string | null
+          created_at?: string
+          id?: string
+          item_key: string
+          report_id: string
+          response?: string | null
+          section_key: string
+          sort_order?: number
+          updated_at?: string
+          value_date?: string | null
+          value_text?: string | null
+        }
+        Update: {
+          building_id?: string
+          comment?: string | null
+          created_at?: string
+          id?: string
+          item_key?: string
+          report_id?: string
+          response?: string | null
+          section_key?: string
+          sort_order?: number
+          updated_at?: string
+          value_date?: string | null
+          value_text?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_checklist_items_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_checklist_items_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      report_narratives: {
+        Row: {
+          body: string | null
+          building_id: string
+          created_at: string
+          heading: string | null
+          id: string
+          issue_id: string | null
+          report_id: string
+          section_key: string
+          sort_order: number
+          status_flag: string | null
+          updated_at: string
+        }
+        Insert: {
+          body?: string | null
+          building_id: string
+          created_at?: string
+          heading?: string | null
+          id?: string
+          issue_id?: string | null
+          report_id: string
+          section_key: string
+          sort_order?: number
+          status_flag?: string | null
+          updated_at?: string
+        }
+        Update: {
+          body?: string | null
+          building_id?: string
+          created_at?: string
+          heading?: string | null
+          id?: string
+          issue_id?: string | null
+          report_id?: string
+          section_key?: string
+          sort_order?: number
+          status_flag?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_narratives_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_narratives_issue_id_fkey"
+            columns: ["issue_id"]
+            isOneToOne: false
+            referencedRelation: "issues"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_narratives_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reports: {
+        Row: {
+          asset_manager: string | null
+          author_id: string | null
+          author_name: string | null
+          building_id: string
+          centre_manager: string | null
+          cloned_from_report_id: string | null
+          created_at: string
+          id: string
+          inspection_date: string | null
+          meta: Json
+          ops_manager: string | null
+          organization_id: string | null
+          prepared_for: string | null
+          report_period: string
+          report_type: string
+          review_notes: string | null
+          reviewed_by: string | null
+          status: string
+          title: string | null
+          updated_at: string
+        }
+        Insert: {
+          asset_manager?: string | null
+          author_id?: string | null
+          author_name?: string | null
+          building_id: string
+          centre_manager?: string | null
+          cloned_from_report_id?: string | null
+          created_at?: string
+          id?: string
+          inspection_date?: string | null
+          meta?: Json
+          ops_manager?: string | null
+          organization_id?: string | null
+          prepared_for?: string | null
+          report_period: string
+          report_type: string
+          review_notes?: string | null
+          reviewed_by?: string | null
+          status?: string
+          title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          asset_manager?: string | null
+          author_id?: string | null
+          author_name?: string | null
+          building_id?: string
+          centre_manager?: string | null
+          cloned_from_report_id?: string | null
+          created_at?: string
+          id?: string
+          inspection_date?: string | null
+          meta?: Json
+          ops_manager?: string | null
+          organization_id?: string | null
+          prepared_for?: string | null
+          report_period?: string
+          report_type?: string
+          review_notes?: string | null
+          reviewed_by?: string | null
+          status?: string
+          title?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reports_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reports_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reports_cloned_from_report_id_fkey"
+            columns: ["cloned_from_report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reports_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      security_incidents: {
+        Row: {
+          building_id: string
+          count: number | null
+          created_at: string
+          id: string
+          incident_type: string | null
+          narrative: string | null
+          period: string | null
+          report_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          count?: number | null
+          created_at?: string
+          id?: string
+          incident_type?: string | null
+          narrative?: string | null
+          period?: string | null
+          report_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          count?: number | null
+          created_at?: string
+          id?: string
+          incident_type?: string | null
+          narrative?: string | null
+          period?: string | null
+          report_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "security_incidents_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "security_incidents_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_interruptions: {
+        Row: {
+          building_id: string
+          comment: string | null
+          council_ref: string | null
+          created_at: string
+          date: string | null
+          end_time: string | null
+          id: string
+          interruption_type: string | null
+          report_id: string | null
+          start_time: string | null
+          total_hours: number | null
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          comment?: string | null
+          council_ref?: string | null
+          created_at?: string
+          date?: string | null
+          end_time?: string | null
+          id?: string
+          interruption_type?: string | null
+          report_id?: string | null
+          start_time?: string | null
+          total_hours?: number | null
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          comment?: string | null
+          council_ref?: string | null
+          created_at?: string
+          date?: string | null
+          end_time?: string | null
+          id?: string
+          interruption_type?: string | null
+          report_id?: string | null
+          start_time?: string | null
+          total_hours?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_interruptions_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_interruptions_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       task_completions: {
         Row: {
@@ -1062,6 +2746,7 @@ export type Database = {
       }
       task_instances: {
         Row: {
+          assigned_to: string | null
           building_id: string
           category: string | null
           completed_at: string | null
@@ -1076,12 +2761,14 @@ export type Database = {
           requires_signature: boolean | null
           responsible_role: string | null
           signature_url: string | null
+          source_document_id: string | null
           status: string
           task_description: string | null
           task_name: string
           template_item_id: string | null
         }
         Insert: {
+          assigned_to?: string | null
           building_id: string
           category?: string | null
           completed_at?: string | null
@@ -1096,12 +2783,14 @@ export type Database = {
           requires_signature?: boolean | null
           responsible_role?: string | null
           signature_url?: string | null
+          source_document_id?: string | null
           status?: string
           task_description?: string | null
           task_name: string
           template_item_id?: string | null
         }
         Update: {
+          assigned_to?: string | null
           building_id?: string
           category?: string | null
           completed_at?: string | null
@@ -1116,6 +2805,7 @@ export type Database = {
           requires_signature?: boolean | null
           responsible_role?: string | null
           signature_url?: string | null
+          source_document_id?: string | null
           status?: string
           task_description?: string | null
           task_name?: string
@@ -1123,10 +2813,24 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "task_instances_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "task_instances_building_id_fkey"
             columns: ["building_id"]
             isOneToOne: false
             referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_instances_source_document_id_fkey"
+            columns: ["source_document_id"]
+            isOneToOne: false
+            referencedRelation: "building_documents"
             referencedColumns: ["id"]
           },
           {
@@ -1178,6 +2882,206 @@ export type Database = {
             columns: ["template_id"]
             isOneToOne: false
             referencedRelation: "checklist_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_arrears: {
+        Row: {
+          building_id: string
+          closing_balance: number | null
+          contact: string | null
+          created_at: string
+          deposit_held: number | null
+          id: string
+          report_id: string | null
+          tenant_id: string | null
+          trading_as: string | null
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          closing_balance?: number | null
+          contact?: string | null
+          created_at?: string
+          deposit_held?: number | null
+          id?: string
+          report_id?: string | null
+          tenant_id?: string | null
+          trading_as?: string | null
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          closing_balance?: number | null
+          contact?: string | null
+          created_at?: string
+          deposit_held?: number | null
+          id?: string
+          report_id?: string | null
+          tenant_id?: string | null
+          trading_as?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_arrears_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_arrears_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_arrears_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "building_tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_compliance: {
+        Row: {
+          building_id: string
+          comment: string | null
+          created_at: string
+          electrical_coc_cert_no: string | null
+          electrical_coc_date: string | null
+          electrical_coc_responsibility: string | null
+          evac_plan_displayed: string | null
+          fire_blanket: string | null
+          fire_sprinkler_3yr: string | null
+          fire_sprinkler_annual: string | null
+          fire_sprinkler_weekly: string | null
+          flammable_liquid_cert: string | null
+          food_extraction_cert: string | null
+          gas_coc: string | null
+          generator_dedicated: string | null
+          generator_records_current: string | null
+          generator_responsibility: string | null
+          grease_trap_clean: string | null
+          handheld_fire_current: string | null
+          hvac_handover_month: string | null
+          hvac_records_current: string | null
+          hvac_responsibility: string | null
+          id: string
+          lease_clause_no: string | null
+          occupancy_cert_date: string | null
+          occupancy_cert_no: string | null
+          ohs_risks: string | null
+          period: string | null
+          report_id: string | null
+          smoke_detection_annual_service: string | null
+          smoke_detection_dedicated: string | null
+          smoke_extraction_annual_service: string | null
+          smoke_extraction_dedicated: string | null
+          sprinkler_dedicated: string | null
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          comment?: string | null
+          created_at?: string
+          electrical_coc_cert_no?: string | null
+          electrical_coc_date?: string | null
+          electrical_coc_responsibility?: string | null
+          evac_plan_displayed?: string | null
+          fire_blanket?: string | null
+          fire_sprinkler_3yr?: string | null
+          fire_sprinkler_annual?: string | null
+          fire_sprinkler_weekly?: string | null
+          flammable_liquid_cert?: string | null
+          food_extraction_cert?: string | null
+          gas_coc?: string | null
+          generator_dedicated?: string | null
+          generator_records_current?: string | null
+          generator_responsibility?: string | null
+          grease_trap_clean?: string | null
+          handheld_fire_current?: string | null
+          hvac_handover_month?: string | null
+          hvac_records_current?: string | null
+          hvac_responsibility?: string | null
+          id?: string
+          lease_clause_no?: string | null
+          occupancy_cert_date?: string | null
+          occupancy_cert_no?: string | null
+          ohs_risks?: string | null
+          period?: string | null
+          report_id?: string | null
+          smoke_detection_annual_service?: string | null
+          smoke_detection_dedicated?: string | null
+          smoke_extraction_annual_service?: string | null
+          smoke_extraction_dedicated?: string | null
+          sprinkler_dedicated?: string | null
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          comment?: string | null
+          created_at?: string
+          electrical_coc_cert_no?: string | null
+          electrical_coc_date?: string | null
+          electrical_coc_responsibility?: string | null
+          evac_plan_displayed?: string | null
+          fire_blanket?: string | null
+          fire_sprinkler_3yr?: string | null
+          fire_sprinkler_annual?: string | null
+          fire_sprinkler_weekly?: string | null
+          flammable_liquid_cert?: string | null
+          food_extraction_cert?: string | null
+          gas_coc?: string | null
+          generator_dedicated?: string | null
+          generator_records_current?: string | null
+          generator_responsibility?: string | null
+          grease_trap_clean?: string | null
+          handheld_fire_current?: string | null
+          hvac_handover_month?: string | null
+          hvac_records_current?: string | null
+          hvac_responsibility?: string | null
+          id?: string
+          lease_clause_no?: string | null
+          occupancy_cert_date?: string | null
+          occupancy_cert_no?: string | null
+          ohs_risks?: string | null
+          period?: string | null
+          report_id?: string | null
+          smoke_detection_annual_service?: string | null
+          smoke_detection_dedicated?: string | null
+          smoke_extraction_annual_service?: string | null
+          smoke_extraction_dedicated?: string | null
+          sprinkler_dedicated?: string | null
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_compliance_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_compliance_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_compliance_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "building_tenants"
             referencedColumns: ["id"]
           },
         ]
@@ -1235,6 +3139,362 @@ export type Database = {
           },
         ]
       }
+      tenant_movements: {
+        Row: {
+          building_id: string
+          comment: string | null
+          created_at: string
+          first_trade_date: string | null
+          id: string
+          movement_type: string | null
+          prelim_inspection_date: string | null
+          report_id: string | null
+          take_on_back_date: string | null
+          tenant_id: string | null
+          trading_as: string | null
+          updated_at: string
+          vacate_or_bo_date: string | null
+        }
+        Insert: {
+          building_id: string
+          comment?: string | null
+          created_at?: string
+          first_trade_date?: string | null
+          id?: string
+          movement_type?: string | null
+          prelim_inspection_date?: string | null
+          report_id?: string | null
+          take_on_back_date?: string | null
+          tenant_id?: string | null
+          trading_as?: string | null
+          updated_at?: string
+          vacate_or_bo_date?: string | null
+        }
+        Update: {
+          building_id?: string
+          comment?: string | null
+          created_at?: string
+          first_trade_date?: string | null
+          id?: string
+          movement_type?: string | null
+          prelim_inspection_date?: string | null
+          report_id?: string | null
+          take_on_back_date?: string | null
+          tenant_id?: string | null
+          trading_as?: string | null
+          updated_at?: string
+          vacate_or_bo_date?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_movements_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_movements_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_movements_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "building_tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_shop_spec: {
+        Row: {
+          actual_amps: string | null
+          building_id: string
+          ceiling_height: string | null
+          ceiling_structure: string | null
+          created_at: string
+          db_phase: string | null
+          effective_from: string | null
+          floor_finish: string | null
+          generator_connection: string | null
+          hvac_btu: string | null
+          hvac_gas: string | null
+          hvac_units: string | null
+          id: string
+          is_current: boolean
+          lease_amps: string | null
+          lighting_type: string | null
+          notes: string | null
+          plumbing_sink: string | null
+          plumbing_toilets: number | null
+          roller_shutter_type: string | null
+          shopfront_type: string | null
+          tenant_id: string
+          updated_at: string
+          wall_finish: string | null
+          walls: string | null
+        }
+        Insert: {
+          actual_amps?: string | null
+          building_id: string
+          ceiling_height?: string | null
+          ceiling_structure?: string | null
+          created_at?: string
+          db_phase?: string | null
+          effective_from?: string | null
+          floor_finish?: string | null
+          generator_connection?: string | null
+          hvac_btu?: string | null
+          hvac_gas?: string | null
+          hvac_units?: string | null
+          id?: string
+          is_current?: boolean
+          lease_amps?: string | null
+          lighting_type?: string | null
+          notes?: string | null
+          plumbing_sink?: string | null
+          plumbing_toilets?: number | null
+          roller_shutter_type?: string | null
+          shopfront_type?: string | null
+          tenant_id: string
+          updated_at?: string
+          wall_finish?: string | null
+          walls?: string | null
+        }
+        Update: {
+          actual_amps?: string | null
+          building_id?: string
+          ceiling_height?: string | null
+          ceiling_structure?: string | null
+          created_at?: string
+          db_phase?: string | null
+          effective_from?: string | null
+          floor_finish?: string | null
+          generator_connection?: string | null
+          hvac_btu?: string | null
+          hvac_gas?: string | null
+          hvac_units?: string | null
+          id?: string
+          is_current?: boolean
+          lease_amps?: string | null
+          lighting_type?: string | null
+          notes?: string | null
+          plumbing_sink?: string | null
+          plumbing_toilets?: number | null
+          roller_shutter_type?: string | null
+          shopfront_type?: string | null
+          tenant_id?: string
+          updated_at?: string
+          wall_finish?: string | null
+          walls?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_shop_spec_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_shop_spec_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "building_tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_turnover: {
+        Row: {
+          annual_growth_pct: number | null
+          annual_trading_density: number | null
+          building_id: string
+          comment: string | null
+          coo_pct: number | null
+          created_at: string
+          gla: number | null
+          id: string
+          monthly_avg_turnover: number | null
+          rank_band: string | null
+          report_id: string | null
+          tenant_id: string | null
+          tenant_name: string | null
+          updated_at: string
+        }
+        Insert: {
+          annual_growth_pct?: number | null
+          annual_trading_density?: number | null
+          building_id: string
+          comment?: string | null
+          coo_pct?: number | null
+          created_at?: string
+          gla?: number | null
+          id?: string
+          monthly_avg_turnover?: number | null
+          rank_band?: string | null
+          report_id?: string | null
+          tenant_id?: string | null
+          tenant_name?: string | null
+          updated_at?: string
+        }
+        Update: {
+          annual_growth_pct?: number | null
+          annual_trading_density?: number | null
+          building_id?: string
+          comment?: string | null
+          coo_pct?: number | null
+          created_at?: string
+          gla?: number | null
+          id?: string
+          monthly_avg_turnover?: number | null
+          rank_band?: string | null
+          report_id?: string | null
+          tenant_id?: string | null
+          tenant_name?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_turnover_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_turnover_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_turnover_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "building_tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      toilet_fund: {
+        Row: {
+          actual_banked: number | null
+          bale_variance: number | null
+          budget: number | null
+          building_id: string
+          created_at: string
+          id: string
+          issued_bales: number | null
+          profit_per_roll: number | null
+          report_id: string | null
+          stock_on_hand_bales: number | null
+          updated_at: string
+          variance: number | null
+        }
+        Insert: {
+          actual_banked?: number | null
+          bale_variance?: number | null
+          budget?: number | null
+          building_id: string
+          created_at?: string
+          id?: string
+          issued_bales?: number | null
+          profit_per_roll?: number | null
+          report_id?: string | null
+          stock_on_hand_bales?: number | null
+          updated_at?: string
+          variance?: number | null
+        }
+        Update: {
+          actual_banked?: number | null
+          bale_variance?: number | null
+          budget?: number | null
+          building_id?: string
+          created_at?: string
+          id?: string
+          issued_bales?: number | null
+          profit_per_roll?: number | null
+          report_id?: string | null
+          stock_on_hand_bales?: number | null
+          updated_at?: string
+          variance?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "toilet_fund_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "toilet_fund_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trading_hour_breaches: {
+        Row: {
+          building_id: string
+          comment: string | null
+          created_at: string
+          date: string | null
+          id: string
+          letter_sent_to: string | null
+          report_id: string | null
+          tenant_name: string | null
+          time: string | null
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          comment?: string | null
+          created_at?: string
+          date?: string | null
+          id?: string
+          letter_sent_to?: string | null
+          report_id?: string | null
+          tenant_name?: string | null
+          time?: string | null
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          comment?: string | null
+          created_at?: string
+          date?: string | null
+          id?: string
+          letter_sent_to?: string | null
+          report_id?: string | null
+          tenant_name?: string | null
+          time?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trading_hour_breaches_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "trading_hour_breaches_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_buildings: {
         Row: {
           building_id: string
@@ -1282,16 +3542,351 @@ export type Database = {
         }
         Relationships: []
       }
+      utility_readings: {
+        Row: {
+          building_id: string
+          category: string | null
+          comment: string | null
+          created_at: string
+          difference: number | null
+          id: string
+          meter_name: string | null
+          night_window: string | null
+          pct_of_bulk: number | null
+          reading: number | null
+          report_id: string | null
+          unit: string | null
+          updated_at: string
+          utility: string | null
+        }
+        Insert: {
+          building_id: string
+          category?: string | null
+          comment?: string | null
+          created_at?: string
+          difference?: number | null
+          id?: string
+          meter_name?: string | null
+          night_window?: string | null
+          pct_of_bulk?: number | null
+          reading?: number | null
+          report_id?: string | null
+          unit?: string | null
+          updated_at?: string
+          utility?: string | null
+        }
+        Update: {
+          building_id?: string
+          category?: string | null
+          comment?: string | null
+          created_at?: string
+          difference?: number | null
+          id?: string
+          meter_name?: string | null
+          night_window?: string | null
+          pct_of_bulk?: number | null
+          reading?: number | null
+          report_id?: string | null
+          unit?: string | null
+          updated_at?: string
+          utility?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "utility_readings_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "utility_readings_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      utility_yields: {
+        Row: {
+          actual_yield: number | null
+          building_id: string
+          comment: string | null
+          created_at: string
+          id: string
+          pct_achieved: number | null
+          predicted_yield: number | null
+          report_id: string | null
+          source: string | null
+          unit: string | null
+          updated_at: string
+        }
+        Insert: {
+          actual_yield?: number | null
+          building_id: string
+          comment?: string | null
+          created_at?: string
+          id?: string
+          pct_achieved?: number | null
+          predicted_yield?: number | null
+          report_id?: string | null
+          source?: string | null
+          unit?: string | null
+          updated_at?: string
+        }
+        Update: {
+          actual_yield?: number | null
+          building_id?: string
+          comment?: string | null
+          created_at?: string
+          id?: string
+          pct_achieved?: number | null
+          predicted_yield?: number | null
+          report_id?: string | null
+          source?: string | null
+          unit?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "utility_yields_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "utility_yields_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vacancies: {
+        Row: {
+          area: number | null
+          budget_relet_rpm: number | null
+          building_id: string
+          comment: string | null
+          created_at: string
+          gross_mandate_rpm: number | null
+          id: string
+          report_id: string | null
+          shop_no: string | null
+          updated_at: string
+        }
+        Insert: {
+          area?: number | null
+          budget_relet_rpm?: number | null
+          building_id: string
+          comment?: string | null
+          created_at?: string
+          gross_mandate_rpm?: number | null
+          id?: string
+          report_id?: string | null
+          shop_no?: string | null
+          updated_at?: string
+        }
+        Update: {
+          area?: number | null
+          budget_relet_rpm?: number | null
+          building_id?: string
+          comment?: string | null
+          created_at?: string
+          gross_mandate_rpm?: number | null
+          id?: string
+          report_id?: string | null
+          shop_no?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vacancies_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vacancies_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
-      [_ in never]: never
+      compliance_critical_scores: {
+        Row: {
+          assessment_id: string | null
+          building_id: string | null
+          critical_pct: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "compliance_assessments_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      compliance_scores: {
+        Row: {
+          assessment_id: string | null
+          building_id: string | null
+          compliance_pct: number | null
+          report_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "compliance_assessments_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "compliance_assessments_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: true
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      compliance_section_scores: {
+        Row: {
+          assessment_id: string | null
+          building_id: string | null
+          section_no: string | null
+          section_pct: number | null
+          section_title: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "compliance_assessments_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ppm_monthly_status: {
+        Row: {
+          building_id: string | null
+          period_month: string | null
+          service_name: string | null
+          status: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_instances_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      v_building_turnover: {
+        Row: {
+          annual_trading_density: number | null
+          building_id: string | null
+          cm_comment: string | null
+          created_at: string | null
+          current_month_total: number | null
+          growth_pct: number | null
+          id: string | null
+          previous_year_month_total: number | null
+          report_id: string | null
+          spend_per_head: number | null
+          updated_at: string | null
+        }
+        Insert: {
+          annual_trading_density?: number | null
+          building_id?: string | null
+          cm_comment?: string | null
+          created_at?: string | null
+          current_month_total?: number | null
+          growth_pct?: never
+          id?: string | null
+          previous_year_month_total?: number | null
+          report_id?: string | null
+          spend_per_head?: number | null
+          updated_at?: string | null
+        }
+        Update: {
+          annual_trading_density?: number | null
+          building_id?: string | null
+          cm_comment?: string | null
+          created_at?: string | null
+          current_month_total?: number | null
+          growth_pct?: never
+          id?: string | null
+          previous_year_month_total?: number | null
+          report_id?: string | null
+          spend_per_head?: number | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "building_turnover_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "building_turnover_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: true
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       app_role: { Args: never; Returns: string }
+      building_insight_linker: {
+        Args: { p_building_id: string }
+        Returns: Json
+      }
+      building_members: {
+        Args: { b: string }
+        Returns: {
+          avatar_url: string
+          full_name: string
+          id: string
+          role: string
+        }[]
+      }
       can_access_building: { Args: { b: string }; Returns: boolean }
       delete_own_account: { Args: never; Returns: undefined }
+      generate_certificate_renewal_tasks: { Args: never; Returns: number }
+      is_active_user: { Args: never; Returns: boolean }
       is_admin: { Args: never; Returns: boolean }
       is_admin_or_manager: { Args: never; Returns: boolean }
+      postgres_fdw_disconnect: { Args: { "": string }; Returns: boolean }
+      postgres_fdw_disconnect_all: { Args: never; Returns: boolean }
+      postgres_fdw_get_connections: {
+        Args: never
+        Returns: Record<string, unknown>[]
+      }
+      postgres_fdw_handler: { Args: never; Returns: unknown }
+      report_electrical_compliance: {
+        Args: { p_building_id: string }
+        Returns: Json
+      }
+      revoke_user_sessions: { Args: { p_user_id: string }; Returns: number }
     }
     Enums: {
       [_ in never]: never
@@ -1310,12 +3905,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1339,11 +3934,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1364,11 +3959,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1389,11 +3984,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -1406,11 +4001,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }

@@ -924,7 +924,7 @@ git commit -m "Make building contact numbers and emails tappable"
 ### Task 9: Owner actions (hand to Arno)
 
 - [ ] Apply `GMI/sql/2026-09-11_01_r1_mine.sql` to staging, run `npm run smoke` (rls-smoke now covers notifications, building_members, assigned_to), then prod, then smoke again.
-- [ ] Regenerate `types.ts`, then drop the `as never` / narrow-cast notes in `useBuildingMembers.ts`, `ChecklistsTab.tsx`, `src/lib/issueActivity.ts`, and the narrow cast in `IssueDetailDialog.tsx`.
+- [x] Regenerate `types.ts`, then drop the `as never` / narrow-cast notes in `useBuildingMembers.ts`, `ChecklistsTab.tsx`, `src/lib/issueActivity.ts`, and the narrow cast in `IssueDetailDialog.tsx`.
 - [ ] Push both repos.
 
 ---

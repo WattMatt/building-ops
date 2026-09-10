@@ -53,14 +53,24 @@ Fixes the live run forced, all committed with this checklist:
 Staging still lacks `RESEND_API_KEY`, `APP_URL` and `EXPIRING_ALERTS_SECRET` (prod has them):
 email sending and the expiring-alerts cron are inert there. The smokes opt personas out of email.
 
-## Production (`qdzgkttiosahdfqresvz`)
+## Production (`qdzgkttiosahdfqresvz`) — DONE 2026-09-10
 
-- [ ] Migrations 1–5 in order (`node supa.mjs apply qdzgkttiosahdfqresvz <file>` or the SQL editor).
-- [ ] `supabase secrets set DAILY_DIGEST_SECRET=<openssl rand -hex 32> --project-ref qdzgkttiosahdfqresvz`,
-      then migration 4 with the prod ref and that secret substituted.
-- [ ] `supabase functions deploy <name> --project-ref qdzgkttiosahdfqresvz` for all 15 functions.
-- [ ] `node scripts/rls-smoke.mjs` against prod (self-cleaning ZZTEST personas); `SMOKE_ALLOW_PROD=1`
-      is required by `notifications-smoke` and should stay a deliberate choice.
-- [ ] `supabase gen types typescript --project-id qdzgkttiosahdfqresvz > src/integrations/supabase/types.ts`,
-      then drop the temporary casts listed in each R1 plan's Status section.
+- [x] Migrations 1–5 applied in order through the Management API (all HTTP 201). Verified:
+      `show_hints`, `report_status`, `assigned_to`, `notifications` (+ realtime publication) present,
+      `building_members` grants = authenticated/postgres/service_role, three helpers gate on `is_active_user`.
+- [x] `DAILY_DIGEST_SECRET` set; cron `daily-digest` scheduled `30 4 * * *` (alongside
+      `certificate-renewal-tasks` and `expiring-alerts-daily`).
+- [x] All 15 functions deployed (`notify`, `daily-digest`, `set-user-role` were new to prod).
+- [x] `node scripts/rls-smoke.mjs` against prod: 417 passed, 0 failed, 2 skipped, teardown clean.
+      `notifications-smoke` deliberately not run on prod (`SMOKE_ALLOW_PROD=1` guard).
+- [x] Types regenerated from prod; the temporary `as never` / `as any` casts in `useBuildingMembers`,
+      `useNotifications`, `useMyWork`, `issueActivity`, `IssueDetailDialog` and `ChecklistsTab` dropped
+      (typecheck stays at the 64 baseline, 391 tests, build green).
 - [ ] `building_type` on the two production buildings (owner decides which type).
+
+## Drift noticed while applying (not changed, worth a decision)
+
+- Prod schedules `expiring-alerts-daily` but not `signoff-reminders-daily`; staging is the reverse.
+  Both crons exist in `../GMI/sql/`; whichever is intended should be applied to the other project.
+- Staging has no `RESEND_API_KEY` / `APP_URL` / `EXPIRING_ALERTS_SECRET`, so email and the
+  expiring-alerts function cannot be exercised there end to end.

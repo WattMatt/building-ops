@@ -139,8 +139,7 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
 
   const assignTasks = async (taskIds: string[], assigned_to: string | null) => {
     if (!taskIds.length) return;
-    // assigned_to is not yet in the generated types; regenerate after the migration ships.
-    const { data, error } = await supabase.from('task_instances').update({ assigned_to } as never).in('id', taskIds).select('id');
+    const { data, error } = await supabase.from('task_instances').update({ assigned_to }).in('id', taskIds).select('id');
     if (error) { toast.error(`Could not assign: ${error.message}`); return; }
     if ((data?.length ?? 0) < taskIds.length) toast.error(`Only ${data?.length ?? 0} of ${taskIds.length} tasks could be assigned.`);
     else toast.success(assigned_to ? `Assigned ${taskIds.length} task${taskIds.length === 1 ? '' : 's'} to ${nameOf(assigned_to) ?? 'user'}` : 'Unassigned');

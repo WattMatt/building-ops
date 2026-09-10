@@ -31,11 +31,8 @@ export function useMyWork() {
     queryKey: ['my-work', 'tasks', uid],
     enabled: !!uid,
     queryFn: async (): Promise<MyTask[]> => {
-      // The one sanctioned boundary cast: assigned_to is not yet in the generated types,
-      // which makes .eq() on it a type error; regenerate after the migration ships. The
-      // `as RawTask[]` on the result re-establishes the row shape immediately after.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { data, error } = await (supabase.from('task_instances') as any)
+      if (!uid) return [];
+      const { data, error } = await supabase.from('task_instances')
         .select('id, task_name, task_description, due_date, building_id, requires_photo, requires_signature, status, buildings(name)')
         .eq('assigned_to', uid).in('status', ['pending', 'overdue']).order('due_date');
       if (error) throw new Error(error.message);

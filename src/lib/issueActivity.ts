@@ -32,8 +32,7 @@ export async function postIssueComment(
       mentions: mentions ?? [],
       user_id: userId,
       author_name: authorName,
-      // mentions is not yet in the generated types; regenerate after the migration ships.
-    } as never)
+    })
     .select('id')
     .single();
 
