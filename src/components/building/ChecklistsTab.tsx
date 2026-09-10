@@ -45,6 +45,7 @@ import { Hint } from '@/components/ui/hint';
 import ReportIssueDialog from '@/components/checklists/ReportIssueDialog';
 import CompleteTaskDialog from '@/components/checklists/CompleteTaskDialog';
 import { TasksList, type TaskInstance, type TaskFrequency, type TaskStatus } from '@/components/building/TasksList';
+import { ALL_FREQUENCIES } from '@/lib/taskSchedule';
 
 interface ChecklistsTabProps {
   buildingId: string;
@@ -337,7 +338,7 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
       {/* Frequency Tabs */}
       <Tabs value={selectedFrequency} onValueChange={v => setSelectedFrequency(v as TaskFrequency)}>
         <TabsList className="grid w-full grid-cols-5">
-          {(['daily', 'weekly', 'monthly', 'quarterly', 'annually'] as TaskFrequency[]).map(freq => {
+          {(ALL_FREQUENCIES as TaskFrequency[]).map(freq => {
             const count = tasks.filter(t => t.frequency === freq).length;
             return (
               <TabsTrigger key={freq} value={freq} className="relative">

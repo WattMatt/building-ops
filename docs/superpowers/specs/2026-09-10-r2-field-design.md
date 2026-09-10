@@ -40,8 +40,9 @@ returns integer language plpgsql security definer set search_path = '' as $$
 -- uses today in ChecklistsTab.generateTasksForFrequency: building_type match or unscoped),
 -- insert the task_instances row for the frequency's current period if it does not exist.
 -- Due-date rule is IDENTICAL to src/components/building/ChecklistsTab.tsx:63 getDueDateForFrequency
--- (daily → today; weekly → next Monday; monthly → first of next month; quarterly → first of next
--- quarter; annually → 1 Jan next year), computed on the Africa/Johannesburg calendar date.
+-- (daily → today; weekly → the Sunday of the current Monday-start week; monthly → first of next
+-- month; quarterly → first of next quarter; annually → 1 Jan next year), computed on the
+-- Africa/Johannesburg calendar date.
 -- Idempotent through `on conflict (building_id, template_item_id, due_date) do nothing`, which
 -- is the existing task_instances_generated_uniq index (2026-06-11_02_fix_task_dedup_index.sql).
 -- Returns the number of rows inserted. p_building null = every building.

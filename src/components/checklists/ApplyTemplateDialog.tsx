@@ -25,6 +25,8 @@ interface Template {
   name: string;
   frequency: TaskFrequency;
   applies_to_building_types?: string[] | null;
+  /** Number of template items; supplied by the parent so the dialog needs no extra fetch. */
+  itemCount?: number;
 }
 
 interface Building {
@@ -100,6 +102,10 @@ export default function ApplyTemplateDialog({
   const handleApply = async () => {
     if (!template || selectedBuildings.size === 0) {
       toast.error('Please select at least one building');
+      return;
+    }
+    if (template.itemCount === 0) {
+      toast.error('This template has no tasks');
       return;
     }
 
