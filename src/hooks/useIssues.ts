@@ -8,7 +8,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { IssuePriority, IssueStatus } from '@/lib/constants';
 
-interface Issue {
+export interface Issue {
   id: string;
   title: string;
   description: string;
@@ -23,6 +23,10 @@ interface Issue {
   corrective_action: string | null;
   photo_urls: string[] | null;
   task_instance_id: string | null;
+  sla_target_hours: number | null;
+  sla_breached_at: string | null;
+  first_response_at: string | null;
+  resolved_at: string | null;
 }
 
 interface IssueStats {
@@ -32,6 +36,11 @@ interface IssueStats {
   escalated: number;
   resolved: number;
 }
+
+export type NewIssueInput = Omit<
+  Issue,
+  'id' | 'created_at' | 'building_name' | 'sla_target_hours' | 'sla_breached_at' | 'first_response_at' | 'resolved_at'
+>;
 
 interface UseIssuesOptions {
   autoFetch?: boolean;
@@ -44,7 +53,8 @@ interface UseIssuesReturn {
   loading: boolean;
   error: Error | null;
   refetch: () => Promise<void>;
-  createIssue: (issue: Omit<Issue, 'id' | 'created_at' | 'building_name'>) => Promise<string | null>;
+  /** The DB fills the SLA columns (trigger) and resolved_at, so they are not part of a new issue. */
+  createIssue: (issue: NewIssueInput) => Promise<string | null>;
   updateIssue: (id: string, updates: Partial<Issue>) => Promise<boolean>;
 }
 
@@ -92,6 +102,10 @@ export function useIssues(
           corrective_action,
           photo_urls,
           task_instance_id,
+          sla_target_hours,
+          sla_breached_at,
+          first_response_at,
+          resolved_at,
           buildings (name)
         `)
         .order('created_at', { ascending: false });
@@ -104,21 +118,27 @@ export function useIssues(
 
       if (fetchError) throw fetchError;
 
+      // The generated Row types priority/status as plain text, created_at as nullable (it has a
+      // default) and photo_urls as Json; the DB check constraints make these narrowings safe.
       const formattedIssues: Issue[] = (data || []).map((issue) => ({
         id: issue.id,
         title: issue.title,
         description: issue.description,
-        priority: issue.priority,
-        status: issue.status,
+        priority: issue.priority as IssuePriority,
+        status: issue.status as IssueStatus,
         deadline: issue.deadline,
-        created_at: issue.created_at,
+        created_at: issue.created_at ?? '',
         building_id: issue.building_id,
-        building_name: (issue.buildings as any)?.name || 'Unknown',
+        building_name: (issue.buildings as { name: string | null } | null)?.name || 'Unknown',
         reported_by: issue.reported_by,
         assigned_to: issue.assigned_to,
         corrective_action: issue.corrective_action,
-        photo_urls: issue.photo_urls,
+        photo_urls: issue.photo_urls as string[] | null,
         task_instance_id: issue.task_instance_id,
+        sla_target_hours: issue.sla_target_hours,
+        sla_breached_at: issue.sla_breached_at,
+        first_response_at: issue.first_response_at,
+        resolved_at: issue.resolved_at,
       }));
 
       setIssues(formattedIssues);
@@ -134,7 +154,7 @@ export function useIssues(
   }, [options.buildingId, calculateStats]);
 
   const createIssue = useCallback(
-    async (issue: Omit<Issue, 'id' | 'created_at' | 'building_name'>): Promise<string | null> => {
+    async (issue: NewIssueInput): Promise<string | null> => {
       try {
         const { data, error: createError } = await supabase
           .from('issues')

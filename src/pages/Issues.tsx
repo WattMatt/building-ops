@@ -8,6 +8,7 @@ import { subscribeQueue } from '@/lib/offline/queue';
 import type { MyTask } from '@/lib/myWork';
 import { queryClient } from '@/lib/queryClient';
 import IssueDetailDialog from '@/components/issues/IssueDetailDialog';
+import { SlaChip } from '@/components/issues/SlaChip';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -413,6 +414,7 @@ export default function Issues() {
                     <Badge variant="secondary" className={statusColors[issue.status]}>
                       {statusLabels[issue.status]}
                     </Badge>
+                    <SlaChip issue={issue} />
                   </div>
                 </div>
               </CardContent>

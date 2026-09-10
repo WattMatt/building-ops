@@ -58,6 +58,10 @@ const liveIssue: IssuesData['issues'][number] = {
   corrective_action: null,
   photo_urls: null,
   task_instance_id: null,
+  sla_target_hours: null,
+  sla_breached_at: null,
+  first_response_at: null,
+  resolved_at: null,
 };
 
 const queuedIssueOp = (status: QueuedOp['status'] = 'pending', buildingId = 'b1'): QueuedOp => ({

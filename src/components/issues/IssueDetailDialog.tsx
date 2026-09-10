@@ -30,6 +30,8 @@ import { AssigneePicker } from '@/components/people/AssigneePicker';
 import { ContractorPicker } from '@/components/contractors/ContractorPicker';
 import { IssueCommentComposer } from '@/components/issues/IssueCommentComposer';
 import { ResolveIssueDialog } from '@/components/issues/ResolveIssueDialog';
+import { SlaChip } from '@/components/issues/SlaChip';
+import { slaState } from '@/lib/slaState';
 import { notify } from '@/lib/notify';
 import { parseCost } from '@/lib/money';
 import { throwIfRefused } from '@/lib/pgErrors';
@@ -51,6 +53,11 @@ interface Issue {
   corrective_action: string | null;
   photo_urls: string[] | null;
   task_instance_id: string | null;
+  // Optional: older fixtures and callers predate the SLA columns; no target means no clock.
+  sla_target_hours?: number | null;
+  sla_breached_at?: string | null;
+  first_response_at?: string | null;
+  resolved_at?: string | null;
 }
 
 interface Activity {
@@ -275,11 +282,19 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
             {issue.deadline && (
               <span className="flex items-center gap-1 text-xs"><Clock className="h-3 w-3" />Due {format(new Date(issue.deadline), 'MMM d')}</span>
             )}
+            <SlaChip issue={issue} />
           </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
 
         <div className="space-y-4">
           <p className="text-sm whitespace-pre-wrap">{issue.description}</p>
+          {issue.sla_target_hours != null && (
+            <p className="text-xs text-muted-foreground">
+              SLA target {issue.sla_target_hours} h
+              {issue.first_response_at ? ` · first response ${format(new Date(issue.first_response_at), 'MMM d, h:mm a')}` : ' · no response yet'}
+              {slaState(issue).due ? ` · due ${format(slaState(issue).due!, 'MMM d, h:mm a')}` : ''}
+            </p>
+          )}
 
           {issue.corrective_action && (
             <div className="rounded-lg bg-muted/50 p-3 text-sm">
