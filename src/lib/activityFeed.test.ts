@@ -44,16 +44,30 @@ describe('describeActivity', () => {
     );
   });
 
-  it('contractor_assignment → "assigned a contractor"', () => {
+  it('contractor_assignment → "assigned contractor <name>"', () => {
     expect(
       describeActivity(row({ activity_type: 'contractor_assignment', new_value: 'ACME Plumbing' }))
-    ).toBe('assigned a contractor');
+    ).toBe('assigned contractor ACME Plumbing');
+  });
+
+  it('contractor_assignment with no new value → "assigned contractor"', () => {
+    expect(
+      describeActivity(row({ activity_type: 'contractor_assignment', new_value: null }))
+    ).toBe('assigned contractor');
   });
 
   it('comment → "commented: <text>" when 80 chars or fewer', () => {
     expect(describeActivity(row({ activity_type: 'comment', comment: 'Fixed the valve.' }))).toBe(
       'commented: Fixed the valve.'
     );
+  });
+
+  it('comment with null text → "commented" with no trailing colon', () => {
+    expect(describeActivity(row({ activity_type: 'comment', comment: null }))).toBe('commented');
+  });
+
+  it('comment with empty text → "commented" with no trailing colon', () => {
+    expect(describeActivity(row({ activity_type: 'comment', comment: '' }))).toBe('commented');
   });
 
   it('comment → truncates to the first 80 chars with an ellipsis when longer', () => {

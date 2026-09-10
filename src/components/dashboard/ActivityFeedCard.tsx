@@ -6,7 +6,6 @@
  */
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { format } from 'date-fns';
 import { Activity as ActivityIcon, AlertTriangle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,17 +13,36 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { supabase } from '@/integrations/supabase/client';
 import { formatBuildingName } from '@/lib/buildingName';
 import { describeActivity, groupByDay, type FeedRow } from '@/lib/activityFeed';
+import { OPERATING_TZ, todayInOperatingTz } from '@/lib/myWork';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const FEED_LIMIT = 30;
 
-function todayInOperatingTz(): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Africa/Johannesburg',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-}
+const ROW_TIME_FORMATTER = new Intl.DateTimeFormat('en-ZA', {
+  timeZone: OPERATING_TZ,
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
+const ROW_FULL_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat('en-ZA', {
+  timeZone: OPERATING_TZ,
+  dateStyle: 'full',
+  timeStyle: 'medium',
+});
+
+/** Shape of the row returned by the `issue_activity` select, before mapping to `FeedRow`. */
+type Raw = {
+  id: string;
+  issue_id: string;
+  activity_type: string;
+  old_value: string | null;
+  new_value: string | null;
+  comment: string | null;
+  author_name: string | null;
+  created_at: string;
+  issues: { title: string; building_id: string; buildings: { name: string } | null } | null;
+};
 
 async function fetchActivityFeed(): Promise<FeedRow[]> {
   const since = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
@@ -35,11 +53,13 @@ async function fetchActivityFeed(): Promise<FeedRow[]> {
     )
     .gte('created_at', since)
     .order('created_at', { ascending: false })
-    .limit(30);
+    .limit(FEED_LIMIT);
   if (error) throw new Error(error.message);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (data ?? []).map((r: any) => ({
+  // `issues`/`issue_title`/`building_name` fall back here only if the join comes back null —
+  // RLS scopes issue_activity to issues the viewer can already see, so in practice the join
+  // always resolves and these fallbacks are unreachable.
+  return ((data ?? []) as Raw[]).map((r) => ({
     id: r.id,
     issue_id: r.issue_id,
     activity_type: r.activity_type,
@@ -57,6 +77,7 @@ export default function ActivityFeedCard() {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['activity-feed'],
     queryFn: fetchActivityFeed,
+    staleTime: 30_000,
   });
 
   if (isLoading) {
@@ -137,9 +158,13 @@ export default function ActivityFeedCard() {
                             {item.building_name ? ` • ${formatBuildingName(item.building_name)}` : ''}
                           </p>
                         </div>
-                        <span className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0 pt-0.5">
-                          {format(new Date(item.created_at), 'HH:mm')}
-                        </span>
+                        <time
+                          dateTime={item.created_at}
+                          title={ROW_FULL_TIMESTAMP_FORMATTER.format(new Date(item.created_at))}
+                          className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0 pt-0.5"
+                        >
+                          {ROW_TIME_FORMATTER.format(new Date(item.created_at))}
+                        </time>
                       </div>
                     </Link>
                   ))}
@@ -147,6 +172,9 @@ export default function ActivityFeedCard() {
               </div>
             ))}
           </div>
+        )}
+        {rows.length === FEED_LIMIT && (
+          <p className="text-xs text-muted-foreground text-center pt-3">Showing the latest 30</p>
         )}
       </CardContent>
     </Card>

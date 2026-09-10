@@ -5,6 +5,7 @@
  */
 import { format } from 'date-fns';
 import { ISSUE_STATUS_LABELS, type IssueStatus } from '@/lib/constants';
+import { OPERATING_TZ } from '@/lib/myWork';
 
 export interface FeedRow {
   id: string;
@@ -30,12 +31,15 @@ export function describeActivity(row: FeedRow): string {
       const newLabel = ISSUE_STATUS_LABELS[row.new_value as IssueStatus] ?? row.new_value;
       return `changed status ${oldLabel} → ${newLabel}`;
     }
+    // No assignee-name join here (profiles are not readable across users under RLS), so this
+    // names the action, not the person — unlike IssueDetailDialog's activityText.
     case 'assignment':
       return row.new_value ? 'assigned this issue' : 'removed the assignee';
     case 'contractor_assignment':
-      return 'assigned a contractor';
+      return `assigned contractor ${row.new_value ?? ''}`.trim();
     case 'comment': {
       const text = row.comment ?? '';
+      if (!text) return 'commented';
       const preview =
         text.length > COMMENT_PREVIEW_LENGTH ? `${text.slice(0, COMMENT_PREVIEW_LENGTH)}…` : text;
       return `commented: ${preview}`;
@@ -51,7 +55,7 @@ export interface DayGroup {
 }
 
 const JOHANNESBURG_DAY_FORMATTER = new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'Africa/Johannesburg',
+  timeZone: OPERATING_TZ,
   year: 'numeric',
   month: '2-digit',
   day: '2-digit',
