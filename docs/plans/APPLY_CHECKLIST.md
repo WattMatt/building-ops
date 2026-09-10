@@ -137,3 +137,33 @@ completion back when the task update is not permitted; GMI `aec6759`) and re-app
 - [x] Revised `complete_task` applied and verified; nothing else to apply. The client change ships with the
       next deploy of the branch.
 - [ ] `notify` edge function must stay deployed on both projects (the comment replay calls it).
+
+## R2c "Push" (2026-09-10)
+
+Spec `docs/superpowers/specs/2026-09-10-r2-field-design.md` §7; plan `docs/superpowers/plans/2026-09-10-r2c-push.md`.
+
+### Keys and env — DONE 2026-09-10
+
+- [x] One VAPID pair generated (`web-push generate-vapid-keys`, kept only in a 0600 scratch file during the session);
+      `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT=mailto:notifications@buildingops.app` set as function
+      secrets on staging and prod.
+- [x] `VITE_VAPID_PUBLIC_KEY` on Vercel: production and preview (`feat/reports-access-hardening`). Other preview
+      branches need it added when they exist (the switch hides itself without it).
+
+### Functions — DONE on staging and prod 2026-09-10
+
+`notify`, `daily-digest`, `notify-signoff-request`, `notify-signoff-complete`, `notify-form-review`,
+`notify-form-submission`, `signoff-reminders`, `notify-expiring-alerts` (all import the shared sender, which now
+fans out push). `npm:web-push@3.6.7` resolves under the edge runtime (first `npm:` specifier in the repo). A malformed
+VAPID secret disables push and logs, it no longer breaks the senders.
+
+- [x] Staging: `smoke:notifications` 26/0 (inbox path unaffected by an invalid subscription, `pushed` reported),
+      sign-off 8/0, forms 7/0; manual `daily-digest` call returns `pushConsidered/pushed/pushFailed`.
+- [x] Prod: functions deployed; `rls-smoke` 435/0. No migration (schema landed in R2a).
+
+### Notes
+
+- Rotating the VAPID keys makes every existing subscription fail with 401/403 (counted, never stamped); users must
+  toggle push off and on again.
+- Push cannot be smoke-tested end to end without a browser; the first real device is the owner's phone: Profile →
+  "Push notifications on this device", then assign yourself a task from another account.
