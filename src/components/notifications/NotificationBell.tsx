@@ -1,4 +1,5 @@
 /** Header bell: unread count, the 10 newest rows, mark all read, link to the full inbox. */
+import { useState } from 'react';
 import { Bell } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
@@ -9,9 +10,12 @@ import { useNotifications } from '@/hooks/useNotifications';
 export function NotificationBell() {
   const { items, unread, markRead, markAllRead } = useNotifications();
   const navigate = useNavigate();
+  // Controlled so navigating away from a row closes the popover instead of leaving it
+  // floating over the page it just took you to.
+  const [open, setOpen] = useState(false);
   const recent = items.slice(0, 10);
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="icon" aria-label={unread ? `${unread} unread notifications` : 'Notifications'} className="relative">
           <Bell className="h-4 w-4" />
@@ -36,8 +40,9 @@ export function NotificationBell() {
                 <button
                   type="button"
                   className={`w-full px-3 py-2 text-left hover:bg-muted ${n.read_at ? '' : 'bg-primary/5'}`}
-                  onClick={() => { void markRead(n.id); navigate(n.url); }}
+                  onClick={() => { setOpen(false); void markRead(n.id); navigate(n.url); }}
                 >
+                  {!n.read_at && <span className="sr-only">Unread</span>}
                   <p className="truncate text-sm">{n.title}</p>
                   <p className="text-xs text-muted-foreground">{n.actor_name ? `${n.actor_name} · ` : ''}{formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}</p>
                 </button>
@@ -46,7 +51,7 @@ export function NotificationBell() {
           </ul>
         )}
         <div className="border-t px-3 py-2 text-right">
-          <Link to="/inbox" className="text-xs underline">Open inbox</Link>
+          <Link to="/inbox" className="text-xs underline" onClick={() => setOpen(false)}>Open inbox</Link>
         </div>
       </PopoverContent>
     </Popover>

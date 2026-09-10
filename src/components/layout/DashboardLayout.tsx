@@ -7,7 +7,7 @@ import { recordAuthEvent } from '@/lib/auth-audit';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { HintsToggle } from '@/components/HintsToggle';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
-import { useNotifications } from '@/hooks/useNotifications';
+import { useNotifications, useNotificationsRealtime } from '@/hooks/useNotifications';
 import type { NotificationKind } from '@/lib/notify';
 import {
   Sidebar,
@@ -138,6 +138,18 @@ interface DashboardLayoutProps {
   children: ReactNode;
 }
 
+/** The unread pill beside a nav item. */
+function NavBadge({ count }: { count: number }) {
+  return (
+    <span
+      aria-label={`${count} unread`}
+      className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground"
+    >
+      {count}
+    </span>
+  );
+}
+
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const { user, role, signOut, isAdminOrManager } = useAuth();
   const { organization } = useOrganization();
@@ -145,6 +157,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   // Signed-out renders are possible (the layout mounts before the session resolves);
   // the hook is enabled only when there is a user, so this is a no-op count of 0.
   const { unreadByKind } = useNotifications();
+  // The one owner of the notifications realtime channel. It belongs here because the layout
+  // persists across routes; opening a second channel on the same topic from the bell or the
+  // inbox page breaks live updates for everyone (see useNotificationsRealtime).
+  useNotificationsRealtime();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -197,22 +213,23 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               <SidebarGroupLabel>Main</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {mainNavItems.map((item) => (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={location.pathname === item.href}
-                      >
-                        <Link to={item.href}>
-                          {item.icon}
-                          <span>{item.title}</span>
-                          {item.badgeKinds && unreadByKind(item.badgeKinds) > 0 && (
-                            <span className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground">{unreadByKind(item.badgeKinds)}</span>
-                          )}
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                  {mainNavItems.map((item) => {
+                    const n = item.badgeKinds ? unreadByKind(item.badgeKinds) : 0;
+                    return (
+                      <SidebarMenuItem key={item.href}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={location.pathname === item.href}
+                        >
+                          <Link to={item.href}>
+                            {item.icon}
+                            <span>{item.title}</span>
+                            {n > 0 && <NavBadge count={n} />}
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
@@ -221,22 +238,23 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               <SidebarGroupLabel>Reports & Audit</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {reportsNavItems.filter(canAccessItem).map((item) => (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={location.pathname === item.href}
-                      >
-                        <Link to={item.href}>
-                          {item.icon}
-                          <span>{item.title}</span>
-                          {item.badgeKinds && unreadByKind(item.badgeKinds) > 0 && (
-                            <span className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground">{unreadByKind(item.badgeKinds)}</span>
-                          )}
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                  {reportsNavItems.filter(canAccessItem).map((item) => {
+                    const n = item.badgeKinds ? unreadByKind(item.badgeKinds) : 0;
+                    return (
+                      <SidebarMenuItem key={item.href}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={location.pathname === item.href}
+                        >
+                          <Link to={item.href}>
+                            {item.icon}
+                            <span>{item.title}</span>
+                            {n > 0 && <NavBadge count={n} />}
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
@@ -245,22 +263,23 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               <SidebarGroupLabel>Administration</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {adminNavItems.filter(canAccessItem).map((item) => (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={location.pathname === item.href}
-                      >
-                        <Link to={item.href}>
-                          {item.icon}
-                          <span>{item.title}</span>
-                          {item.badgeKinds && unreadByKind(item.badgeKinds) > 0 && (
-                            <span className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground">{unreadByKind(item.badgeKinds)}</span>
-                          )}
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                  {adminNavItems.filter(canAccessItem).map((item) => {
+                    const n = item.badgeKinds ? unreadByKind(item.badgeKinds) : 0;
+                    return (
+                      <SidebarMenuItem key={item.href}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={location.pathname === item.href}
+                        >
+                          <Link to={item.href}>
+                            {item.icon}
+                            <span>{item.title}</span>
+                            {n > 0 && <NavBadge count={n} />}
+                          </Link>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    );
+                  })}
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>

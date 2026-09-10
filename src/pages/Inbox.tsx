@@ -83,6 +83,7 @@ export default function Inbox() {
                 className={`block w-full p-4 text-left hover:bg-muted ${n.read_at ? '' : 'bg-primary/5'}`}
                 onClick={() => { void markRead(n.id); navigate(n.url); }}
               >
+                {!n.read_at && <span className="sr-only">Unread</span>}
                 <p className="font-medium truncate">{n.title}</p>
                 {n.body && <p className="text-sm text-muted-foreground truncate">{n.body}</p>}
                 <p className="text-xs text-muted-foreground">
