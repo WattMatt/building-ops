@@ -1,5 +1,6 @@
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { Button } from '@/components/ui/button';
 import type { AppRole } from '@/lib/constants';
 
 interface ProtectedRouteProps {
@@ -48,17 +49,13 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
         <div className="max-w-sm text-center">
           {authError ? (
             <>
-              <h1 className="mb-2 text-2xl font-bold">Couldn’t verify your access</h1>
+              <h1 className="mb-2 text-2xl font-bold">Couldn't verify your access</h1>
               <p className="text-muted-foreground">
                 Your role could not be loaded, so this page is locked for now. This is usually a connection problem, not a permissions one.
               </p>
-              <button
-                type="button"
-                className="mt-4 rounded-md border px-4 py-2 text-sm"
-                onClick={() => { void refreshRole(); }}
-              >
+              <Button variant="outline" size="sm" className="mt-4" onClick={() => { void refreshRole(); }}>
                 Try again
-              </button>
+              </Button>
             </>
           ) : (
             <>

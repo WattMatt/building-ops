@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type { AppRole } from '@/lib/constants';
 
@@ -27,7 +27,7 @@ const authState = vi.hoisted(() => ({
     mustSetPassword: false,
     onboardingCompleted: true,
     loading: false,
-    refreshRole: () => Promise.resolve(),
+    refreshRole: vi.fn(() => Promise.resolve()),
   } as {
     user: { id: string } | null;
     role: string | null;
@@ -78,6 +78,7 @@ function setAuth(overrides: Partial<AuthStub>) {
 
 describe('ProtectedRoute', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     authState.current = {
       user: { id: 'user-1' },
       role: 'admin',
@@ -85,7 +86,7 @@ describe('ProtectedRoute', () => {
       mustSetPassword: false,
       onboardingCompleted: true,
       loading: false,
-      refreshRole: () => Promise.resolve(),
+      refreshRole: vi.fn(() => Promise.resolve()),
     };
   });
 
@@ -124,6 +125,7 @@ describe('ProtectedRoute', () => {
     // message — but it must still deny access, not admit or redirect.
     expect(contentShown()).toBe(false);
     expect(redirectTarget()).toBeNull();
+    expect(screen.getByText(/couldn.t verify/i)).toBeInTheDocument();
   });
 
   it('denies a role-gated route on role mismatch', () => {
@@ -177,14 +179,19 @@ describe('ProtectedRoute', () => {
 
 describe('access-denied copy', () => {
   it('names a role-fetch failure and offers a retry', () => {
-    authState.current = { ...authState.current, role: null, authError: true };
+    setAuth({ role: null, authError: true });
     renderGuard(['admin']);
     expect(screen.getByText(/couldn.t verify your access/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
+    const retryButton = screen.getByRole('button', { name: /try again/i });
+    expect(retryButton).toBeInTheDocument();
+
+    fireEvent.click(retryButton);
+
+    expect(authState.current.refreshRole).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the plain permission message when the role is simply wrong', () => {
-    authState.current = { ...authState.current, role: 'user', authError: false };
+    setAuth({ role: 'user', authError: false });
     renderGuard(['admin']);
     expect(screen.getByText(/don.t have permission/i)).toBeInTheDocument();
     expect(screen.getByText(/back to dashboard/i)).toBeInTheDocument();
