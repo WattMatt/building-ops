@@ -269,6 +269,37 @@ describe('MyDay', () => {
     expect(screen.getByText(/Was due Wed 9 Sep/)).toBeInTheDocument();
   });
 
+  it('renders the week strip with seven day links and counts today from the fixtures', () => {
+    state.work = baseWork({
+      buckets: {
+        overdue: [task],
+        today: [{ ...task, id: 't-today', due_date: '2026-09-10', status: 'pending' }],
+        upcoming: [upcomingTask],
+      },
+      issues: [{ ...issue, deadline: '2026-09-10' }],
+    });
+    renderPage();
+    const dayLinks = screen.getAllByRole('link', { name: /^\w{3} \d{1,2} \w{3}: / });
+    expect(dayLinks).toHaveLength(7);
+    // Today: the one task due today plus the issue deadline. The overdue task (9 Sep) is
+    // outside the window and must not be counted anywhere.
+    expect(dayLinks[0]).toHaveAccessibleName('Thu 10 Sep: 1 task, 1 issue');
+    expect(dayLinks[0]).toHaveAttribute('href', '/calendar?date=2026-09-10&view=week');
+    expect(screen.getByRole('link', { name: 'Mon 14 Sep: 1 task' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Fri 11 Sep: nothing due' })).toBeInTheDocument();
+  });
+
+  it('leaves the week strip out while loading and after a failed load', () => {
+    state.work = baseWork({ isLoading: true });
+    const { unmount } = renderPage();
+    expect(screen.queryByText('This week')).not.toBeInTheDocument();
+    unmount();
+
+    state.work = baseWork({ isError: true, error: new Error('boom') });
+    renderPage();
+    expect(screen.queryByText('This week')).not.toBeInTheDocument();
+  });
+
   it('routes the section coaching copy through the hints toggle', () => {
     const { unmount } = renderPage();
     expect(screen.getByText('Past their due date — clear these first.')).toBeInTheDocument();
