@@ -61,7 +61,7 @@ export function useOfflineQueue(): OfflineQueueState {
     [uid],
   );
   const discard = useCallback((id: string) => (uid ? removeOp(uid, id) : Promise.resolve()), [uid]);
-  const retryAll = useCallback(() => (uid ? replayAll(uid, { retryFailed: true }) : Promise.resolve()), [uid]);
+  const retryAll = useCallback(async () => { if (uid) await replayAll(uid, { retryFailed: true }); }, [uid]);
 
   return { ops, pending, failed, retry, discard, retryAll };
 }
