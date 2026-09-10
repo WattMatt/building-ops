@@ -30,6 +30,7 @@ import { useUserProfile } from '@/hooks/useUserProfile';
 import { useMyWork, type MyIssue } from '@/hooks/useMyWork';
 import { greetingFor, type MyTask } from '@/lib/myWork';
 import CompleteTaskDialog from '@/components/checklists/CompleteTaskDialog';
+import { InstallCard } from '@/components/pwa/InstallCard';
 import IssueDetailDialog from '@/components/issues/IssueDetailDialog';
 import { formatBuildingName } from '@/lib/buildingName';
 import { formatPeriodLabel } from '@/lib/fortressReports';
@@ -178,6 +179,8 @@ export default function MyDay() {
           )}
         </div>
       </div>
+
+      <InstallCard />
 
       {isLoading && (
         <div className="flex h-48 items-center justify-center">

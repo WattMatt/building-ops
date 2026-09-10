@@ -28,6 +28,8 @@ vi.mock('@/hooks/useHints', () => ({
   useHints: () => ({ hintsEnabled: state.hintsEnabled, setHintsEnabled: vi.fn() }),
 }));
 vi.mock('@/lib/analytics', () => ({ track }));
+// The install offer has its own hooks and tests; My Day only needs to mount it.
+vi.mock('@/components/pwa/InstallCard', () => ({ InstallCard: () => null }));
 
 // The dialogs are exercised by their own tests; here we only care that My Day opens them.
 vi.mock('@/components/checklists/CompleteTaskDialog', () => ({
