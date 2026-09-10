@@ -8,7 +8,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { fdb } from '@/integrations/supabase/fortress-db';
 import { classify, ratioPct, waterDeltaPct, THRESHOLDS, type KpiStatus } from '@/lib/fortressKpis';
-import { ppmCompletion, type PpmServiceLike } from '@/lib/ppmStatus';
+import { fiscalWindow, gridHasData, ppmCompletionFromGrid } from '@/lib/ppmGrid';
+import { fetchMergedPpmGrids, type PpmGridSourceRow } from '@/hooks/useBuildingPpm';
 
 export type KpiFormat = 'pct' | 'zar' | 'count' | 'number';
 export interface Kpi {
@@ -93,6 +94,8 @@ export function useBuildingKpis(buildingId: string | undefined) {
         const o2 = critRows.data?.[0]?.critical_pct ?? null;
         kpis.push({ id: 'O2', label: 'Critical Equipment', value: num(o2), format: 'pct', status: classify(num(o2), THRESHOLDS.critical) });
 
+        // The embedded compliance_template_items join has no generated row type.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const resp = (respRows.data ?? []) as any[];
         const noCount = resp.filter((r) => r.response === 'no').length;
         const naCount = resp.filter((r) => r.response === 'na').length;
@@ -278,20 +281,7 @@ export function useBuildingKpis(buildingId: string | undefined) {
         kpis.push({ id: 'O6', label: 'Equipment Overdue', value: overdue, format: 'count', status: classify(overdue, THRESHOLDS.equipmentOverdue) });
       }
 
-      // K11 PPM Serviced — ppm_services on the latest approved ops report: the share of
-      // services that have been serviced at least once (any 'done' month cell) over the
-      // report's 12-month window. null when there are no services (honest empty-state), and
-      // likewise when the register exists but not one month cell has been filled in yet —
-      // an uncaptured matrix is "no data", not a measured 0%.
-      let k11: number | null = null; let k11Sub: string | undefined;
-      if (ops) {
-        const ppm = await fdb.from('ppm_services').select('months').eq('report_id', ops.id);
-        const ppmRows = (ppm.data ?? []) as PpmServiceLike[];
-        const ppmCaptured = ppmRows.some((s) => Object.keys(s.months ?? {}).length > 0);
-        const { doneCount, total, pct } = ppmCompletion(ppmRows);
-        k11 = ppmCaptured ? pct : null;
-        if (total > 0) k11Sub = ppmCaptured ? `${doneCount}/${total}` : 'Not captured';
-      }
+      const { value: k11, sub: k11Sub } = ops ? await ppmServicedKpi(ops) : { value: null, sub: undefined };
       kpis.push({ id: 'K11', label: 'PPM Serviced', value: k11, format: 'pct', status: classify(k11, THRESHOLDS.ppm), sub: k11Sub });
 
       // O7 Days Since Evac Drill — days since the most recent COMPLETED evacuation-drill task for the building.
@@ -309,6 +299,29 @@ export function useBuildingKpis(buildingId: string | undefined) {
       return { ops, cm, annual, kpis, sectionScores, actions, trend };
     },
   });
+}
+
+/**
+ * K11 PPM Serviced — ppm_services on the latest approved ops report: the share of services
+ * that have been serviced at least once (any 'done' cell) over the report's fiscal window.
+ * Cells come from the MERGED grid (override > derived execution > legacy `months`), so a
+ * plan-backed row whose `months` is empty still counts once an occurrence was completed.
+ * null when there are no services (honest empty-state), and likewise when the register
+ * exists but not one cell has been filled by any layer — an uncaptured matrix is "no data",
+ * not a measured 0%. Exported for the unit test.
+ */
+export async function ppmServicedKpi(
+  ops: { id: string; report_period: string | null },
+): Promise<{ value: number | null; sub: string | undefined }> {
+  // plan_service_id / overrides are not yet in the generated types — read the whole row and narrow.
+  const ppm = await fdb.from('ppm_services').select('*').eq('report_id', ops.id);
+  const rows = (ppm.data ?? []) as unknown as PpmGridSourceRow[];
+  if (rows.length === 0) return { value: null, sub: undefined };
+  const grids = await fetchMergedPpmGrids(rows, fiscalWindow(ops.report_period));
+  const gridList = rows.map((r) => grids.get(r.id) ?? {});
+  const captured = gridList.some(gridHasData);
+  const { doneCount, total, pct } = ppmCompletionFromGrid(gridList);
+  return { value: captured ? pct : null, sub: captured ? `${doneCount}/${total}` : 'Not captured' };
 }
 
 function num(v: unknown): number | null {

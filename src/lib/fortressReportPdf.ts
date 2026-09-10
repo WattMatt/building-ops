@@ -11,7 +11,8 @@ import { fdb, type ReportType } from '@/integrations/supabase/fortress-db';
 import { resolveStorageUrl } from '@/integrations/supabase/storage';
 import { buildReportDoc, MARK, type ReportData, type EmbeddedPhoto, type AnnualItem } from '@/lib/fortressReportDoc';
 import { ANNUAL_FIELD_SETS } from '@/lib/annualFieldSets';
-import { doneMonths, type PpmCell } from '@/lib/ppmStatus';
+import { doneMonthsFromGrid, fiscalWindow, gridHasData } from '@/lib/ppmGrid';
+import { fetchMergedPpmGrids, type PpmGridSourceRow } from '@/hooks/useBuildingPpm';
 import { REPORT_SECTIONS, watermarkFor } from '@/lib/fortressReports';
 import { fetchReportElectricalCompliance } from '@/integrations/supabase/insight-linker';
 
@@ -97,6 +98,35 @@ function unwrap<T>(res: { data: T | null; error: { message: string } | null }, w
   return res.data;
 }
 
+/**
+ * The PPM table for the ops PDF, from the MERGED grid (override > derived execution >
+ * legacy `months`) over the report's fiscal window — a plan-backed row whose `months` is
+ * empty still prints the months its completed occurrences fell in. Exported for the test.
+ */
+export async function fetchPpmForPdf(
+  reportId: string,
+  reportPeriod: string | null,
+): Promise<{ ppm: NonNullable<ReportData['ppm']>; ppmStatusNote: string | null }> {
+  // plan_service_id / overrides are not yet in the generated types — read the whole row and narrow.
+  const rows = (unwrap(await fdb.from('ppm_services').select('*')
+    .eq('report_id', reportId).order('sort_order', { ascending: true, nullsFirst: false }), 'the PPM schedule') ?? []) as unknown as
+    (PpmGridSourceRow & { service_name: string | null; frequency: string | null })[];
+  const grids = await fetchMergedPpmGrids(rows, fiscalWindow(reportPeriod));
+  const ppm = rows.map((p) => ({
+    service: p.service_name ?? '',
+    frequency: p.frequency ?? null,
+    servicedMonths: doneMonthsFromGrid(grids.get(p.id) ?? {}).map(ppmMonthLabel),
+  }));
+  // Only status === 'done' counts as serviced. A schedule whose cells carry no status in any
+  // layer (the source workbook records it as a fill colour, which has no agreed meaning yet)
+  // would otherwise print a full table of "—" and read as "nothing was serviced".
+  const anyStatus = rows.some((p) => gridHasData(grids.get(p.id) ?? {}));
+  const ppmStatusNote = rows.length && !anyStatus
+    ? 'Service status is recorded in the source workbook as a cell colour with no legend, so no month can be reported as serviced or missed. The schedule itself is shown below.'
+    : null;
+  return { ppm, ppmStatusNote };
+}
+
 export async function generateReportPdf(reportId: string, branding: ReportBranding): Promise<GeneratedFortressPdf> {
   const color = /^#([a-f\d]{6})$/i.test(branding.primaryColor) ? branding.primaryColor : '#2563eb';
   // maybeSingle() responses go through a variable before unwrap(): passing the awaited
@@ -124,8 +154,10 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       .eq('report_id', reportId).maybeSingle();
     const asmt = unwrap(asmtRes, 'the OHS assessment');
     if (asmt) {
+      // The embedded compliance_template_items join has no generated row type.
       const resp = (unwrap(await fdb.from('compliance_responses')
         .select('response,comment,compliance_template_items(item_no,prompt)')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .eq('assessment_id', asmt.id), 'the OHS responses') ?? []) as any[];
       data.compliance = resp.map((r) => ({
         itemNo: r.compliance_template_items?.item_no ?? '',
@@ -187,24 +219,9 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     const rec = unwrap(await fdb.from('expense_recoveries').select('service,ytd_expense,ytd_recovery,pct_recovery').eq('report_id', reportId), 'expense recoveries') ?? [];
     data.recoveries = rec.map((r) => ({ service: r.service ?? '', ytdExpense: r.ytd_expense, ytdRecovery: r.ytd_recovery, pctRecovery: r.pct_recovery == null ? '—' : `${Math.round(Number(r.pct_recovery) * 10) / 10}%` }));
 
-    const ppm = unwrap(await fdb.from('ppm_services').select('service_name,frequency,months,sort_order')
-      .eq('report_id', reportId).order('sort_order', { ascending: true, nullsFirst: false }), 'the PPM schedule') ?? [];
-    data.ppm = ppm.map((p) => ({
-      service: p.service_name ?? '',
-      frequency: p.frequency ?? null,
-      servicedMonths: doneMonths({ months: p.months as Record<string, PpmCell> }).map(ppmMonthLabel),
-    }));
-    // doneMonths() counts only status === 'done'. A schedule whose month cells carry no
-    // status at all (the source records it as a fill colour, which has no agreed meaning
-    // yet) would otherwise print a full table of "—" and read as "nothing was serviced".
-    const anyStatus = ppm.some((p) => {
-      const m = (p.months ?? {}) as Record<string, PpmCell>;
-      return Object.values(m).some((c) => c && c.status != null);
-    });
-    if (ppm.length && !anyStatus) {
-      data.ppmStatusNote =
-        'Service status is recorded in the source workbook as a cell colour with no legend, so no month can be reported as serviced or missed. The schedule itself is shown below.';
-    }
+    const { ppm, ppmStatusNote } = await fetchPpmForPdf(reportId, report.report_period);
+    data.ppm = ppm;
+    if (ppmStatusNote) data.ppmStatusNote = ppmStatusNote;
 
     const util = unwrap(await fdb.from('utility_readings')
       .select('utility,meter_name,reading,unit,category,pct_of_bulk,comment')
@@ -587,6 +604,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     // table is empty. `motivation` is the item's justification and prints beside it.
     const capex = unwrap(await fdb.from('capex_items')
       .select('item,motivation,estimate,year,priority,status').eq('report_id', reportId), 'the capex register') ?? [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     data.capex = capex.map((c: any) => ({
       description: [c.item, c.motivation].filter(Boolean).join(' — ') || '',
       estimate: c.estimate ?? null,

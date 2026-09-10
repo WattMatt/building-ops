@@ -140,6 +140,47 @@ export function mergePpmGrid(
   return grid;
 }
 
+/** The slice of a `ppm_services` row the merge needs (plan link, overrides, legacy months). */
+// plan_service_id and overrides are not yet in the generated types; consumers read them off `select('*')`.
+export interface PpmGridRow {
+  id: string;
+  plan_service_id?: string | null;
+  overrides?: Record<string, PpmOverride> | null;
+  months?: unknown;
+}
+
+const isCellMap = (v: unknown): v is Record<string, PpmCell> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * Merge every report row into its grid: plan-backed rows get override > derived > legacy
+ * months; legacy rows (no `plan_service_id`) get their `months` as 'legacy' cells. The
+ * window is widened per row by any legacy month key outside it, so a cell captured by hand
+ * before the plan existed is never dropped by a consumer that only looks at the window.
+ *
+ * Pure: hand it the view rows already fetched (see `fetchMergedPpmGrids` in useBuildingPpm.ts).
+ */
+export function mergePpmGrids(
+  rows: readonly PpmGridRow[],
+  derived: readonly DerivedRow[],
+  window: readonly string[],
+): Map<string, Record<string, MergedCell>> {
+  const byService = derivedByService(derived);
+  const out = new Map<string, Record<string, MergedCell>>();
+  for (const row of rows) {
+    const legacy = isCellMap(row.months) ? row.months : {};
+    const months = [...new Set([...window, ...Object.keys(legacy)])].sort();
+    const derivedRows = row.plan_service_id ? byService.get(row.plan_service_id) ?? [] : [];
+    const overrides = row.plan_service_id ? row.overrides ?? {} : {};
+    out.set(row.id, mergePpmGrid(months, derivedRows, overrides, legacy));
+  }
+  return out;
+}
+
+/** Sorted "YYYY-MM" keys whose merged cell reads 'done' (the PDF's "serviced" column). */
+export function doneMonthsFromGrid(grid: Record<string, MergedCell>): string[] {
+  return Object.keys(grid).filter((mk) => grid[mk].status === 'done').sort();
+}
+
 /**
  * K11 over merged grids: a row counts as serviced when any cell reads 'done', whatever
  * layer produced it. Delegates to `ppmCompletion` so there is one definition of "done".

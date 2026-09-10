@@ -3,14 +3,45 @@
  * (draft → submitted → reviewed → approved / rejected). Mirrors the
  * form_submissions review model. RLS enforces who may transition: the author can
  * submit their own draft; admin/manager perform review transitions.
+ *
+ * PPM (R3c): an ops report's `ppm_services` rows are SEEDED from the building's active plan
+ * lines (`seedPpmFromPlan`) when the report is created and again on carry-forward — the
+ * function is idempotent, so the second run only picks up lines the first did not. The
+ * prior report's PPM rows are never cloned: a plan-backed row's grid is derived from
+ * execution, and its overrides belong to the month they were written for.
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { fdb, type Report, type ReportType, type ReportStatus, type FTableName } from '@/integrations/supabase/fortress-db';
 import { useAuth } from '@/contexts/AuthContext';
 import { notify } from '@/lib/notify';
+import { seedPpmFromPlan } from '@/hooks/useReportPpm';
 
 const REPORTS_KEY = ['fortress-reports'];
+
+/** Report types that carry the PPM section (see REPORT_SECTIONS in lib/fortressReports.ts). */
+const PPM_REPORT_TYPES: ReadonlySet<string> = new Set<ReportType>(['ops_monthly']);
+
+/** Plain copy for a seed that failed after the report itself was saved. */
+export const PPM_SEED_FAILED_MESSAGE =
+  'The report was saved, but its PPM services could not be seeded from the building plan. Use "Sync with the PPM plan" on the PPM section.';
+
+/**
+ * Seed the report's PPM rows from the plan without failing the surrounding write: the
+ * report row already exists, so a refused seed is reported and the user is pointed at the
+ * section's sync button rather than left with a create that "failed" after it succeeded.
+ */
+async function seedPpmOrWarn(report: Pick<Report, 'id' | 'building_id' | 'report_type'>): Promise<number> {
+  if (!PPM_REPORT_TYPES.has(report.report_type)) return 0;
+  try {
+    const { added, linked } = await seedPpmFromPlan(report.id, report.building_id);
+    return added + linked;
+  } catch (e) {
+    if (import.meta.env.DEV) console.error('Seed PPM from plan failed:', e);
+    toast.error(PPM_SEED_FAILED_MESSAGE);
+    return 0;
+  }
+}
 
 export function useFortressReports(buildingId?: string) {
   return useQuery({
@@ -86,6 +117,7 @@ export function useCreateReport() {
         .select('*')
         .single();
       if (error) throw error;
+      await seedPpmOrWarn(data);
       return data;
     },
     onSuccess: () => {
@@ -103,7 +135,10 @@ export function useCreateReport() {
 
 /** Section tables cloned on carry-forward, with volatile columns blanked (operator
  *  re-enters fresh values). Scaffold columns (services, tenants, narratives, contacts)
- *  carry over. Heavy/seeded sections (tenant_compliance, inspections) regenerate. */
+ *  carry over. Heavy/seeded sections (tenant_compliance, inspections) regenerate.
+ *  `ppm_services` is deliberately absent: PPM rows are re-seeded from the building plan
+ *  (`seedPpmFromPlan`), not cloned, so the new report gets the plan as it stands today
+ *  and none of last month's overrides. */
 const CARRY_FORWARD: Record<ReportType, { table: FTableName; blank: string[] }[]> = {
   ops_monthly: [
     { table: 'report_narratives', blank: [] },
@@ -136,6 +171,8 @@ export function useCarryForwardReport() {
     mutationFn: async ({ newReport, fromReportId }: { newReport: Report; fromReportId: string }): Promise<number> => {
       let cloned = 0;
       for (const { table, blank } of CARRY_FORWARD[newReport.report_type as ReportType] ?? []) {
+        // `table` is a runtime union of section tables; the typed client cannot narrow it.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { data: rows } = await (fdb.from(table) as any).select('*').eq('report_id', fromReportId);
         if (!rows?.length) continue;
         const mapped = (rows as Record<string, unknown>[]).map((r) => {
@@ -145,10 +182,16 @@ export function useCarryForwardReport() {
           for (const c of blank) row[c] = null;
           return row;
         });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error } = await (fdb.from(table) as any).insert(mapped);
         if (error) { if (import.meta.env.DEV) console.error(`carry-forward ${table}:`, error); }
         else cloned += mapped.length;
       }
+      // PPM: seed from the plan (idempotent — creation usually did this already, so this
+      // only adds lines the plan gained since, or seeds a report created another way).
+      cloned += await seedPpmOrWarn(newReport);
+      // cloned_from_report_id is not yet in the generated types.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (fdb.from('reports') as any).update({ cloned_from_report_id: fromReportId }).eq('id', newReport.id);
       return cloned;
     },

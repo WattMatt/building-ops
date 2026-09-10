@@ -49,7 +49,7 @@ vi.mock('@/integrations/supabase/client', () => {
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock('sonner', () => ({ toast: toastMock }));
 
-import { useBuildingPpm, useDerivedPpm, PPM_PERMISSION_MESSAGE } from './useBuildingPpm';
+import { useBuildingPpm, useDerivedPpm, fetchMergedPpmGrids, PPM_PERMISSION_MESSAGE } from './useBuildingPpm';
 
 let qc: QueryClient;
 const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: qc }, children);
@@ -191,5 +191,41 @@ describe('derived grid', () => {
   it('useDerivedPpm is usable on its own (the report section shares it)', async () => {
     const { result } = renderHook(() => useDerivedPpm('b1', ['2026-09']), { wrapper });
     await waitFor(() => expect(result.current.data).toHaveLength(1));
+  });
+});
+
+describe('fetchMergedPpmGrids (shared by K11, the PDF and the calendar)', () => {
+  const months = ['2026-07', '2026-08', '2026-09'];
+
+  it('reads the view once for the plan-backed rows\' buildings and merges every row', async () => {
+    state.result = (table) => {
+      if (table === 'ppm_monthly_status') {
+        return { data: [{ ppm_service_id: 'p1', period_month: '2026-08', status: 'done', done_on: '2026-08-12' }], error: null };
+      }
+      return { data: [], error: null };
+    };
+    const grids = await fetchMergedPpmGrids([
+      { id: 'r1', building_id: 'b1', plan_service_id: 'p1', overrides: {}, months: {} },
+      { id: 'r2', building_id: 'b2', plan_service_id: 'p9', overrides: {}, months: {} },
+      { id: 'r3', building_id: 'b1', plan_service_id: null, months: { '2026-07': { status: 'done' } } },
+    ], months);
+    const views = state.queries.filter((x) => x.table === 'ppm_monthly_status');
+    expect(views).toHaveLength(1);
+    expect(has(views[0].calls, 'in', 'building_id', ['b1', 'b2'])).toBe(true);
+    expect(has(views[0].calls, 'in', 'period_month', months)).toBe(true);
+    expect(grids.get('r1')!['2026-08']).toMatchObject({ status: 'done', source: 'derived' });
+    expect(grids.get('r2')!['2026-08']).toMatchObject({ status: null, source: 'none' });
+    expect(grids.get('r3')!['2026-07']).toMatchObject({ status: 'done', source: 'legacy' });
+  });
+
+  it('costs no view query when no row is plan-backed', async () => {
+    const grids = await fetchMergedPpmGrids([{ id: 'r3', building_id: 'b1', plan_service_id: null, months: {} }], months);
+    expect(state.queries.filter((x) => x.table === 'ppm_monthly_status')).toHaveLength(0);
+    expect(Object.keys(grids.get('r3')!)).toEqual(months);
+  });
+
+  it('surfaces a view error instead of an empty grid', async () => {
+    state.result = (table) => (table === 'ppm_monthly_status' ? { data: null, error: { message: 'boom' } } : { data: [], error: null });
+    await expect(fetchMergedPpmGrids([{ id: 'r1', building_id: 'b1', plan_service_id: 'p1', months: {} }], months)).rejects.toMatchObject({ message: 'boom' });
   });
 });

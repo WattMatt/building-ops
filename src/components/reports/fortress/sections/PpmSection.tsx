@@ -11,9 +11,9 @@
  *  - LEGACY (no `plan_service_id`, reports from before the plan existed): the original
  *    click-cycling on `months` (blank → due → done → missed → na → blank) stays as it was.
  *
- * "Seed from the building's PPM plan" (admin/manager, draft only) adds a plan-backed row for
- * every active plan line the report does not have yet — nothing seeds these automatically
- * when a report is created.
+ * Rows are seeded from the building plan when the report is created and on carry-forward
+ * (useFortressReports.ts). "Sync with the PPM plan" (admin/manager, draft only) re-runs the
+ * same idempotent seed for plan lines added after that — it never duplicates a row.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -223,7 +223,8 @@ export default function PpmSection({ reportId, buildingId, readOnly }: SectionPr
       frequency: d.frequency.trim() || null,
       comment: d.comment.trim() || null,
       sort_order: svc.sort_order,
-      months: svc.months,
+      // `months` is written for legacy rows only; a plan-backed row's grid is derived + overrides.
+      ...(isPlanBacked(svc) ? {} : { months: svc.months }),
     });
   };
 
@@ -259,8 +260,9 @@ export default function PpmSection({ reportId, buildingId, readOnly }: SectionPr
 
   const canSeed = !readOnly && isAdminOrManager;
   const seedButton = canSeed && (
-    <Button variant="outline" size="sm" className="min-h-11" onClick={() => void seedFromPlan().catch(() => {})} disabled={isSeeding}>
-      <ListPlus className="mr-2 h-4 w-4" /> {isSeeding ? 'Seeding…' : "Seed from the building's PPM plan"}
+    <Button variant="outline" size="sm" className="min-h-11" onClick={() => void seedFromPlan().catch(() => {})} disabled={isSeeding}
+      title="Adds any active plan line this report does not have yet; never duplicates a row">
+      <ListPlus className="mr-2 h-4 w-4" /> {isSeeding ? 'Syncing…' : 'Sync with the PPM plan'}
     </Button>
   );
 

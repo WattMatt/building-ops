@@ -8,14 +8,24 @@
  * same function for this building so a new line shows up on the Checklists tab today. The
  * month grid is read from the `ppm_monthly_status` view (`derived`), never written here.
  *
+ * Plan lines are NEVER hard-deleted: `task_instances.source_ppm_id` and
+ * `ppm_services.plan_service_id` reference them, and the history behind a building's grid
+ * would go with the row. `is_active = false` is the archive — an inactive line stops
+ * generating occurrences and drops out of report seeding, but every past occurrence, report
+ * row and derived month stays readable. There is deliberately no `deleteLine` here.
+ *
  * Writes `.select('id')` so an RLS-filtered update (site users, another organisation) surfaces
  * as a plain permission message instead of a silent no-op.
+ *
+ * `fetchMergedPpmGrids(rows, months)` is the one place every read-only consumer of a report's
+ * PPM grid (K11, the PDF, the calendar) turns `ppm_services` rows into merged cells, so none
+ * of them can fall back to reading `months` alone.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { fdb } from '@/integrations/supabase/fortress-db';
 import type { RecurrenceRule } from '@/lib/recurrence';
-import type { DerivedRow } from '@/lib/ppmGrid';
+import { mergePpmGrids, type DerivedRow, type MergedCell, type PpmGridRow } from '@/lib/ppmGrid';
 
 export const BUILDING_PPM_KEY = (buildingId: string | undefined) => ['building-ppm', buildingId] as const;
 export const PPM_DERIVED_KEY = (buildingId: string | undefined, months: readonly string[]) =>
@@ -62,16 +72,45 @@ function permissionOrThrow(error: PgError | null, rows: unknown[] | null | undef
   if (!rows || rows.length === 0) throw new Error(PPM_PERMISSION_MESSAGE);
 }
 
-/** The view rows for one building across `months` ("YYYY-MM" keys). Empty months → no query. */
-export async function fetchDerivedPpm(buildingId: string, months: readonly string[]): Promise<DerivedRow[]> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function queryDerived(scope: (q: any) => any, months: readonly string[]): Promise<DerivedRow[]> {
   if (months.length === 0) return [];
-  const { data, error } = await db
-    .from('ppm_monthly_status')
-    .select('ppm_service_id, service_name, period_month, status, done_on')
-    .eq('building_id', buildingId)
-    .in('period_month', [...months]);
+  const { data, error } = await scope(
+    db.from('ppm_monthly_status').select('ppm_service_id, service_name, period_month, status, done_on'),
+  ).in('period_month', [...months]);
   if (error) throw error;
   return (data ?? []) as DerivedRow[];
+}
+
+/** The view rows for one building across `months` ("YYYY-MM" keys). Empty months → no query. */
+export async function fetchDerivedPpm(buildingId: string, months: readonly string[]): Promise<DerivedRow[]> {
+  return queryDerived((q) => q.eq('building_id', buildingId), months);
+}
+
+/** The view rows for several buildings at once (the portfolio calendar). No buildings → no query. */
+export async function fetchDerivedPpmForBuildings(buildingIds: readonly string[], months: readonly string[]): Promise<DerivedRow[]> {
+  if (buildingIds.length === 0) return [];
+  return queryDerived((q) => q.in('building_id', [...buildingIds]), months);
+}
+
+/** A `ppm_services` row as the merged-grid consumers read it (`select('*')`, then narrowed). */
+export interface PpmGridSourceRow extends PpmGridRow {
+  building_id: string;
+}
+
+/**
+ * One merged grid per `ppm_services` row: override > derived > legacy `months` > blank, over
+ * `months` (a report's fiscal window, or the calendar's range). Reads `ppm_monthly_status`
+ * once for the buildings the plan-backed rows belong to; rows with no plan line cost no
+ * query and simply get their `months` back as legacy cells.
+ */
+export async function fetchMergedPpmGrids(
+  rows: readonly PpmGridSourceRow[],
+  months: readonly string[],
+): Promise<Map<string, Record<string, MergedCell>>> {
+  const buildingIds = [...new Set(rows.filter((r) => r.plan_service_id).map((r) => r.building_id))];
+  const derived = await fetchDerivedPpmForBuildings(buildingIds, months);
+  return mergePpmGrids(rows, derived, months);
 }
 
 /** Derived month statuses for a building over a window. Shared by the tab and the report section. */

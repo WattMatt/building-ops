@@ -128,7 +128,7 @@ describe('PpmSection — plan-backed rows', () => {
     const cell = await screen.findByRole('img', { name: /Fire equipment 2026-08: N\/A \(override/ });
     expect(cell).toHaveAttribute('title', expect.stringContaining('Extinguishers replaced'));
     expect(screen.queryByRole('button', { name: /Lift service 2026-07/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: /Seed from the building/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Sync with the PPM plan/ })).toBeNull();
   });
 });
 
@@ -144,24 +144,51 @@ describe('PpmSection — legacy rows', () => {
   });
 });
 
-describe('PpmSection — seeding from the plan', () => {
-  it('admins and managers can seed the report from the building plan', async () => {
+describe('PpmSection — syncing with the plan', () => {
+  it('admins and managers can sync the report with the building plan', async () => {
     renderSection();
-    fireEvent.click(await screen.findByRole('button', { name: /Seed from the building's PPM plan/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Sync with the PPM plan/ }));
     expect(state.seedFromPlan).toHaveBeenCalledTimes(1);
   });
 
-  it('offers seeding in the empty state and hides it from site users', async () => {
+  it('offers the sync in the empty state', async () => {
     state.services = [];
     renderSection();
     expect(await screen.findByText('No services on this report yet.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Seed from the building's PPM plan/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Sync with the PPM plan/ })).toBeInTheDocument();
   });
 
-  it('hides seeding from site users', async () => {
+  it('hides the sync from site users', async () => {
     state.isAdminOrManager = false;
     renderSection();
     await screen.findByRole('button', { name: 'Lift service 2026-09: Due' });
-    expect(screen.queryByRole('button', { name: /Seed from the building's PPM plan/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Sync with the PPM plan/ })).toBeNull();
+  });
+});
+
+/** The mocked upsertService takes no typed params; read its first call's payload untyped. */
+const firstUpsertPayload = () => (state.upsertService.mock.calls as unknown[][])[0][0] as Record<string, unknown>;
+
+describe('PpmSection — text edits and months', () => {
+  it('a plan-backed row\'s comment edit sends no months (its grid is derived + overrides)', async () => {
+    renderSection();
+    await screen.findByRole('button', { name: 'Lift service 2026-09: Due' });
+    const comment = screen.getAllByPlaceholderText('Comment')[0]; // r1, plan-backed
+    fireEvent.change(comment, { target: { value: 'Contractor changed' } });
+    fireEvent.blur(comment);
+    await waitFor(() => expect(state.upsertService).toHaveBeenCalledTimes(1));
+    const payload = firstUpsertPayload();
+    expect(payload).toMatchObject({ id: 'r1', service_name: 'Lift service', comment: 'Contractor changed' });
+    expect('months' in payload).toBe(false);
+  });
+
+  it('a legacy row\'s text edit still carries its months', async () => {
+    renderSection();
+    await screen.findByRole('button', { name: 'Lift service 2026-09: Due' });
+    const comment = screen.getAllByPlaceholderText('Comment')[2]; // r3, legacy
+    fireEvent.change(comment, { target: { value: 'Quarterly' } });
+    fireEvent.blur(comment);
+    await waitFor(() => expect(state.upsertService).toHaveBeenCalledTimes(1));
+    expect(firstUpsertPayload()).toMatchObject({ id: 'r3', comment: 'Quarterly', months: { '2026-07': { status: 'due' } } });
   });
 });

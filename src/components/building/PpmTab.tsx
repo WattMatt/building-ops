@@ -176,6 +176,7 @@ export default function PpmTab({ buildingId }: Props) {
           </div>
         </div>
         <Hint>Occurrences are generated every night for the next year; completing them on the Checklists tab fills this grid.</Hint>
+        <Hint>Inactive lines stop generating tasks; history is kept. Lines are never deleted.</Hint>
 
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>

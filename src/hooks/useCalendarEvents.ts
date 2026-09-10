@@ -20,6 +20,7 @@ import { fdb } from '@/integrations/supabase/fortress-db';
 import { useAuth } from '@/contexts/AuthContext';
 import { todayInOperatingTz } from '@/lib/myWork';
 import { PERSIST_DEFAULTS } from '@/lib/persist';
+import { fetchMergedPpmGrids, type PpmGridSourceRow } from '@/hooks/useBuildingPpm';
 import {
   assetEvent,
   documentEvent,
@@ -35,6 +36,7 @@ import {
   type CalendarEvent,
   type DocumentRow,
   type IssueRow,
+  type PpmMonthCell,
   type PpmRow,
   type ReportRow,
   type SignoffRequestRow,
@@ -104,6 +106,46 @@ export function monthKeysBetween(from: string, to: string): string[] {
  */
 export function ppmMonthsFilter(from: string, to: string): string {
   return monthKeysBetween(from, to).map((k) => `months->${k}.not.is.null`).join(',');
+}
+
+/**
+ * The full PPM row filter: every PLAN-BACKED row (its grid is derived server-side from
+ * execution, so `months` says nothing about it) plus the legacy rows `ppmMonthsFilter`
+ * admits. Plan-backed rows are narrowed to the range after the merge, by month key.
+ */
+export function ppmRowsFilter(from: string, to: string): string {
+  return ['plan_service_id.not.is.null', ppmMonthsFilter(from, to)].filter(Boolean).join(',');
+}
+
+/** A `ppm_services` row as the calendar reads it (`select('*')`, narrowed). */
+type CalendarPpmRow = PpmRow & PpmGridSourceRow & { created_at?: string | null };
+
+/**
+ * Turn the fetched rows into the `PpmRow`s `ppmEvents` expands: legacy rows pass through
+ * with their `months`; plan-backed rows get their MERGED grid (override > derived > legacy)
+ * over the range's months, and one row per plan line — every report month carries a row for
+ * the same line, so the newest report's row (its overrides) speaks for it.
+ */
+export async function mergedPpmRows(rows: readonly CalendarPpmRow[], from: string, to: string): Promise<PpmRow[]> {
+  const monthKeys = monthKeysBetween(from, to);
+  const planBacked = rows.filter((r) => r.plan_service_id);
+  const grids = await fetchMergedPpmGrids(planBacked, monthKeys);
+  const newestPerLine = new Map<string, CalendarPpmRow>();
+  for (const r of planBacked) {
+    const cur = newestPerLine.get(r.plan_service_id!);
+    if (!cur || (r.created_at ?? '') > (cur.created_at ?? '')) newestPerLine.set(r.plan_service_id!, r);
+  }
+  const out: PpmRow[] = [];
+  for (const r of rows) {
+    if (!r.plan_service_id) { out.push(r); continue; }
+    if (newestPerLine.get(r.plan_service_id) !== r) continue;
+    const months: Record<string, PpmMonthCell> = {};
+    for (const [mk, cell] of Object.entries(grids.get(r.id) ?? {})) {
+      if (cell.status) months[mk] = { status: cell.status, date: cell.doneOn ?? null };
+    }
+    out.push({ id: r.id, service_name: r.service_name, building_id: r.building_id, report_id: r.report_id, months });
+  }
+  return out;
 }
 
 export function useCalendarEvents({ scope, from, to }: UseCalendarEventsArgs): UseCalendarEventsResult {
@@ -193,20 +235,21 @@ export function useCalendarEvents({ scope, from, to }: UseCalendarEventsArgs): U
         },
       },
       {
-        // Months live in a jsonb map. Rows are limited server-side to those with a cell in one
-        // of the range's months (so a month step does not re-download the whole table); the
-        // day-level range is then applied after expansion (see `events`).
+        // Legacy rows keep their months in a jsonb map and are limited server-side to those
+        // with a cell in one of the range's months (so a month step does not re-download the
+        // whole table). Plan-backed rows are all fetched and merged with `ppm_monthly_status`
+        // for the range's months (`mergedPpmRows`); the day-level range is then applied after
+        // expansion (see `events`).
         queryKey: keyFor('ppm'),
         ...persistMeta,
         enabled: !!uid,
         queryFn: async (): Promise<PpmRow[]> => {
-          let q = supabase.from('ppm_services').select('id, building_id, service_name, months, report_id');
-          const monthsFilter = ppmMonthsFilter(from, to);
-          if (monthsFilter) q = q.or(monthsFilter);
+          // plan_service_id / overrides are not yet in the generated types — read the whole row and narrow.
+          let q = supabase.from('ppm_services').select('*').or(ppmRowsFilter(from, to));
           if (buildingId) q = q.eq('building_id', buildingId);
           const { data, error } = await q.order('service_name');
           if (error) throw new Error(error.message);
-          return (data ?? []) as PpmRow[];
+          return mergedPpmRows((data ?? []) as unknown as CalendarPpmRow[], from, to);
         },
       },
       {
