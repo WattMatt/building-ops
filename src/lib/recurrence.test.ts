@@ -15,8 +15,8 @@ type Row = { rule: RecurrenceRule; from: string; to: string; expected: string[] 
 const rows = fixture as Row[];
 
 describe('occurrences — pinned to docs/fixtures/recurrence-occurrences.json', () => {
-  it('has the ten fixture rows', () => {
-    expect(rows).toHaveLength(10);
+  it('has the eleven fixture rows', () => {
+    expect(rows).toHaveLength(11);
   });
 
   for (const row of rows) {
@@ -87,7 +87,6 @@ describe('isValidRule — mirror of public.recurrence_is_valid', () => {
     { every: 52, unit: 'day' },
     { every: 1, unit: 'week', weekdays: [1, 3, 5] },
     { every: 2, unit: 'week', weekdays: [7] },
-    { every: 1, unit: 'week', weekdays: [] }, // SQL accepts an empty array
     { every: 1, unit: 'month' },
     { every: 1, unit: 'month', monthDay: 31 },
     { every: 1, unit: 'month', monthDay: 'last' },
@@ -112,6 +111,7 @@ describe('isValidRule — mirror of public.recurrence_is_valid', () => {
     { every: 1.5, unit: 'day' },
     { every: '1', unit: 'day' },
     { every: 1, unit: 'week' }, // weekdays required for week
+    { every: 1, unit: 'week', weekdays: [] }, // ...and at least one of them, else nothing ever generates
     { every: 1, unit: 'week', weekdays: 1 },
     { every: 1, unit: 'week', weekdays: [0] },
     { every: 1, unit: 'week', weekdays: [8] },

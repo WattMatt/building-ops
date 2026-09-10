@@ -113,7 +113,7 @@ export function isValidRule(rule: unknown): rule is RecurrenceRule {
   if (r.monthDay !== undefined && r.monthDay !== 'last' && !isInt(r.monthDay, 1, 31)) return false;
   if (r.month !== undefined && !isInt(r.month, 1, 12)) return false;
   if (r.lead !== undefined && !isInt(r.lead, 0, 60)) return false;
-  if (r.unit === 'week' && r.weekdays === undefined) return false;
+  if (r.unit === 'week' && (!Array.isArray(r.weekdays) || r.weekdays.length === 0)) return false;
   if (r.unit === 'year' && r.month === undefined) return false;
   return true;
 }

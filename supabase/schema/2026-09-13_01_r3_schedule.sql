@@ -33,7 +33,7 @@ as $$
          or ((r->>'monthDay') ~ '^[0-9]+$' and (r->>'monthDay')::int between 1 and 31))
     and (r->'month' is null or ((r->>'month') ~ '^[0-9]+$' and (r->>'month')::int between 1 and 12))
     and (r->'lead' is null or ((r->>'lead') ~ '^[0-9]+$' and (r->>'lead')::int between 0 and 60))
-    and ((r->>'unit') <> 'week' or r->'weekdays' is not null)
+    and ((r->>'unit') <> 'week' or (r->'weekdays' is not null and jsonb_array_length(r->'weekdays') > 0))
     and ((r->>'unit') <> 'year' or r->'month' is not null)
   ), false)
 $$;
