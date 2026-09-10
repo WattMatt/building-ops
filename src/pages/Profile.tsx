@@ -25,7 +25,7 @@ import { AvatarPicker } from '@/components/avatar/AvatarPicker';
 import { ImageCropper } from '@/components/avatar/ImageCropper';
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter';
 import { gatePassword } from '@/lib/password-strength';
-import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare, Upload, Lock, Eye, EyeOff, Trash2, Crop } from 'lucide-react';
+import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare, Upload, Lock, Eye, EyeOff, Trash2, Crop, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ProfileData {
@@ -38,6 +38,7 @@ interface ProfileData {
   daily_digest: boolean | null;
   issue_updates: boolean | null;
   task_reminders: boolean | null;
+  geotag_photos: boolean | null;
 }
 
 export default function Profile() {
@@ -52,6 +53,7 @@ export default function Profile() {
   const [dailyDigest, setDailyDigest] = useState(false);
   const [issueUpdates, setIssueUpdates] = useState(true);
   const [taskReminders, setTaskReminders] = useState(true);
+  const [geotagPhotos, setGeotagPhotos] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingNotifications, setIsSavingNotifications] = useState(false);
@@ -79,13 +81,16 @@ export default function Profile() {
     const fetchProfile = async () => {
       setIsLoading(true);
       try {
-        const { data, error } = await supabase
+        const cols = 'full_name, avatar_url, phone, email, email_notifications, overdue_alerts, daily_digest, issue_updates, task_reminders';
+        // geotag_photos is not yet in the generated types; regenerate after the migration ships.
+        const { data: raw, error } = await supabase
           .from('profiles')
-          .select('full_name, avatar_url, phone, email, email_notifications, overdue_alerts, daily_digest, issue_updates, task_reminders')
+          .select(`${cols}, geotag_photos` as typeof cols)
           .eq('id', userId)
           .maybeSingle();
 
         if (error) throw error;
+        const data = raw as ProfileData | null;
 
         if (data && !cancelled) {
           setProfile(data);
@@ -97,6 +102,7 @@ export default function Profile() {
           setDailyDigest(data.daily_digest ?? false);
           setIssueUpdates(data.issue_updates ?? true);
           setTaskReminders(data.task_reminders ?? true);
+          setGeotagPhotos(data.geotag_photos ?? false);
         }
       } catch (error) {
         if (!cancelled) {
@@ -152,14 +158,16 @@ export default function Profile() {
     try {
       const { data, error } = await supabase
         .from('profiles')
+        // geotag_photos is not yet in the generated types; regenerate after the migration ships.
         .update({
           email_notifications: emailNotifications,
           overdue_alerts: overdueAlerts,
           daily_digest: dailyDigest,
           issue_updates: issueUpdates,
           task_reminders: taskReminders,
+          geotag_photos: geotagPhotos,
           updated_at: new Date().toISOString(),
-        })
+        } as Record<string, unknown>)
         .eq('id', user.id)
         .select('id');
 
@@ -662,6 +670,20 @@ export default function Profile() {
                 checked={dailyDigest}
                 onCheckedChange={setDailyDigest}
               />
+            </div>
+
+            <Separator />
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="photo-geotag" className="flex items-center gap-2">
+                  <MapPin className="h-4 w-4" />
+                  Location on photos
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Adds the location to the caption on photos you take. Off by default; nothing is stored separately.
+                </p>
+              </div>
+              <Switch id="photo-geotag" checked={geotagPhotos} onCheckedChange={setGeotagPhotos} />
             </div>
           </div>
 
