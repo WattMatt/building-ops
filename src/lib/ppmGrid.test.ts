@@ -1,0 +1,102 @@
+import { describe, it, expect } from 'vitest';
+import {
+  derivedByService, fiscalWindow, gridHasData, mergePpmGrid, ppmCompletionFromGrid, type DerivedRow,
+} from './ppmGrid';
+
+const WINDOW = fiscalWindow('2026-09-01');
+const row = (period_month: string, status: string, extra: Partial<DerivedRow> = {}): DerivedRow =>
+  ({ ppm_service_id: 'p1', period_month, status, ...extra });
+
+describe('fiscalWindow', () => {
+  it('starts in July of the same year for months from July on', () => {
+    expect(fiscalWindow('2026-09-01')).toEqual([
+      '2026-07', '2026-08', '2026-09', '2026-10', '2026-11', '2026-12',
+      '2027-01', '2027-02', '2027-03', '2027-04', '2027-05', '2027-06',
+    ]);
+  });
+  it('starts in July of the previous year for January to June', () => {
+    expect(fiscalWindow('2026-03-01')[0]).toBe('2025-07');
+    expect(fiscalWindow('2026-03-01')[11]).toBe('2026-06');
+  });
+  it('accepts a Date and defaults to today', () => {
+    expect(fiscalWindow(new Date(2026, 6, 15))[0]).toBe('2026-07');
+    expect(fiscalWindow()).toHaveLength(12);
+  });
+});
+
+describe('mergePpmGrid', () => {
+  it('fills every month of the window, blank where nothing is known', () => {
+    const grid = mergePpmGrid(WINDOW, [], {});
+    expect(Object.keys(grid)).toEqual(WINDOW);
+    expect(grid['2026-07']).toEqual({ status: null, source: 'none', derivedStatus: null });
+  });
+
+  it('takes the derived status when there is no override', () => {
+    const grid = mergePpmGrid(WINDOW, [row('2026-08', 'done', { done_on: '2026-08-12' }), row('2026-09', 'due')], {});
+    expect(grid['2026-08']).toMatchObject({ status: 'done', source: 'derived', doneOn: '2026-08-12', derivedStatus: 'done' });
+    expect(grid['2026-09']).toMatchObject({ status: 'due', source: 'derived', doneOn: null });
+  });
+
+  it('an override wins over derived and keeps the derived status and note beside it', () => {
+    const grid = mergePpmGrid(WINDOW, [row('2026-08', 'missed')], {
+      '2026-08': { status: 'na', note: 'Lift decommissioned', by: 'u1', at: '2026-09-01T00:00:00Z' },
+    });
+    expect(grid['2026-08']).toMatchObject({ status: 'na', source: 'override', note: 'Lift decommissioned', derivedStatus: 'missed' });
+  });
+
+  it('an override applies even to a month with no occurrence', () => {
+    const grid = mergePpmGrid(WINDOW, [], { '2026-10': { status: 'done', note: 'Done ad hoc' } });
+    expect(grid['2026-10']).toMatchObject({ status: 'done', source: 'override', derivedStatus: null });
+  });
+
+  it('the strongest signal wins when a month holds several occurrences (done > missed > due)', () => {
+    const grid = mergePpmGrid(WINDOW, [row('2026-08', 'due'), row('2026-08', 'missed'), row('2026-08', 'done', { done_on: '2026-08-20' })], {});
+    expect(grid['2026-08']).toMatchObject({ status: 'done', doneOn: '2026-08-20' });
+    const grid2 = mergePpmGrid(WINDOW, [row('2026-08', 'due'), row('2026-08', 'missed')], {});
+    expect(grid2['2026-08'].status).toBe('missed');
+  });
+
+  it('ignores derived rows outside the window and statuses it does not know', () => {
+    const grid = mergePpmGrid(WINDOW, [row('2025-01', 'done'), row('2026-08', 'weird')], {});
+    expect(grid['2026-08'].source).toBe('none');
+    expect(Object.keys(grid)).not.toContain('2025-01');
+  });
+
+  it('falls back to a legacy months cell only when neither override nor derived exists', () => {
+    const legacy = { '2026-07': { status: 'done' as const, date: '2026-07-03' }, '2026-08': { status: 'due' as const } };
+    const grid = mergePpmGrid(WINDOW, [row('2026-08', 'done')], {}, legacy);
+    expect(grid['2026-07']).toMatchObject({ status: 'done', source: 'legacy' });
+    expect(grid['2026-08']).toMatchObject({ status: 'done', source: 'derived' });
+  });
+});
+
+describe('derivedByService', () => {
+  it('groups view rows by plan line', () => {
+    const m = derivedByService([row('2026-08', 'done'), row('2026-09', 'due', { ppm_service_id: 'p2' }), row('2026-09', 'due')]);
+    expect(m.get('p1')?.map((r) => r.period_month)).toEqual(['2026-08', '2026-09']);
+    expect(m.get('p2')).toHaveLength(1);
+  });
+});
+
+describe('ppmCompletionFromGrid (K11)', () => {
+  it('counts a row as serviced when any cell is done, whatever layer produced it', () => {
+    const rows = [
+      mergePpmGrid(WINDOW, [row('2026-08', 'done')], {}),                                      // derived done
+      mergePpmGrid(WINDOW, [row('2026-08', 'missed')], { '2026-08': { status: 'done', note: 'n' } }), // override done
+      mergePpmGrid(WINDOW, [], {}, { '2026-07': { status: 'done' } }),                          // legacy done
+      mergePpmGrid(WINDOW, [row('2026-08', 'due'), row('2026-09', 'missed')], {}),               // not done
+      mergePpmGrid(WINDOW, [row('2026-08', 'done')], { '2026-08': { status: 'na', note: 'n' } }), // override hides the done
+    ];
+    expect(ppmCompletionFromGrid(rows)).toEqual({ doneCount: 3, total: 5, pct: 60 });
+  });
+  it('is null for no rows', () => {
+    expect(ppmCompletionFromGrid([]).pct).toBeNull();
+  });
+});
+
+describe('gridHasData', () => {
+  it('is true when any cell came from a layer', () => {
+    expect(gridHasData(mergePpmGrid(WINDOW, [], {}))).toBe(false);
+    expect(gridHasData(mergePpmGrid(WINDOW, [row('2026-08', 'due')], {}))).toBe(true);
+  });
+});

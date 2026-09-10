@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import TenantsTab from '@/components/building/TenantsTab';
 import AssetsTab from '@/components/building/AssetsTab';
+import PpmTab from '@/components/building/PpmTab';
 import DocumentsTab from '@/components/building/DocumentsTab';
 import BuildingCalendarTab from '@/components/building/BuildingCalendarTab';
 import NotesTab from '@/components/building/NotesTab';
@@ -210,6 +211,7 @@ export default function BuildingDetails() {
           <TabsTrigger value="reports" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Reports</TabsTrigger>
           <TabsTrigger value="tenants" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Tenants</TabsTrigger>
           <TabsTrigger value="assets" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Assets</TabsTrigger>
+          <TabsTrigger value="ppm" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">PPM</TabsTrigger>
           {/* Value stays `maintenance` so existing ?tab=maintenance deep links keep working. */}
           <TabsTrigger value="maintenance" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
             <span className="hidden sm:inline">Calendar</span>
@@ -357,6 +359,10 @@ export default function BuildingDetails() {
 
         <TabsContent value="assets" className="mt-6">
           <AssetsTab buildingId={building.id} />
+        </TabsContent>
+
+        <TabsContent value="ppm" className="mt-6">
+          <PpmTab buildingId={building.id} />
         </TabsContent>
 
         <TabsContent value="maintenance" className="mt-6">

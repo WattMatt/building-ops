@@ -13,6 +13,7 @@ vi.mock('@/hooks/useBuildingScore', () => ({
 // Each tab has its own tests; here we only care about the page shell on a phone.
 vi.mock('@/components/building/TenantsTab', () => ({ default: () => <div>TenantsTab</div> }));
 vi.mock('@/components/building/AssetsTab', () => ({ default: () => <div>AssetsTab</div> }));
+vi.mock('@/components/building/PpmTab', () => ({ default: () => <div>PpmTab</div> }));
 vi.mock('@/components/building/DocumentsTab', () => ({ default: () => <div>DocumentsTab</div> }));
 vi.mock('@/components/building/BuildingCalendarTab', () => ({ default: () => <div>BuildingCalendarTab</div> }));
 vi.mock('@/components/building/NotesTab', () => ({ default: () => <div>NotesTab</div> }));
