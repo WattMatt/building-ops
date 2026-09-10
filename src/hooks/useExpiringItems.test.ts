@@ -23,8 +23,10 @@ const rows: ExpiringItem[] = [
   },
 ];
 
+// The hook sets its own `retry`, which overrides a client default, so the retry is real here — as in the
+// app — and only its delay is removed to keep the tests fast.
 function wrapper({ children }: { children: ReactNode }) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
   return createElement(QueryClientProvider, { client }, children);
 }
 
@@ -55,5 +57,19 @@ describe('useExpiringItems', () => {
     const { result } = renderHook(() => useExpiringItems(30), { wrapper });
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect((result.current.error as { message: string }).message).toBe('permission denied');
+  });
+
+  it('does not retry when the function is missing (PGRST202)', async () => {
+    state.rpc.mockResolvedValue({ data: null, error: { message: 'Could not find the function public.expiring_items', code: 'PGRST202' } });
+    const { result } = renderHook(() => useExpiringItems(30), { wrapper });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(state.rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries any other error once, not the default three times', async () => {
+    state.rpc.mockResolvedValue({ data: null, error: { message: 'upstream timeout', code: '57014' } });
+    const { result } = renderHook(() => useExpiringItems(30), { wrapper });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(state.rpc).toHaveBeenCalledTimes(2);
   });
 });

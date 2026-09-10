@@ -11,7 +11,10 @@ import { useOrgSettings } from '@/hooks/useOrgSettings';
 import { FEATURE_LABELS, FEATURE_NAMES, type FeatureName } from '@/lib/orgSettings';
 
 export function FeatureFlagsCard({ canEdit }: { canEdit: boolean }) {
-  const { settings, isLoading, save, isSaving } = useOrgSettings();
+  const { settings, isLoading, isError, save, isSaving } = useOrgSettings();
+  // Nothing to toggle until the real values are in: the defaults shown while loading or after a failed
+  // load are not the org's, and saving them would silently overwrite whatever is stored.
+  const locked = !canEdit || isLoading || isError;
 
   const toggle = async (name: FeatureName, on: boolean) => {
     try {
@@ -36,10 +39,11 @@ export function FeatureFlagsCard({ canEdit }: { canEdit: boolean }) {
               <Label htmlFor={`feature-${name}`} className="font-medium">{FEATURE_LABELS[name].label}</Label>
               <p className="text-xs text-muted-foreground">{FEATURE_LABELS[name].description}</p>
             </div>
-            <Switch id={`feature-${name}`} checked={settings.features[name]} disabled={!canEdit || isLoading || isSaving}
+            <Switch id={`feature-${name}`} checked={settings.features[name]} disabled={locked || isSaving}
               onCheckedChange={(on) => void toggle(name, on)} aria-label={FEATURE_LABELS[name].label} />
           </div>
         ))}
+        {isError && <p className="text-sm text-destructive">Settings could not be loaded</p>}
         <Hint>These features arrive in later releases; the switches are here now so they can be turned on the day they land.</Hint>
       </CardContent>
     </Card>

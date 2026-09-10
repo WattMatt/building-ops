@@ -18,6 +18,9 @@ import { notify } from '@/lib/notify';
 import { describeSeed, seedPpmFromPlan } from '@/hooks/useReportPpm';
 
 const REPORTS_KEY = ['fortress-reports'];
+/** Keys of the readers that derive figures from report status (usePortfolioCompliance, useBuildingsScores). */
+const PORTFOLIO_COMPLIANCE_KEY = ['portfolio-compliance'];
+const BUILDINGS_OHS_SCORES_KEY = ['buildings-ohs-scores'];
 
 /** Report types that carry the PPM section (see REPORT_SECTIONS in lib/fortressReports.ts). */
 const PPM_REPORT_TYPES: ReadonlySet<string> = new Set<ReportType>(['ops_monthly']);
@@ -241,6 +244,10 @@ export function useReportLifecycle(reportId: string) {
     },
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: REPORTS_KEY });
+      // The portfolio compliance card and the building chips read the latest filed/approved ops report per
+      // building; a transition changes what they show, so they must not wait out their stale time.
+      qc.invalidateQueries({ queryKey: PORTFOLIO_COMPLIANCE_KEY });
+      qc.invalidateQueries({ queryKey: BUILDINGS_OHS_SCORES_KEY });
       const label = r.title ?? 'Building report';
       const url = `/reports/fortress/${r.id}`;
       if (r.status === 'submitted') {

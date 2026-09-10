@@ -22,13 +22,24 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 const RANGES = [30, 90, 365] as const;
 type Range = (typeof RANGES)[number];
 
-interface ChartSpec { key: keyof PortfolioRow; title: string; pct?: boolean }
+/** A chart plots the sum of `keys` per day: one column for most, building + contractor documents for expiry. */
+interface ChartSpec { id: string; keys: (keyof PortfolioRow)[]; title: string; pct?: boolean }
 const CHARTS: ChartSpec[] = [
-  { key: 'compliance_avg', title: 'OHS compliance (portfolio average)', pct: true },
-  { key: 'issues_open', title: 'Open issues' },
-  { key: 'tasks_overdue', title: 'Overdue tasks' },
-  { key: 'docs_expiring_30', title: 'Documents expiring within 30 days' },
+  { id: 'compliance', keys: ['compliance_avg'], title: 'OHS compliance (portfolio average)', pct: true },
+  { id: 'issues', keys: ['issues_open'], title: 'Open issues' },
+  { id: 'tasks', keys: ['tasks_overdue'], title: 'Overdue tasks' },
+  { id: 'docs', keys: ['docs_expiring_30', 'contractor_docs_expiring_30'], title: 'Documents expiring within 30 days' },
 ];
+
+/** Sum of the named columns, or null when none of them holds a number (a gap the line must not bridge). */
+function sumColumns(row: PortfolioRow, keys: (keyof PortfolioRow)[]): number | null {
+  let total: number | null = null;
+  for (const k of keys) {
+    const v = num(row[k]);
+    if (v !== null) total = (total ?? 0) + v;
+  }
+  return total;
+}
 
 /** Tick labels show MM-DD; the axis itself is keyed on the full day so two years' 09-10 never collide. */
 const tickDay = (day: string) => day.slice(5);
@@ -36,7 +47,7 @@ const tickDay = (day: string) => day.slice(5);
 const TOOLTIP_STYLE = { backgroundColor: 'hsl(var(--popover))', borderColor: 'hsl(var(--border))', color: 'hsl(var(--popover-foreground))', fontSize: 12 };
 
 function TrendChart({ rows, spec, boundaryDay }: { rows: PortfolioRow[]; spec: ChartSpec; boundaryDay: string | null }) {
-  const data = rows.map((r) => ({ day: r.day, value: num(r[spec.key]) }));
+  const data = rows.map((r) => ({ day: r.day, value: sumColumns(r, spec.keys) }));
   return (
     <Card>
       <CardHeader className="pb-2"><CardTitle className="text-base">{spec.title}</CardTitle></CardHeader>
@@ -107,13 +118,13 @@ export default function Trends() {
         <Card><CardContent className="p-6 text-sm text-destructive">Could not load the portfolio snapshots.</CardContent></Card>
       ) : portfolio.isLoading ? (
         <div className="grid gap-4 md:grid-cols-2" aria-busy="true" aria-label="Loading trends">
-          {CHARTS.map((spec) => <Skeleton key={spec.key} className="h-[260px]" />)}
+          {CHARTS.map((spec) => <Skeleton key={spec.id} className="h-[260px]" />)}
         </div>
       ) : !rows.length ? (
         <Card><CardContent className="p-6 text-sm text-muted-foreground">No snapshots yet. The first one is written at 05:00 after the migration is applied.</CardContent></Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
-          {CHARTS.map((spec) => <TrendChart key={spec.key} rows={rows} spec={spec} boundaryDay={boundaryDay} />)}
+          {CHARTS.map((spec) => <TrendChart key={spec.id} rows={rows} spec={spec} boundaryDay={boundaryDay} />)}
         </div>
       )}
       <Card>

@@ -67,12 +67,13 @@ describe('snapshotRowsOrEmpty', () => {
 });
 
 describe('snapshotQueryDefaults', () => {
-  it('retries once, never when the table is missing', () => {
+  it('retries once, never when the table or function is missing', () => {
     const { retry } = snapshotQueryDefaults;
     expect(retry(0, { message: 'boom' })).toBe(true);
     expect(retry(1, { message: 'boom' })).toBe(false);
     expect(retry(0, { message: 'missing', code: 'PGRST205' })).toBe(false);
     expect(retry(0, { message: 'missing', code: '42P01' })).toBe(false);
+    expect(retry(0, { message: 'missing function', code: 'PGRST202' })).toBe(false);
     expect(retry(0, undefined)).toBe(true);
     expect(snapshotQueryDefaults.staleTime).toBe(10 * 60_000);
   });

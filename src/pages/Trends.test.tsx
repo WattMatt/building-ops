@@ -6,10 +6,10 @@ import type { ReactNode } from 'react';
 
 // recharts measures its container; in jsdom that is 0×0, so stub the components, keep the tree and
 // record the props the axis/line were given so the wiring (not the drawing) is under test.
-const charts = vi.hoisted(() => ({ line: [] as Record<string, unknown>[], xAxis: [] as Record<string, unknown>[], yAxis: [] as Record<string, unknown>[], grid: [] as Record<string, unknown>[], tooltip: [] as Record<string, unknown>[], refLine: [] as Record<string, unknown>[] }));
+const charts = vi.hoisted(() => ({ chart: [] as Record<string, unknown>[], line: [] as Record<string, unknown>[], xAxis: [] as Record<string, unknown>[], yAxis: [] as Record<string, unknown>[], grid: [] as Record<string, unknown>[], tooltip: [] as Record<string, unknown>[], refLine: [] as Record<string, unknown>[] }));
 vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: { children: ReactNode }) => <div data-testid="chart">{children}</div>,
-  LineChart: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  LineChart: ({ children, ...p }: { children: ReactNode }) => { charts.chart.push(p); return <div>{children}</div>; },
   CartesianGrid: (p: Record<string, unknown>) => { charts.grid.push(p); return null; },
   Line: (p: Record<string, unknown>) => { charts.line.push(p); return null; },
   ReferenceLine: (p: Record<string, unknown>) => { charts.refLine.push(p); return null; },
@@ -27,10 +27,10 @@ const state = vi.hoisted(() => ({
 const snap = (building_id: string, day: string, compliance_pct: number) => ({
   building_id, day, compliance_pct, task_completion_30d_pct: null, tasks_overdue: 0, issues_open: 0, issues_breached: 0, docs_expiring_30: 0, reconstructed: false, computed_at: `${day}T03:00:00Z`,
 });
-const portfolioRow = (day: string, reconstructed: boolean) => ({
+const portfolioRow = (day: string, reconstructed: boolean, over: Record<string, unknown> = {}) => ({
   day, buildings: 2, compliance_avg: '75.5', critical_avg: null, inspection_pass_avg: null, ppm_done_avg: null, task_completion_avg: null,
   tasks_overdue: 1, tasks_due_7d: 0, issues_open: 3, issues_breached: 0, issues_resolved_30d: 0, docs_expiring_30: 2, docs_expiring_60: 0, docs_expiring_90: 0,
-  docs_expired: 0, assets_overdue: 0, contractor_docs_expiring_30: 0, contractor_docs_expiring_60: 0, contractor_docs_expiring_90: 0, contractor_docs_expired: 0, reconstructed,
+  docs_expired: 0, assets_overdue: 0, contractor_docs_expiring_30: 5, contractor_docs_expiring_60: 0, contractor_docs_expiring_90: 0, contractor_docs_expired: 0, reconstructed, ...over,
 });
 
 vi.mock('@/hooks/usePortfolioTrend', () => ({
@@ -98,6 +98,24 @@ describe('Trends', () => {
     expect(charts.refLine.map((p) => p.x)).toEqual(['2026-09-09', '2026-09-09', '2026-09-09', '2026-09-09']);
     expect(charts.grid.every((p) => p.className === 'stroke-muted')).toBe(true);
     expect(charts.tooltip.every((p) => typeof (p.contentStyle as Record<string, unknown>)?.backgroundColor === 'string')).toBe(true);
+  });
+
+  it('plots building and contractor documents together on the expiring-documents chart', () => {
+    state.portfolio = {
+      data: [
+        portfolioRow('2026-09-08', false),
+        portfolioRow('2026-09-09', false, { docs_expiring_30: null, contractor_docs_expiring_30: 4 }),
+        portfolioRow('2026-09-10', false, { docs_expiring_30: null, contractor_docs_expiring_30: null }),
+      ],
+      isLoading: false, isError: false,
+    };
+    renderPage();
+    const values = (i: number) => (charts.chart[i].data as { day: string; value: number | null }[]).map((d) => d.value);
+    // Chart order follows the titles: compliance, open issues, overdue tasks, documents.
+    expect(values(0)).toEqual([75.5, 75.5, 75.5]);
+    expect(values(1)).toEqual([3, 3, 3]);
+    // 2 building + 5 contractor; a null on one side is not a gap; both null is.
+    expect(values(3)).toEqual([7, 4, null]);
   });
 
   it('says so when every day in the range is a reconstruction', () => {

@@ -12,12 +12,15 @@ import { Label } from '@/components/ui/label';
 import { useOrgSettings } from '@/hooks/useOrgSettings';
 
 export function ReportDueDayCard({ canEdit }: { canEdit: boolean }) {
-  const { settings, isLoading, save, isSaving } = useOrgSettings();
+  const { settings, isLoading, isError, save, isSaving } = useOrgSettings();
   const [day, setDay] = useState(String(settings.report_due_day));
   useEffect(() => { setDay(String(settings.report_due_day)); }, [settings.report_due_day]);
 
   const n = Number(day);
   const valid = Number.isInteger(n) && n >= 1 && n <= 28;
+  // Nothing to edit until the real value is in: the default shown while loading or after a failed load is
+  // not the org's, and saving it would silently overwrite whatever is stored.
+  const locked = !canEdit || isLoading || isError;
 
   const onSave = async () => {
     if (!valid) return;
@@ -40,12 +43,13 @@ export function ReportDueDayCard({ canEdit }: { canEdit: boolean }) {
         <div className="max-w-xs space-y-2">
           <Label htmlFor="report-due-day">Day of the following month (1–28)</Label>
           <Input id="report-due-day" type="number" inputMode="numeric" min={1} max={28} className="h-11" value={day}
-            onChange={(e) => setDay(e.target.value)} disabled={!canEdit || isLoading} aria-invalid={!valid} />
+            onChange={(e) => setDay(e.target.value)} disabled={locked} aria-invalid={!valid} />
           {!valid && <p className="text-xs text-destructive">Enter a whole number from 1 to 28.</p>}
         </div>
+        {isError && <p className="text-sm text-destructive">Settings could not be loaded</p>}
         <Hint>September's OPS and CM reports are due by this day in October. Reminders (a later release) count back from it.</Hint>
         {canEdit && (
-          <Button className="min-h-11" onClick={onSave} disabled={!valid || isSaving || isLoading}>{isSaving ? 'Saving…' : 'Save'}</Button>
+          <Button className="min-h-11" onClick={onSave} disabled={!valid || isSaving || locked}>{isSaving ? 'Saving…' : 'Save'}</Button>
         )}
       </CardContent>
     </Card>

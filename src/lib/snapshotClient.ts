@@ -138,18 +138,21 @@ export function snapshotRowsOrEmpty<Row>(res: PgResult<Row>, where: string): Row
   return res.data ?? [];
 }
 
-/** PostgREST "relation does not exist" (PGRST205 via the schema cache, 42P01 straight from Postgres). */
-const MISSING_TABLE = /PGRST205|42P01/;
+/**
+ * PostgREST "relation does not exist" (PGRST205 via the schema cache, 42P01 straight from Postgres) or
+ * "function does not exist" (PGRST202): an object the migration has not created yet.
+ */
+const MISSING_OBJECT = /PGRST205|42P01|PGRST202/;
 
 /**
- * react-query options every snapshot hook spreads in. Before the migration is applied the table is
- * missing on every attempt, and the default three retries × N hooks × every mount was a storm of 404s;
- * a missing table is never retried, anything else once. Snapshots change once a night, so ten minutes
- * of staleness costs nothing.
+ * react-query options every snapshot hook spreads in (RPC readers borrow `retry` alone). Before the
+ * migration is applied the table or function is missing on every attempt, and the default three retries
+ * × N hooks × every mount was a storm of 404s; a missing object is never retried, anything else once.
+ * Snapshots change once a night, so ten minutes of staleness costs nothing.
  */
 export const snapshotQueryDefaults = {
   retry: (failureCount: number, error: unknown): boolean =>
-    failureCount < 1 && !MISSING_TABLE.test(String((error as PgErrLike | null)?.code ?? '')),
+    failureCount < 1 && !MISSING_OBJECT.test(String((error as PgErrLike | null)?.code ?? '')),
   staleTime: 10 * 60_000,
 };
 

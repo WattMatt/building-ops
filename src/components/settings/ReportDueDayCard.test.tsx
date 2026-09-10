@@ -3,8 +3,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { DEFAULT_ORG_SETTINGS, type OrgSettings } from '@/lib/orgSettings';
 
 // Populated in beforeEach: a hoisted block runs before the imports above are initialised.
-const hook = vi.hoisted(() => ({ save: vi.fn(async (n: unknown) => n), settings: undefined as unknown as OrgSettings, isLoading: false, isSaving: false }));
-vi.mock('@/hooks/useOrgSettings', () => ({ useOrgSettings: () => ({ settings: hook.settings, isLoading: hook.isLoading, isSaving: hook.isSaving, save: hook.save, organizationId: 'o1', isError: false }) }));
+const hook = vi.hoisted(() => ({ save: vi.fn(async (n: unknown) => n), settings: undefined as unknown as OrgSettings, isLoading: false, isError: false, isSaving: false }));
+vi.mock('@/hooks/useOrgSettings', () => ({ useOrgSettings: () => ({ settings: hook.settings, isLoading: hook.isLoading, isSaving: hook.isSaving, save: hook.save, organizationId: 'o1', isError: hook.isError }) }));
 vi.mock('@/hooks/useHints', () => ({ useHints: () => ({ hintsEnabled: true, setHintsEnabled: () => {} }) }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -12,7 +12,7 @@ import { ReportDueDayCard } from './ReportDueDayCard';
 
 const input = () => screen.getByLabelText('Day of the following month (1–28)') as HTMLInputElement;
 
-beforeEach(() => { hook.save.mockClear(); hook.settings = { ...DEFAULT_ORG_SETTINGS, report_due_day: 9 }; });
+beforeEach(() => { hook.save.mockClear(); hook.settings = { ...DEFAULT_ORG_SETTINGS, report_due_day: 9 }; hook.isLoading = false; hook.isError = false; });
 
 describe('ReportDueDayCard', () => {
   it('renders the current due day', () => {
@@ -39,5 +39,21 @@ describe('ReportDueDayCard', () => {
     render(<ReportDueDayCard canEdit={false} />);
     expect(input()).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+  });
+  it('locks the input and Save while the settings are loading, without the load-error line', () => {
+    hook.isLoading = true;
+    render(<ReportDueDayCard canEdit />);
+    expect(input()).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.queryByText('Settings could not be loaded')).not.toBeInTheDocument();
+  });
+  it('says so and locks everything when the settings could not be loaded', () => {
+    hook.isError = true;
+    render(<ReportDueDayCard canEdit />);
+    expect(screen.getByText('Settings could not be loaded')).toBeInTheDocument();
+    expect(input()).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(hook.save).not.toHaveBeenCalled();
   });
 });

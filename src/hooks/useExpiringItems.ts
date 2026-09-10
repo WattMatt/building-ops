@@ -4,12 +4,15 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { snapshotQueryDefaults } from '@/lib/snapshotClient';
 import type { ExpiringItem } from '@/lib/expiry';
 
 export function useExpiringItems(days = 90) {
   return useQuery({
     queryKey: ['expiring-items', days],
     staleTime: 5 * 60_000,
+    // Same cap as the snapshot readers: a missing function (PGRST202, before the migration) is never retried.
+    retry: snapshotQueryDefaults.retry,
     queryFn: async (): Promise<ExpiringItem[]> => {
       // expiring_items is not yet in the generated types; regenerate after the migration ships.
       const { data, error } = await (supabase as unknown as {

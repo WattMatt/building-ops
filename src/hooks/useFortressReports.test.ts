@@ -49,7 +49,7 @@ vi.mock('@/hooks/useReportPpm', async () => {
   return { describeSeed: actual.describeSeed, seedPpmFromPlan: seedMock.seedPpmFromPlan };
 });
 
-import { useCreateReport, useCarryForwardReport, useDiscardDraft, useSetBuildingReportTypes, discardErrorMessage, PPM_SEED_FAILED_MESSAGE } from './useFortressReports';
+import { useCreateReport, useCarryForwardReport, useDiscardDraft, useSetBuildingReportTypes, useReportLifecycle, discardErrorMessage, PPM_SEED_FAILED_MESSAGE } from './useFortressReports';
 
 let qc: QueryClient;
 const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: qc }, children);
@@ -147,6 +147,32 @@ describe('useCarryForwardReport — PPM seeding', () => {
     const { result } = renderHook(() => useCarryForwardReport(), { wrapper });
     await act(async () => { await result.current.mutateAsync({ newReport: report({ report_type: 'cm_monthly' }) as never, fromReportId: 'rep0' }); });
     expect(seedMock.seedPpmFromPlan).not.toHaveBeenCalled();
+  });
+});
+
+describe('useReportLifecycle', () => {
+  it('a transition refreshes the reports list and the portfolio readers that derive from report status', async () => {
+    state.result = (table, calls) => table === 'reports' && has(calls, 'update')
+      ? { data: report({ status: 'submitted' }), error: null }
+      : { data: [], error: null };
+    const invalidate = vi.spyOn(qc, 'invalidateQueries');
+    const { result } = renderHook(() => useReportLifecycle('rep1'), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ status: 'submitted' }); });
+    const q = state.queries.find((x) => x.table === 'reports' && has(x.calls, 'update'))!;
+    expect(q.calls.find((c) => c.method === 'update')!.args[0]).toEqual({ status: 'submitted' });
+    expect(q.calls.find((c) => c.method === 'eq')!.args).toEqual(['id', 'rep1']);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['fortress-reports'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['portfolio-compliance'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['buildings-ohs-scores'] });
+    expect(toastMock.success).toHaveBeenCalledWith('Report submitted for review.');
+  });
+  it('a refused transition invalidates nothing and says so', async () => {
+    state.result = (table) => table === 'reports' ? { data: null, error: { message: 'permission denied' } } : { data: [], error: null };
+    const invalidate = vi.spyOn(qc, 'invalidateQueries');
+    const { result } = renderHook(() => useReportLifecycle('rep1'), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ status: 'approved' }).catch(() => {}); });
+    expect(invalidate).not.toHaveBeenCalled();
+    expect(toastMock.error).toHaveBeenCalledWith('You do not have permission to change this report, or the change failed.');
   });
 });
 
