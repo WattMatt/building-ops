@@ -9,7 +9,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import { DialogTitle } from '@/components/ui/dialog';
+import { DialogDescription, DialogTitle } from '@/components/ui/dialog';
 import { useSearchEntities, type SearchHit } from '@/hooks/useSearchEntities';
 import { track } from '@/lib/analytics';
 import { useRecentSearches } from './useRecentSearches';
@@ -80,6 +80,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange} shouldFilter={false}>
       <DialogTitle className="sr-only">Search</DialogTitle>
+      <DialogDescription className="sr-only">Search buildings, issues, tenants and documents</DialogDescription>
       <CommandInput placeholder="Search buildings, issues, tenants, documents…" value={q} onValueChange={setQ} />
       <CommandList>
         <CommandEmpty>

@@ -67,6 +67,16 @@ describe('QuickCreateMenu', () => {
     expect(screen.queryByText('Generate tasks')).not.toBeInTheDocument();
   });
 
+  it('on the create-building form treats /buildings/new as no building', async () => {
+    renderAt('/buildings/new');
+    openMenu();
+    expect(await screen.findByText('New issue')).toBeInTheDocument();
+    expect(screen.queryByText('New note')).not.toBeInTheDocument();
+    expect(screen.queryByText('Generate tasks')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('New issue'));
+    expect(navigateMock).toHaveBeenCalledWith('/issues/new');
+  });
+
   it('pre-scopes the new issue to the current building', async () => {
     renderAt('/buildings/b1');
     openMenu();

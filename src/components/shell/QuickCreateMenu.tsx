@@ -18,7 +18,8 @@ export function QuickCreateMenu() {
   const navigate = useNavigate();
   const { isAdminOrManager } = useAuth();
   const match = useMatch('/buildings/:id');
-  const buildingId = match?.params.id;
+  // `/buildings/new` (the create form) also matches `:id`; there is no building to scope to yet.
+  const buildingId = match?.params.id && match.params.id !== 'new' ? match.params.id : undefined;
 
   const go = (kind: 'issue' | 'note' | 'tasks', href: string) => {
     track('quick_create', { kind });
