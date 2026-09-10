@@ -29,6 +29,11 @@
  *                    authenticated, no update, delete admin only; generate_ppm_tasks never
  *                    anon, admin/manager only, building required; ppm_monthly_status and
  *                    building_month_costs never anon; ppm_services.overrides admin/manager only
+ *   R4a "Snapshots"→ organizations: anon cannot read the table, can read organization_branding; settings
+ *                    readable by any signed-in user, writable admin/manager; building_metrics_daily select by
+ *                    access, no client writes; snapshot_building_metrics / mark_sla_breaches / delete_empty_report /
+ *                    expiring_items never anon; delete_empty_report admin only; media_attachments admin only;
+ *                    a user with two user_roles rows still passes is_admin_or_manager (21000 fix)
  *
  * Personas: admin, manager, userA (user role, assigned building A only),
  * userB (user role, assigned building B only). userA probing building B
@@ -695,6 +700,75 @@ try {
   assert('ppm_services non-overrides update as userA still allowed', (await canUpdate(personas.userA.jwt, 'ppm_services', ppmRowA, { comment: 'ZZTEST-RLS-upd' })) === true, 'member could not edit the report row itself');
   assert('ppm_services.overrides change as manager allowed', (await canUpdate(personas.manager.jwt, 'ppm_services', ppmRowA, { overrides: override })) === true, 'manager could not set an override');
   console.log('  R3c ppm (building_ppm_services, contractor_ratings, generate_ppm_tasks, derived views, ppm_services.overrides): done');
+  // ════ R4a: organizations, branding view, snapshots, SLA sweep, discard, media_attachments, two-role user ════
+  {
+    const anonOrg = await fetch(`${URL_BASE}/rest/v1/organizations?select=id&limit=1`, { headers: { apikey: ANON } });
+    assert('organizations not readable by anon', !anonOrg.ok, `expected a non-2xx, got HTTP ${anonOrg.status}`);
+    const anonBranding = await fetch(`${URL_BASE}/rest/v1/organization_branding?select=id,name,logo_url,primary_color&limit=1`, { headers: { apikey: ANON } });
+    assert('organization_branding readable by anon', anonBranding.ok, `HTTP ${anonBranding.status}`);
+    const brandingCols = Object.keys((await anonBranding.json())[0] ?? { id: 1, name: 1, logo_url: 1, primary_color: 1 }).sort();
+    assert('organization_branding exposes only id/name/logo_url/primary_color', brandingCols.join(',') === 'id,logo_url,name,primary_color', brandingCols.join(','));
+    await probeMatrix('organizations select (settings included)', anyAuth(), (jwt) => canSelectF(jwt, 'organizations', 'settings=not.is.null'));
+    const org = (await (await fetch(`${URL_BASE}/rest/v1/organizations?select=id,settings&limit=1`, { headers: SVC })).json())[0];
+    if (org?.id) {
+      // Write the settings the org already has back to it: the probe proves the policy without changing anything.
+      await probeMatrix('organizations.settings update', adminMgr(), (jwt) => canUpdate(jwt, 'organizations', org.id, { settings: org.settings ?? {} }));
+    } else {
+      skip('organizations.settings update', 'no organizations row on this project');
+    }
+    for (const view of ['building_metrics_daily', 'portfolio_metrics_daily']) {
+      const res = await fetch(`${URL_BASE}/rest/v1/${view}?limit=1`, { headers: { apikey: ANON } });
+      assert(`${view} not readable by anon`, !res.ok, `expected a non-2xx, got HTTP ${res.status}`);
+    }
+    // One snapshot row per fixture building (service role runs the function as cron would).
+    for (const bid of [A, B]) {
+      const r = await fetch(`${URL_BASE}/rest/v1/rpc/snapshot_building_metrics`, { method: 'POST', headers: SVC, body: JSON.stringify({ p_building: bid }) });
+      if (!r.ok) fail(`snapshot fixture for ${bid === A ? 'A' : 'B'}`, `HTTP ${r.status} ${await r.text()}`);
+    }
+    await probeMatrix('building_metrics_daily[A] select', byAccess('A'), (jwt) => canSelectF(jwt, 'building_metrics_daily', `building_id=eq.${A}`));
+    await probeMatrix('building_metrics_daily[B] select', byAccess('B'), (jwt) => canSelectF(jwt, 'building_metrics_daily', `building_id=eq.${B}`));
+    await probeMatrix('building_metrics_daily insert', nobody(), (jwt) => canInsert(jwt, 'building_metrics_daily', { building_id: A, day: '2030-01-01' }));
+    await probeMatrix('building_metrics_daily update', nobody(), (jwt) => canUpdateF(jwt, 'building_metrics_daily', `building_id=eq.${A}`, { issues_open: 99 }));
+    for (const fn of ['snapshot_building_metrics', 'mark_sla_breaches', 'delete_empty_report', 'expiring_items']) {
+      const args = fn === 'delete_empty_report' ? { p_report: A } : fn === 'expiring_items' ? { p_days: 30 } : {};
+      const anonR = await rpcCall(null, fn, args);
+      assert(`${fn} not executable by anon`, anonR.status === 401 || anonR.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${anonR.status}`);
+    }
+    assert('snapshot_building_metrics refused for a site user', (await rpcCall(personas.userA.jwt, 'snapshot_building_metrics', { p_building: A })).status === 403, 'site user ran the snapshot');
+    assert('mark_sla_breaches refused for a site user', (await rpcCall(personas.userA.jwt, 'mark_sla_breaches', {})).status === 403, 'site user ran the sweep');
+    assert('mark_sla_breaches runs for a manager', (await rpcCall(personas.manager.jwt, 'mark_sla_breaches', {})).status === 200, 'manager could not run the sweep');
+    // expiring_items is invoker: the site user on A sees A's document, not B's.
+    const docA = (await svcInsert('building_documents', { building_id: A, name: `ZZTEST-RLS-exp-A-${RUN}`, expiry_date: '2030-01-01' })).id;
+    cleanup.push(['building_documents', docA]);
+    const docB = (await svcInsert('building_documents', { building_id: B, name: `ZZTEST-RLS-exp-B-${RUN}`, expiry_date: '2030-01-01' })).id;
+    cleanup.push(['building_documents', docB]);
+    {
+      const r = await rpcCall(personas.userA.jwt, 'expiring_items', { p_days: 5000 });
+      const names = r.rows.map((x) => x.name);
+      assert('expiring_items as userA includes building A', r.ok && names.includes(`ZZTEST-RLS-exp-A-${RUN}`), JSON.stringify(names.filter((n) => String(n).startsWith('ZZTEST-RLS'))));
+      assert('expiring_items as userA excludes building B', r.ok && !names.includes(`ZZTEST-RLS-exp-B-${RUN}`), JSON.stringify(names.filter((n) => String(n).startsWith('ZZTEST-RLS'))));
+    }
+    // delete_empty_report: admin only; an empty draft goes, a draft with content stays.
+    const emptyDraft = (await svcInsert('reports', { building_id: A, report_type: 'cm_monthly', report_period: '2029-01-01', status: 'draft', title: `ZZTEST-RLS-${RUN}` })).id;
+    cleanup.push(['reports', emptyDraft]);
+    assert('delete_empty_report refused for a manager', (await rpcCall(personas.manager.jwt, 'delete_empty_report', { p_report: emptyDraft })).status === 403, 'manager discarded a draft');
+    assert('delete_empty_report refused for a site user', (await rpcCall(personas.userA.jwt, 'delete_empty_report', { p_report: emptyDraft })).status === 403, 'site user discarded a draft');
+    const fullDraft = (await svcInsert('reports', { building_id: A, report_type: 'cm_monthly', report_period: '2029-02-01', status: 'draft', title: `ZZTEST-RLS-full-${RUN}` })).id;
+    cleanup.push(['reports', fullDraft]);
+    const narr = (await svcInsert('report_narratives', { report_id: fullDraft, building_id: A, section_key: 'building_overview', heading: 'x', body: 'ZZTEST-RLS content' })).id;
+    cleanup.push(['report_narratives', narr]);
+    assert('delete_empty_report refuses a draft with content', (await rpcCall(personas.admin.jwt, 'delete_empty_report', { p_report: fullDraft })).status === 403, 'admin discarded a draft that had rows');
+    assert('delete_empty_report deletes an empty draft for admin', (await rpcCall(personas.admin.jwt, 'delete_empty_report', { p_report: emptyDraft })).status === 200, 'admin could not discard an empty draft');
+    assert('empty draft is gone', (await (await fetch(`${URL_BASE}/rest/v1/reports?id=eq.${emptyDraft}&select=id`, { headers: SVC })).json()).length === 0, 'row still present');
+    // media_attachments: admin only, every verb (0 rows on every project; the insert probe deletes its own row).
+    await probeMatrix('media_attachments insert', adminOnly(), (jwt) => canInsert(jwt, 'media_attachments', { record_type: 'issue', record_id: A, storage_path: `zztest-rls-${RUN}` }));
+    // A second user_roles row (building-scoped manager) must not break the helpers (was 21000).
+    await svcInsert('user_roles', { user_id: personas.manager.id, role: 'manager', building_id: A });
+    assert('manager with two role rows still reads building B', await canSelect(personas.manager.jwt, 'buildings', B), 'two-role manager lost access (21000 regression)');
+    await fetch(`${URL_BASE}/rest/v1/user_roles?user_id=eq.${personas.manager.id}&building_id=eq.${A}`, { method: 'DELETE', headers: SVC });
+    console.log('  R4a (organizations, branding view, building_metrics_daily, SLA sweep, delete_empty_report, expiring_items, media_attachments, two-role user): done');
+  }
+
 } catch (e) {
   fail('smoke run', e.message);
 } finally {
