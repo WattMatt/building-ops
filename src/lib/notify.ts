@@ -3,6 +3,9 @@
  * with `supabase.functions.invoke('notify')` so the row lands in the recipient's inbox and
  * email fans out according to their preferences. Fire-and-forget: a failure to notify must
  * never fail the action that caused it.
+ *
+ * Bulk task assignment sends one notification keyed on the first task id; the `url`
+ * deep-links to the building's checklist tab, not to a single task.
  */
 export type NotificationKind =
   | 'task_assigned' | 'issue_assigned' | 'issue_comment' | 'issue_mention'
