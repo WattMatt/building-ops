@@ -1,11 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { entries } from 'idb-keyval';
 import { enqueue, listOps, updateOp, removeOp, clearQueue, subscribeQueue, queueStoreName } from './queue';
 import { File as NodeFile } from 'node:buffer';
+
+// `entries` is the read the per-user seed goes through; wrap it so one test can make it fail.
+// The wrapper passes through by default, so every other test still hits fake-indexeddb.
+vi.mock('idb-keyval', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('idb-keyval')>();
+  return { ...actual, entries: vi.fn(actual.entries) };
+});
 
 const payload = { kind: 'task_complete', completionId: 'c1', taskInstanceId: 't1', taskName: 'Check', notes: null, signatureConfirmed: false } as const;
 
 describe('offline queue store', () => {
-  beforeEach(async () => { await clearQueue('u1'); await clearQueue('u2'); await clearQueue('u3'); await clearQueue('u4'); });
+  beforeEach(async () => { await clearQueue('u1'); await clearQueue('u2'); await clearQueue('u3'); await clearQueue('u4'); await clearQueue('u5'); });
   afterEach(() => { vi.restoreAllMocks(); });
 
   it('enqueues, lists oldest-first, and isolates users', async () => {
@@ -57,6 +65,15 @@ describe('offline queue store', () => {
     const ops = await listOps('u3');
     expect(ops.map((o) => o.id)).toEqual([a.id, b.id, c.id]);
     expect(ops.map((o) => o.createdAt)).toEqual([1000, 1001, 1002]);
+  });
+
+  it('retries the seed after a transient store failure instead of caching the rejection', async () => {
+    // One failed IndexedDB read during the first seed must not poison every later enqueue for
+    // that user until reload.
+    vi.mocked(entries).mockRejectedValueOnce(new Error('transient idb failure'));
+    await expect(enqueue('u5', payload, [])).rejects.toThrow('transient idb failure');
+    const op = await enqueue('u5', payload, []);
+    expect((await listOps('u5')).map((o) => o.id)).toEqual([op.id]);
   });
 
   it('keeps createdAt increasing across a reload by seeding from the store', async () => {

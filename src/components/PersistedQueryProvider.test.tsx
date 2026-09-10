@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { clear as clearIdb, get } from 'idb-keyval';
 import { queryClient } from '@/lib/queryClient';
 import { cacheKeyFor, clearPersistedCache, createPersisterFor, stopPersisting, PERSIST_DEFAULTS } from '@/lib/persist';
+import { clearQueue, enqueue, listOps } from '@/lib/offline/queue';
 import { PersistedQueryProvider } from './PersistedQueryProvider';
 
 // The provider owns the only per-user IndexedDB persister in the app, so these tests run it
@@ -95,6 +96,9 @@ describe('PersistedQueryProvider', () => {
     stopPersisting();
     queryClient.clear();
     await clearIdb();
+    // The write queue lives in its own per-user store, which clearIdb() (default store) misses.
+    await clearQueue('A');
+    await clearQueue('B');
   });
 
   it('a direct user switch (no signOut) drops A from memory and disk before B persists anything', async () => {
@@ -122,6 +126,24 @@ describe('PersistedQueryProvider', () => {
       expect(keys).toContain(JSON.stringify(keyFor('B')));
       expect(keys).not.toContain(JSON.stringify(keyFor('A')));
     });
+  });
+
+  it('an implicit user switch also drops the outgoing user\'s offline write queue', async () => {
+    // A's unsynced writes must not survive on a shared device to replay under B's session.
+    await enqueue('A', { kind: 'task_complete', completionId: 'c1', taskInstanceId: 't1', taskName: 'Check', notes: null, signatureConfirmed: false }, []);
+    expect(await listOps('A')).toHaveLength(1);
+
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('success:A'));
+    expect(await listOps('A')).toHaveLength(1); // mounting as A keeps A's queue
+
+    act(() => {
+      auth.callback!('SIGNED_IN', { user: { id: 'B' } });
+      setProbeUid('B');
+    });
+
+    await waitFor(async () => expect(await listOps('A')).toEqual([]));
+    await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('success:B'));
   });
 
   it('an other-tab sign-out (uid -> null) clears memory and disk for the outgoing user', async () => {

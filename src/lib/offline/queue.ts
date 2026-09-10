@@ -27,6 +27,8 @@ function emit() { for (const fn of listeners) fn(); }
  * the same millisecond, so `createdAt` is not read straight from the clock — it is forced to be
  * strictly greater than the last value this user was handed. The high-water mark is seeded once
  * per user from whatever is already in the store, so the guarantee also survives a reload.
+ * A seed that fails (a transient IndexedDB error) is forgotten, not cached: the next enqueue
+ * retries it instead of every later write for that user failing until reload.
  */
 const lastCreatedAt = new Map<string, number>();
 const seeding = new Map<string, Promise<void>>();
@@ -36,6 +38,9 @@ function ensureSeeded(uid: string): Promise<void> {
     p = entries<string, QueuedOp>(storeFor(uid)).then((rows) => {
       const max = rows.reduce((m, [, v]) => Math.max(m, v.createdAt), 0);
       lastCreatedAt.set(uid, Math.max(max, lastCreatedAt.get(uid) ?? 0));
+    }).catch((e: unknown) => {
+      seeding.delete(uid);
+      throw e;
     });
     seeding.set(uid, p);
   }

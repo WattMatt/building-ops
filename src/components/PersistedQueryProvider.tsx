@@ -3,6 +3,7 @@ import { IsRestoringProvider, QueryClientProvider } from '@tanstack/react-query'
 import { persistQueryClientRestore, persistQueryClientSubscribe } from '@tanstack/react-query-persist-client';
 import { supabase } from '@/integrations/supabase/client';
 import { queryClient } from '@/lib/queryClient';
+import { clearQueue } from '@/lib/offline/queue';
 import {
   createPersisterFor,
   clearPersistedCache,
@@ -37,7 +38,9 @@ import {
  * another tab, an other-tab sign-out, an expired token). When `uid` moves A→B or A→null,
  * this effect stops persisting, empties the in-memory cache and deletes A's store BEFORE
  * restoring B's; otherwise B's subscription would dehydrate A's `success` rows into
- * `bo-cache-B`. The stop is registered in `src/lib/persist.ts` so `AuthContext.signOut`
+ * `bo-cache-B`. A's offline write queue (`bo-queue-A`) is dropped in the same step —
+ * deliberately: unsynced writes never outlive the session that made them, so on a shared
+ * device they can never replay under B. The stop is registered in `src/lib/persist.ts` so `AuthContext.signOut`
  * can halt persistence before its own `queryClient.clear()` (see the ordering note there).
  *
  * Queries that opt in today (`...PERSIST_DEFAULTS`): `useMyWork` (tasks, issues, returned
@@ -76,10 +79,12 @@ export function PersistedQueryProvider({
 
     if (prevUid && prevUid !== uid) {
       // Someone else (or nobody) now owns this tab. Stop first so clear() cannot be
-      // persisted, then drop the previous user's rows from memory and disk.
+      // persisted, then drop the previous user's rows from memory and disk — read cache
+      // AND write queue, so A's unsynced ops cannot replay under B's session.
       stopPersisting();
       queryClient.clear();
       void clearPersistedCache(prevUid);
+      void clearQueue(prevUid);
     }
 
     if (uid === null) { setRestoredFor(null); return; } // signed out: nothing to restore or persist
