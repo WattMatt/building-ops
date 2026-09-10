@@ -8,6 +8,7 @@ export const NOTIFICATION_KINDS = [
   'report_submitted', 'report_returned', 'report_approved',
   'form_submitted', 'form_reviewed', 'signoff_requested', 'signoff_complete', 'signoff_overdue',
   'document_expiring', 'asset_service_due', 'task_due_today', 'issue_sla_breached',
+  'report_due_soon', 'report_export_needed',
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -207,6 +208,8 @@ export function governingFlag(kind: NotificationKind): PrefFlag {
     case 'asset_service_due':
     case 'issue_sla_breached':
       return 'overdue_alerts';
+    // report_due_soon and report_export_needed (R4b) are raised only by the report-distribution
+    // function, never by the client; they email per item under the report kinds' flag and never push.
     case 'issue_assigned':
     case 'issue_comment':
     case 'issue_mention':
@@ -215,6 +218,8 @@ export function governingFlag(kind: NotificationKind): PrefFlag {
     case 'report_approved':
     case 'form_submitted':
     case 'form_reviewed':
+    case 'report_due_soon':
+    case 'report_export_needed':
       return 'issue_updates';
     default: {
       // Every kind is listed above; adding one to NOTIFICATION_KINDS breaks the build here

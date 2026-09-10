@@ -11,14 +11,16 @@ import { supabase } from '@/integrations/supabase/client';
 /**
  * Mirrors NOTIFICATION_KINDS in supabase/functions/_shared/notifyRules.ts (that module is
  * Deno-land, not in the app bundle). `task_due_today` is raised by the daily digest only;
- * `issue_sla_breached` by the SQL sweep `mark_sla_breaches()` only; the client never sends
- * either and `notify` would reject them.
+ * `issue_sla_breached` by the SQL sweep `mark_sla_breaches()` only; `report_due_soon` and
+ * `report_export_needed` by the `report-distribution` function only. The client never sends any
+ * of them and `notify` would reject them.
  */
 export type NotificationKind =
   | 'task_assigned' | 'issue_assigned' | 'issue_comment' | 'issue_mention'
   | 'report_submitted' | 'report_returned' | 'report_approved'
   | 'form_submitted' | 'form_reviewed' | 'signoff_requested' | 'signoff_complete' | 'signoff_overdue'
-  | 'document_expiring' | 'asset_service_due' | 'task_due_today' | 'issue_sla_breached';
+  | 'document_expiring' | 'asset_service_due' | 'task_due_today' | 'issue_sla_breached'
+  | 'report_due_soon' | 'report_export_needed';
 
 export type NotificationEntityType = 'task' | 'issue' | 'report' | 'form_submission' | 'signoff_request' | 'document' | 'asset';
 

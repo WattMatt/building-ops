@@ -49,6 +49,8 @@ describe('governingFlag', () => {
     asset_service_due: 'overdue_alerts',
     task_due_today: 'task_reminders',
     issue_sla_breached: 'overdue_alerts',
+    report_due_soon: 'issue_updates',
+    report_export_needed: 'issue_updates',
   };
 
   it('maps every kind to the flag the design says governs it', () => {
@@ -351,6 +353,24 @@ describe('push', () => {
     expect(shouldPush('issue_sla_breached', on)).toBe(false);
     expect(CLIENT_KINDS.has('issue_sla_breached')).toBe(false);
     expect(parseNotifyBody({ ...input(), kind: 'issue_sla_breached' })).toEqual({ ok: false, reason: 'Unsupported notification kind' });
+  });
+  it('R4b kinds are server-only: report-distribution raises them, they email per item, never push, never from the client', () => {
+    const on = { email_notifications: true, issue_updates: true, task_reminders: true, overdue_alerts: true, daily_digest: true };
+    for (const kind of ['report_due_soon', 'report_export_needed'] as const) {
+      expect(NOTIFICATION_KINDS).toContain(kind);
+      expect(governingFlag(kind)).toBe('issue_updates');
+      expect(shouldEmail(kind, on)).toBe(true);
+      expect(shouldEmail(kind, { ...on, issue_updates: false })).toBe(false);
+      expect(shouldPush(kind, on)).toBe(false);
+      expect(CLIENT_KINDS.has(kind)).toBe(false);
+      expect(PUSH_KINDS.has(kind)).toBe(false);
+      expect(ORG_WIDE_KINDS.has(kind)).toBe(false);
+      expect(parseNotifyBody({ ...input(), kind })).toEqual({ ok: false, reason: 'Unsupported notification kind' });
+    }
+  });
+  it('never deep-links a signed-in user to the public share surface', () => {
+    expect(isAllowedUrl('/share/abc')).toBe(false);
+    expect(isAllowedUrl('/share')).toBe(false);
   });
   it('allows /my-day deep links', () => {
     expect(isAllowedUrl('/my-day')).toBe(true);

@@ -60,3 +60,11 @@ verify_jwt = false
 # scoped by a secret token looked up with the service role; unknown/revoked → 404.
 [functions.ics-feed]
 verify_jwt = false
+
+# Cron-invoked (x-distribution-secret) OR admin/manager JWT validated in code (run-now).
+[functions.report-distribution]
+verify_jwt = false
+
+# Public share-link endpoint (no user JWT): token looked up with the service role; unknown/expired/revoked → 404.
+[functions.report-share]
+verify_jwt = false
