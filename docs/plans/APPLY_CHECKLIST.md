@@ -1,10 +1,14 @@
-# R0 + R1 apply checklist (2026-09-10)
+# Apply checklist (R0 onward)
+
+One section per release slice, newest last. Same shape as `PHASE3_APPLY_CHECKLIST.md`.
+
+## R0 + R1 (2026-09-10)
 
 Same shape as `PHASE3_APPLY_CHECKLIST.md`. Migrations are applied through the Supabase
 Management API (`POST /v1/projects/{ref}/database/query`), never `db push`. Canonical SQL
 lives in `../GMI/sql/` and is mirrored here by `npm run schema:vendor`.
 
-## Migrations, in order
+### Migrations, in order
 
 1. `2026-09-10_01_profiles_show_hints.sql`
 2. `2026-09-10_02_report_artifacts_report_status.sql`
@@ -18,13 +22,13 @@ lives in `../GMI/sql/` and is mirrored here by `npm run schema:vendor`.
    and `can_access_building` return false for a deactivated profile, so a deactivated user's
    still-valid access token loses all data at once instead of at token expiry.
 
-## Edge functions (all of `supabase/functions/*`, JWT settings come from `supabase/config.toml`)
+### Edge functions (all of `supabase/functions/*`, JWT settings come from `supabase/config.toml`)
 
 clear-password-gate, daily-digest, delete-account, delete-user, invite-user, notify,
 notify-expiring-alerts, notify-form-review, notify-form-submission, notify-signoff-complete,
 notify-signoff-request, request-password-reset, set-user-role, set-user-status, signoff-reminders.
 
-## Staging (`vkrihpmjajjcxmzgjqdr`) — DONE 2026-09-10
+### Staging (`vkrihpmjajjcxmzgjqdr`) — DONE 2026-09-10
 
 - [x] Migrations 1–5 applied (all HTTP 201), `DAILY_DIGEST_SECRET` set, cron `daily-digest` scheduled `30 4 * * *`.
 - [x] All 15 functions deployed (staging previously lacked `clear-password-gate`, `delete-user`,
@@ -53,7 +57,7 @@ Fixes the live run forced, all committed with this checklist:
 Staging still lacks `RESEND_API_KEY`, `APP_URL` and `EXPIRING_ALERTS_SECRET` (prod has them):
 email sending and the expiring-alerts cron are inert there. The smokes opt personas out of email.
 
-## Production (`qdzgkttiosahdfqresvz`) — DONE 2026-09-10
+### Production (`qdzgkttiosahdfqresvz`) — DONE 2026-09-10
 
 - [x] Migrations 1–5 applied in order through the Management API (all HTTP 201). Verified:
       `show_hints`, `report_status`, `assigned_to`, `notifications` (+ realtime publication) present,
@@ -68,9 +72,44 @@ email sending and the expiring-alerts cron are inert there. The smokes opt perso
       (typecheck stays at the 64 baseline, 391 tests, build green).
 - [ ] `building_type` on the two production buildings (owner decides which type).
 
-## Drift noticed while applying (not changed, worth a decision)
+### Drift noticed while applying (not changed, worth a decision)
 
 - Prod schedules `expiring-alerts-daily` but not `signoff-reminders-daily`; staging is the reverse.
   Both crons exist in `../GMI/sql/`; whichever is intended should be applied to the other project.
 - Staging has no `RESEND_API_KEY` / `APP_URL` / `EXPIRING_ALERTS_SECRET`, so email and the
   expiring-alerts function cannot be exercised there end to end.
+
+## R2a "Shell" (2026-09-10)
+
+Spec `docs/superpowers/specs/2026-09-10-r2-field-design.md` §4–§5; plan `docs/superpowers/plans/2026-09-10-r2a-shell.md`.
+
+### Migration
+
+`2026-09-12_01_r2_field.sql` — `scheduled_due_date`, `generate_scheduled_tasks(p_building, p_template, p_frequency)`,
+`mark_overdue_tasks`, `complete_task`, `search_entities` (per-kind limits), `push_subscriptions` + RLS,
+`profiles.geotag_photos`, `notifications.kind` gains `task_due_today`, crons `task-generation-daily`
+(`0 2 * * *` = 04:00 SAST) and `task-overdue-sweep` (`5 22 * * *` = 00:05 SAST). Idempotent; re-applied on
+staging after the per-kind-limit revision. No edge-function changes in R2a (push lands in R2c).
+
+### Staging — DONE 2026-09-10
+
+- [x] Applied (HTTP 201 twice); functions, crons and the weekly fixture row verified; staging backlog 0.
+- [x] `npm run smoke` green end to end (RLS 432/0 incl. the new RPC/`push_subscriptions` probes, checklist 16/0
+      incl. `complete_task` replay and the overdue sweep), `npm run smoke:notifications` 20/0.
+
+### Production — DONE 2026-09-10
+
+- [x] Backlog counted before apply: **101 of 123 pending tasks were already past due**. The first
+      `task-overdue-sweep` (00:05 SAST) marks them `overdue`; dashboard/building KPIs will jump accordingly.
+      Nothing was flipped manually.
+- [x] Applied (HTTP 201); functions, crons, table, column and grants verified; `rls-smoke` on prod 432/0, teardown clean.
+- [x] Types regenerated from prod; boundary casts dropped.
+- [ ] `building_type` on production buildings that lack it — `generate_scheduled_tasks` only creates tasks from
+      type-scoped templates for classified buildings (unscoped templates apply everywhere). Owner decision.
+
+### Notes for R2b/R2c
+
+- Storage: `upsert: true` on an EXISTING object needs the update policy, which is admin/manager-only. The offline
+  queue must retry onto a fresh path (or tolerate a duplicate), not overwrite.
+- Push needs VAPID keys: `VITE_VAPID_PUBLIC_KEY` (Vercel env) and `VAPID_PRIVATE_KEY`/`VAPID_SUBJECT` (function
+  secrets) on both projects, then redeploy `notify` and `daily-digest` (R2c).
