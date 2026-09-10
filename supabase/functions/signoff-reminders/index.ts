@@ -136,7 +136,7 @@ serve(async (req: Request): Promise<Response> => {
     });
   } catch (error) {
     console.error("signoff-reminders error:", error);
-    return new Response(JSON.stringify({ error: (error as Error).message }), {
+    return new Response(JSON.stringify({ error: "An unexpected error occurred" }), {
       status: 500,
       headers: { "Content-Type": "application/json", ...cors },
     });

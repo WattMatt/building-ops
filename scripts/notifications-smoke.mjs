@@ -184,7 +184,7 @@ try {
     const entityId = crypto.randomUUID();
     const { status, body } = await notifyCall(personas.user.jwt, {
       kind: 'task_assigned', entityType: 'task', entityId, buildingId: A,
-      recipients: [personas.user.id], title: `ZZTEST-NOTIFY self ${RUN}`, url: '/tasks',
+      recipients: [personas.user.id], title: `ZZTEST-NOTIFY self ${RUN}`, url: `/buildings/${A}?tab=checklists`,
     });
     assert('self-recipient: HTTP 200', status === 200, `HTTP ${status} ${JSON.stringify(body).slice(0, 160)}`);
     assert('self-recipient: inserted 0 (actor excluded)', body?.inserted === 0, `inserted=${body?.inserted}`);
@@ -197,7 +197,7 @@ try {
     const entityId = crypto.randomUUID();
     const { status, body } = await notifyCall(personas.user.jwt, {
       kind: 'task_assigned', entityType: 'task', entityId, buildingId: A,
-      recipients: [personas.manager.id], title: `ZZTEST-NOTIFY manager ${RUN}`, url: '/tasks',
+      recipients: [personas.manager.id], title: `ZZTEST-NOTIFY manager ${RUN}`, url: `/buildings/${A}?tab=checklists`,
     });
     assert('manager-recipient: HTTP 200', status === 200, `HTTP ${status} ${JSON.stringify(body).slice(0, 160)}`);
     assert('manager-recipient: inserted 1', body?.inserted === 1, `inserted=${body?.inserted}`);
@@ -214,7 +214,7 @@ try {
   await step('buildingId the caller cannot access', async () => {
     const { status, body } = await notifyCall(personas.user.jwt, {
       kind: 'task_assigned', entityType: 'task', entityId: crypto.randomUUID(), buildingId: B,
-      recipients: [personas.user.id], title: `ZZTEST-NOTIFY forbidden ${RUN}`, url: '/tasks',
+      recipients: [personas.user.id], title: `ZZTEST-NOTIFY forbidden ${RUN}`, url: `/buildings/${B}?tab=checklists`,
     });
     assert('non-member building: HTTP 403', status === 403, `HTTP ${status} ${JSON.stringify(body).slice(0, 160)}`);
   });
@@ -223,7 +223,7 @@ try {
   await step('unknown kind', async () => {
     const { status, body } = await notifyCall(personas.user.jwt, {
       kind: 'not_a_real_kind', entityType: 'task', entityId: crypto.randomUUID(), buildingId: A,
-      recipients: [personas.user.id], title: `ZZTEST-NOTIFY badkind ${RUN}`, url: '/tasks',
+      recipients: [personas.user.id], title: `ZZTEST-NOTIFY badkind ${RUN}`, url: `/buildings/${A}?tab=checklists`,
     });
     assert('unknown kind: HTTP 400', status === 400, `HTTP ${status} ${JSON.stringify(body).slice(0, 160)}`);
   });
@@ -232,7 +232,7 @@ try {
   await step('missing Authorization', async () => {
     const { status, body } = await notifyCall(null, {
       kind: 'task_assigned', entityType: 'task', entityId: crypto.randomUUID(), buildingId: A,
-      recipients: [personas.user.id], title: `ZZTEST-NOTIFY noauth ${RUN}`, url: '/tasks',
+      recipients: [personas.user.id], title: `ZZTEST-NOTIFY noauth ${RUN}`, url: `/buildings/${A}?tab=checklists`,
     });
     assert('missing Authorization: HTTP 401', status === 401, `HTTP ${status} ${JSON.stringify(body).slice(0, 160)}`);
   });
@@ -242,7 +242,7 @@ try {
     const entityId = crypto.randomUUID();
     const { status, body } = await notifyCall(personas.user.jwt, {
       kind: 'report_submitted', entityType: 'report', entityId, buildingId: A,
-      recipients: [], title: `ZZTEST-NOTIFY report ${RUN}`, url: '/reports/fortress',
+      recipients: [], title: `ZZTEST-NOTIFY report ${RUN}`, url: `/reports/fortress/${entityId}`,
     });
     assert('org-wide report_submitted: HTTP 200', status === 200, `HTTP ${status} ${JSON.stringify(body).slice(0, 160)}`);
     assert('org-wide report_submitted: inserted >= 1', (body?.inserted ?? 0) >= 1, `inserted=${body?.inserted}`);

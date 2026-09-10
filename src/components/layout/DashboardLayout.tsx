@@ -141,11 +141,9 @@ interface DashboardLayoutProps {
 /** The unread pill beside a nav item. */
 function NavBadge({ count }: { count: number }) {
   return (
-    <span
-      aria-label={`${count} unread`}
-      className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground"
-    >
-      {count}
+    <span className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground">
+      <span aria-hidden="true">{count}</span>
+      <span className="sr-only">{count} unread</span>
     </span>
   );
 }

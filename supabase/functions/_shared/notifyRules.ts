@@ -62,11 +62,22 @@ export const ALLOWED_URL_PREFIXES = [
  * (`//evil.example` is a fully qualified off-site link once the browser resolves it), contains
  * no backslash (which several clients normalise to `/`, so `/issues\evil` can escape the
  * prefix it appears to match) and fits the column.
+ *
+ * A bare prefix (one that does not already end in `/`, e.g. `/issues` or `/forms`) is a route
+ * boundary, not a free-text prefix: `startsWith` alone would also accept a sibling route it
+ * merely shares characters with, like `/issuesanything` or `/formsx`. So for those prefixes the
+ * character right after the match must be absent, `/`, or `?` — the only ways a real path can
+ * continue. Prefixes that already end in `/` (e.g. `/buildings/`) already carry that boundary.
  */
 export function isAllowedUrl(url: string): boolean {
   if (typeof url !== 'string' || url.length === 0 || url.length > URL_MAX) return false;
   if (url.startsWith('//') || url.includes('\\')) return false;
-  return ALLOWED_URL_PREFIXES.some((prefix) => url.startsWith(prefix));
+  return ALLOWED_URL_PREFIXES.some((prefix) => {
+    if (!url.startsWith(prefix)) return false;
+    if (prefix.endsWith('/')) return true;
+    const next = url.charAt(prefix.length);
+    return next === '' || next === '/' || next === '?';
+  });
 }
 
 /** Ids are uuids everywhere in this schema; accept nothing looser. */

@@ -6,6 +6,7 @@ import {
   clamp,
   TITLE_MAX,
   BODY_MAX,
+  URL_MAX,
   NOTIFICATION_KINDS,
   buildInboxRows,
   isAllowedUrl,
@@ -143,6 +144,15 @@ describe('isAllowedUrl', () => {
     ['/settings', false],
     ['/', false],
     ['', false],
+    // A bare prefix (no trailing slash) is a route boundary, not a free-text prefix: a sibling
+    // route that merely shares characters must not sneak past `startsWith`.
+    ['/issuesanything', false],
+    ['/issues?open=x', true],
+    ['/issues/', true],
+    ['/inboxx', false],
+    ['/forms', true],
+    ['/buildings/abc', true],
+    ['/buildingsx', false],
     // Off-site, or a path that resolves off-site once a browser normalises it.
     ['//evil.example', false],
     ['https://evil.example', false],
@@ -157,7 +167,10 @@ describe('isAllowedUrl', () => {
   });
 
   it('accepts a url of exactly the maximum length', () => {
-    expect(isAllowedUrl(`/issues${'a'.repeat(293)}`)).toBe(true);
+    // `/issues` needs a boundary char (`?`) before free text now that a bare prefix requires
+    // one — `/issues` + 293 letters would be the `/issuesanything` sibling-route case.
+    expect(isAllowedUrl(`/issues?${'a'.repeat(292)}`)).toBe(true);
+    expect(`/issues?${'a'.repeat(292)}`).toHaveLength(URL_MAX);
   });
 });
 

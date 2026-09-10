@@ -164,6 +164,6 @@ serve(async (req: Request): Promise<Response> => {
     return json({ considered, sent, skipped, failed });
   } catch (error) {
     console.error("daily-digest error:", error);
-    return json({ error: (error as Error).message }, 500);
+    return json({ error: "An unexpected error occurred" }, 500);
   }
 });
