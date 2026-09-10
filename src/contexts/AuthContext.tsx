@@ -3,7 +3,7 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { ROLE_PRECEDENCE, type AppRole } from '@/lib/constants';
 import { queryClient } from '@/lib/queryClient';
-import { clearPersistedCache } from '@/lib/persist';
+import { clearPersistedCache, stopPersisting } from '@/lib/persist';
 import { identify, resetAnalytics } from '@/lib/analytics';
 
 export interface InviteUserPayload {
@@ -264,6 +264,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
     // E3: purge the query cache so the next user (or a signed-out window)
     // cannot see the outgoing user's cached data — in memory and on disk.
+    // Persistence must stop BEFORE clear(): clear() emits synchronous `removed`
+    // events and the persister writes the first one immediately, which would put
+    // the outgoing user's remaining rows back on disk after the delete below.
+    stopPersisting();
     queryClient.clear();
     void clearPersistedCache(outgoingUserId);
     resetAnalytics();

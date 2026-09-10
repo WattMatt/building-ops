@@ -1,6 +1,15 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { get } from 'idb-keyval';
 import { QueryClient } from '@tanstack/react-query';
-import { shouldPersistQuery, cacheKeyFor, createPersisterFor, clearPersistedCache, PERSIST_DEFAULTS } from './persist';
+import {
+  shouldPersistQuery,
+  cacheKeyFor,
+  createPersisterFor,
+  clearPersistedCache,
+  registerPersistStop,
+  stopPersisting,
+  PERSIST_DEFAULTS,
+} from './persist';
 
 describe('persist', () => {
   it('only dehydrates queries that opted in with meta.persist and have data', () => {
@@ -47,6 +56,30 @@ describe('persist', () => {
   it('clearing with no user is a no-op', async () => {
     await expect(clearPersistedCache(null)).resolves.toBeUndefined();
     await expect(clearPersistedCache(undefined)).resolves.toBeUndefined();
+  });
+
+  it('a disposed persister never writes again, even for a save the throttle already queued', async () => {
+    // Throttle interval of 50 ms: the first save runs immediately, the second is held and
+    // written once the interval elapses — the trailing write that unsubscribing alone
+    // cannot cancel.
+    const p = createPersisterFor('u3', { throttleTime: 50 });
+    const snapshot = (buster: string) => ({ buster, timestamp: Date.now(), clientState: { mutations: [], queries: [] } });
+    await p.persistClient(snapshot('first'));
+    void p.persistClient(snapshot('trailing')); // queued behind the interval
+    p.dispose();
+    await clearPersistedCache('u3');
+    await new Promise((r) => setTimeout(r, 120));
+    expect(await get(cacheKeyFor('u3'))).toBeUndefined();
+  });
+
+  it('stopPersisting runs the registered stop once and is a no-op when nothing is registered', () => {
+    expect(() => stopPersisting()).not.toThrow();
+    const stop = vi.fn();
+    registerPersistStop(stop);
+    stopPersisting();
+    stopPersisting();
+    expect(stop).toHaveBeenCalledTimes(1);
+    registerPersistStop(null);
   });
 
   it('persisted queries render cached data while offline', () => {

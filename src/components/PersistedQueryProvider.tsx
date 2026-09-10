@@ -1,9 +1,16 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { IsRestoringProvider, QueryClientProvider } from '@tanstack/react-query';
 import { persistQueryClientRestore, persistQueryClientSubscribe } from '@tanstack/react-query-persist-client';
 import { supabase } from '@/integrations/supabase/client';
 import { queryClient } from '@/lib/queryClient';
-import { createPersisterFor, shouldPersistQuery, MAX_AGE_MS } from '@/lib/persist';
+import {
+  createPersisterFor,
+  clearPersistedCache,
+  registerPersistStop,
+  stopPersisting,
+  shouldPersistQuery,
+  MAX_AGE_MS,
+} from '@/lib/persist';
 
 /**
  * Wraps the app in the query provider and attaches a per-user IndexedDB persister to it.
@@ -16,14 +23,44 @@ import { createPersisterFor, shouldPersistQuery, MAX_AGE_MS } from '@/lib/persis
  * (AuthContext lives inside it) and re-runs restore/subscribe against the module
  * `queryClient` whenever the user id changes; children never remount.
  *
- * `IsRestoringProvider` holds queries back until the initial session check and the
- * restore for that user have finished, so an offline reload renders the persisted rows
- * rather than a failed first fetch. Sign-out flips `uid` to null, which drops the
- * subscription; AuthContext's `signOut` clears the in-memory cache and the user's store.
+ * Restore gating — `isRestoring` is DERIVED during render, not set from the effect:
+ * `restoredFor` records which uid's restore has settled, and queries are held back while
+ * the session is unknown or `restoredFor !== uid`. Children's `useQuery` calls subscribe
+ * on the same render that first sees a new uid, before any parent effect runs; a
+ * state-driven flag would still be false on that render and the first fetch would race the
+ * restore. Deriving it means the very first render after SIGNED_IN (or a user switch)
+ * already holds queries back, so an offline reload renders the persisted rows rather than
+ * a failed first fetch.
+ *
+ * User change — sessions also change without going through `signOut()` (a SIGNED_IN from
+ * another tab, an other-tab sign-out, an expired token). When `uid` moves A→B or A→null,
+ * this effect stops persisting, empties the in-memory cache and deletes A's store BEFORE
+ * restoring B's; otherwise B's subscription would dehydrate A's `success` rows into
+ * `bo-cache-B`. The stop is registered in `src/lib/persist.ts` so `AuthContext.signOut`
+ * can halt persistence before its own `queryClient.clear()` (see the ordering note there).
+ *
+ * Queries that opt in today (`...PERSIST_DEFAULTS`): `useMyWork` (tasks, issues, returned
+ * reports) and `useBuildingMembers`. Spec §5.2 also lists the issue list for assigned
+ * buildings, but `useIssues` is `useState`-based rather than a query and is deferred to R2b.
  */
-export function PersistedQueryProvider({ children }: { children: ReactNode }) {
+export function PersistedQueryProvider({
+  children,
+  persisterFactory = createPersisterFor,
+}: {
+  children: ReactNode;
+  /** Test seam: build the persister with a different throttle without touching production wiring. */
+  persisterFactory?: typeof createPersisterFor;
+}) {
   const [uid, setUid] = useState<string | null | undefined>(undefined);
-  const [isRestoring, setIsRestoring] = useState(true);
+  const [restoredFor, setRestoredFor] = useState<string | null>(null);
+  const prevUidRef = useRef<string | null | undefined>(undefined);
+  // Read through a ref so an inline factory prop cannot re-run the restore effect every render.
+  const persisterFactoryRef = useRef(persisterFactory);
+  persisterFactoryRef.current = persisterFactory;
+
+  // Session unknown: hold back. Signed out: nothing to restore. Signed in: hold back until
+  // THIS uid's restore has settled (see the docblock for why this must be computed here).
+  const isRestoring = uid === undefined || (uid !== null && restoredFor !== uid);
 
   useEffect(() => {
     void supabase.auth.getSession().then(({ data }) => setUid(data.session?.user.id ?? null));
@@ -32,26 +69,48 @@ export function PersistedQueryProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const prevUid = prevUidRef.current;
+    prevUidRef.current = uid;
     if (uid === undefined) return; // session not known yet: keep queries held back
-    if (uid === null) { setIsRestoring(false); return; } // signed out: nothing to restore or persist
+
+    if (prevUid && prevUid !== uid) {
+      // Someone else (or nobody) now owns this tab. Stop first so clear() cannot be
+      // persisted, then drop the previous user's rows from memory and disk.
+      stopPersisting();
+      queryClient.clear();
+      void clearPersistedCache(prevUid);
+    }
+
+    if (uid === null) { setRestoredFor(null); return; } // signed out: nothing to restore or persist
+
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
+    const persister = persisterFactoryRef.current(uid);
+    const stop = () => {
+      unsubscribe?.();
+      unsubscribe = undefined;
+      persister.dispose();
+    };
     const options = {
       queryClient,
-      persister: createPersisterFor(uid),
+      persister,
       maxAge: MAX_AGE_MS,
       buster: uid,
       dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
     };
-    setIsRestoring(true);
     persistQueryClientRestore(options)
       .catch(() => { /* corrupt or unreadable store: core already discarded it */ })
       .finally(() => {
         if (cancelled) return;
-        setIsRestoring(false);
         unsubscribe = persistQueryClientSubscribe(options);
+        registerPersistStop(stop);
+        setRestoredFor(uid);
       });
-    return () => { cancelled = true; unsubscribe?.(); };
+    return () => {
+      cancelled = true;
+      stop();
+      registerPersistStop(null);
+    };
   }, [uid]);
 
   return (
