@@ -32,7 +32,8 @@ export interface SectionScore { section_no: string; section_title: string | null
 /**
  * The newest APPROVED report of a type for a building. Dashboards and KPI cards
  * read from this, so a half-filled draft or a rejected report can never become the
- * building's headline numbers (finding K1). Exported for the unit test.
+ * building's headline numbers (finding K1). Exported for the unit test and for
+ * other readers of approved reports.
  */
 export async function latestApprovedReport(buildingId: string, type: string) {
   const rows = await fdb.from('reports').select('*')
@@ -166,7 +167,7 @@ export function useBuildingKpis(buildingId: string | undefined) {
       }
 
       // trend across all approved ops reports
-      const allOps = await fdb.from('reports').select('id,report_period').eq('building_id', bid).eq('report_type', 'ops_monthly').order('report_period');
+      const allOps = await fdb.from('reports').select('id,report_period').eq('building_id', bid).eq('report_type', 'ops_monthly').eq('status', 'approved').order('report_period');
       const trendRows = await Promise.all((allOps.data ?? []).map(async (r) => {
         const s = await fdb.from('compliance_scores').select('compliance_pct').eq('report_id', r.id);
         return { period: r.report_period as string, pct: num(s.data?.[0]?.compliance_pct ?? null) };
@@ -234,7 +235,7 @@ export function useBuildingKpis(buildingId: string | undefined) {
         // reports. Needs ≥2 periods → null for a single report. See totalFootfall() for how the mix of
         // per-entrance and roll-up rows is collapsed to one non-double-counted total.
         const cmReports = await fdb.from('reports').select('id,report_period')
-          .eq('building_id', bid).eq('report_type', 'cm_monthly').order('report_period');
+          .eq('building_id', bid).eq('report_type', 'cm_monthly').eq('status', 'approved').order('report_period');
         const footfallByPeriod = await Promise.all((cmReports.data ?? []).map(async (r) => {
           const ff = await fdb.from('footfall_counts').select('entrance,month_count').eq('report_id', r.id);
           const rows = (ff.data ?? []) as { entrance: string | null; month_count: number | null }[];

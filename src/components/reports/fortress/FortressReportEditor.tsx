@@ -352,9 +352,7 @@ export default function FortressReportEditor() {
             <DialogDescription>Add a note explaining what needs to change. The author will see this.</DialogDescription>
           </DialogHeader>
           <Textarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} placeholder="What needs fixing…" rows={4} />
-          {!reviewNotes.trim() && (
-            <p className="text-xs text-muted-foreground">A note is required — it is the only thing the author will see.</p>
-          )}
+          <p className="text-xs text-muted-foreground">A note is required — it is the only thing the author will see.</p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setReviewOpen(null)}>Cancel</Button>
             <Button

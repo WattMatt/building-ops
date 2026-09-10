@@ -32,6 +32,11 @@ export default function ReportsTab({ buildingId, buildingName }: { buildingId: s
   const { data: reports, isLoading } = useFortressReports(buildingId);
   const { data: kpiData } = useBuildingKpis(buildingId);
   const hasApproved = !!kpiData?.ops || !!kpiData?.cm;
+  const sources = [
+    kpiData?.ops ? `Monthly OPS Report — ${formatPeriodLabel(kpiData.ops.report_period)} · approved` : null,
+    kpiData?.cm ? `Monthly CM Report — ${formatPeriodLabel(kpiData.cm.report_period)} · approved` : null,
+    kpiData?.annual ? `Annual Inspection — ${formatPeriodLabel(kpiData.annual.report_period)} · approved` : null,
+  ].filter(Boolean).join(' · ');
   const { organization } = useOrganization();
   const [hsOpen, setHsOpen] = useState(false);
   const [hsStart, setHsStart] = useState(format(subDays(new Date(), 90), 'yyyy-MM-dd'));
@@ -138,11 +143,7 @@ export default function ReportsTab({ buildingId, buildingName }: { buildingId: s
             />
           </TabsContent>
           <TabsContent value="kpis" className="mt-4">
-            <p className="mb-2 text-xs text-muted-foreground">
-              From {kpiData?.ops ? `Monthly OPS Report — ${formatPeriodLabel(kpiData.ops.report_period)} · approved` : ''}
-              {kpiData?.ops && kpiData?.cm ? ' · ' : ''}
-              {kpiData?.cm ? `Monthly CM Report — ${formatPeriodLabel(kpiData.cm.report_period)} · approved` : ''}
-            </p>
+            {sources && <p className="mb-2 text-xs text-muted-foreground">From {sources}</p>}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {(kpiData?.kpis ?? []).map((k) => <KpiCard key={k.id} kpi={k} />)}
             </div>
