@@ -19,21 +19,8 @@ describe('occurrences — pinned to docs/fixtures/recurrence-occurrences.json', 
     expect(rows).toHaveLength(10);
   });
 
-  // Fixture row 8 ({every:6, unit:'month', monthDay:1} from 2026-09-10) expects 2026-10-01 / 2027-04-01 /
-  // 2027-10-01, which contradicts the plan's stated semantics ("first candidate month is from's month")
-  // and the SQL (date_trunc('month', p_from) + 6 months -> 2027-03-01, 2027-09-01). The SQL is the
-  // pinned truth, so that row is skipped here until the controller reconciles the fixture.
-  const DISPUTED = (row: Row) =>
-    row.rule.unit === 'month' && row.rule.every === 6 && row.from === '2026-09-10';
-
   for (const row of rows) {
     const name = `${JSON.stringify(row.rule)} ${row.from}..${row.to}`;
-    if (DISPUTED(row)) {
-      it.skip(`${name} (fixture disagrees with the SQL; see note above)`, () => {
-        expect(occurrences(row.rule, row.from, row.to)).toEqual(row.expected);
-      });
-      continue;
-    }
     it(name, () => {
       expect(occurrences(row.rule, row.from, row.to)).toEqual(row.expected);
     });
