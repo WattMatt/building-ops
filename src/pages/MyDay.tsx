@@ -28,6 +28,8 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUserProfile } from '@/hooks/useUserProfile';
 import { useMyWork, type MyIssue } from '@/hooks/useMyWork';
+import { useOfflineQueue } from '@/hooks/useOfflineQueue';
+import { failedTaskIds, queuedTaskIds } from '@/lib/offline/pendingOverlay';
 import { greetingFor, type MyTask } from '@/lib/myWork';
 import CompleteTaskDialog from '@/components/checklists/CompleteTaskDialog';
 import { InstallCard } from '@/components/pwa/InstallCard';
@@ -129,6 +131,12 @@ export default function MyDay() {
     refetch,
   } = useMyWork();
 
+  // Completions waiting in the offline queue. The server still lists those tasks as due, so
+  // the row must say "already done, waiting to sync" rather than offer Complete a second time.
+  const { ops: queuedOps } = useOfflineQueue();
+  const queuedTasks = queuedTaskIds(queuedOps);
+  const failedTasks = failedTaskIds(queuedOps);
+
   const [taskToComplete, setTaskToComplete] = useState<MyTask | null>(null);
   const [issueToOpen, setIssueToOpen] = useState<MyIssue | null>(null);
 
@@ -147,14 +155,30 @@ export default function MyDay() {
 
   const greeting = greetingFor(profile?.full_name, new Date().getHours());
 
+  // Guardrail chips, not <Hint>s: the state of a queued write must survive hints being off.
+  const queuedChip = (taskId: string) =>
+    failedTasks.has(taskId) ? (
+      <Badge variant="destructive" className="h-10 w-full justify-center sm:w-auto sm:h-auto">
+        Needs attention
+      </Badge>
+    ) : (
+      <Badge variant="secondary" className="h-10 w-full justify-center sm:w-auto sm:h-auto">
+        Queued
+      </Badge>
+    );
+
   const taskRow = (task: MyTask) => (
     <Row
       key={task.id}
       action={
-        <Button className="h-10 w-full sm:w-auto" onClick={() => setTaskToComplete(task)}>
-          <CheckCircle2 className="mr-2 h-4 w-4" />
-          Complete
-        </Button>
+        queuedTasks.has(task.id) ? (
+          queuedChip(task.id)
+        ) : (
+          <Button className="h-10 w-full sm:w-auto" onClick={() => setTaskToComplete(task)}>
+            <CheckCircle2 className="mr-2 h-4 w-4" />
+            Complete
+          </Button>
+        )
       }
     >
       <p className="font-medium text-sm">{task.task_name}</p>

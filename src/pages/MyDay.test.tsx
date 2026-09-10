@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { useMyWork } from '@/hooks/useMyWork';
+import type { QueuedOp } from '@/lib/offline/types';
 
 /** The page's whole data contract, so a field added to useMyWork fails here, not silently. */
 type MyWork = ReturnType<typeof useMyWork>;
@@ -11,6 +12,7 @@ const state = vi.hoisted(() => ({
   isAdminOrManager: false,
   fullName: 'Thabo Mokoena' as string | null,
   hintsEnabled: true,
+  queuedOps: [] as QueuedOp[],
 }));
 
 const track = vi.hoisted(() => vi.fn());
@@ -28,6 +30,17 @@ vi.mock('@/hooks/useHints', () => ({
   useHints: () => ({ hintsEnabled: state.hintsEnabled, setHintsEnabled: vi.fn() }),
 }));
 vi.mock('@/lib/analytics', () => ({ track }));
+// The queue hook reads IndexedDB through TanStack Query; the page only needs the ops list.
+vi.mock('@/hooks/useOfflineQueue', () => ({
+  useOfflineQueue: () => ({
+    ops: state.queuedOps,
+    pending: state.queuedOps.filter((o) => o.status === 'pending').length,
+    failed: state.queuedOps.filter((o) => o.status === 'failed').length,
+    retry: vi.fn(),
+    discard: vi.fn(),
+    retryAll: vi.fn(),
+  }),
+}));
 // The install offer has its own hooks and tests; My Day only needs to mount it.
 vi.mock('@/components/pwa/InstallCard', () => ({ InstallCard: () => null }));
 
@@ -82,6 +95,24 @@ const issue = {
   task_instance_id: null,
 };
 
+const queuedCompletion = (taskInstanceId: string, status: QueuedOp['status'] = 'pending'): QueuedOp => ({
+  id: `op-${taskInstanceId}`,
+  uid: 'u1',
+  createdAt: Date.now(),
+  attempts: 0,
+  status,
+  lastError: status === 'failed' ? 'permission denied' : null,
+  photos: [],
+  payload: {
+    kind: 'task_complete',
+    completionId: `c-${taskInstanceId}`,
+    taskInstanceId,
+    taskName: 'Check fire extinguishers',
+    notes: null,
+    signatureConfirmed: false,
+  },
+});
+
 const returnedReport = {
   id: 'r1',
   title: 'August OPS report',
@@ -120,6 +151,7 @@ describe('MyDay', () => {
     state.isAdminOrManager = false;
     state.fullName = 'Thabo Mokoena';
     state.hintsEnabled = true;
+    state.queuedOps = [];
     state.work = baseWork();
   });
 
@@ -144,6 +176,26 @@ describe('MyDay', () => {
     expect(screen.queryByText(/CompleteTaskDialog/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /complete/i }));
     expect(screen.getByText('CompleteTaskDialog open=true task=Check fire extinguishers')).toBeInTheDocument();
+  });
+
+  it('shows a Queued chip instead of Complete while the completion waits to sync', () => {
+    state.queuedOps = [queuedCompletion('t1')];
+    renderPage();
+    expect(screen.getByText('Check fire extinguishers')).toBeInTheDocument();
+    expect(screen.getByText('Queued')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /complete/i })).not.toBeInTheDocument();
+    // Still counted in its bucket: the server has not accepted it yet.
+    expect(screen.getByText('Overdue (1)')).toBeInTheDocument();
+  });
+
+  it('says a rejected completion needs attention, and leaves other rows actionable', () => {
+    state.queuedOps = [queuedCompletion('t1', 'failed')];
+    state.work = baseWork({ buckets: { overdue: [task], today: [{ ...upcomingTask, status: 'pending' }], upcoming: [] } });
+    renderPage();
+    expect(screen.getByText('Needs attention')).toBeInTheDocument();
+    expect(screen.queryByText('Queued')).not.toBeInTheDocument();
+    // t2 is not queued, so its Complete button is the only one left.
+    expect(screen.getAllByRole('button', { name: /complete/i })).toHaveLength(1);
   });
 
   it('opens the issue dialog for the clicked issue', () => {

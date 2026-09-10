@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { formatBuildingName } from '@/lib/buildingName';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIssues } from '@/hooks/useIssues';
+import { useOfflineQueue } from '@/hooks/useOfflineQueue';
+import { queuedIssues, type QueuedIssueRow } from '@/lib/offline/pendingOverlay';
 import IssueDetailDialog from '@/components/issues/IssueDetailDialog';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,6 +23,7 @@ import {
   Building2,
   Clock,
   Calendar,
+  CloudOff,
   Loader2,
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -52,6 +55,17 @@ const statusLabels: Record<IssueStatus, string> = {
 export default function Issues() {
   const { isAdminOrManager } = useAuth();
   const { issues, stats, loading, error, refetch } = useIssues();
+  // Issues reported while offline sit in the queue until they sync; the server does not have
+  // them yet, so they are overlaid at the top of the list. Names come from the live list — the
+  // only building lookup this page already holds — so a building with no other issue shows blank.
+  const { ops: queuedOps } = useOfflineQueue();
+  const buildingNames = new Map<string, string>();
+  for (const issue of issues) {
+    if (issue.building_name && !buildingNames.has(issue.building_id)) {
+      buildingNames.set(issue.building_id, issue.building_name);
+    }
+  }
+  const pendingIssues = queuedIssues(queuedOps, buildingNames);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<IssueStatus | 'all'>('all');
   const [priorityFilter, setPriorityFilter] = useState<IssuePriority | 'all'>('all');
@@ -79,14 +93,30 @@ export default function Issues() {
     setSearchParams((prev) => { prev.delete('open'); return prev; }, { replace: true });
   }, [openId, loading, issues, setSearchParams]);
 
-  const filteredIssues = issues.filter((issue) => {
+  const matchesFilters = (issue: {
+    title: string;
+    description: string;
+    status: IssueStatus;
+    priority: IssuePriority;
+  }) => {
     const matchesSearch =
       issue.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       issue.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === 'all' || issue.status === statusFilter;
     const matchesPriority = priorityFilter === 'all' || issue.priority === priorityFilter;
     return matchesSearch && matchesStatus && matchesPriority;
-  });
+  };
+
+  // Queued rows take part in the same filters, and always sit above the live rows.
+  const filteredQueued = pendingIssues.filter(matchesFilters);
+  const filteredIssues = issues.filter(matchesFilters);
+  const nothingToShow = filteredQueued.length === 0 && filteredIssues.length === 0;
+
+  // No detail dialog for a queued issue: it has no server row to load activity for. The
+  // queue sheet (where it can be retried or discarded) is the tap target once it lands.
+  const onQueuedRowClick = (row: QueuedIssueRow) => {
+    toast(row.failed ? 'This issue could not sync yet' : 'This issue is waiting to sync');
+  };
 
   if (loading) {
     return (
@@ -233,7 +263,7 @@ export default function Issues() {
       </div>
 
       {/* Issues List */}
-      {filteredIssues.length === 0 ? (
+      {nothingToShow ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <AlertTriangle className="h-12 w-12 text-muted-foreground mb-4" />
@@ -247,6 +277,51 @@ export default function Issues() {
         </Card>
       ) : (
         <div className="space-y-4">
+          {filteredQueued.map((row) => (
+            <Card
+              key={row.id}
+              data-testid="queued-issue"
+              className="border-dashed cursor-pointer"
+              onClick={() => onQueuedRowClick(row)}
+            >
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-4">
+                    <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-muted">
+                      <CloudOff className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <h3 className="font-medium">{row.title}</h3>
+                      <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                        {row.description}
+                      </p>
+                      <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
+                        {row.building_name && (
+                          <span className="flex items-center gap-1">
+                            <Building2 className="h-3 w-3" />
+                            {formatBuildingName(row.building_name)}
+                          </span>
+                        )}
+                        <span className="flex items-center gap-1">
+                          <Calendar className="h-3 w-3" />
+                          {format(new Date(row.created_at), 'MMM d, yyyy')}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <Badge variant="secondary" className={priorityColors[row.priority]}>
+                      {row.priority}
+                    </Badge>
+                    {/* Guardrail chip, plain text: the sync state must always be visible. */}
+                    <Badge variant={row.failed ? 'destructive' : 'outline'}>
+                      {row.failed ? 'Needs attention' : 'Queued'}
+                    </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
           {filteredIssues.map((issue) => (
             <Card
               key={issue.id}
