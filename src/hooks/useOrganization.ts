@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { subscribePostgresChanges } from '@/lib/realtime/subscribePostgresChanges';
 import type { Tables } from '@/integrations/supabase/types';
 
 type Organization = Tables<'organizations'>;
@@ -31,23 +32,18 @@ export function useOrganization() {
 
     fetchOrganization();
 
-    // Subscribe to changes
-    const channel = supabase
-      .channel('organization-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'organizations' },
-        (payload) => {
-          if (payload.new) {
-            setOrganization(payload.new as Organization);
-          }
+    // Many components call this hook at once (the layout plus whatever page is inside
+    // it). The registry keeps ONE live channel for all of them; opening a channel per
+    // consumer under a fixed name errors the shared channel — see subscribePostgresChanges.
+    return subscribePostgresChanges<Organization>(
+      'organization-changes',
+      { event: '*', schema: 'public', table: 'organizations' },
+      (payload) => {
+        if (payload.new) {
+          setOrganization(payload.new as Organization);
         }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+      },
+    );
   }, []);
 
   return { organization, loading };

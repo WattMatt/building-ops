@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import { subscribePostgresChanges } from '@/lib/realtime/subscribePostgresChanges';
 
 interface UserProfile {
   full_name: string | null;
@@ -40,26 +41,21 @@ export function useUserProfile() {
 
     fetchProfile();
 
-    // Subscribe to profile changes
-    const channel = supabase
-      .channel('profile-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'profiles',
-          filter: `id=eq.${user.id}`,
-        },
-        (payload) => {
-          setProfile(payload.new as UserProfile);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    // The layout and the Dashboard page both call this hook at once. The registry keeps
+    // ONE live channel per user for all consumers; the user id is part of the key because
+    // listeners share the filter the key was opened with — see subscribePostgresChanges.
+    return subscribePostgresChanges<UserProfile & Record<string, unknown>>(
+      `profile-changes:${user.id}`,
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'profiles',
+        filter: `id=eq.${user.id}`,
+      },
+      (payload) => {
+        setProfile(payload.new as UserProfile);
+      },
+    );
   }, [user]);
 
   return { profile, loading };
