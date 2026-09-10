@@ -227,13 +227,13 @@ export default function BuildingDetails() {
                     {contacts.assetManager.phone && (
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
                         <Phone className="h-3 w-3" />
-                        {contacts.assetManager.phone}
+                        <a href={`tel:${contacts.assetManager.phone.replace(/\s+/g, '')}`} className="hover:underline">{contacts.assetManager.phone}</a>
                       </p>
                     )}
                     {contacts.assetManager.email && (
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
                         <Mail className="h-3 w-3" />
-                        {contacts.assetManager.email}
+                        <a href={`mailto:${contacts.assetManager.email}`} className="hover:underline">{contacts.assetManager.email}</a>
                       </p>
                     )}
                   </div>
@@ -258,13 +258,13 @@ export default function BuildingDetails() {
                     {contacts.centreManagement.phone && (
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
                         <Phone className="h-3 w-3" />
-                        {contacts.centreManagement.phone}
+                        <a href={`tel:${contacts.centreManagement.phone.replace(/\s+/g, '')}`} className="hover:underline">{contacts.centreManagement.phone}</a>
                       </p>
                     )}
                     {contacts.centreManagement.email && (
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
                         <Mail className="h-3 w-3" />
-                        {contacts.centreManagement.email}
+                        <a href={`mailto:${contacts.centreManagement.email}`} className="hover:underline">{contacts.centreManagement.email}</a>
                       </p>
                     )}
                   </div>
@@ -289,13 +289,13 @@ export default function BuildingDetails() {
                     {contacts.securityContact.phone && (
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
                         <Phone className="h-3 w-3" />
-                        {contacts.securityContact.phone}
+                        <a href={`tel:${contacts.securityContact.phone.replace(/\s+/g, '')}`} className="hover:underline">{contacts.securityContact.phone}</a>
                       </p>
                     )}
                     {contacts.securityContact.email && (
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
                         <Mail className="h-3 w-3" />
-                        {contacts.securityContact.email}
+                        <a href={`mailto:${contacts.securityContact.email}`} className="hover:underline">{contacts.securityContact.email}</a>
                       </p>
                     )}
                   </div>
