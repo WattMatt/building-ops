@@ -934,3 +934,22 @@ git commit -m "Make building contact numbers and emails tappable"
 - Spec §5 coverage: AssigneePicker + useBuildingMembers → T2; task assignment single+bulk with zero-row checks → T7; comments with photos + mentions → T5; resolve with closing note + trigger → T1 + T6; tel/mailto → T8; notify seam → T3; issue assignee via picker → T4; migration incl. notifications table + realtime → T1. Generation leaves `assigned_to` null (stated).
 - Placeholders: none.
 - Type consistency: `BuildingMember` / `memberDisplayName` / `useBuildingMembers().byId` used identically in T2, T4, T5, T7; `NotifyInput` fields match across T3–T7; `uploadIssuePhotos(photos, userId)` in T5 and T6; `assignTasks(ids, assigned_to)` in T7 both call sites.
+
+## Status (2026-09-10)
+
+Tasks 1–8 implemented on `feat/reports-access-hardening` (commits 951045c..d724622), each through a
+spec review and a code-quality review plus five fix commits and a whole-slice final review; 234 tests
+pass, typecheck baseline 64, build green. Task 9 remains with the owner. Migration
+`GMI/sql/2026-09-11_01_r1_mine.sql` (GMI HEAD 8a4c813) is NOT yet applied anywhere.
+
+Deviations from the plan text, all reviewed: `building_members` de-duplicates users with several
+role rows and returns the highest-precedence role; the stored comment is trimmed; `TasksList` lives in
+its own file; `postIssueComment` in `src/lib/issueActivity.ts` is the one comment write path;
+`AssigneePicker` exposes `toSelectValue`/`fromSelectValue`, `id`, and `placeholder`; assignment patches
+state optimistically instead of refetching; the Issues page honours `?open=<id>`.
+
+Follow-ups deliberately left for later slices:
+- Resolve-with-note is two client writes; a `resolve_issue(issue_id, note, photo_urls)` RPC would make
+  it atomic (R1b or R3).
+- `@mention` picker has no name-collision handling beyond the role suffix.
+- The `notify()` seam is a no-op until R1b wires the edge function.
