@@ -5,7 +5,8 @@
  * titles for its scope. It is minted client-side (32 random bytes, base64url,
  * 43 chars), stored plain in `calendar_tokens` under owner-only RLS, and the
  * `ics-feed` edge function resolves it with the service role. Rotating a token
- * revokes the old row and inserts a fresh one, so a leaked link stops working.
+ * inserts a fresh row and then revokes the old one, so a leaked link stops
+ * working — and a failed insert leaves the old feed intact rather than none.
  *
  * One active row per (user, scope): `building_id` null is the user's own feed;
  * a building id is the per-building feed (admin/manager surfaces only).
@@ -167,11 +168,13 @@ export function useCalendarToken(buildingId: string | null, label?: string): Cal
   const rotateMutation = useMutation({
     mutationFn: async () => {
       const current = query.data;
-      if (current) await revokeRow(current.id);
+      // New row first: if the insert fails the user keeps a working feed. The read takes the
+      // newest active row (`created_at desc limit 1`), so the new one wins as soon as it exists.
       await insertToken(uid!, buildingId, rowLabel);
+      if (current) await revokeRow(current.id);
     },
     onSuccess: () => { track('calendar_feed', { action: 'rotate', scope }); void invalidate(); },
-    // A revoke that landed before the insert failed still changed the row; refetch either way.
+    // An insert that landed before the revoke failed still made a new row; refetch either way.
     onError: () => { void invalidate(); },
   });
 

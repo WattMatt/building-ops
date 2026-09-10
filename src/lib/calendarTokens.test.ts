@@ -95,6 +95,19 @@ function wrapper({ children }: { children: ReactNode }) {
   return createElement(QueryClientProvider, { client }, children);
 }
 
+/**
+ * Runs a mutation inside `act` and returns what it rejected with (or undefined when it resolved).
+ * `await expect(act(...)).rejects` cannot be used here: React's `act` returns a thenable whose
+ * `then` returns undefined, so vitest's `.rejects` resolves at once and the assertion never runs.
+ */
+async function rejectionOf(run: () => Promise<unknown>): Promise<unknown> {
+  let rejection: unknown;
+  await act(async () => {
+    await run().catch((e: unknown) => { rejection = e; });
+  });
+  return rejection;
+}
+
 describe('useCalendarToken', () => {
   beforeEach(() => {
     state.calls.length = 0;
@@ -146,7 +159,7 @@ describe('useCalendarToken', () => {
     await waitFor(() => expect(state.calls.some((c) => c.verb === 'select')).toBe(true));
   });
 
-  it('rotate revokes the current row, then inserts a new one', async () => {
+  it('rotate inserts the new row first, then revokes the current one', async () => {
     state.row = { id: 'r1', token: 'old' };
     const { result } = renderHook(() => useCalendarToken(null), { wrapper });
     await waitFor(() => expect(result.current.token).toBe('old'));
@@ -155,12 +168,37 @@ describe('useCalendarToken', () => {
     await act(() => result.current.rotate());
 
     const writes = state.calls.filter((c) => c.verb !== 'select');
-    expect(writes.map((c) => c.verb)).toEqual(['update', 'insert']);
-    expect(writes[0].eq).toEqual([['id', 'r1']]);
-    expect(typeof writes[0].payload!.revoked_at).toBe('string');
-    expect(writes[1].payload).toMatchObject({ user_id: 'me', building_id: null, label: 'My calendar' });
-    expect(writes[1].payload!.token).not.toBe('old');
+    expect(writes.map((c) => c.verb)).toEqual(['insert', 'update']);
+    expect(writes[0].payload).toMatchObject({ user_id: 'me', building_id: null, label: 'My calendar' });
+    expect(writes[0].payload!.token).not.toBe('old');
+    expect(writes[1].eq).toEqual([['id', 'r1']]);
+    expect(typeof writes[1].payload!.revoked_at).toBe('string');
     expect(trackMock).toHaveBeenCalledWith('calendar_feed', { action: 'rotate', scope: 'me' });
+  });
+
+  it('rotate leaves the current row active when the insert fails', async () => {
+    state.row = { id: 'r1', token: 'old' };
+    const { result } = renderHook(() => useCalendarToken(null), { wrapper });
+    await waitFor(() => expect(result.current.token).toBe('old'));
+    state.calls.length = 0;
+    state.writeError = { message: 'boom' };
+
+    expect(await rejectionOf(() => result.current.rotate())).toMatchObject({ message: 'boom' });
+
+    const writes = state.calls.filter((c) => c.verb !== 'select');
+    expect(writes.map((c) => c.verb)).toEqual(['insert']);
+    expect(trackMock).not.toHaveBeenCalled();
+    expect(result.current.token).toBe('old');
+  });
+
+  it('rotate with no current row only inserts', async () => {
+    const { result } = renderHook(() => useCalendarToken(null), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    state.calls.length = 0;
+
+    await act(() => result.current.rotate());
+
+    expect(state.calls.filter((c) => c.verb !== 'select').map((c) => c.verb)).toEqual(['insert']);
   });
 
   it('revoke stamps revoked_at on the current row only', async () => {
@@ -183,7 +221,7 @@ describe('useCalendarToken', () => {
     const { result } = renderHook(() => useCalendarToken(null), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    await expect(act(() => result.current.create())).rejects.toThrow(PERMISSION_MESSAGE);
+    expect(await rejectionOf(() => result.current.create())).toMatchObject({ message: PERMISSION_MESSAGE });
     expect(trackMock).not.toHaveBeenCalled();
   });
 
@@ -192,6 +230,7 @@ describe('useCalendarToken', () => {
     const { result } = renderHook(() => useCalendarToken(null), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    await expect(act(() => result.current.create())).rejects.toMatchObject({ message: 'boom' });
+    expect(await rejectionOf(() => result.current.create())).toMatchObject({ message: 'boom' });
+    expect(state.calls.filter((c) => c.verb !== 'select').map((c) => c.verb)).toEqual(['insert']);
   });
 });

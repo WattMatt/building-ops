@@ -83,6 +83,29 @@ function scopeKeyOf(scope: CalendarScope): string {
 /** Postgres surfaces a unique-index violation as SQLSTATE 23505. */
 const UNIQUE_VIOLATION = '23505';
 
+/** Every `YYYY-MM` key from the month of `from` to the month of `to`, inclusive (both YYYY-MM-DD). */
+export function monthKeysBetween(from: string, to: string): string[] {
+  const [fy, fm] = from.split('-').map(Number);
+  const [ty, tm] = to.split('-').map(Number);
+  const keys: string[] = [];
+  for (let y = fy, m = fm; y < ty || (y === ty && m <= tm); m === 12 ? ((y += 1), (m = 1)) : (m += 1)) {
+    keys.push(`${y}-${String(m).padStart(2, '0')}`);
+  }
+  return keys;
+}
+
+/**
+ * The body of a PostgREST `or=(...)` that keeps only `ppm_services` rows whose `months` grid
+ * has a cell for at least one month in `[from, to]`, e.g.
+ * `months->2026-08.not.is.null,months->2026-09.not.is.null`. PostgREST parses a `->` path
+ * with a hyphenated key (checked against the project's REST endpoint: 200 for this shape,
+ * 400 for a malformed tree). A cell's `date` is assumed to fall in its key's month; the
+ * client-side `inRange` remains the second guard either way.
+ */
+export function ppmMonthsFilter(from: string, to: string): string {
+  return monthKeysBetween(from, to).map((k) => `months->${k}.not.is.null`).join(',');
+}
+
 export function useCalendarEvents({ scope, from, to }: UseCalendarEventsArgs): UseCalendarEventsResult {
   const { user, isAdminOrManager } = useAuth();
   const uid = user?.id;
@@ -170,12 +193,16 @@ export function useCalendarEvents({ scope, from, to }: UseCalendarEventsArgs): U
         },
       },
       {
-        // Months live in a jsonb map, so the range is applied after expansion (see `events`).
+        // Months live in a jsonb map. Rows are limited server-side to those with a cell in one
+        // of the range's months (so a month step does not re-download the whole table); the
+        // day-level range is then applied after expansion (see `events`).
         queryKey: keyFor('ppm'),
         ...persistMeta,
         enabled: !!uid,
         queryFn: async (): Promise<PpmRow[]> => {
           let q = supabase.from('ppm_services').select('id, building_id, service_name, months, report_id');
+          const monthsFilter = ppmMonthsFilter(from, to);
+          if (monthsFilter) q = q.or(monthsFilter);
           if (buildingId) q = q.eq('building_id', buildingId);
           const { data, error } = await q.order('service_name');
           if (error) throw new Error(error.message);

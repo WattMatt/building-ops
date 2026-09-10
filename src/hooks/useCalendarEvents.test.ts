@@ -13,6 +13,8 @@ interface RecordedCall {
   lte: [string, unknown][];
   in: [string, unknown[]][];
   not: [string, string, unknown][];
+  /** Raw `or=(...)` bodies, as handed to PostgREST. */
+  or: string[];
 }
 
 type Row = Record<string, unknown>;
@@ -31,6 +33,7 @@ interface Chain {
   lte: (col: string, val: unknown) => Chain;
   in: (col: string, vals: unknown[]) => Chain;
   not: (col: string, op: string, val: unknown) => Chain;
+  or: (filters: string) => Chain;
   order: () => Chain;
   then: <T>(onFulfilled: (r: Response) => T, onRejected?: (e: unknown) => T) => Promise<T>;
 }
@@ -44,7 +47,7 @@ const state = vi.hoisted(() => {
     makeChain: ((): Chain => { throw new Error('unset'); }) as (table: string) => Chain,
   };
   st.makeChain = (table: string): Chain => {
-    const call: RecordedCall = { table, select: null, update: null, eq: [], gte: [], lte: [], in: [], not: [] };
+    const call: RecordedCall = { table, select: null, update: null, eq: [], gte: [], lte: [], in: [], not: [], or: [] };
     const chain: Chain = {
       select: (cols) => { call.select = cols ?? '*'; return chain; },
       update: (values) => { call.update = values; return chain; },
@@ -53,6 +56,7 @@ const state = vi.hoisted(() => {
       lte: (col, val) => { call.lte.push([col, val]); return chain; },
       in: (col, vals) => { call.in.push([col, vals]); return chain; },
       not: (col, op, val) => { call.not.push([col, op, val]); return chain; },
+      or: (filters) => { call.or.push(filters); return chain; },
       order: () => chain,
       then: (onFulfilled, onRejected) => {
         st.calls.push(call);
@@ -73,7 +77,7 @@ vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ user: { id: 'me' }, isAdminOrManager: state.isAdminOrManager }),
 }));
 
-import { useCalendarEvents } from './useCalendarEvents';
+import { monthKeysBetween, ppmMonthsFilter, useCalendarEvents } from './useCalendarEvents';
 import { todayInOperatingTz } from '@/lib/myWork';
 
 const callsFor = (table: string) => state.calls.filter((c) => c.table === table && !c.update);
@@ -96,7 +100,56 @@ beforeEach(() => {
   state.isAdminOrManager = false;
 });
 
+describe('monthKeysBetween / ppmMonthsFilter', () => {
+  it('lists every month key the range touches, across a year boundary', () => {
+    expect(monthKeysBetween('2026-09-01', '2026-09-30')).toEqual(['2026-09']);
+    expect(monthKeysBetween('2026-08-25', '2026-10-07')).toEqual(['2026-08', '2026-09', '2026-10']);
+    expect(monthKeysBetween('2026-12-15', '2027-01-03')).toEqual(['2026-12', '2027-01']);
+    expect(monthKeysBetween('2026-10-01', '2026-09-01')).toEqual([]);
+  });
+
+  it('builds one not-null jsonb path test per key, in PostgREST or-tree syntax', () => {
+    expect(ppmMonthsFilter('2026-08-25', '2026-10-07'))
+      .toBe('months->2026-08.not.is.null,months->2026-09.not.is.null,months->2026-10.not.is.null');
+    expect(ppmMonthsFilter('2026-10-01', '2026-09-01')).toBe('');
+  });
+});
+
 describe('useCalendarEvents', () => {
+  it('limits the PPM query server-side to rows with a cell in one of the months in range', async () => {
+    const client = makeClient();
+    const { result } = renderHook(() => useCalendarEvents({ scope: { kind: 'portfolio' }, from: '2026-08-25', to: '2026-10-07' }), { wrapper: wrapperFor(client) });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const ppm = callsFor('ppm_services')[0];
+    expect(ppm.or).toHaveLength(1);
+    for (const key of ['2026-08', '2026-09', '2026-10']) expect(ppm.or[0]).toContain(`months->${key}.not.is.null`);
+    expect(ppm.or[0]).toBe(ppmMonthsFilter('2026-08-25', '2026-10-07'));
+    // No other source uses an or-tree.
+    for (const table of ['task_instances', 'issues', 'building_documents', 'building_assets', 'reports']) {
+      expect(callsFor(table)[0].or, table).toEqual([]);
+    }
+  });
+
+  it('still drops PPM cells outside the day range after the month filter (second guard)', async () => {
+    state.data.buildings = [{ id: 'b1', name: 'Block A' }];
+    state.data.ppm_services = [{
+      id: 'p1', building_id: 'b1', service_name: 'Lift service', report_id: null,
+      months: { '2026-09': { status: 'due', date: '2026-09-02' }, '2026-10': { status: 'due', date: '2026-10-09' } },
+    }];
+    const client = makeClient();
+    // A week in September: the month filter fetches the row (it has a 2026-09 cell), but both
+    // cells fall outside 7–13 Sep, so the day-level guard must drop them.
+    const { result } = renderHook(() => useCalendarEvents({ scope: { kind: 'building', id: 'b1' }, from: '2026-09-07', to: '2026-09-13' }), { wrapper: wrapperFor(client) });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(callsFor('ppm_services')[0].or[0]).toBe('months->2026-09.not.is.null');
+    expect(result.current.events.filter((e) => e.kind === 'ppm')).toEqual([]);
+
+    const wide = makeClient();
+    const w = renderHook(() => useCalendarEvents({ scope: { kind: 'building', id: 'b1' }, from: '2026-09-01', to: '2026-09-30' }), { wrapper: wrapperFor(wide) });
+    await waitFor(() => expect(w.result.current.isLoading).toBe(false));
+    expect(w.result.current.events.filter((e) => e.kind === 'ppm').map((e) => e.date)).toEqual(['2026-09-02']);
+  });
+
   it('fans out to all seven sources and the buildings list, filtered to the building in scope', async () => {
     state.data.form_signoff_requests = [{ id: 's1', submission_id: 'sub1', due_at: '2026-09-10T08:00:00Z', status: 'pending', active: true, assigned_to: 'me' }];
     state.data.form_submissions = [{ id: 'sub1', form_name: 'Fire check', building_id: 'b1' }];

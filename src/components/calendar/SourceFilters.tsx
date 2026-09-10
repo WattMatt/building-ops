@@ -5,7 +5,7 @@
  * Storage can be missing or full (private mode, quota), so every read and write is guarded
  * and a failure just means the default — everything shown.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { KIND_COLORS, KIND_LABELS, type CalendarEvent, type CalendarKind } from '@/lib/calendar/events';
 
@@ -36,6 +36,16 @@ function writeHidden(uid: string | null | undefined, hidden: Set<CalendarKind>):
 /** The hidden-kind set for a user, persisted across visits. */
 export function useSourceFilters(uid: string | null | undefined) {
   const [hidden, setHiddenState] = useState<Set<CalendarKind>>(() => readHidden(uid));
+
+  // The session can resolve after mount (uid undefined → id) or change user; each user has
+  // their own remembered set, so re-read when the key changes — not on the initial render,
+  // which the lazy initialiser already covered.
+  const readFor = useRef(uid);
+  useEffect(() => {
+    if (readFor.current === uid) return;
+    readFor.current = uid;
+    setHiddenState(readHidden(uid));
+  }, [uid]);
 
   const setHidden = useCallback((next: Set<CalendarKind>) => {
     setHiddenState(next);
@@ -91,7 +101,8 @@ export function SourceFilters({ events, hidden, onToggle, className }: SourceFil
             )}
           >
             <span className={cn(!shown && 'line-through')}>{KIND_LABELS[kind]}</span>
-            <span className="tabular-nums text-xs opacity-80" aria-label={`${counts[kind]} ${KIND_LABELS[kind]}`}>{counts[kind]}</span>
+            {/* No aria-label here: the button already reads "<label> <count>"; a label on the count made it "Task 3 Task". */}
+            <span className="tabular-nums text-xs opacity-80">{counts[kind]}</span>
           </button>
         );
       })}
