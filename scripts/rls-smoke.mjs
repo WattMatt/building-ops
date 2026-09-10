@@ -453,8 +453,16 @@ try {
     const r = await rpcCall(null, fn, args);
     assert(`${fn} not executable by anon`, r.status === 401 || r.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${r.status}`);
   }
-  assert('mark_overdue_tasks not executable by authenticated', (await rpcCall(personas.admin.jwt, 'mark_overdue_tasks', {})).status !== 200, 'admin ran the cron-only sweep');
-  assert('generate_scheduled_tasks refused for a site user', (await rpcCall(personas.userA.jwt, 'generate_scheduled_tasks', { p_building: A })).status !== 200, 'site user generated tasks');
+  // 403 exactly: PostgREST maps a revoked EXECUTE (42501) to 403 for a signed-in caller, and a
+  // looser `!== 200` would let a 404 from a missing function pass.
+  {
+    const r = await rpcCall(personas.admin.jwt, 'mark_overdue_tasks', {});
+    assert('mark_overdue_tasks not executable by authenticated', r.status === 403, `expected HTTP 403 (revoked grant), got HTTP ${r.status}`);
+  }
+  {
+    const r = await rpcCall(personas.userA.jwt, 'generate_scheduled_tasks', { p_building: A });
+    assert('generate_scheduled_tasks refused for a site user', r.status === 403, `expected HTTP 403 (raised 42501), got HTTP ${r.status}`);
+  }
   // Inserts real task_instances for building A from every active unscoped template on the
   // project; the teardown deletes generated rows for A/B before the buildings themselves.
   assert('generate_scheduled_tasks runs for admin', (await rpcCall(personas.admin.jwt, 'generate_scheduled_tasks', { p_building: A })).status === 200, 'admin generate failed');

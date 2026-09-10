@@ -14,6 +14,12 @@
  * The photo step uploads to whatever path CompleteTaskDialog.tsx builds, so a
  * storage-policy/path mismatch (the F-30 failure class) shows up HERE as a
  * real client would hit it, not as an abstract policy probe.
+ *
+ * The final overdue-sweep assertions call `mark_overdue_tasks` as the service
+ * role, which flips EVERY genuinely back-dated pending task on the target
+ * project, not just the fixture. Against production (SUPABASE_URL containing
+ * the prod ref qdzgkttiosahdfqresvz) those assertions are SKIPped unless
+ * SMOKE_ALLOW_PROD=1; the rest of the journey still runs.
  */
 
 const URL_BASE = process.env.SUPABASE_URL;
@@ -23,6 +29,10 @@ if (!URL_BASE || !SERVICE || !ANON) {
   console.error('Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY and SUPABASE_ANON_KEY');
   process.exit(2);
 }
+
+// Same guard as scripts/notifications-smoke.mjs, but scoped to the overdue sweep only.
+const PROD_REF = 'qdzgkttiosahdfqresvz';
+const SWEEP_ALLOWED = !URL_BASE.includes(PROD_REF) || process.env.SMOKE_ALLOW_PROD === '1';
 
 const RUN = crypto.randomUUID().slice(0, 8);
 const PASSWORD = `Chk-Smoke-${RUN}!`;
@@ -169,15 +179,20 @@ try {
   assert('exactly one completion row after replay', tcs.length === 1, `${tcs.length} rows`);
 
   // Sweep: flips every genuinely back-dated pending task on the project (what the cron does nightly).
-  const late = (await svcInsert('task_instances', {
-    building_id: building, task_name: `ZZTEST-late-${RUN}`, frequency: 'daily', status: 'pending', due_date: '2020-01-01', responsible_role: 'user',
-  })).id;
-  cleanup.unshift(['task_instances', `id=eq.${late}`]);
-  r = await fetch(`${URL_BASE}/rest/v1/rpc/mark_overdue_tasks`, { method: 'POST', headers: SVC, body: '{}' });
-  assert('mark_overdue_tasks runs as service role', r.ok, `HTTP ${r.status}`);
-  const lateRow = await (await fetch(`${URL_BASE}/rest/v1/task_instances?id=eq.${late}&select=status`, { headers: SVC })).json();
-  assert('back-dated pending task is now overdue', lateRow[0]?.status === 'overdue', JSON.stringify(lateRow[0]));
-  await svcDelete('task_instances', `id=eq.${late}`);
+  // That is a real side effect on prod, so refuse there unless SMOKE_ALLOW_PROD=1.
+  if (!SWEEP_ALLOWED) {
+    console.log(`  SKIP  mark_overdue_tasks sweep — SUPABASE_URL contains the prod ref ${PROD_REF}; the sweep flips every back-dated pending task. Set SMOKE_ALLOW_PROD=1 to run it.`);
+  } else {
+    const late = (await svcInsert('task_instances', {
+      building_id: building, task_name: `ZZTEST-late-${RUN}`, frequency: 'daily', status: 'pending', due_date: '2020-01-01', responsible_role: 'user',
+    })).id;
+    cleanup.unshift(['task_instances', `id=eq.${late}`]);
+    r = await fetch(`${URL_BASE}/rest/v1/rpc/mark_overdue_tasks`, { method: 'POST', headers: SVC, body: '{}' });
+    assert('mark_overdue_tasks runs as service role', r.ok, `HTTP ${r.status}`);
+    const lateRow = await (await fetch(`${URL_BASE}/rest/v1/task_instances?id=eq.${late}&select=status`, { headers: SVC })).json();
+    assert('back-dated pending task is now overdue', lateRow[0]?.status === 'overdue', JSON.stringify(lateRow[0]));
+    await svcDelete('task_instances', `id=eq.${late}`);
+  }
 } catch (e) {
   fail('smoke run', e.message);
 } finally {

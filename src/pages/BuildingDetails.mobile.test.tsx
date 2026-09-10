@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import { mockViewport } from '@/test/mobile';
 
 vi.mock('@/contexts/AuthContext', () => ({
@@ -71,6 +71,41 @@ function renderAt(url: string) {
     </MemoryRouter>,
   );
 }
+
+// Stands in for quick-create "New note" / a palette hit: an in-app navigation that
+// only changes ?tab= on the building page that is already mounted.
+function GoToNotes() {
+  const navigate = useNavigate();
+  return <button onClick={() => navigate('/buildings/b1?tab=notes')}>go to notes</button>;
+}
+
+describe('BuildingDetails ?tab= deep links', () => {
+  it('switches tabs when an in-app navigation changes ?tab= on the mounted page', async () => {
+    render(
+      <MemoryRouter initialEntries={['/buildings/b1?tab=overview']}>
+        <Routes>
+          <Route
+            path="/buildings/:id"
+            element={
+              <>
+                <GoToNotes />
+                <BuildingDetails />
+              </>
+            }
+          />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const tablist = await screen.findByRole('tablist');
+    expect(tablist.querySelector('[data-state="active"]')).toHaveTextContent('Overview');
+
+    fireEvent.click(screen.getByRole('button', { name: 'go to notes' }));
+
+    const active = await screen.findByRole('tab', { selected: true });
+    expect(active).toHaveTextContent('Notes');
+  });
+});
 
 describe('BuildingDetails on a phone', () => {
   it('renders the tabs as a horizontally scrollable strip and scrolls the active tab into view', async () => {

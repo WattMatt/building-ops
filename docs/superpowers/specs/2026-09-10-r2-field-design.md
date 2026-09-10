@@ -34,7 +34,8 @@ All statements idempotent, wrapped in `begin/commit`. Nothing here is required b
 ### 4.1 Server-side task generation
 
 ```sql
-create or replace function public.generate_scheduled_tasks(p_building uuid default null)
+create or replace function public.generate_scheduled_tasks(
+  p_building uuid default null, p_template uuid default null, p_frequency text default null)
 returns integer language plpgsql security definer set search_path = '' as $$
 -- For each active checklist template item that applies to a building (same scoping the client
 -- uses today in ChecklistsTab.generateTasksForFrequency: building_type match or unscoped),
@@ -45,11 +46,13 @@ returns integer language plpgsql security definer set search_path = '' as $$
 -- Africa/Johannesburg calendar date.
 -- Idempotent through `on conflict (building_id, template_item_id, due_date) do nothing`, which
 -- is the existing task_instances_generated_uniq index (2026-06-11_02_fix_task_dedup_index.sql).
--- Returns the number of rows inserted. p_building null = every building.
+-- Returns the number of rows inserted. p_building null = every building; p_template null = every
+-- active template; p_frequency null = every frequency. The app calls it per building (the
+-- building page), per template from Apply Template, and per frequency from the Generate button.
 $$;
-revoke all on function public.generate_scheduled_tasks(uuid) from public;
-revoke execute on function public.generate_scheduled_tasks(uuid) from anon;
-grant execute on function public.generate_scheduled_tasks(uuid) to authenticated, service_role;
+revoke all on function public.generate_scheduled_tasks(uuid, uuid, text) from public;
+revoke execute on function public.generate_scheduled_tasks(uuid, uuid, text) from anon;
+grant execute on function public.generate_scheduled_tasks(uuid, uuid, text) to authenticated, service_role;
 ```
 
 The client "Generate" buttons stay as a manual re-run and call this RPC (`p_building = <id>`); the two copies of the client logic (`ChecklistsTab.tsx:229`, `ApplyTemplateDialog.tsx:119`) are deleted. An `authenticated` caller must pass `can_access_building(p_building)` and `is_admin_or_manager()`; the function raises otherwise (definer functions do not get RLS for free).
@@ -77,8 +80,8 @@ Cron: `cron.schedule('task-overdue-sweep', '5 22 * * *', $$select public.mark_ov
 
 ```sql
 create or replace function public.complete_task(
-  p_completion_id uuid, p_task_instance_id uuid, p_notes text,
-  p_signature_confirmed boolean, p_photo_urls jsonb)
+  p_completion_id uuid, p_task_instance_id uuid, p_notes text default null,
+  p_signature_confirmed boolean default false, p_photo_urls jsonb default '[]'::jsonb)
 returns table (completion_id uuid, already_completed boolean)
 language plpgsql security invoker set search_path = '' as $$
 -- 1. insert into task_completions (id, task_instance_id, completed_by = auth.uid(), notes,
@@ -120,8 +123,9 @@ create or replace function public.search_entities(q text, lim int default 20)
 returns table (kind text, id uuid, building_id uuid, title text, subtitle text)
 language sql stable security invoker set search_path = '' as $$
   -- union of buildings(name/address), issues(title/description), building_tenants(name/unit),
-  -- building_documents(name) filtered with `ilike '%' || q || '%'`, ordered by kind then title,
-  -- limited to lim. RLS on each table applies because the function is security invoker.
+  -- building_documents(name) filtered with `ilike '%' || q || '%'`, kinds in the order building,
+  -- issue, tenant, document, up to `lim` results per kind (so one kind cannot starve the others).
+  -- RLS on each table applies because the function is security invoker.
 $$;
 -- grant execute to authenticated only; revoke from public and anon.
 ```

@@ -53,6 +53,16 @@ export default function BuildingDetails() {
     setSearchParams((prev) => { prev.set('tab', tab); return prev; }, { replace: true });
   };
 
+  // `activeTab` is seeded from ?tab= once above; in-app navigations to the same
+  // building with a different ?tab= (quick-create "New note", palette hits) must
+  // switch too. Only write when the param is present and differs, so the
+  // handleTabChange -> setSearchParams -> effect round-trip cannot loop.
+  const tabParam = searchParams.get('tab');
+  useEffect(() => {
+    if (tabParam !== null && tabParam !== activeTab) setActiveTab(tabParam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync from the URL only when the param changes
+  }, [tabParam]);
+
   // On phones the tab strip scrolls horizontally; keep the active tab in view
   // (deep links like ?tab=documents land on a tab that starts off-screen).
   // `loading` is a dep because the strip only mounts once the building has loaded.
