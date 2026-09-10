@@ -580,6 +580,54 @@ export type Database = {
           },
         ]
       }
+      calendar_tokens: {
+        Row: {
+          building_id: string | null
+          created_at: string
+          id: string
+          label: string | null
+          last_used_at: string | null
+          revoked_at: string | null
+          token: string
+          user_id: string
+        }
+        Insert: {
+          building_id?: string | null
+          created_at?: string
+          id?: string
+          label?: string | null
+          last_used_at?: string | null
+          revoked_at?: string | null
+          token: string
+          user_id: string
+        }
+        Update: {
+          building_id?: string | null
+          created_at?: string
+          id?: string
+          label?: string | null
+          last_used_at?: string | null
+          revoked_at?: string | null
+          token?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calendar_tokens_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "calendar_tokens_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       capex_items: {
         Row: {
           building_id: string
@@ -4031,6 +4079,10 @@ export type Database = {
           subtitle: string
           title: string
         }[]
+      }
+      user_can_access_building: {
+        Args: { p_building: string; p_user: string }
+        Returns: boolean
       }
     }
     Enums: {

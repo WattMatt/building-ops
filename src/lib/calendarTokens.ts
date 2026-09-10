@@ -11,10 +11,10 @@
  * One active row per (user, scope): `building_id` null is the user's own feed;
  * a building id is the per-building feed (admin/manager surfaces only).
  */
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 import { track } from '@/lib/analytics';
 
 /** 32 random bytes → base64url without padding → 43 chars. */
@@ -36,10 +36,7 @@ export function webcalUrl(url: string): string {
   return url.replace(/^https?:\/\//i, 'webcal://');
 }
 
-interface TokenRow {
-  id: string;
-  token: string;
-}
+type TokenRow = Pick<Tables<'calendar_tokens'>, 'id' | 'token'>;
 
 type Scope = 'me' | 'building';
 
@@ -52,48 +49,7 @@ function assertWrote(rows: { id: string }[] | null): void {
   if (!rows || rows.length === 0) throw new Error(PERMISSION_MESSAGE);
 }
 
-/** The one table this module touches, typed locally so reads and writes are checked. */
-type CalendarTokensDb = {
-  public: {
-    Tables: {
-      calendar_tokens: {
-        Row: {
-          id: string;
-          user_id: string;
-          building_id: string | null;
-          token: string;
-          label: string | null;
-          created_at: string;
-          last_used_at: string | null;
-          revoked_at: string | null;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          building_id?: string | null;
-          token: string;
-          label?: string | null;
-          created_at?: string;
-          last_used_at?: string | null;
-          revoked_at?: string | null;
-        };
-        Update: {
-          label?: string | null;
-          last_used_at?: string | null;
-          revoked_at?: string | null;
-        };
-        Relationships: [];
-      };
-    };
-    Views: { [_ in never]: never };
-    Functions: { [_ in never]: never };
-    Enums: { [_ in never]: never };
-    CompositeTypes: { [_ in never]: never };
-  };
-};
-
-// calendar_tokens is not yet in the generated types; regenerate after the migration ships.
-const tokens = () => (supabase as unknown as SupabaseClient<CalendarTokensDb>).from('calendar_tokens');
+const tokens = () => supabase.from('calendar_tokens');
 
 async function readActive(uid: string, buildingId: string | null): Promise<TokenRow | null> {
   const base = tokens().select('id, token').eq('user_id', uid).is('revoked_at', null);
