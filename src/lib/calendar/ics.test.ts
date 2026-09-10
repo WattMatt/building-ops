@@ -60,9 +60,17 @@ describe('renderIcs', () => {
   });
 
   it('escapes backslash, semicolon, comma and newline in text values', () => {
+    const BS = String.fromCharCode(92); // one real backslash, so no literal below can collapse silently
     const ics = unfold(render([ev({ title: 'Fix; leak, roof\\door\nnow', buildingName: 'A, B' })]));
-    expect(ics).toContain('SUMMARY:Fix\; leak\\, roof\\\\door\\nnow · A\\, B\r\n');
+    expect(ics).toContain(`SUMMARY:Fix${BS}; leak${BS}, roof${BS}${BS}door${BS}nnow · A${BS}, B\r\n`);
+    expect(ics).not.toContain('SUMMARY:Fix; leak');
     expect(escapeIcsText('a\r\nb')).toBe('a\\nb');
+    // Each of the four escapes must actually emit a backslash (RFC 5545 §3.3.11).
+    expect(escapeIcsText(';')).toBe(`${BS};`);
+    expect(escapeIcsText(';')).toHaveLength(2);
+    expect(escapeIcsText(',')).toBe(`${BS},`);
+    expect(escapeIcsText(BS)).toBe(`${BS}${BS}`);
+    expect(escapeIcsText('\n')).toBe(`${BS}n`);
   });
 
   it('folds long lines at 75 octets and unfolding restores the text', () => {

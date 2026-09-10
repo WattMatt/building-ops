@@ -255,7 +255,9 @@ export function ppmEvents(row: PpmRow, buildingName: string | null, today: strin
 
 /**
  * `due_at` is a timestamptz; the event day is that instant's SAST calendar day. A request
- * whose submission is missing (not visible to the caller) yields no event.
+ * whose submission is missing (not visible to the caller) yields no event. A declined
+ * sign-off (`declined` on the request, `rejected` on its submission) is not completed
+ * work, so it reads `na`; any other non-pending status is `done`.
  */
 export function signoffEvent(
   req: SignoffRequestRow,
@@ -265,7 +267,10 @@ export function signoffEvent(
 ): CalendarEvent | null {
   if (!req.due_at || !submission) return null;
   const date = toOperatingDate(req.due_at);
-  const status: CalendarStatus = req.status !== 'pending' ? 'done' : isPast(date, today) ? 'overdue' : 'open';
+  let status: CalendarStatus;
+  if (req.status === 'declined' || req.status === 'rejected') status = 'na';
+  else if (req.status !== 'pending') status = 'done';
+  else status = isPast(date, today) ? 'overdue' : 'open';
   return {
     id: `signoff-${req.id}`,
     kind: 'signoff',
@@ -350,9 +355,13 @@ const UID_DOMAIN = 'buildingops.app';
 const FOLD_OCTETS = 75;
 const CRLF = '\r\n';
 
-/** RFC 5545 §3.3.11 TEXT escaping: backslash, semicolon, comma, and newlines as `\n`. */
+/**
+ * RFC 5545 §3.3.11 TEXT escaping: backslash, semicolon, comma, and newlines as `\n`. Each
+ * replacement is a JS literal holding ONE real backslash (`'\\;'` is the two characters `\;`);
+ * a single `'\;'` would collapse to a bare `;` and leave the value unescaped.
+ */
 export function escapeIcsText(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/;/g, '\;').replace(/,/g, '\\,').replace(/\r\n|\r|\n/g, '\\n');
+  return s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r\n|\r|\n/g, '\\n');
 }
 
 const utf8Len = (cp: number) => (cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4);

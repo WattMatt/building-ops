@@ -190,8 +190,13 @@ describe('signoffEvent', () => {
     expect(e.status).toBe('open');
   });
 
-  it('is done once no longer pending, overdue when the SAST day has passed', () => {
-    expect(signoffEvent({ ...req, status: 'complete' }, sub, BN, TODAY)?.status).toBe('done');
+  it('is done once signed, na when declined or rejected, overdue when the SAST day has passed', () => {
+    expect(signoffEvent({ ...req, status: 'signed' }, sub, BN, TODAY)?.status).toBe('done');
+    expect(signoffEvent({ ...req, status: 'expired' }, sub, BN, TODAY)?.status).toBe('done');
+    // A declined sign-off is not completed work: the request says 'declined', its submission 'rejected'.
+    expect(signoffEvent({ ...req, status: 'declined' }, sub, BN, TODAY)?.status).toBe('na');
+    expect(signoffEvent({ ...req, status: 'rejected' }, sub, BN, TODAY)?.status).toBe('na');
+    expect(signoffEvent({ ...req, status: 'declined', due_at: '2026-09-01T08:00:00Z' }, sub, BN, TODAY)?.status).toBe('na');
     expect(signoffEvent({ ...req, due_at: '2026-09-09T21:59:59Z' }, sub, BN, TODAY)?.status).toBe('overdue');
     // 22:00Z on the 9th is already the 10th in SAST, so it is still open today.
     expect(signoffEvent({ ...req, due_at: '2026-09-09T22:00:00Z' }, sub, BN, TODAY)?.status).toBe('open');

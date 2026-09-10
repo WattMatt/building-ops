@@ -41,9 +41,15 @@ const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
 const DAYS_BACK = 90;
 const DAYS_FORWARD = 180;
+// Tasks are the high-volume source (buildings × items × horizon), so they get a narrower window
+// and only the rows that are still work: completed history is never a calendar item.
+const TASK_DAYS_BACK = 14;
+const TASK_DAYS_FORWARD = 60;
+const TASK_STATUSES = ["pending", "overdue"];
 
 /** Every source query is capped so a runaway table cannot turn one feed fetch into a full scan. */
 const ROW_CAP = 2000;
+const TASK_ROW_CAP = 5000;
 
 const ADMIN_ROLES = new Set(["admin", "manager"]);
 
@@ -141,10 +147,13 @@ serve(async (req: Request): Promise<Response> => {
       }
     }
 
-    // 3. One window for every source: 90 days back, 180 forward, on the SAST date.
+    // 3. One window for every source (90 days back, 180 forward, on the SAST date) except
+    // tasks, which use the narrower TASK_* window.
     const today = todayInOperatingTz();
     const from = shiftDate(today, -DAYS_BACK);
     const to = shiftDate(today, DAYS_FORWARD);
+    const taskFrom = shiftDate(today, -TASK_DAYS_BACK);
+    const taskTo = shiftDate(today, TASK_DAYS_FORWARD);
     // Sign-off due dates are instants; the window edges are SAST midnight (no DST in ZA).
     const fromIso = new Date(`${from}T00:00:00+02:00`).toISOString();
     const toIso = new Date(`${to}T23:59:59.999+02:00`).toISOString();
@@ -171,6 +180,13 @@ serve(async (req: Request): Promise<Response> => {
       events.push(e);
       counts[key]++;
     };
+    // A source that returned exactly its cap has (almost certainly) been cut short. Every dated
+    // source is ordered by its date column, so what is dropped is the far end of the window —
+    // and for tasks the user is told (see below) rather than silently short-changed.
+    const truncated: Partial<Record<keyof typeof counts, true>> = {};
+    const noteCap = (key: keyof typeof counts, rows: unknown[] | null, cap: number) => {
+      if ((rows?.length ?? 0) >= cap) truncated[key] = true;
+    };
 
     if (buildingIds.length > 0) {
       const [tasks, issues, documents, assets, ppm, reports] = await Promise.all([
@@ -178,15 +194,18 @@ serve(async (req: Request): Promise<Response> => {
           .from("task_instances")
           .select("id, task_name, due_date, status, building_id")
           .in("building_id", buildingIds)
-          .gte("due_date", from)
-          .lte("due_date", to)
-          .limit(ROW_CAP),
+          .in("status", TASK_STATUSES)
+          .gte("due_date", taskFrom)
+          .lte("due_date", taskTo)
+          .order("due_date")
+          .limit(TASK_ROW_CAP),
         supabase
           .from("issues")
           .select("id, title, deadline, status, building_id")
           .in("building_id", buildingIds)
           .gte("deadline", from)
           .lte("deadline", to)
+          .order("deadline")
           .limit(ROW_CAP),
         supabase
           .from("building_documents")
@@ -194,6 +213,7 @@ serve(async (req: Request): Promise<Response> => {
           .in("building_id", buildingIds)
           .gte("expiry_date", from)
           .lte("expiry_date", to)
+          .order("expiry_date")
           .limit(ROW_CAP),
         supabase
           .from("building_assets")
@@ -201,9 +221,10 @@ serve(async (req: Request): Promise<Response> => {
           .in("building_id", buildingIds)
           .gte("next_service_date", from)
           .lte("next_service_date", to)
+          .order("next_service_date")
           .limit(ROW_CAP),
         // PPM rows hold a jsonb of month cells; the mapper expands them and the window is
-        // applied afterwards, so no date filter is possible at the query.
+        // applied afterwards, so no date filter or date order is possible at the query.
         supabase
           .from("ppm_services")
           .select("id, building_id, service_name, months, report_id")
@@ -216,11 +237,18 @@ serve(async (req: Request): Promise<Response> => {
           .in("building_id", buildingIds)
           .gte("report_period", from)
           .lte("report_period", to)
+          .order("report_period")
           .limit(ROW_CAP),
       ]);
       for (const r of [tasks, issues, documents, assets, ppm, reports]) {
         if (r.error) throw r.error;
       }
+      noteCap("tasks", tasks.data, TASK_ROW_CAP);
+      noteCap("issues", issues.data, ROW_CAP);
+      noteCap("documents", documents.data, ROW_CAP);
+      noteCap("assets", assets.data, ROW_CAP);
+      noteCap("ppm", ppm.data, ROW_CAP);
+      noteCap("reports", reports.data, ROW_CAP);
 
       for (const row of (tasks.data ?? []) as TaskRow[]) push(taskEvent(row, nameOf(row.building_id), today), "tasks");
       for (const row of (issues.data ?? []) as IssueRow[]) push(issueEvent(row, nameOf(row.building_id), today), "issues");
@@ -234,6 +262,23 @@ serve(async (req: Request): Promise<Response> => {
       for (const row of (reports.data ?? []) as ReportRow[]) {
         push(reportEvent(row, nameOf(row.building_id), today), "reports");
       }
+
+      // Tasks were cut at the cap: rows are date-ordered, so everything missing sits at the far
+      // end of the task window. One all-day marker on that last day says so and links to the
+      // in-app calendar, which has no such cap.
+      if (truncated.tasks) {
+        events.push({
+          id: "task-truncated",
+          kind: "task",
+          title: "Calendar truncated — open Building Ops",
+          date: taskTo,
+          buildingId: null,
+          buildingName: null,
+          href: "/calendar",
+          status: "open",
+          entityId: "truncated",
+        });
+      }
     }
 
     if (!scope.building_id) {
@@ -244,8 +289,10 @@ serve(async (req: Request): Promise<Response> => {
         .eq("active", true)
         .gte("due_at", fromIso)
         .lte("due_at", toIso)
+        .order("due_at")
         .limit(ROW_CAP);
       if (reqErr) throw reqErr;
+      noteCap("signoffs", requests, ROW_CAP);
       const signoffs = (requests ?? []) as SignoffRow[];
       const submissions = new Map<string, SubmissionRow>();
       const submissionIds = [...new Set(signoffs.map((r) => r.submission_id))];
@@ -256,22 +303,10 @@ serve(async (req: Request): Promise<Response> => {
           .in("id", submissionIds)
           .limit(ROW_CAP);
         if (error) throw error;
-        const rows = (data ?? []) as SubmissionRow[];
-        for (const s of rows) submissions.set(s.id, s);
+        for (const s of (data ?? []) as SubmissionRow[]) submissions.set(s.id, s);
         // Sign-offs are assigned to a person, not scoped by building, so a submission's building
-        // may sit outside the names read in step 4; fetch the missing names in one more read.
-        const missing = [...new Set(
-          rows.map((s) => s.building_id).filter((id): id is string => !!id && !names.has(id)),
-        )];
-        if (missing.length > 0) {
-          const { data: more, error: moreErr } = await supabase
-            .from("buildings")
-            .select("id, name")
-            .in("id", missing)
-            .limit(ROW_CAP);
-          if (moreErr) throw moreErr;
-          for (const b of (more ?? []) as BuildingRow[]) names.set(b.id, b.name);
-        }
+        // may sit outside the names read in step 4. That name is deliberately NOT fetched: the
+        // owner's in-app session could not see it either, and the mapper accepts a null name.
       }
       for (const r of signoffs) {
         const submission = submissions.get(r.submission_id);
@@ -296,12 +331,14 @@ serve(async (req: Request): Promise<Response> => {
     const runtime = (globalThis as unknown as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
     runtime?.waitUntil?.(touch);
 
-    // Counts only — never the token, never the owner.
+    // Counts only — never the token, never the owner. `truncated` names each source that hit
+    // its cap (absent when none did).
     console.log("ics-feed: served", {
       scope: scope.building_id ? "building" : "user",
       buildings: buildingIds.length,
       events: events.length,
       ...counts,
+      ...(Object.keys(truncated).length > 0 ? { truncated } : {}),
     });
 
     return new Response(body, {
