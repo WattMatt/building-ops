@@ -30,6 +30,7 @@ import FortressReportEditor from "./components/reports/fortress/FortressReportEd
 import FortressReports from "./pages/FortressReports";
 import FormsLibrary from "./pages/FormsLibrary";
 import MySignoffs from "./pages/MySignoffs";
+import Inbox from "./pages/Inbox";
 import UserManagement from "./pages/UserManagement";
 import Settings from "./pages/Settings";
 import Profile from "./pages/Profile";
@@ -125,6 +126,11 @@ const App = () => (
             <Route path="/my-signoffs" element={
               <ProtectedRoute>
                 <DashboardLayout><MySignoffs /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/inbox" element={
+              <ProtectedRoute>
+                <DashboardLayout><Inbox /></DashboardLayout>
               </ProtectedRoute>
             } />
             <Route path="/users" element={

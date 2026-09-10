@@ -6,6 +6,9 @@ import { useUserProfile } from '@/hooks/useUserProfile';
 import { recordAuthEvent } from '@/lib/auth-audit';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { HintsToggle } from '@/components/HintsToggle';
+import { NotificationBell } from '@/components/notifications/NotificationBell';
+import { useNotifications } from '@/hooks/useNotifications';
+import type { NotificationKind } from '@/lib/notify';
 import {
   Sidebar,
   SidebarContent,
@@ -53,6 +56,8 @@ interface NavItem {
   href: string;
   icon: ReactNode;
   roles?: ('admin' | 'manager' | 'user' | 'reviewer')[];
+  /** Unread notifications of these kinds show as a count beside the item. */
+  badgeKinds?: NotificationKind[];
 }
 
 const mainNavItems: NavItem[] = [
@@ -75,6 +80,7 @@ const mainNavItems: NavItem[] = [
     title: 'Issues',
     href: '/issues',
     icon: <AlertTriangle className="w-4 h-4" />,
+    badgeKinds: ['issue_assigned', 'issue_comment', 'issue_mention'],
   },
   {
     title: 'Map View',
@@ -85,6 +91,7 @@ const mainNavItems: NavItem[] = [
     title: 'My Sign-offs',
     href: '/my-signoffs',
     icon: <PenLine className="w-4 h-4" />,
+    badgeKinds: ['signoff_requested', 'signoff_overdue'],
   },
 ];
 
@@ -96,6 +103,7 @@ const reportsNavItems: NavItem[] = [
     title: 'Building Reports',
     href: '/reports/fortress',
     icon: <FileText className="w-4 h-4" />,
+    badgeKinds: ['report_submitted', 'report_returned', 'report_approved'],
   },
   {
     // Note: a different thing — H&S scoring and PDF evidence packs, not the reports above.
@@ -134,6 +142,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const { user, role, signOut, isAdminOrManager } = useAuth();
   const { organization } = useOrganization();
   const { profile } = useUserProfile();
+  // Signed-out renders are possible (the layout mounts before the session resolves);
+  // the hook is enabled only when there is a user, so this is a no-op count of 0.
+  const { unreadByKind } = useNotifications();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -195,6 +206,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                         <Link to={item.href}>
                           {item.icon}
                           <span>{item.title}</span>
+                          {item.badgeKinds && unreadByKind(item.badgeKinds) > 0 && (
+                            <span className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground">{unreadByKind(item.badgeKinds)}</span>
+                          )}
                         </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -216,6 +230,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                         <Link to={item.href}>
                           {item.icon}
                           <span>{item.title}</span>
+                          {item.badgeKinds && unreadByKind(item.badgeKinds) > 0 && (
+                            <span className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground">{unreadByKind(item.badgeKinds)}</span>
+                          )}
                         </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -237,6 +254,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                         <Link to={item.href}>
                           {item.icon}
                           <span>{item.title}</span>
+                          {item.badgeKinds && unreadByKind(item.badgeKinds) > 0 && (
+                            <span className="ml-auto rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-4 text-primary-foreground">{unreadByKind(item.badgeKinds)}</span>
+                          )}
                         </Link>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -302,6 +322,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           <header className="h-12 sm:h-14 border-b bg-card flex items-center justify-between px-3 sm:px-4 shrink-0">
             <SidebarTrigger />
             <div className="flex items-center gap-1">
+              <NotificationBell />
               <HintsToggle />
               <ThemeToggle />
             </div>
