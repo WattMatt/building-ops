@@ -21,7 +21,7 @@
 **Files:**
 - Create: `src/lib/offline/types.ts`, `src/lib/offline/queue.ts`, `src/lib/offline/queue.test.ts`
 
-- [ ] **Step 1: Types**
+- [x] **Step 1: Types**
 
 ```ts
 // src/lib/offline/types.ts
@@ -89,7 +89,7 @@ export type RunOutcome =
   | { status: 'failed'; error: string };
 ```
 
-- [ ] **Step 2: Failing test** (`src/lib/offline/queue.test.ts`; `fake-indexeddb/auto` is already in `src/test/setup.ts`)
+- [x] **Step 2: Failing test** (`src/lib/offline/queue.test.ts`; `fake-indexeddb/auto` is already in `src/test/setup.ts`)
 
 ```ts
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -140,7 +140,7 @@ describe('offline queue store', () => {
 });
 ```
 
-- [ ] **Step 3: Implementation**
+- [x] **Step 3: Implementation**
 
 ```ts
 // src/lib/offline/queue.ts
@@ -205,7 +205,7 @@ export async function countOps(uid: string): Promise<number> {
 }
 ```
 
-- [ ] **Step 4: gate, test, commit** — `git add src/lib/offline/types.ts src/lib/offline/queue.ts src/lib/offline/queue.test.ts && git commit -m "Offline write queue store: per-user IndexedDB ops with photos"`
+- [x] **Step 4: gate, test, commit** — `git add src/lib/offline/types.ts src/lib/offline/queue.ts src/lib/offline/queue.test.ts && git commit -m "Offline write queue store: per-user IndexedDB ops with photos"`
 
 ---
 
@@ -215,9 +215,9 @@ export async function countOps(uid: string): Promise<number> {
 - Create: `src/lib/offline/handlers.ts`, `src/lib/offline/replay.ts`, `src/lib/offline/replay.test.ts`
 - Modify: `src/lib/issueActivity.ts` (optional `id` on the insert; `photoUrls` unchanged)
 
-- [ ] **Step 1: `postIssueComment` accepts a client id** — add `id?: string` to `PostIssueCommentInput`; include `...(id ? { id } : {})` in the insert object. No other change.
+- [x] **Step 1: `postIssueComment` accepts a client id** — add `id?: string` to `PostIssueCommentInput`; include `...(id ? { id } : {})` in the insert object. No other change.
 
-- [ ] **Step 2: Failing tests** (`replay.test.ts`) with `vi.mock('@/integrations/supabase/client')` (hoisted chainable mock recording `rpc`, `from().insert/update…`), `vi.mock('@/lib/photos', () => ({ uploadPhotos: vi.fn().mockResolvedValue(['https://x/p.jpg']), photoPrefix: (u: string) => `photos/${u}` }))`, `vi.mock('@/lib/notify', () => ({ notify: vi.fn() }))`, `vi.mock('@/lib/issueActivity', () => ({ postIssueComment: vi.fn().mockResolvedValue({ id: 'a1', authorName: 'Thabo' }) }))`. Cases:
+- [x] **Step 2: Failing tests** (`replay.test.ts`) with `vi.mock('@/integrations/supabase/client')` (hoisted chainable mock recording `rpc`, `from().insert/update…`), `vi.mock('@/lib/photos', () => ({ uploadPhotos: vi.fn().mockResolvedValue(['https://x/p.jpg']), photoPrefix: (u: string) => `photos/${u}` }))`, `vi.mock('@/lib/notify', () => ({ notify: vi.fn() }))`, `vi.mock('@/lib/issueActivity', () => ({ postIssueComment: vi.fn().mockResolvedValue({ id: 'a1', authorName: 'Thabo' }) }))`. Cases:
   1. `task_complete` → `rpc('complete_task', { p_completion_id, p_task_instance_id, p_notes, p_signature_confirmed, p_photo_urls: ['https://x/p.jpg'] })`; op removed; outcome `synced` with `{ already_completed: false }`.
   2. `task_complete` when rpc returns `already_completed: true` → still `synced`, result carries the flag (caller shows the "someone else" toast).
   3. `issue_create` → `from('issues').insert({ id: issueId, …row, photo_urls })`, then `from('task_instances').update({ status: 'issue_logged' }).eq('id', markTaskIssueLogged)` only when set.
@@ -228,7 +228,7 @@ export async function countOps(uid: string): Promise<number> {
   8. Other error (`{ code: '42501', message: 'permission denied' }`) → op `failed`, `lastError` set, outcome `failed`.
   9. `replayAll` processes oldest-first, stops at the first network failure (leaves the rest pending), and skips `failed` ops unless `retryFailed` is passed; it is single-flight (a second concurrent call awaits the first).
 
-- [ ] **Step 3: Handlers**
+- [x] **Step 3: Handlers**
 
 ```ts
 // src/lib/offline/handlers.ts
@@ -282,7 +282,7 @@ export async function runOp(op: QueuedOp): Promise<unknown> {
 }
 ```
 
-- [ ] **Step 4: Replay**
+- [x] **Step 4: Replay**
 
 ```ts
 // src/lib/offline/replay.ts
@@ -353,7 +353,7 @@ export async function retryOp(uid: string, id: string): Promise<RunOutcome> {
 }
 ```
 
-- [ ] **Step 5: gate, tests, commit** — `git add src/lib/offline/handlers.ts src/lib/offline/replay.ts src/lib/offline/replay.test.ts src/lib/issueActivity.ts && git commit -m "Offline replay engine: sequential, idempotent handlers for complete/create/comment/resolve"`
+- [x] **Step 5: gate, tests, commit** — `git add src/lib/offline/handlers.ts src/lib/offline/replay.ts src/lib/offline/replay.test.ts src/lib/issueActivity.ts && git commit -m "Offline replay engine: sequential, idempotent handlers for complete/create/comment/resolve"`
 
 ---
 
@@ -363,7 +363,7 @@ export async function retryOp(uid: string, id: string): Promise<RunOutcome> {
 - Create: `src/lib/offline/enqueueAndRun.ts`, `src/hooks/useOfflineQueue.ts`, `src/hooks/useOfflineQueue.test.ts`, `src/components/offline/OfflineQueueRunner.tsx`
 - Modify: `src/components/layout/DashboardLayout.tsx` (mount `OfflineQueueRunner` once, next to `UpdateToast`), `src/contexts/AuthContext.tsx` (`clearQueue(uid)` beside `clearPersistedCache`)
 
-- [ ] **Step 1: `enqueueAndRun`**
+- [x] **Step 1: `enqueueAndRun`**
 
 ```ts
 // src/lib/offline/enqueueAndRun.ts
@@ -383,11 +383,11 @@ export async function enqueueAndRun(uid: string, payload: OpPayload, photos: Que
 }
 ```
 
-- [ ] **Step 2: Hook** — `useOfflineQueue()` returns `{ ops, pending, failed, retry(id), discard(id), retryAll() }` using `useQuery({ queryKey: ['offline-queue', uid], queryFn: () => listOps(uid), enabled: !!uid })` and an effect that `subscribeQueue(() => qc.invalidateQueries({ queryKey: ['offline-queue'] }))`. NOT persisted (no `PERSIST_DEFAULTS`). Test with fake-indexeddb: enqueue → `pending === 1`; `discard` removes; `retry` calls `retryOp` (mock `./replay`).
+- [x] **Step 2: Hook** — `useOfflineQueue()` returns `{ ops, pending, failed, retry(id), discard(id), retryAll() }` using `useQuery({ queryKey: ['offline-queue', uid], queryFn: () => listOps(uid), enabled: !!uid })` and an effect that `subscribeQueue(() => qc.invalidateQueries({ queryKey: ['offline-queue'] }))`. NOT persisted (no `PERSIST_DEFAULTS`). Test with fake-indexeddb: enqueue → `pending === 1`; `discard` removes; `retry` calls `retryOp` (mock `./replay`).
 
-- [ ] **Step 3: Runner** — `OfflineQueueRunner` (renders null): on mount with a uid, on `online`, and on `visibilitychange` → visible, call `replayAll(uid)`; debounce 500 ms; also when `useOnlineStatus()` flips to true. On `uid` change do nothing else (the queue is per user). Mount in `DashboardLayout` once. In `AuthContext.signOut` add `void clearQueue(outgoingUid)` next to `clearPersistedCache` — sign-out discards unsynced writes deliberately: warn in the sheet (Task 5) that signing out drops queued changes.
+- [x] **Step 3: Runner** — `OfflineQueueRunner` (renders null): on mount with a uid, on `online`, and on `visibilitychange` → visible, call `replayAll(uid)`; debounce 500 ms; also when `useOnlineStatus()` flips to true. On `uid` change do nothing else (the queue is per user). Mount in `DashboardLayout` once. In `AuthContext.signOut` add `void clearQueue(outgoingUid)` next to `clearPersistedCache` — sign-out discards unsynced writes deliberately: warn in the sheet (Task 5) that signing out drops queued changes.
 
-- [ ] **Step 4: gate, tests, commit** — `git add src/lib/offline/enqueueAndRun.ts src/hooks/useOfflineQueue.ts src/hooks/useOfflineQueue.test.ts src/components/offline/OfflineQueueRunner.tsx src/components/layout/DashboardLayout.tsx src/contexts/AuthContext.tsx && git commit -m "Queue entry point, replay triggers, and the queue hook"`
+- [x] **Step 4: gate, tests, commit** — `git add src/lib/offline/enqueueAndRun.ts src/hooks/useOfflineQueue.ts src/hooks/useOfflineQueue.test.ts src/components/offline/OfflineQueueRunner.tsx src/components/layout/DashboardLayout.tsx src/contexts/AuthContext.tsx && git commit -m "Queue entry point, replay triggers, and the queue hook"`
 
 ---
 
@@ -396,9 +396,9 @@ export async function enqueueAndRun(uid: string, payload: OpPayload, photos: Que
 **Files:**
 - Modify: `src/components/checklists/CompleteTaskDialog.tsx`, `src/pages/NewIssue.tsx`, `src/components/checklists/ReportIssueDialog.tsx`, `src/components/issues/IssueCommentComposer.tsx`, `src/components/issues/ResolveIssueDialog.tsx`, and their tests
 
-- [ ] **Step 1: A shared toast helper** — in `src/lib/offline/outcomeToast.ts`: `toastForOutcome(outcome, { synced: string, queued?: string })` → `synced` → `toast.success(synced)`, `queued` → `toast(queued ?? 'Saved on this device — it will sync when you're back online')` (guardrail copy), `failed` → `toast.error(outcome.error)`.
+- [x] **Step 1: A shared toast helper** — in `src/lib/offline/outcomeToast.ts`: `toastForOutcome(outcome, { synced: string, queued?: string })` → `synced` → `toast.success(synced)`, `queued` → `toast(queued ?? 'Saved on this device — it will sync when you're back online')` (guardrail copy), `failed` → `toast.error(outcome.error)`.
 
-- [ ] **Step 2: CompleteTaskDialog** — replace the upload + upsert + update block with:
+- [x] **Step 2: CompleteTaskDialog** — replace the upload + upsert + update block with:
 
 ```ts
       const outcome = await enqueueAndRun(user.id, {
@@ -415,11 +415,11 @@ export async function enqueueAndRun(uid: string, payload: OpPayload, photos: Que
 
 Remove the now-unused `supabase`/`uploadPhotos` imports. The `complete_task` RPC replaces the two direct writes (spec §4.3): an RLS denial arrives as `outcome.failed` with the server message.
 
-- [ ] **Step 3: NewIssue** — `const issueId = crypto.randomUUID(); const outcome = await enqueueAndRun(user.id, { kind: 'issue_create', issueId, row: {...as today, reported_by: user.id, assigned_to: null, task_instance_id: null, status: 'open' }, markTaskIssueLogged: null }, photos.map(...))`; on `synced` or `queued` navigate to `/issues` (queued issues show there via Task 6); drop `createIssue` from `useIssues` usage here (keep the hook for the list). **ReportIssueDialog** — same with `task_instance_id: taskId`, `markTaskIssueLogged: taskId`; on non-failed → reset/close/`onSuccess`. **IssueCommentComposer** — build `issue_comment` with `activityId: crypto.randomUUID()`, `notifyOthers: [assigneeId, reporterId].filter(Boolean)`, `mentions: kept`, `userEmail: user.email ?? null`; the two `notify` calls move into the handler (delete them here); `track('issue_commented', …)` stays; on non-failed clear the box and `onPosted()`. **ResolveIssueDialog** — `issue_resolve` with `activityId`; on `synced` → "Issue resolved"; `queued` → "Saved on this device — it will resolve when you're back online"; `failed` → the error (the RESOLVE_DENIED message is already user-facing).
+- [x] **Step 3: NewIssue** — `const issueId = crypto.randomUUID(); const outcome = await enqueueAndRun(user.id, { kind: 'issue_create', issueId, row: {...as today, reported_by: user.id, assigned_to: null, task_instance_id: null, status: 'open' }, markTaskIssueLogged: null }, photos.map(...))`; on `synced` or `queued` navigate to `/issues` (queued issues show there via Task 6); drop `createIssue` from `useIssues` usage here (keep the hook for the list). **ReportIssueDialog** — same with `task_instance_id: taskId`, `markTaskIssueLogged: taskId`; on non-failed → reset/close/`onSuccess`. **IssueCommentComposer** — build `issue_comment` with `activityId: crypto.randomUUID()`, `notifyOthers: [assigneeId, reporterId].filter(Boolean)`, `mentions: kept`, `userEmail: user.email ?? null`; the two `notify` calls move into the handler (delete them here); `track('issue_commented', …)` stays; on non-failed clear the box and `onPosted()`. **ResolveIssueDialog** — `issue_resolve` with `activityId`; on `synced` → "Issue resolved"; `queued` → "Saved on this device — it will resolve when you're back online"; `failed` → the error (the RESOLVE_DENIED message is already user-facing).
 
-- [ ] **Step 4: Tests** — each dialog test mocks `@/lib/offline/enqueueAndRun` (`enqueueAndRun: vi.fn().mockResolvedValue({ status: 'synced', result: {} })`) and asserts the payload shape (kind, client id is a UUID, key fields) and the toast for `queued`/`failed` outcomes. Remove now-dead mocks of `@/lib/photos`/`@/lib/issueActivity` where a component no longer imports them.
+- [x] **Step 4: Tests** — each dialog test mocks `@/lib/offline/enqueueAndRun` (`enqueueAndRun: vi.fn().mockResolvedValue({ status: 'synced', result: {} })`) and asserts the payload shape (kind, client id is a UUID, key fields) and the toast for `queued`/`failed` outcomes. Remove now-dead mocks of `@/lib/photos`/`@/lib/issueActivity` where a component no longer imports them.
 
-- [ ] **Step 5: gate, tests, commit** — `git add src/lib/offline/outcomeToast.ts <the five components> <their tests> && git commit -m "Field dialogs write through the offline queue; task completion uses complete_task"`
+- [x] **Step 5: gate, tests, commit** — `git add src/lib/offline/outcomeToast.ts <the five components> <their tests> && git commit -m "Field dialogs write through the offline queue; task completion uses complete_task"`
 
 ---
 
@@ -429,13 +429,13 @@ Remove the now-unused `supabase`/`uploadPhotos` imports. The `complete_task` RPC
 - Create: `src/components/offline/SyncStatusPill.tsx`, `src/components/offline/QueueSheet.tsx`, `src/components/offline/SyncStatusPill.test.tsx`
 - Modify: `src/components/layout/DashboardLayout.tsx` (mount pill before `QuickCreateMenu`), `src/components/pwa/OfflineBanner.tsx` (copy)
 
-- [ ] **Step 1: Pill states** (all guardrail copy, plain text): offline with N pending → `Offline · N queued` (warning tone); online with pending and a replay in flight → `Syncing…`; failed > 0 → `N need attention` (destructive tone); otherwise render nothing (an "All synced" state is noise in a top bar — show it only as a 2 s toast when a replay finishes with zero pending, via the runner). Tap opens `QueueSheet` (a `ResponsiveDialog`) listing ops oldest-first: kind label ("Complete task", "New issue", "Comment", "Resolve issue"), the task/issue title from the payload, `createdAt` relative time, photo count, status chip, and for failed ops the `lastError` plus Retry / Discard buttons (44 px). Footer note: "Signing out discards changes that have not synced." `track('offline_queue_opened', { pending, failed })`.
+- [x] **Step 1: Pill states** (all guardrail copy, plain text): offline with N pending → `Offline · N queued` (warning tone); online with pending and a replay in flight → `Syncing…`; failed > 0 → `N need attention` (destructive tone); otherwise render nothing (an "All synced" state is noise in a top bar — show it only as a 2 s toast when a replay finishes with zero pending, via the runner). Tap opens `QueueSheet` (a `ResponsiveDialog`) listing ops oldest-first: kind label ("Complete task", "New issue", "Comment", "Resolve issue"), the task/issue title from the payload, `createdAt` relative time, photo count, status chip, and for failed ops the `lastError` plus Retry / Discard buttons (44 px). Footer note: "Signing out discards changes that have not synced." `track('offline_queue_opened', { pending, failed })`.
 
-- [ ] **Step 2: Banner copy** — `OfflineBanner` becomes "You're offline. Your day is available; changes you make will sync when you're back online." (spec §5.1 promised this once R2b landed).
+- [x] **Step 2: Banner copy** — `OfflineBanner` becomes "You're offline. Your day is available; changes you make will sync when you're back online." (spec §5.1 promised this once R2b landed).
 
-- [ ] **Step 3: Tests** — render the pill with a mocked `useOfflineQueue` + `useOnlineStatus` for each state; open the sheet; Retry calls `retry(id)`, Discard calls `discard(id)`.
+- [x] **Step 3: Tests** — render the pill with a mocked `useOfflineQueue` + `useOnlineStatus` for each state; open the sheet; Retry calls `retry(id)`, Discard calls `discard(id)`.
 
-- [ ] **Step 4: gate, tests, commit** — `git add src/components/offline/SyncStatusPill.tsx src/components/offline/QueueSheet.tsx src/components/offline/SyncStatusPill.test.tsx src/components/layout/DashboardLayout.tsx src/components/pwa/OfflineBanner.tsx && git commit -m "Sync status pill and queue sheet; offline banner promises the sync"`
+- [x] **Step 4: gate, tests, commit** — `git add src/components/offline/SyncStatusPill.tsx src/components/offline/QueueSheet.tsx src/components/offline/SyncStatusPill.test.tsx src/components/layout/DashboardLayout.tsx src/components/pwa/OfflineBanner.tsx && git commit -m "Sync status pill and queue sheet; offline banner promises the sync"`
 
 ---
 
@@ -445,13 +445,13 @@ Remove the now-unused `supabase`/`uploadPhotos` imports. The `complete_task` RPC
 - Create: `src/lib/offline/pendingOverlay.ts`, `src/lib/offline/pendingOverlay.test.ts`
 - Modify: `src/pages/MyDay.tsx`, `src/pages/MyDay.test.tsx`, `src/pages/Issues.tsx`
 
-- [ ] **Step 1: Pure selectors** — `queuedTaskIds(ops)` → Set of `taskInstanceId` for pending/failed `task_complete` ops; `queuedIssues(ops, buildingNames)` → array of `{ id, title, description, priority, status: 'open', building_id, building_name, created_at: iso(createdAt), queued: true, failed: boolean }` from `issue_create` ops. Tests for both.
+- [x] **Step 1: Pure selectors** — `queuedTaskIds(ops)` → Set of `taskInstanceId` for pending/failed `task_complete` ops; `queuedIssues(ops, buildingNames)` → array of `{ id, title, description, priority, status: 'open', building_id, building_name, created_at: iso(createdAt), queued: true, failed: boolean }` from `issue_create` ops. Tests for both.
 
-- [ ] **Step 2: My Day** — tasks whose id is in `queuedTaskIds` render with a "Queued" (or "Needs attention") chip instead of the Complete button, still counted in their bucket; `useMyWork` untouched. **Issues page** — prepend `queuedIssues` (from `useOfflineQueue().ops`) to the list with a "Queued" chip and no detail dialog (tap opens the QueueSheet). Keep filters working (queued rows participate in the status/priority filters).
+- [x] **Step 2: My Day** — tasks whose id is in `queuedTaskIds` render with a "Queued" (or "Needs attention") chip instead of the Complete button, still counted in their bucket; `useMyWork` untouched. **Issues page** — prepend `queuedIssues` (from `useOfflineQueue().ops`) to the list with a "Queued" chip and no detail dialog (tap opens the QueueSheet). Keep filters working (queued rows participate in the status/priority filters).
 
-- [ ] **Step 3: Tests** — MyDay test: with a queued op for `t1`, the row shows "Queued" and no Complete button. Issues page has no test; add a minimal one rendering with mocked `useIssues` + `useOfflineQueue` and asserting the queued row.
+- [x] **Step 3: Tests** — MyDay test: with a queued op for `t1`, the row shows "Queued" and no Complete button. Issues page has no test; add a minimal one rendering with mocked `useIssues` + `useOfflineQueue` and asserting the queued row.
 
-- [ ] **Step 4: gate, tests, commit** — `git add src/lib/offline/pendingOverlay.ts src/lib/offline/pendingOverlay.test.ts src/pages/MyDay.tsx src/pages/MyDay.test.tsx src/pages/Issues.tsx src/pages/Issues.test.tsx && git commit -m "Queued writes show on My Day and the Issues list"`
+- [x] **Step 4: gate, tests, commit** — `git add src/lib/offline/pendingOverlay.ts src/lib/offline/pendingOverlay.test.ts src/pages/MyDay.tsx src/pages/MyDay.test.tsx src/pages/Issues.tsx src/pages/Issues.test.tsx && git commit -m "Queued writes show on My Day and the Issues list"`
 
 ---
 
@@ -461,12 +461,47 @@ Remove the now-unused `supabase`/`uploadPhotos` imports. The `complete_task` RPC
 - Create: `scripts/offline-smoke.ts`
 - Modify: `package.json` (`"smoke:offline": "npx vite-node scripts/offline-smoke.ts"`), `.env.example` (document `SMOKE_*` → `VITE_*` mapping for this smoke)
 
-- [ ] **Step 1: Script** — runs under `vite-node` so it can import the real queue/replay modules through the `@/` alias. Needs `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (same as the other smokes) and sets `import.meta.env.VITE_SUPABASE_URL`/`VITE_SUPABASE_PUBLISHABLE_KEY` before importing the client (`process.env.VITE_SUPABASE_URL = process.env.SUPABASE_URL` etc. at the top; vite-node exposes `process.env` VITE_ vars through `import.meta.env`). Refuses the prod ref unless `SMOKE_ALLOW_PROD=1` (copy the guard from `notifications-smoke.mjs`). Imports `fake-indexeddb/auto`. Steps: create a building + a site user + a pending task via the service role (raw fetch, same helpers as `checklist-smoke.mjs`); `supabase.auth.signInWithPassword` as the user; stub `navigator.onLine = false` (`Object.defineProperty(globalThis, 'navigator', …)`); `enqueueAndRun` three ops: `task_complete`, `issue_create`, `issue_comment` (on the created issue id) — all return `queued`; set online; `replayAll(uid)` twice; assert via service role: exactly one `task_completions` row with the client `completionId`, one `issues` row with the client `issueId`, one `issue_activity` row with the client `activityId`; queue empty; a `notifications` row for the comment if a recipient was given (use the admin as reporter). Teardown everything (users, rows, building). Print `passed/failed` like the others.
+- [x] **Step 1: Script** — runs under `vite-node` so it can import the real queue/replay modules through the `@/` alias. Needs `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (same as the other smokes) and sets `import.meta.env.VITE_SUPABASE_URL`/`VITE_SUPABASE_PUBLISHABLE_KEY` before importing the client (`process.env.VITE_SUPABASE_URL = process.env.SUPABASE_URL` etc. at the top; vite-node exposes `process.env` VITE_ vars through `import.meta.env`). Refuses the prod ref unless `SMOKE_ALLOW_PROD=1` (copy the guard from `notifications-smoke.mjs`). Imports `fake-indexeddb/auto`. Steps: create a building + a site user + a pending task via the service role (raw fetch, same helpers as `checklist-smoke.mjs`); `supabase.auth.signInWithPassword` as the user; stub `navigator.onLine = false` (`Object.defineProperty(globalThis, 'navigator', …)`); `enqueueAndRun` three ops: `task_complete`, `issue_create`, `issue_comment` (on the created issue id) — all return `queued`; set online; `replayAll(uid)` twice; assert via service role: exactly one `task_completions` row with the client `completionId`, one `issues` row with the client `issueId`, one `issue_activity` row with the client `activityId`; queue empty; a `notifications` row for the comment if a recipient was given (use the admin as reporter). Teardown everything (users, rows, building). Print `passed/failed` like the others.
 
-- [ ] **Step 2: Run against staging** (controller), fix, commit — `git add scripts/offline-smoke.ts package.json .env.example && git commit -m "Live offline-replay smoke"`
+- [x] **Step 2: Run against staging** (controller), fix, commit — `git add scripts/offline-smoke.ts package.json .env.example && git commit -m "Live offline-replay smoke"`
 
 ---
 
 ### Task 8 (controller): verify, review, record
 
-- [ ] `npm run smoke && npm run smoke:notifications && npm run smoke:offline` against staging; nothing to apply to prod (no migration); whole-slice review; Status section here; `docs/plans/APPLY_CHECKLIST.md` R2b section; push; PR #3 body.
+- [x] `npm run smoke && npm run smoke:notifications && npm run smoke:offline` against staging; nothing to apply to prod (no migration); whole-slice review; Status section here; `docs/plans/APPLY_CHECKLIST.md` R2b section; push; PR #3 body.
+
+---
+
+## Status (2026-09-10)
+
+**DONE.** Commits `59d0919..305e73e` on `feat/reports-access-hardening` (PR #3); canonical SQL GMI `aec6759`.
+Gates: typecheck 56 (= baseline), 551 tests, build green; staging `smoke:offline` 21/21, full battery +
+notifications green. No new migration; `complete_task` hardened (atomic on a denied update).
+
+Task → commit: 1 queue store `59d0919` (+ `85bce67` monotonic order, `6ca96e8` seed retry + clear on user
+switch); 2 replay engine `f2d78b9` (+ `6b1d0cc` two-write duplicates, network classification, 20-attempt
+cap, per-user single-flight); 3 entry point + hook + runner `0f9febf` (+ `71bcfba` older ops replay first,
+`59eccc1`); 4 dialogs `411e413`; 5 pill + sheet `beb5f79`; 6 overlay `a1378a9`; 7 smoke `f4fbde1`;
+review follow-ups `305e73e` (compact pill, refresh after background sync, offline building names,
+terminal denied-resolve).
+
+Deviations worth knowing:
+- `enqueueAndRun` returns the per-op outcome AND `opId`; online it first replays older pending ops
+  (`replayAll(uid, { stopAt })`) so writes land in order, then runs the new op.
+- Duplicates (23505) are "already applied" only for single-write ops; `issue_create`+task flip and
+  `issue_resolve` tolerate a duplicate on write 1 and always run write 2.
+- A denied resolve (`RESOLVE_DENIED`) is terminal: the note is saved, the op is discarded, the dialog
+  closes with the permission message.
+- Network errors are recognised by message (postgrest wraps a dead fetch as `TypeError: Failed to
+  fetch`), not by `navigator.onLine`; after 20 network failures an op is marked failed.
+- The runner invalidates `['my-work']` / `['building-overview']` after a background replay and toasts
+  "All synced" when the queue drains; the Issues page refetches on the queue emitter.
+- Queue is dropped on sign-out and on an implicit user switch (documented in the sheet footer).
+- `smoke:offline` must be run through `npm run smoke:offline` (shell-level `VITE_*` mapping; vite-node
+  inlines env at transform time).
+
+Follow-ups: spec §6.3's "not available offline" state on report/form/sign-off/admin actions is not
+implemented (they fail with a network error offline); queued issues show no building line when the
+building is in neither the live issues list nor the My Day cache; `useIssues.createIssue` is now unused;
+no "stuck" affordance distinct from "rejected" in the sheet (both are "failed").

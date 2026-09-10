@@ -115,3 +115,25 @@ changes in R2a (push lands in R2c).
   queue must retry onto a fresh path (or tolerate a duplicate), not overwrite.
 - Push needs VAPID keys: `VITE_VAPID_PUBLIC_KEY` (Vercel env) and `VAPID_PRIVATE_KEY`/`VAPID_SUBJECT` (function
   secrets) on both projects, then redeploy `notify` and `daily-digest` (R2c).
+
+## R2b "Offline writes" (2026-09-10)
+
+Spec `docs/superpowers/specs/2026-09-10-r2-field-design.md` §6; plan `docs/superpowers/plans/2026-09-10-r2b-offline-writes.md`.
+
+### Migration
+
+None new. `2026-09-12_01_r2_field.sql` was revised once more (`complete_task` now raises `42501` and rolls the
+completion back when the task update is not permitted; GMI `aec6759`) and re-applied to staging and prod
+(HTTP 201 each).
+
+### Staging — DONE 2026-09-10
+
+- [x] `npm run smoke:offline` 21/21 (three ops queued offline with a photo, replayed twice → each row exactly
+      once by client id, one storage object, one notification; RLS rejection lands as a failed op).
+- [x] `npm run smoke` and `npm run smoke:notifications` green end to end afterwards.
+
+### Production — DONE 2026-09-10
+
+- [x] Revised `complete_task` applied and verified; nothing else to apply. The client change ships with the
+      next deploy of the branch.
+- [ ] `notify` edge function must stay deployed on both projects (the comment replay calls it).
