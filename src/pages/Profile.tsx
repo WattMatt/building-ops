@@ -25,6 +25,7 @@ import {
 import { AvatarPicker } from '@/components/avatar/AvatarPicker';
 import { ImageCropper } from '@/components/avatar/ImageCropper';
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter';
+import { PushSwitch } from '@/components/profile/PushSwitch';
 import { gatePassword } from '@/lib/password-strength';
 import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare, Upload, Lock, Eye, EyeOff, Trash2, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
@@ -563,6 +564,9 @@ export default function Profile() {
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-4">
+            <PushSwitch userId={userId} />
+            <Separator />
+
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
                 <Label htmlFor="notify-email-all" className="flex items-center gap-2">
