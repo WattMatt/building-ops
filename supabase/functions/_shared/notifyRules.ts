@@ -23,7 +23,31 @@ export interface NotificationPrefs {
   daily_digest: boolean | null;
 }
 
-/** Kinds that reach the inbox but never send a per-item email (the digest covers them). */
+/** Column limits for the inbox row; the email is rendered from the same clamped values. */
+export const TITLE_MAX = 200;
+export const BODY_MAX = 500;
+
+/**
+ * Truncate to `max` Unicode code points. `String.slice` counts UTF-16 units and would cut an
+ * emoji in half at the boundary, leaving a lone surrogate in the inbox and the email.
+ */
+export function clamp(s: string, max: number): string {
+  return Array.from(s).slice(0, max).join('');
+}
+
+/**
+ * Organization name is operator-supplied; keep it safe for the From display name.
+ * Pure, so it lives here and is re-exported from notify.ts for the edge functions.
+ */
+export function senderName(name: string): string {
+  return name.replace(/[^A-Za-z0-9 &.-]/g, "").trim().slice(0, 64) || "Building Ops";
+}
+
+/**
+ * Kinds that reach the inbox but never send a per-item email (the digest covers them).
+ * This cannot be derived from the governing flag: `signoff_overdue` shares `overdue_alerts`
+ * with these two, yet it does email per item.
+ */
 const DIGEST_ONLY: ReadonlySet<NotificationKind> = new Set(['document_expiring', 'asset_service_due']);
 
 export function governingFlag(kind: NotificationKind): PrefFlag {
@@ -36,8 +60,21 @@ export function governingFlag(kind: NotificationKind): PrefFlag {
     case 'document_expiring':
     case 'asset_service_due':
       return 'overdue_alerts';
-    default:
+    case 'issue_assigned':
+    case 'issue_comment':
+    case 'issue_mention':
+    case 'report_submitted':
+    case 'report_returned':
+    case 'report_approved':
+    case 'form_submitted':
+    case 'form_reviewed':
       return 'issue_updates';
+    default: {
+      // Every kind is listed above; adding one to NOTIFICATION_KINDS breaks the build here
+      // rather than silently defaulting a new kind onto the wrong preference.
+      const _exhaustive: never = kind;
+      return _exhaustive;
+    }
   }
 }
 
@@ -74,8 +111,18 @@ export interface InboxRow {
   url: string;
 }
 
-/** One row per distinct recipient, never the actor. */
+/**
+ * One row per distinct recipient, never the actor. Returns [] for a notification that has no
+ * title or whose url is not an in-app path.
+ *
+ * The `notify` edge function already rejects both cases before it calls this; the check is
+ * repeated here as defence in depth, because senders retrofitted onto this module call
+ * buildInboxRows directly and an off-site `url` would become the email's CTA link.
+ */
 export function buildInboxRows(input: InboxInput): InboxRow[] {
+  if (!input.title.trim()) return [];
+  if (!input.url.startsWith('/') || input.url.startsWith('//')) return [];
+
   const seen = new Set<string>();
   const rows: InboxRow[] = [];
   for (const id of input.recipients) {
@@ -84,7 +131,8 @@ export function buildInboxRows(input: InboxInput): InboxRow[] {
     rows.push({
       recipient_id: id, actor_id: input.actorId, actor_name: input.actorName,
       kind: input.kind, entity_type: input.entityType, entity_id: input.entityId,
-      building_id: input.buildingId, title: input.title.slice(0, 200), body: input.body ? input.body.slice(0, 500) : null, url: input.url,
+      building_id: input.buildingId, title: clamp(input.title, TITLE_MAX),
+      body: input.body ? clamp(input.body, BODY_MAX) : null, url: input.url,
     });
   }
   return rows;
