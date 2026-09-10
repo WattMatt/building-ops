@@ -276,3 +276,40 @@ Spec `docs/superpowers/specs/2026-09-10-r3-plan-design.md` §8; plan `docs/super
 - Review the 519 inactive plan lines per building (Building → PPM tab): set the rule and switch each line on. The
   note on each line says what the migration saw. Active lines start generating occurrences at the next 04:10 run.
 - Rating a contractor is offered on resolve when the issue has a contractor; one rating per issue, admin can delete.
+
+## R4a "Snapshots & SLA" (2026-09-10)
+
+Spec `docs/superpowers/specs/2026-09-10-r4-insight-design.md` §5.1–5.6; plan `docs/superpowers/plans/2026-09-10-r4a-snapshots-sla.md`.
+
+### Migration
+
+- `2026-09-14_01_r4_snapshots_sla.sql` (GMI `bfc5f2c`) — idempotent, one transaction, re-appliable (staging received the first
+  version `0122069` and then the amended file). Contains the 90-day backfill (`reconstructed = true`); ran in 1.3 s on both
+  projects, so the chunked fallback in the plan was not needed.
+
+### Staging — DONE 2026-09-10
+
+- [x] Applied (201) twice (amended file re-applied), PostgREST reloaded; 4277 snapshot rows over 91 days (4230 reconstructed);
+      crons `metrics-snapshot-daily 0 3 * * *` and `sla-breach-sweep */15 * * * *` active.
+- [x] `notify-expiring-alerts` and `daily-digest` deployed.
+- [x] `smoke:snapshot` 44/0 (`snapshot_building_metrics(today, null)` 208 ms for 49 buildings); `rls-smoke` 560/0 (3 skipped:
+      the two-role probe — `user_roles` is keyed by `user_id`); `notifications-smoke` 48/0 (expiry milestones, SLA sweep).
+
+### Production — DONE 2026-09-10
+
+- [x] Applied (201), PostgREST reloaded; 4277 rows / 91 days / 4230 reconstructed; both crons active; `organizations.settings`
+      is `{}` (defaults apply); every building has `report_types = {ops_monthly,cm_monthly}`.
+- [x] `notify-expiring-alerts` and `daily-digest` deployed; the pg_cron jobs that POST to them (`expiring-alerts-daily`,
+      `daily-digest`) were already present from R1/R2 — see the cron list recorded below.
+- [x] `rls-smoke` 560/0 (3 skipped). Types regenerated from prod; interim casts dropped (close-out commit).
+- [ ] Next morning check: `select max(day), bool_or(reconstructed) from building_metrics_daily where day = current_date` →
+      today, false.
+
+### Owner items
+
+- Settings → Operations: set SLA hours per priority (defaults 4/24/72/168 h) and the report due day (default 7). New issues
+  only; existing issues carry no SLA.
+- Reports → coverage grid: per building, untick a report type that does not apply (default OPS + CM; annual is opt-in).
+- Feature flags `share_links`, `report_schedules`, `tenant_intake` stay off until R4b/R4c land.
+- Archive or delete superseded expired documents: an expired document stays in the alert email and resurfaces in the inbox
+  every seventh day.
