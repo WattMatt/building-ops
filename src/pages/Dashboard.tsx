@@ -243,8 +243,18 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
-      {/* What happened this week, for everyone who can see the dashboard */}
-      <ActivityFeedCard />
+      {/* The manager's own queues, directly under the portfolio numbers and side by side:
+          these are the only two blocks on this page that are work *for the viewer*, and
+          they were previously below three portfolio-wide widgets and a week of activity —
+          off-screen on a laptop, so the things actually blocking other people went unseen. */}
+      {isAdminOrManager && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Reports and sign-offs waiting on this manager specifically */}
+          <WaitingOnYouWidget />
+          {/* Pending Form Submissions for Managers */}
+          <PendingSubmissionsWidget />
+        </div>
+      )}
 
       {/* H&S compliance score per building */}
       {isAdminOrManager && <HsComplianceWidget />}
@@ -254,12 +264,6 @@ export default function Dashboard() {
 
       {/* Building Health Widget */}
       {isAdminOrManager && <BuildingAlertsWidget />}
-
-      {/* Pending Form Submissions for Managers */}
-      {isAdminOrManager && <PendingSubmissionsWidget />}
-
-      {/* Reports and sign-offs waiting on this manager specifically */}
-      {isAdminOrManager && <WaitingOnYouWidget />}
 
       {/* Two Column Layout */}
       <div className="grid gap-6 lg:grid-cols-2">
@@ -382,6 +386,11 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* What happened this week, for everyone who can see the dashboard. Last of the
+          read-only blocks: it is context, not a queue, so it sits below the things that
+          ask the viewer to do something. */}
+      <ActivityFeedCard />
 
       {/* Quick Actions for Field Staff */}
       {role === 'user' && (

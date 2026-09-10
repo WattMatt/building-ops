@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import type { useMyWork } from '@/hooks/useMyWork';
+
+/** The page's whole data contract, so a field added to useMyWork fails here, not silently. */
+type MyWork = ReturnType<typeof useMyWork>;
 
 const state = vi.hoisted(() => ({
-  work: {} as any,
+  work: {} as MyWork,
   isAdminOrManager: false,
   fullName: 'Thabo Mokoena' as string | null,
+  hintsEnabled: true,
 }));
 
 const track = vi.hoisted(() => vi.fn());
@@ -16,6 +21,11 @@ vi.mock('@/contexts/AuthContext', () => ({
 }));
 vi.mock('@/hooks/useUserProfile', () => ({
   useUserProfile: () => ({ profile: { full_name: state.fullName }, loading: false }),
+}));
+// The real hook reaches for the Supabase client at import time; the page only cares
+// whether hints are on, and toggling that is how we prove the coaching copy is a <Hint>.
+vi.mock('@/hooks/useHints', () => ({
+  useHints: () => ({ hintsEnabled: state.hintsEnabled, setHintsEnabled: vi.fn() }),
 }));
 vi.mock('@/lib/analytics', () => ({ track }));
 
@@ -45,6 +55,14 @@ const task = {
   status: 'overdue' as const,
 };
 
+const upcomingTask = {
+  ...task,
+  id: 't2',
+  task_name: 'Service the generator',
+  due_date: '2026-09-14',
+  status: 'pending' as const,
+};
+
 const issue = {
   id: 'i1',
   title: 'Leaking pipe',
@@ -70,7 +88,7 @@ const returnedReport = {
   review_notes: 'Add the water readings',
 };
 
-function baseWork(overrides: Record<string, unknown> = {}) {
+function baseWork(overrides: Partial<MyWork> = {}): MyWork {
   return {
     today: '2026-09-10',
     buckets: { overdue: [task], today: [], upcoming: [] },
@@ -80,6 +98,7 @@ function baseWork(overrides: Record<string, unknown> = {}) {
     unread: 3,
     isLoading: false,
     isError: false,
+    error: null,
     isEmpty: false,
     refetch: vi.fn(),
     ...overrides,
@@ -98,6 +117,7 @@ describe('MyDay', () => {
     track.mockClear();
     state.isAdminOrManager = false;
     state.fullName = 'Thabo Mokoena';
+    state.hintsEnabled = true;
     state.work = baseWork();
   });
 
@@ -144,10 +164,16 @@ describe('MyDay', () => {
   });
 
   it('offers a retry rather than an empty day when the load fails', () => {
-    state.work = baseWork({ isError: true, isEmpty: false });
+    state.work = baseWork({
+      isError: true,
+      isEmpty: false,
+      error: new Error('permission denied for table task_instances'),
+    });
     renderPage();
     expect(screen.getByText('Your day could not be loaded')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
+    // The reason, not just the fact — otherwise a report to support says only "it broke".
+    expect(screen.getByText('permission denied for table task_instances')).toBeInTheDocument();
     expect(track).not.toHaveBeenCalled();
   });
 
@@ -167,5 +193,38 @@ describe('MyDay', () => {
     renderPage();
     expect(track).not.toHaveBeenCalled();
     expect(screen.getByLabelText('Loading your day')).toBeInTheDocument();
+  });
+
+  it('keeps Upcoming collapsed until it is opened', () => {
+    state.work = baseWork({
+      buckets: { overdue: [task], today: [], upcoming: [upcomingTask] },
+    });
+    renderPage();
+
+    // The count is visible while collapsed — the reader has to know there is something there.
+    expect(screen.getByText('Upcoming (1)')).toBeInTheDocument();
+    expect(screen.queryByText('Service the generator')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /upcoming \(1\)/i }));
+    expect(screen.getByText('Service the generator')).toBeInTheDocument();
+  });
+
+  it('says a past due date is past', () => {
+    renderPage();
+    // Overdue rows read "Was due …", not a bare date that looks like any other deadline.
+    expect(screen.getByText(/Was due Wed 9 Sep/)).toBeInTheDocument();
+  });
+
+  it('routes the section coaching copy through the hints toggle', () => {
+    const { unmount } = renderPage();
+    expect(screen.getByText('Past their due date — clear these first.')).toBeInTheDocument();
+    unmount();
+
+    // Hints off: the coaching line goes, the heading, count and rows stay.
+    state.hintsEnabled = false;
+    renderPage();
+    expect(screen.queryByText('Past their due date — clear these first.')).not.toBeInTheDocument();
+    expect(screen.getByText('Overdue (1)')).toBeInTheDocument();
+    expect(screen.getByText('Check fire extinguishers')).toBeInTheDocument();
   });
 });

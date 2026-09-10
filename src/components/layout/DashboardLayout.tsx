@@ -69,9 +69,13 @@ const mainNavItems: NavItem[] = [
     icon: <Sun className="w-4 h-4" />,
   },
   {
+    // `/` renders the portfolio dashboard for admins and managers and redirects everyone
+    // else to /my-day, so for a site role this entry is a second door to the page above it.
+    // Hiding it keeps one destination per control.
     title: 'Dashboard',
     href: '/',
     icon: <LayoutDashboard className="w-4 h-4" />,
+    roles: ['admin', 'manager'],
   },
   {
     title: 'Buildings',
@@ -218,7 +222,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               <SidebarGroupLabel>Main</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {mainNavItems.map((item) => {
+                  {mainNavItems.filter(canAccessItem).map((item) => {
                     const n = item.badgeKinds ? unreadByKind(item.badgeKinds) : 0;
                     return (
                       <SidebarMenuItem key={item.href}>

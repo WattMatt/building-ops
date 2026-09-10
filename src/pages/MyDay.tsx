@@ -20,9 +20,10 @@ import {
   Sun,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Hint } from '@/components/ui/hint';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useUserProfile } from '@/hooks/useUserProfile';
@@ -41,12 +42,17 @@ const priorityColors: Record<string, string> = {
   critical: 'bg-destructive text-destructive-foreground',
 };
 
-/** A date-column value (YYYY-MM-DD) read against the operating day, not the browser's. */
+/**
+ * A date-column value (YYYY-MM-DD) read against the operating day, not the browser's.
+ * A past due date reads "Was due …": in a list mixing overdue and upcoming rows, a bare
+ * "Due Mon 8 Sep" gives the reader no clue that the date has already gone.
+ */
 function dueLabel(dueDate: string, today: string): string {
   if (dueDate === today) return 'Due today';
   const parsed = new Date(`${dueDate}T00:00:00`);
   if (Number.isNaN(parsed.getTime())) return dueDate;
-  return `Due ${format(parsed, 'EEE d MMM')}`;
+  const when = format(parsed, 'EEE d MMM');
+  return dueDate < today ? `Was due ${when}` : `Due ${when}`;
 }
 
 function whenLabel(iso: string | null): string | null {
@@ -80,7 +86,10 @@ function Section({
           </span>
           {`${title} (${count})`}
         </CardTitle>
-        {description && <CardDescription>{description}</CardDescription>}
+        {/* Coaching copy — why this section is first / what it wants from you. It goes
+            through <Hint> so experienced users can switch it off; the counts, dates and
+            error states around it are state cues and always stay visible. */}
+        {description && <Hint>{description}</Hint>}
       </CardHeader>
       <CardContent className="space-y-2">{children}</CardContent>
     </Card>
@@ -91,7 +100,9 @@ function Section({
 function Row({ children, action }: { children: ReactNode; action: ReactNode }) {
   return (
     <div className="flex flex-col gap-3 rounded-lg bg-muted/50 p-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0 flex-1">{children}</div>
+      {/* break-words here rather than on each title: long task names and issue titles
+          arrive unhyphenated from the field and would otherwise widen the row on a phone. */}
+      <div className="min-w-0 flex-1 break-words">{children}</div>
       <div className="shrink-0">{action}</div>
     </div>
   );
@@ -109,6 +120,7 @@ export default function MyDay() {
     unread,
     isLoading,
     isError,
+    error,
     isEmpty,
     refetch,
   } = useMyWork();
@@ -142,7 +154,7 @@ export default function MyDay() {
       }
     >
       <p className="font-medium text-sm">{task.task_name}</p>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         {formatBuildingName(task.building_name)} · {dueLabel(task.due_date, today)}
       </p>
     </Row>
@@ -189,6 +201,11 @@ export default function MyDay() {
             <p className="text-sm text-muted-foreground">
               Work may still be assigned to you. Try again, or open Checklists and Issues directly.
             </p>
+            {/* The actual failure, so a report to support says more than "it didn't work".
+                Not a <Hint>: this is an error detail, and must survive hints being off. */}
+            {error?.message && (
+              <p className="mt-1 text-xs text-muted-foreground">{error.message}</p>
+            )}
           </CardContent>
         </Card>
       )}
@@ -240,31 +257,34 @@ export default function MyDay() {
               count={issues.length}
               icon={<AlertTriangle className="h-4 w-4" />}
             >
-              {issues.map((issue) => (
-                <Row
-                  key={issue.id}
-                  action={
-                    <Button
-                      variant="outline"
-                      className="h-10 w-full sm:w-auto"
-                      onClick={() => setIssueToOpen(issue)}
-                    >
-                      Open
-                    </Button>
-                  }
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-medium text-sm">{issue.title}</p>
-                    <Badge variant="secondary" className={priorityColors[issue.priority] ?? 'bg-muted'}>
-                      {issue.priority}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {formatBuildingName(issue.building_name)}
-                    {whenLabel(issue.deadline) ? ` · Due ${whenLabel(issue.deadline)}` : ''}
-                  </p>
-                </Row>
-              ))}
+              {issues.map((issue) => {
+                const due = whenLabel(issue.deadline);
+                return (
+                  <Row
+                    key={issue.id}
+                    action={
+                      <Button
+                        variant="outline"
+                        className="h-10 w-full sm:w-auto"
+                        onClick={() => setIssueToOpen(issue)}
+                      >
+                        Open
+                      </Button>
+                    }
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-medium text-sm">{issue.title}</p>
+                      <Badge variant="secondary" className={priorityColors[issue.priority] ?? 'bg-muted'}>
+                        {issue.priority}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {formatBuildingName(issue.building_name)}
+                      {due ? ` · Due ${due}` : ''}
+                    </p>
+                  </Row>
+                );
+              })}
             </Section>
           )}
 
@@ -274,22 +294,25 @@ export default function MyDay() {
               count={signoffs.length}
               icon={<PenLine className="h-4 w-4" />}
             >
-              {signoffs.map((signoff) => (
-                <Row
-                  key={signoff.id}
-                  action={
-                    <Button asChild variant="outline" className="h-10 w-full sm:w-auto">
-                      <Link to="/my-signoffs">Review &amp; sign</Link>
-                    </Button>
-                  }
-                >
-                  <p className="font-medium text-sm">{signoff.form_name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {signoff.building_name ? formatBuildingName(signoff.building_name) : 'No building'}
-                    {whenLabel(signoff.due_at) ? ` · Due ${whenLabel(signoff.due_at)}` : ''}
-                  </p>
-                </Row>
-              ))}
+              {signoffs.map((signoff) => {
+                const due = whenLabel(signoff.due_at);
+                return (
+                  <Row
+                    key={signoff.id}
+                    action={
+                      <Button asChild variant="outline" className="h-10 w-full sm:w-auto">
+                        <Link to="/my-signoffs">Review &amp; sign</Link>
+                      </Button>
+                    }
+                  >
+                    <p className="font-medium text-sm">{signoff.form_name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {signoff.building_name ? formatBuildingName(signoff.building_name) : 'No building'}
+                      {due ? ` · Due ${due}` : ''}
+                    </p>
+                  </Row>
+                );
+              })}
             </Section>
           )}
 
@@ -327,15 +350,17 @@ export default function MyDay() {
             <Collapsible>
               <Card>
                 <CollapsibleTrigger asChild>
+                  {/* Radix puts data-state on the trigger itself, so `group` here is what
+                      lets the chevron follow the open/closed state. */}
                   <button
                     type="button"
-                    className="flex min-h-[40px] w-full items-center justify-between gap-2 p-4 text-left"
+                    className="group flex min-h-[40px] w-full items-center justify-between gap-2 p-4 text-left"
                   >
                     <span className="flex items-center gap-2 text-base font-semibold">
                       <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
                       {`Upcoming (${buckets.upcoming.length})`}
                     </span>
-                    <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
                   </button>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
