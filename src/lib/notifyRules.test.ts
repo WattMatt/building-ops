@@ -150,6 +150,9 @@ describe('isAllowedUrl', () => {
     ['/calendar', true],
     ['/calendar?date=2026-09-10&view=week', true],
     ['/calendarx', false],
+    ['/contractors', true],
+    ['/contractors?open=abc', true],
+    ['/contractorsx', false],
     // Not on the allowlist, however in-app it looks.
     ['/settings', false],
     ['/', false],
@@ -348,6 +351,11 @@ describe('push', () => {
     expect(isAllowedUrl('/calendar')).toBe(true);
     expect(isAllowedUrl('/calendar?date=2026-09-10&view=week')).toBe(true);
     expect(isAllowedUrl('/calendarx')).toBe(false);
+  });
+  it('allows /contractors deep links (expiring contractor documents)', () => {
+    expect(isAllowedUrl('/contractors')).toBe(true);
+    expect(isAllowedUrl('/contractors?open=abc')).toBe(true);
+    expect(isAllowedUrl('/contractorsx')).toBe(false);
   });
   it('shapes a push payload from an inbox row', () => {
     const p = pushPayloadFor({ kind: 'task_assigned', title: 'T', body: 'B', url: '/my-day', entity_id: 'e1' });

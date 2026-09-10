@@ -14,6 +14,7 @@
  */
 export const PUSH_URL_PREFIXES = [
   '/issues', '/buildings/', '/reports/fortress/', '/my-signoffs', '/forms', '/inbox', '/my-day', '/calendar',
+  '/contractors',
 ] as const;
 
 /** Mirrors `URL_MAX` in notifyRules.ts (the width of `notifications.url`). */

@@ -59,6 +59,7 @@ import {
   User,
   Search,
   CalendarDays,
+  HardHat,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -152,6 +153,14 @@ const adminNavItems: NavItem[] = [
     href: '/users',
     icon: <Users className="w-4 h-4" />,
     roles: ['admin'],
+  },
+  {
+    // The register of outside companies (R3c). Managers assign contractors day to day, so
+    // they maintain the register too.
+    title: 'Contractors',
+    href: '/contractors',
+    icon: <HardHat className="w-4 h-4" />,
+    roles: ['admin', 'manager'],
   },
   {
     title: 'Settings',

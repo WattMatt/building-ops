@@ -65,6 +65,7 @@ export const MAX_RECIPIENTS = 50;
  */
 export const ALLOWED_URL_PREFIXES = [
   '/issues', '/buildings/', '/reports/fortress/', '/my-signoffs', '/forms', '/inbox', '/my-day', '/calendar',
+  '/contractors',
 ] as const;
 
 /**

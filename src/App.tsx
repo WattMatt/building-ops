@@ -42,6 +42,7 @@ const FormsLibrary = lazy(() => import("./pages/FormsLibrary"));
 const MySignoffs = lazy(() => import("./pages/MySignoffs"));
 const Inbox = lazy(() => import("./pages/Inbox"));
 const UserManagement = lazy(() => import("./pages/UserManagement"));
+const Contractors = lazy(() => import("./pages/Contractors"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Profile = lazy(() => import("./pages/Profile"));
 
@@ -158,6 +159,13 @@ const App = () => (
             <Route path="/users" element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <DashboardLayout><UserManagement /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            {/* The contractor register: reads are org-wide under RLS, but the page is a
+                management surface, so it is gated like Settings. */}
+            <Route path="/contractors" element={
+              <ProtectedRoute allowedRoles={['admin', 'manager']}>
+                <DashboardLayout><Contractors /></DashboardLayout>
               </ProtectedRoute>
             } />
             <Route path="/settings" element={
