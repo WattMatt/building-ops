@@ -365,6 +365,7 @@ try {
 
     const second = await call();
     assert('expiring alerts re-run: HTTP 200', second.status === 200, `HTTP ${second.status} ${JSON.stringify(second.body).slice(0, 160)}`);
+    assert('expiring alerts re-run: reports the row as already sent today', (second.body?.inboxAlreadyToday ?? 0) >= 1, `inboxAlreadyToday=${JSON.stringify(second.body?.inboxAlreadyToday)}`);
     const rowsAfter = await adminRows();
     assert('expiring alerts re-run: still exactly one row (idempotent per day)', rowsAfter.length === 1, `found ${rowsAfter.length} row(s)`);
   });

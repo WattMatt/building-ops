@@ -10,7 +10,7 @@ Today nothing in Building Ops is addressed to a person. R1 gives tasks and issue
 
 ## 2. Decisions applied
 
-- D1 person-first. D2 landing: `user` and `reviewer` land on My Day; `admin` and `manager` keep the dashboard, which gains a My Day link. D7 web only, email + in-app in R1 (push is R2). D8 analytics: instrumentation scaffold ships in R1c, env-gated; vendor keys are an owner action.
+- D1 person-first. D2 landing: `user` and `reviewer` land on My Day (2026-09-10, R3a: the reviewer role was removed; see the R3 spec §5.3); `admin` and `manager` keep the dashboard, which gains a My Day link. D7 web only, email + in-app in R1 (push is R2). D8 analytics: instrumentation scaffold ships in R1c, env-gated; vendor keys are an owner action.
 - Schema is shared with iOS: every change is additive, authored in `../GMI/sql/`, vendored, applied staging-first by the owner. iOS ignores unknown columns.
 - RLS remains the boundary. New tables get policies in the same migration. Anything that must read other users' profiles goes through a SECURITY DEFINER function, because `profiles` is self-or-manager readable only (`2026-06-10_02_rls_redesign.sql:184`).
 

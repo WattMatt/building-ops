@@ -68,7 +68,7 @@ export function FormSubmissionsDialog({
 }: FormSubmissionsDialogProps) {
   const { user, isAdminOrManager } = useAuth();
   // Who may review a submission: admin/manager only, matching the fs_update RLS policy
-  // (`is_admin_or_manager()`, see supabase/schema — reviewer has no write here), and
+  // (`is_admin_or_manager()`, see supabase/schema), and
   // never the person who submitted it. Previously the buttons rendered on submission
   // status alone, so any user — including the submitter — saw Approve/Reject/Mark-
   // reviewed, and a denied write toasted success.

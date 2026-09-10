@@ -273,7 +273,15 @@ const handler = async (req: Request): Promise<Response> => {
     // caller — it is portfolio-wide confidential data.
     if (totalAlerts === 0) {
       console.log("No alerts to send");
-      return json({ success: true, dryRun, totalAlerts: 0, recipientCount: 0, inboxRows: 0 });
+      return json({
+        success: true,
+        dryRun,
+        totalAlerts: 0,
+        recipientCount: 0,
+        inboxRows: 0,
+        inboxAlreadyToday: 0,
+        inboxFailed: 0,
+      });
     }
 
     // ---- Inbox pass ---------------------------------------------------------------------
@@ -365,9 +373,17 @@ const handler = async (req: Request): Promise<Response> => {
     }
 
     // ---- Email pass ---------------------------------------------------------------------
+    // `recipientCount` is the number of people an email actually went out to (or would go
+    // out to on a dry run). Without a Resend key nothing can be sent, so the whole block is
+    // skipped and the count stays 0 — checking inside the recipient loop used to report N
+    // recipients after zero sends.
     let recipientCount = 0;
 
-    if (notifyAdmins) {
+    if (!notifyAdmins) {
+      // Caller asked for inbox rows only.
+    } else if (!resend) {
+      console.warn("RESEND_API_KEY not set; alert email skipped");
+    } else {
       const { data: roleRows, error: roleError } = await supabase
         .from("user_roles")
         .select("user_id")
@@ -418,7 +434,6 @@ const handler = async (req: Request): Promise<Response> => {
           const emailHtml = generateAlertEmailHtml(branding, recipientName, alertSummary);
 
           try {
-            if (!resend) { console.warn("RESEND_API_KEY not set; alert email skipped"); break; }
             await resend.emails.send({
               from: `${senderName(branding.appName)} <alerts@buildingops.app>`,
               to: [recipientEmail],
