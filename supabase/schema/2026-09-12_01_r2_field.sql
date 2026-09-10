@@ -41,6 +41,10 @@ declare
   v_count integer := 0;
 begin
   if auth.uid() is not null then
+    -- Only the nightly cron (postgres, null uid) may generate for every building at once.
+    if p_building is null then
+      raise exception 'generate_scheduled_tasks: p_building is required for signed-in callers' using errcode = '42501';
+    end if;
     if not public.is_admin_or_manager() then
       raise exception 'generate_scheduled_tasks: admin or manager only' using errcode = '42501';
     end if;
@@ -126,7 +130,7 @@ revoke execute on function public.complete_task(uuid, uuid, text, boolean, jsonb
 grant execute on function public.complete_task(uuid, uuid, text, boolean, jsonb) to authenticated;
 
 -- 5) Global search (security INVOKER so each table's RLS applies). Two-character minimum.
---    Returns up to lim per kind, kinds in the order building, issue, tenant, document, so one
+--    Returns up to lim (capped at 50) per kind, kinds in the order building, issue, tenant, document, so one
 --    kind with many matches cannot starve the others.
 create or replace function public.search_entities(q text, lim integer default 20)
 returns table (kind text, id uuid, building_id uuid, title text, subtitle text)
@@ -139,21 +143,21 @@ as $$
   )
   (select 'building'::text, b.id, b.id, b.name::text, b.address::text
      from public.buildings b, needle where b.name ilike needle.p or b.address ilike needle.p
-    order by b.name limit lim)
+    order by b.name limit least(coalesce(lim, 20), 50))
   union all
   (select 'issue', i.id, i.building_id, i.title, left(i.description, 80)
      from public.issues i, needle where i.title ilike needle.p or i.description ilike needle.p
-    order by i.created_at desc limit lim)
+    order by i.created_at desc limit least(coalesce(lim, 20), 50))
   union all
   (select 'tenant', t.id, t.building_id, coalesce(t.shop_name, t.name, 'Tenant'),
           coalesce(t.unit_number, t.shop_number)
      from public.building_tenants t, needle
     where t.name ilike needle.p or t.shop_name ilike needle.p or t.unit_number ilike needle.p
-    order by 4 limit lim)
+    order by 4 limit least(coalesce(lim, 20), 50))
   union all
   (select 'document', d.id, d.building_id, d.name, d.document_type
      from public.building_documents d, needle where d.name ilike needle.p
-    order by d.name limit lim)
+    order by d.name limit least(coalesce(lim, 20), 50))
 $$;
 revoke all on function public.search_entities(text, integer) from public;
 revoke execute on function public.search_entities(text, integer) from anon;

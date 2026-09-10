@@ -97,10 +97,13 @@ function Section({
   );
 }
 
-/** Every row is the same shape: what it is, where it is, and one action, ≥ 40 px tall. */
+/**
+ * Every row is the same shape: what it is, where it is, and one action. Spec §5.3: a 56 px
+ * tap target on phones (min-h-14), relaxing to 40 px once the row lays out horizontally.
+ */
 function Row({ children, action }: { children: ReactNode; action: ReactNode }) {
   return (
-    <div className="flex flex-col gap-3 rounded-lg bg-muted/50 p-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex min-h-14 flex-col gap-3 rounded-lg bg-muted/50 p-3 sm:min-h-10 sm:flex-row sm:items-center sm:justify-between">
       {/* break-words here rather than on each title: long task names and issue titles
           arrive unhyphenated from the field and would otherwise widen the row on a phone. */}
       <div className="min-w-0 flex-1 break-words">{children}</div>

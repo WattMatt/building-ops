@@ -34,6 +34,11 @@ vi.mock('@/integrations/supabase/client', () => ({
   },
 }));
 
+declare global {
+  // eslint-disable-next-line no-var
+  var IS_REACT_ACT_ENVIRONMENT: boolean | undefined;
+}
+
 const keyFor = (uid: string) => ['my-work', 'tasks', uid] as const;
 
 interface PersistedClientShape {
@@ -202,5 +207,58 @@ describe('PersistedQueryProvider', () => {
 
     await waitFor(() => expect(screen.getByTestId('late').textContent).toBe(JSON.stringify(['from-disk'])));
     expect(fetches).toHaveLength(0);
+  });
+
+  it('keeps a restored query alive with no consumer past the default 5-minute gcTime', async () => {
+    // An offline launch restores every persisted query at once; the page that owns one may
+    // not be visited for a while. Restored queries are built from the persisted state alone
+    // (the consumer's PERSIST_DEFAULTS.gcTime is not on disk), so without `hydrateOptions`
+    // they would get the 5-minute default and be collected before the user got there.
+    const seeded = createPersisterFor('A', { throttleTime: 0 });
+    await seeded.persistClient({
+      buster: 'A',
+      timestamp: Date.now(),
+      clientState: {
+        mutations: [],
+        queries: [{
+          queryKey: keyFor('A'),
+          queryHash: JSON.stringify(keyFor('A')),
+          state: {
+            data: ['from-disk'], dataUpdateCount: 1, dataUpdatedAt: Date.now(), error: null,
+            errorUpdateCount: 0, errorUpdatedAt: 0, fetchFailureCount: 0, fetchFailureReason: null,
+            fetchMeta: null, isInvalidated: false, status: 'success', fetchStatus: 'idle',
+          },
+        }],
+      },
+    });
+
+    // Only the timer pair the gc uses is faked: fake-indexeddb schedules on setImmediate and
+    // React's scheduler on MessageChannel/setImmediate, which must keep running for the
+    // restore to settle at all. Faking before mounting matters — the gc timer is armed the
+    // moment the query is hydrated.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      render(<PersistedQueryProvider persisterFactory={fastPersister}><div /></PersistedQueryProvider>);
+      // vi.waitFor polls on vitest's own (real) timers; RTL's waitFor would wait on the faked
+      // setTimeout and never return, and wrapping the wait in act() would hold React's render
+      // queue until it exits. So, as RTL's asyncWrapper does, take the act environment down
+      // while the restore settles and put it back for the assertions.
+      const actEnv = globalThis.IS_REACT_ACT_ENVIRONMENT;
+      globalThis.IS_REACT_ACT_ENVIRONMENT = false;
+      try {
+        await vi.waitFor(() => expect(queryClient.getQueryCache().find({ queryKey: keyFor('A') })).toBeDefined());
+      } finally {
+        globalThis.IS_REACT_ACT_ENVIRONMENT = actEnv;
+      }
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(6 * 60 * 1000); });
+
+      const q = queryClient.getQueryCache().find({ queryKey: keyFor('A') });
+      expect(q).toBeDefined();
+      expect(q!.gcTime).toBe(PERSIST_DEFAULTS.gcTime);
+      expect(q!.state.data).toEqual(['from-disk']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -104,6 +104,22 @@ describe('ResponsiveDialog', () => {
     expect(sheet.querySelectorAll('.overflow-y-auto')).toHaveLength(1);
   });
 
+  it('drops a call-site max-width so the sheet spans 512–767 px viewports instead of anchoring left', async () => {
+    mockViewport(600);
+    render(
+      <ResponsiveDialog open onOpenChange={() => {}}>
+        <ResponsiveDialogContent className="max-w-md">
+          <ResponsiveDialogTitle>Title</ResponsiveDialogTitle>
+          <p>Body</p>
+        </ResponsiveDialogContent>
+      </ResponsiveDialog>,
+    );
+    await screen.findByText('Title');
+    const sheet = document.querySelector('[data-vaul-drawer]') as HTMLElement;
+    expect(sheet.className).toContain('max-w-none');
+    expect(sheet.className).not.toContain('max-w-md');
+  });
+
   it('renders a nested sheet inside an open sheet on phones', async () => {
     mockViewport(375);
     render(

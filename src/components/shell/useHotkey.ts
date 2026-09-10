@@ -8,7 +8,9 @@ function isEditable(target: EventTarget | null): boolean {
 
 /**
  * Global keyboard shortcut. `meta` accepts either ⌘ (macOS) or Ctrl (everything else).
- * Ignored while the user is typing in a field, so a plain-letter hotkey never eats input.
+ * A plain-letter hotkey is ignored while the user is typing in a field, so it never eats
+ * input; a `meta` chord is not, because ⌘K / Ctrl+K types nothing and users expect it to
+ * work from inside a search box or a comment.
  * The handler lives in a ref so the window listener is registered once per key/modifier.
  */
 export function useHotkey(key: string, opts: { meta?: boolean }, handler: () => void) {
@@ -20,7 +22,7 @@ export function useHotkey(key: string, opts: { meta?: boolean }, handler: () => 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() !== key) return;
       if (meta && !(e.metaKey || e.ctrlKey)) return;
-      if (isEditable(e.target)) return;
+      if (!meta && isEditable(e.target)) return;
       e.preventDefault();
       handlerRef.current();
     };

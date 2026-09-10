@@ -463,6 +463,12 @@ try {
     const r = await rpcCall(personas.userA.jwt, 'generate_scheduled_tasks', { p_building: A });
     assert('generate_scheduled_tasks refused for a site user', r.status === 403, `expected HTTP 403 (raised 42501), got HTTP ${r.status}`);
   }
+  // Only the nightly cron (null uid) may generate for every building at once; a signed-in
+  // manager omitting p_building would otherwise fan out across buildings they cannot access.
+  {
+    const r = await rpcCall(personas.manager.jwt, 'generate_scheduled_tasks', {});
+    assert('generate_scheduled_tasks refused without a building for a signed-in manager', r.status === 403, `expected HTTP 403 (raised 42501), got HTTP ${r.status}`);
+  }
   // Inserts real task_instances for building A from every active unscoped template on the
   // project; the teardown deletes generated rows for A/B before the buildings themselves.
   assert('generate_scheduled_tasks runs for admin', (await rpcCall(personas.admin.jwt, 'generate_scheduled_tasks', { p_building: A })).status === 200, 'admin generate failed');

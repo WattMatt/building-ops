@@ -5,6 +5,7 @@ import { useGeotag } from '@/hooks/useGeotag';
 import { captionText, drawCaption } from '@/lib/photoCaption';
 import { Camera, X, ImagePlus, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Hint } from '@/components/ui/hint';
 import { toast } from 'sonner';
 import heic2any from 'heic2any';
 
@@ -462,15 +463,19 @@ export function PhotoCapture({
         aria-hidden="true"
       />
 
-      {/* Helper text */}
+      {/* Helper text. The touch line is coaching copy, so it goes through <Hint> (its own <p>)
+          and can be switched off; the desktop line states the remaining slots and size limit,
+          which must survive hints being off. */}
       {canAddMore && !isProcessing && (
-        <p className="text-xs text-muted-foreground">
-          {isTouch ? (
-            <>Tap <strong>Camera</strong> to take a photo or <strong>Gallery</strong> to choose existing</>
-          ) : (
-            <>Add up to {remainingSlots} more photo{remainingSlots !== 1 ? 's' : ''} (max {maxSizeMB}MB each)</>
-          )}
-        </p>
+        isTouch ? (
+          <Hint icon={false}>
+            Tap <strong>Camera</strong> to take a photo or <strong>Gallery</strong> to choose existing
+          </Hint>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Add up to {remainingSlots} more photo{remainingSlots !== 1 ? 's' : ''} (max {maxSizeMB}MB each)
+          </p>
+        )
       )}
     </div>
   );

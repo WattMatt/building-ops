@@ -118,11 +118,12 @@ export const ResponsiveDialogContent = forwardRef<HTMLDivElement, ComponentProps
   function ResponsiveDialogContent({ className, children, ...rest }, ref) {
     const mobile = useResponsiveDialogMode();
     if (mobile) {
-      // Call-site classes go first so the sheet's own height and overflow win over desktop
-      // values such as `max-h-[90vh] overflow-y-auto`; the inner div is the single scroll
-      // region (min-h-0 lets it shrink inside the flex column so it actually scrolls).
+      // Call-site classes go first so the sheet's own width, height and overflow win over
+      // desktop values such as `max-w-md max-h-[90vh] overflow-y-auto`: a call-site max-width
+      // would anchor the sheet to the left edge on 512–767 px viewports, and the inner div is
+      // the single scroll region (min-h-0 lets it shrink inside the flex column so it scrolls).
       return (
-        <DrawerContent ref={ref} className={cn(className, 'max-h-[92dvh] overflow-hidden')} {...rest}>
+        <DrawerContent ref={ref} className={cn(className, 'max-w-none max-h-[92dvh] overflow-hidden')} {...rest}>
           <DrawerClose asChild>
             <Button
               type="button"

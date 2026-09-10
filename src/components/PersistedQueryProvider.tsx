@@ -10,6 +10,7 @@ import {
   stopPersisting,
   shouldPersistQuery,
   MAX_AGE_MS,
+  PERSIST_DEFAULTS,
 } from '@/lib/persist';
 
 /**
@@ -97,6 +98,11 @@ export function PersistedQueryProvider({
       maxAge: MAX_AGE_MS,
       buster: uid,
       dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
+      // Restored queries are built from the persisted state alone — the `gcTime` a consumer
+      // spreads in via PERSIST_DEFAULTS is not on disk. Without this they get the 5-minute
+      // default and are collected (and the store rewritten without them) if the page that owns
+      // them is not visited within 5 minutes of an offline launch.
+      hydrateOptions: { defaultOptions: { queries: { gcTime: PERSIST_DEFAULTS.gcTime } } },
     };
     persistQueryClientRestore(options)
       .catch(() => { /* corrupt or unreadable store: core already discarded it */ })

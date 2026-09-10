@@ -58,7 +58,31 @@ async function svcDelete(table, filter) {
 
 const cleanup = [];       // [table, filter] LIFO
 const storageCleanup = [];
-let userId = null, building = null;
+const userIds = [];       // disposable site users, torn down after the rows that reference them
+let building = null;
+
+/** A confirmed site user ('user' role) assigned to `buildingId`, signed in. Registered for teardown. */
+async function siteUser(tag, buildingId) {
+  const email = `zztest-chk-${tag}-${RUN}@buildingops.app`;
+  let res = await fetch(`${URL_BASE}/auth/v1/admin/users`, {
+    method: 'POST', headers: SVC, body: JSON.stringify({ email, password: PASSWORD, email_confirm: true }),
+  });
+  const id = (await res.json()).id;
+  if (!id) throw new Error(`persona ${tag} create failed`);
+  userIds.push(id);
+  await fetch(`${URL_BASE}/rest/v1/user_roles?on_conflict=user_id`, {
+    method: 'POST', headers: { ...SVC, Prefer: 'resolution=merge-duplicates' },
+    body: JSON.stringify({ user_id: id, role: 'user' }),
+  });
+  await svcInsert('user_buildings', { user_id: id, building_id: buildingId });
+  res = await fetch(`${URL_BASE}/auth/v1/token?grant_type=password`, {
+    method: 'POST', headers: { apikey: ANON, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password: PASSWORD }),
+  });
+  const jwt = (await res.json()).access_token;
+  if (!jwt) throw new Error(`persona ${tag} login failed`);
+  return { id, jwt };
+}
 
 try {
   console.log(`checklist-smoke vs ${URL_BASE} (run ${RUN})`);
@@ -67,23 +91,7 @@ try {
   building = (await svcInsert('buildings', { name: `ZZTEST-CHK-${RUN}` })).id;
   cleanup.push(['buildings', `id=eq.${building}`]);
 
-  const email = `zztest-chk-${RUN}@buildingops.app`;
-  let res = await fetch(`${URL_BASE}/auth/v1/admin/users`, {
-    method: 'POST', headers: SVC, body: JSON.stringify({ email, password: PASSWORD, email_confirm: true }),
-  });
-  userId = (await res.json()).id;
-  if (!userId) throw new Error('persona create failed');
-  await fetch(`${URL_BASE}/rest/v1/user_roles?on_conflict=user_id`, {
-    method: 'POST', headers: { ...SVC, Prefer: 'resolution=merge-duplicates' },
-    body: JSON.stringify({ user_id: userId, role: 'user' }),
-  });
-  await svcInsert('user_buildings', { user_id: userId, building_id: building });
-  res = await fetch(`${URL_BASE}/auth/v1/token?grant_type=password`, {
-    method: 'POST', headers: { apikey: ANON, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password: PASSWORD }),
-  });
-  const jwt = (await res.json()).access_token;
-  if (!jwt) throw new Error('persona login failed');
+  const { id: userId, jwt } = await siteUser('a', building);
   console.log('  setup: building + assigned site user + login');
 
   const template = (await svcInsert('checklist_templates', { name: `ZZTEST-CHK-${RUN}`, frequency: 'monthly', is_active: true })).id;
@@ -178,6 +186,19 @@ try {
   const tcs = await (await fetch(`${URL_BASE}/rest/v1/task_completions?task_instance_id=eq.${task2}&select=id`, { headers: SVC })).json();
   assert('exactly one completion row after replay', tcs.length === 1, `${tcs.length} rows`);
 
+  // Spec §8: a second site user on the same building completing the same task (two phones,
+  // one checklist) gets the ORIGINAL completion back, not a second row, and the instance
+  // still credits whoever finished it first.
+  const { id: userB, jwt: jwtB } = await siteUser('b', building);
+  r = await rpc(jwtB, 'complete_task', { p_completion_id: crypto.randomUUID(), p_task_instance_id: task2, p_notes: 'ZZTEST second user', p_signature_confirmed: true, p_photo_urls: [] });
+  body = await r.json();
+  assert('complete_task by a second site user reports already_completed with the original completion_id',
+    r.ok && body[0]?.already_completed === true && body[0]?.completion_id === cid, `HTTP ${r.status} ${JSON.stringify(body)}`);
+  const tiB = await (await fetch(`${URL_BASE}/rest/v1/task_instances?id=eq.${task2}&select=status,completed_by`, { headers: SVC })).json();
+  assert('task_instances.completed_by still credits the first user', tiB[0]?.status === 'completed' && tiB[0]?.completed_by === userId && tiB[0]?.completed_by !== userB, JSON.stringify(tiB[0]));
+  const tcsB = await (await fetch(`${URL_BASE}/rest/v1/task_completions?task_instance_id=eq.${task2}&select=id`, { headers: SVC })).json();
+  assert('still exactly one completion row after the second user', tcsB.length === 1, `${tcsB.length} rows`);
+
   // Sweep: flips every genuinely back-dated pending task on the project (what the cron does nightly).
   // That is a real side effect on prod, so refuse there unless SMOKE_ALLOW_PROD=1.
   if (!SWEEP_ALLOWED) {
@@ -198,10 +219,10 @@ try {
 } finally {
   for (const path of storageCleanup) await fetch(`${URL_BASE}/storage/v1/object/${path}`, { method: 'DELETE', headers: SVC });
   for (const [table, filter] of cleanup) await svcDelete(table, filter);
-  if (userId) {
-    await svcDelete('user_buildings', `user_id=eq.${userId}`);
-    await svcDelete('user_roles', `user_id=eq.${userId}`);
-    await fetch(`${URL_BASE}/auth/v1/admin/users/${userId}`, { method: 'DELETE', headers: SVC });
+  for (const id of userIds) {
+    await svcDelete('user_buildings', `user_id=eq.${id}`);
+    await svcDelete('user_roles', `user_id=eq.${id}`);
+    await fetch(`${URL_BASE}/auth/v1/admin/users/${id}`, { method: 'DELETE', headers: SVC });
   }
   const left = await (await fetch(`${URL_BASE}/rest/v1/buildings?name=like.ZZTEST-CHK-*&select=id`, { headers: SVC })).json();
   console.log((left.length ?? 0) === 0 ? '  teardown: clean' : `  WARN  ${left.length} ZZTEST-CHK buildings left`);
