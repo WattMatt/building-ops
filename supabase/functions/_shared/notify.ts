@@ -1,17 +1,21 @@
-// One sender for every notification: inserts inbox rows (service role) and emails each
-// recipient whose preferences allow it. Every user-facing edge function routes through
-// this so the inbox and the email can never disagree about what was sent.
+// One sender for every notification: inserts inbox rows (service role), pushes to the
+// devices of recipients whose preferences allow it, and emails each recipient whose
+// preferences allow it. Every user-facing edge function routes through this so the inbox,
+// the push and the email can never disagree about what was sent.
 import { escapeText, loadBranding, renderEmail, type Branding } from "./email.ts";
 import {
   BODY_MAX,
   TITLE_MAX,
   buildInboxRows,
   clamp,
+  pushPayloadFor,
   senderName,
   shouldEmail,
+  shouldPush,
   type InboxInput,
   type NotificationPrefs,
 } from "./notifyRules.ts";
+import { sendPush, type PushResult } from "./push.ts";
 
 // senderName is pure, so it lives in notifyRules.ts; re-exported here for existing importers.
 export { senderName };
@@ -39,7 +43,7 @@ export async function sendEmail(from: string, to: string[], subject: string, htm
 // deno-lint-ignore no-explicit-any
 type Admin = { from: (t: string) => any };
 
-/** The profile columns the sender needs to decide whether a recipient gets an email. */
+/** The profile columns the sender needs to decide whether a recipient gets a push or an email. */
 interface Recipient extends NotificationPrefs {
   id: string;
   email: string | null;
@@ -69,19 +73,24 @@ export interface CreateNotificationsResult {
   inserted: number;
   /** Emails Resend accepted. */
   emailed: number;
+  /** Push messages the push services accepted (one per live device, so this can exceed `inserted`). */
+  pushed: number;
   /** Recipients deliberately not emailed: unknown id, deactivated, no address, preference off. */
   skipped: number;
   /** Recipients whose email threw (provider error or timeout). The inbox row still stands. */
   failed: number;
 }
 
+const NO_PUSH: PushResult = { sent: 0, gone: 0, failed: 0, skipped: 0 };
+
 /**
  * Read the recipient profiles first, drop anyone unknown or deactivated, insert inbox rows
- * for the survivors only, then email those whose profile flags allow it.
+ * for the survivors only, push to the devices of those whose profile flags allow it, then
+ * email those whose profile flags allow it.
  *
  * Reading first matters twice over: an id with no profile would make the whole insert fail on
  * the recipient foreign key, and a deactivated account should not accumulate inbox rows it can
- * never read. Email failures are counted, never thrown: the inbox row is the record.
+ * never read. Push and email failures are counted, never thrown: the inbox row is the record.
  */
 export async function createNotifications(
   admin: Admin,
@@ -95,7 +104,7 @@ export async function createNotifications(
 
   // Also validates the title and url; [] means there is nothing legitimate to send.
   const candidates = buildInboxRows(input);
-  if (!candidates.length) return { inserted: 0, emailed: 0, skipped: 0, failed: 0 };
+  if (!candidates.length) return { inserted: 0, emailed: 0, pushed: 0, skipped: 0, failed: 0 };
 
   const { data: profiles, error: profErr } = await admin
     .from("profiles")
@@ -114,10 +123,32 @@ export async function createNotifications(
   });
   // Recipients dropped here get neither a row nor an email.
   let skipped = candidates.length - rows.length;
-  if (!rows.length) return { inserted: 0, emailed: 0, skipped, failed: 0 };
+  if (!rows.length) return { inserted: 0, emailed: 0, pushed: 0, skipped, failed: 0 };
 
   const { error: insErr } = await admin.from("notifications").insert(rows);
   if (insErr) throw new Error(`Could not write inbox rows: ${insErr.message}`);
+
+  // Push before email: it is the channel that reaches a phone now. Only the kinds in PUSH_KINDS
+  // qualify, governed by the same profile flag as the email but not by the email master switch.
+  // sendPush itself never throws for a single device; the guard here covers the subscription
+  // read and anything unexpected, because a push problem must never cost anyone the email.
+  const pushRecipients = rows
+    .filter((row) => shouldPush(input.kind, byId.get(row.recipient_id)!))
+    .map((row) => row.recipient_id);
+  let push: PushResult = NO_PUSH;
+  if (pushRecipients.length) {
+    try {
+      push = await sendPush(
+        admin,
+        pushRecipients,
+        pushPayloadFor({ kind: input.kind, title, body, url: input.url, entity_id: input.entityId }),
+      );
+    } catch (e) {
+      console.error("notify: push failed", e);
+      push = { ...NO_PUSH, failed: pushRecipients.length };
+    }
+  }
+  console.log("notify: push", { kind: input.kind, ...push });
 
   const branding = brandingOverride ?? await loadBranding(admin);
   const from = `${senderName(branding.appName)} <notifications@buildingops.app>`;
@@ -155,7 +186,7 @@ export async function createNotifications(
       failed++;
     }
   }
-  return { inserted: rows.length, emailed, skipped, failed };
+  return { inserted: rows.length, emailed, pushed: push.sent, skipped, failed };
 }
 
 /** All admins and managers by role; deactivated accounts are dropped by createNotifications. */
