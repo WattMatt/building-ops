@@ -20,6 +20,9 @@
  *   R3a "Schedule" → building_role_assignments select by access, write admin/manager;
  *                    recurrence_occurrences / reschedule_template never anon; the reviewer
  *                    role is gone (user_roles rejects it even for the service role)
+ *   R3b "Calendar" → calendar_tokens owner-only (a building token also needs building
+ *                    access); user_can_access_building(p_user, p_building) is service-role
+ *                    only — never anon, never authenticated
  *
  * Personas: admin, manager, userA (user role, assigned building A only),
  * userB (user role, assigned building B only). userA probing building B
@@ -566,6 +569,37 @@ try {
     await fetch(`${URL_BASE}/rest/v1/user_roles?user_id=eq.${personas.norole.id}`, { method: 'DELETE', headers: SVC });
   }
   console.log('  R3a schedule (role assignments, recurrence RPCs, reviewer gone): done');
+
+  // ── R3b "Calendar": calendar_tokens owner-only, feed access helper service-role only ──
+  // Tokens are minted client-side (32 random bytes, base64url) and stored plain; the boundary
+  // is owner-only RLS, so admin/manager see nothing here — like push_subscriptions. A building
+  // token additionally needs the owner to pass can_access_building at mint time.
+  const CT = 'calendar_tokens';
+  const mintToken = () => crypto.randomBytes(32).toString('base64url');
+  // canInsert deletes what it creates, so these probe rows need no cleanup entry.
+  assert(`${CT} insert own (my feed) as userA`, (await canInsert(personas.userA.jwt, CT, { user_id: personas.userA.id, token: mintToken() })) === true, 'user could not mint their own feed token');
+  assert(`${CT} insert for someone else as userA`, (await canInsert(personas.userA.jwt, CT, { user_id: personas.admin.id, token: mintToken() })) === false, 'user minted a feed token for another user');
+  assert(`${CT} building token for building A (member) as userA`, (await canInsert(personas.userA.jwt, CT, { user_id: personas.userA.id, building_id: A, token: mintToken() })) === true, 'member could not mint a building feed token');
+  assert(`${CT} building token for building B (no access) as userA`, (await canInsert(personas.userA.jwt, CT, { user_id: personas.userA.id, building_id: B, token: mintToken() })) === false, 'LEAK: user minted a feed token for a building they cannot access');
+  const ctA = (await svcInsert(CT, { user_id: personas.userA.id, token: mintToken(), label: `ZZTEST-RLS-${RUN}` })).id;
+  cleanup.push([CT, ctA]);
+  await probeMatrix(`${CT}(userA row) select`, { admin: false, manager: false, userA: true, userB: false }, (jwt) => canSelect(jwt, CT, ctA));
+  // Revoke = update revoked_at on your own row; nobody else's row is even visible to USING.
+  assert(`${CT} revoke own (revoked_at) as userA`, (await canUpdate(personas.userA.jwt, CT, ctA, { revoked_at: new Date().toISOString() })) === true, 'user could not revoke their own token');
+  assert(`${CT} foreign update as admin`, (await canUpdate(personas.admin.jwt, CT, ctA, { revoked_at: null })) === false, "admin updated another user's token");
+  // user_can_access_building(p_user, p_building) takes the user id as an argument — the feed
+  // function calls it with the service role on the token OWNER's behalf — so a signed-in caller
+  // must never be able to run it. An empty 200 never proves a revoked grant — only a real HTTP
+  // denial does; 403 exactly for authenticated, since a looser `!== 200` would let a 404 from a
+  // missing function pass.
+  {
+    const args = { p_user: personas.userA.id, p_building: A };
+    const anonR = await rpcCall(null, 'user_can_access_building', args);
+    assert('user_can_access_building not executable by anon', anonR.status === 401 || anonR.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${anonR.status}`);
+    const authR = await rpcCall(personas.admin.jwt, 'user_can_access_building', args);
+    assert('user_can_access_building not executable by authenticated (admin)', authR.status === 403, `expected HTTP 403 (revoked grant), got HTTP ${authR.status}`);
+  }
+  console.log('  R3b calendar (calendar_tokens, user_can_access_building): done');
 } catch (e) {
   fail('smoke run', e.message);
 } finally {
