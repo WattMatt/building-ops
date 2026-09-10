@@ -32,7 +32,7 @@ function formatSize(bytes: number): string {
 }
 
 export function SavedReportsCard() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['report-artifacts'],
     queryFn: async () => {
       const { data: rows, error } = await listReportArtifacts();
@@ -104,6 +104,11 @@ export function SavedReportsCard() {
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : isError ? (
+          <div className="py-4 text-sm">
+            <p className="text-destructive">Could not load saved reports.</p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => refetch()}>Try again</Button>
           </div>
         ) : !data || data.length === 0 ? (
           <p className="py-4 text-sm text-muted-foreground">
