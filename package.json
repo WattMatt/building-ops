@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "schema:vendor": "bash scripts/vendor-schema.sh",
-    "smoke": "node scripts/auth-smoke.mjs && node scripts/recovery-smoke.mjs && node scripts/rls-smoke.mjs && node scripts/checklist-smoke.mjs && node scripts/issue-smoke.mjs && node scripts/documents-smoke.mjs && node scripts/hs-smoke.mjs && node scripts/forms-smoke.mjs && node scripts/dashboard-smoke.mjs && node scripts/admin-ops-smoke.mjs && node scripts/signoff-smoke.mjs && node scripts/fortress-smoke.mjs && npx vite-node scripts/fortress-pdf-smoke.ts"
+    "smoke": "node scripts/auth-smoke.mjs && node scripts/recovery-smoke.mjs && node scripts/rls-smoke.mjs && node scripts/checklist-smoke.mjs && node scripts/issue-smoke.mjs && node scripts/documents-smoke.mjs && node scripts/hs-smoke.mjs && node scripts/forms-smoke.mjs && node scripts/dashboard-smoke.mjs && node scripts/admin-ops-smoke.mjs && node scripts/signoff-smoke.mjs && node scripts/fortress-smoke.mjs && npx vite-node scripts/fortress-pdf-smoke.ts",
+    "smoke:notifications": "node scripts/notifications-smoke.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
