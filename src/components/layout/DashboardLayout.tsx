@@ -9,6 +9,7 @@ import { HintsToggle } from '@/components/HintsToggle';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { OfflineBanner } from '@/components/pwa/OfflineBanner';
 import { UpdateToast } from '@/components/pwa/UpdateToast';
+import { OfflineQueueRunner } from '@/components/offline/OfflineQueueRunner';
 import { CommandPalette } from '@/components/shell/CommandPalette';
 import { QuickCreateMenu } from '@/components/shell/QuickCreateMenu';
 import { useHotkey } from '@/components/shell/useHotkey';
@@ -358,6 +359,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         <main className="flex-1 flex flex-col min-w-0">
           <OfflineBanner />
           {'serviceWorker' in navigator && <UpdateToast />}
+          <OfflineQueueRunner />
           <header className="h-12 sm:h-14 border-b bg-card flex items-center justify-between px-3 sm:px-4 shrink-0">
             <SidebarTrigger />
             <div className="flex items-center gap-1">

@@ -4,6 +4,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { ROLE_PRECEDENCE, type AppRole } from '@/lib/constants';
 import { queryClient } from '@/lib/queryClient';
 import { clearPersistedCache, stopPersisting } from '@/lib/persist';
+import { clearQueue } from '@/lib/offline/queue';
 import { identify, resetAnalytics } from '@/lib/analytics';
 
 export interface InviteUserPayload {
@@ -270,6 +271,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     stopPersisting();
     queryClient.clear();
     void clearPersistedCache(outgoingUserId);
+    // Unsynced offline writes go with the user too — a shared phone must never replay them
+    // as someone else. The queue sheet warns that signing out drops queued changes.
+    if (outgoingUserId) void clearQueue(outgoingUserId);
     resetAnalytics();
     setUser(null);
     setSession(null);
