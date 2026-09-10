@@ -405,7 +405,15 @@ try {
   assert('building_members(A) lists the caller', membersA.rows.some((m) => m.id === personas.userA.id), 'member missing from own building roster');
   assert('building_members(A) lists admin and manager', membersA.rows.some((m) => m.id === personas.admin.id) && membersA.rows.some((m) => m.id === personas.manager.id), 'admin/manager missing from roster');
   assert('building_members(A) excludes reviewerB (building B only)', !membersA.rows.some((m) => m.id === personas.reviewerB.id), 'LEAK: unassigned user listed as a building A member');
-  assert('building_members(A) excludes the role-less persona', !membersA.rows.some((m) => m.id === personas.norole.id), 'user with no role row listed as a member');
+  // norole has no user_buildings row by default, so excluding them proves nothing about
+  // the exists(user_roles) guard on its own — give them a real user_buildings(A) row
+  // (so the membership test itself would pass) and confirm they are STILL excluded.
+  const noroleUB = await svcInsert('user_buildings', { user_id: personas.norole.id, building_id: A });
+  cleanup.push(['user_buildings', noroleUB.id]);
+  const membersAWithNorole = await rpcCall(personas.userA.jwt, 'building_members', { b: A });
+  assert('building_members(A) excludes the role-less persona', !membersAWithNorole.rows.some((m) => m.id === personas.norole.id), 'user with no role row listed as a member despite a user_buildings row (exists(user_roles) guard broken)');
+  await svcDelete('user_buildings', noroleUB.id);
+  cleanup.splice(cleanup.findIndex(([t, id]) => t === 'user_buildings' && id === noroleUB.id), 1);
   assert('building_members(A) returns one row per person', new Set(membersA.rows.map((m) => m.id)).size === membersA.rows.length, 'duplicate people (multi-row user_roles joined, not EXISTS-tested)');
   assert('building_members(A) resolves a role for everyone', membersA.rows.every((m) => typeof m.role === 'string' && m.role.length > 0), 'null role returned');
   const membersB = await rpcCall(personas.userA.jwt, 'building_members', { b: B });
@@ -413,7 +421,9 @@ try {
   const membersRev = await rpcCall(personas.reviewerB.jwt, 'building_members', { b: B });
   assert('building_members(B) callable by reviewerB', membersRev.ok && membersRev.rows.some((m) => m.id === personas.reviewerB.id), 'reviewer missing from own building roster');
   const membersAnon = await rpcCall(null, 'building_members', { b: A });
-  assert('building_members not executable by anon', membersAnon.ok === false || membersAnon.rows.length === 0, 'anon read a building roster');
+  // An empty 200 (function ran, returned no rows) does NOT prove the EXECUTE revoke —
+  // only a real HTTP denial does. Assert the status itself is not 200.
+  assert('building_members not executable by anon', membersAnon.status === 401 || membersAnon.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${membersAnon.status}`);
 
   // notifications: recipient-only select/update, no client insert policy at all.
   await probeMatrix('notifications insert (no client policy)', nobody(), (jwt, who) => canInsert(jwt, 'notifications', {

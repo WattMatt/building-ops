@@ -19,11 +19,11 @@ alter table public.issue_activity
 
 -- 3) resolved_at is set by the database so cycle time is trustworthy.
 create or replace function public.stamp_issue_resolved_at() returns trigger
-language plpgsql as $$
+language plpgsql set search_path = public as $$
 begin
   if new.status = 'resolved' and (old.status is distinct from 'resolved') then
     new.resolved_at := now();
-  elsif new.status <> 'resolved' then
+  else
     new.resolved_at := null;
   end if;
   return new;
