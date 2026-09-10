@@ -12,6 +12,12 @@ export function mentionQueryAt(text: string, caret: number): MentionRange | null
   return { start: at, query };
 }
 
+/** True if `@name` appears in `text` as a whole mention (not a prefix of a longer name, e.g. "@Ann" must not match "@Anna"). */
+export function mentionPresent(text: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('(^|\\s)@' + escaped + '(?!\\S)').test(text);
+}
+
 export function insertMention(text: string, range: MentionRange, name: string): { text: string; caret: number } {
   const head = text.slice(0, range.start);
   const tail = text.slice(range.start + 1 + range.query.length);

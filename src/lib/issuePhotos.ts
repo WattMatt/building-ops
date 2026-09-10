@@ -1,4 +1,9 @@
-/** Upload issue evidence photos to the private tenant-documents bucket under the user's prefix. */
+/**
+ * Upload issue evidence photos to the private tenant-documents bucket under the user's prefix.
+ * `getPublicUrl` is stored by convention (matching NewIssue) even though the bucket is private;
+ * it is re-signed on read by `SignedImage`. A failure partway through the loop leaves earlier
+ * uploads in this call orphaned in storage — acceptable for now.
+ */
 import { supabase } from '@/integrations/supabase/client';
 import type { PhotoFile } from '@/components/ui/photo-capture';
 
