@@ -16,6 +16,8 @@
  * Checks POST /functions/v1/notify (supabase/functions/notify/index.ts):
  *   task_assigned, recipients=[self]              → 200, inserted 0, no inbox row (actor excluded)
  *   task_assigned, recipients=[manager]            → 200, inserted 1, row visible to manager only
+ *   task_assigned, manager has a push subscription → 200, inserted 1, numeric `pushed`; the
+ *                                                    subscription row survives (failed_at null or set)
  *   buildingId the caller cannot access            → 403
  *   unknown kind                                   → 400
  *   missing Authorization                          → 401
@@ -210,6 +212,45 @@ try {
     assert('manager-recipient: NOT visible via user JWT', userCanSee.length === 0, "actor could read the recipient's inbox row");
   });
 
+  // ════ 2b: task_assigned with a push subscription on file → push fan-out never breaks the inbox ════
+  // R2c: the shared sender reads push_subscriptions (failed_at null) for each recipient and
+  // sends via web-push. This endpoint is well-formed but not a real subscription, so the push
+  // service will reject it (404/410 → failed_at stamped) or the send will error some other way
+  // (logged, failed_at left null). Either is acceptable — what must hold is that the inbox row
+  // still lands and the function still answers 200 with a numeric `pushed` count.
+  await step('task_assigned: recipient with a push subscription', async () => {
+    const sub = await svcInsert('push_subscriptions', {
+      user_id: personas.manager.id,
+      endpoint: `https://updates.push.services.mozilla.com/wpush/v2/ZZTEST-${RUN}`,
+      p256dh: 'BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM', // valid-shaped 65-byte P-256 point
+      auth: 'tBHItJI5svbpez7KI4CCXg', // 16 bytes base64url
+      user_agent: 'zztest',
+    });
+    cleanup.push(['push_subscriptions', sub.id]);
+
+    const entityId = crypto.randomUUID();
+    const { status, body } = await notifyCall(personas.user.jwt, {
+      kind: 'task_assigned', entityType: 'task', entityId, buildingId: A,
+      recipients: [personas.manager.id], title: `ZZTEST-NOTIFY push ${RUN}`, url: `/buildings/${A}?tab=checklists`,
+    });
+    assert('push fan-out does not break the inbox: HTTP 200', status === 200, `HTTP ${status} ${JSON.stringify(body).slice(0, 160)}`);
+    assert('push fan-out does not break the inbox: inserted 1', body?.inserted === 1, `inserted=${body?.inserted}`);
+    const rows = await registerCleanup(entityId);
+    assert('push fan-out does not break the inbox: inbox row written', rows.length === 1, `found ${rows.length} row(s)`);
+    assert('notify reports a pushed count', typeof body?.pushed === 'number', `pushed=${JSON.stringify(body?.pushed)} (expected a number, 0 or 1)`);
+    console.log(`  info: notify pushed=${body?.pushed}`);
+
+    const after = await svcSelectF('push_subscriptions', `id=eq.${sub.id}`);
+    assert('subscription row survives with failed_at null-or-set: row still exists', after.length === 1, `found ${after.length} row(s) after notify`);
+    const failedAt = after[0]?.failed_at ?? null;
+    assert(
+      'subscription row survives with failed_at null-or-set: failed_at is null or a timestamp',
+      failedAt === null || (typeof failedAt === 'string' && !Number.isNaN(Date.parse(failedAt))),
+      `failed_at=${JSON.stringify(failedAt)}`
+    );
+    console.log(`  info: subscription failed_at ${failedAt === null ? 'is null (push not attempted, or send failed without 404/410)' : `= ${failedAt} (push service reported the subscription gone)`}`);
+  });
+
   // ════ 3: buildingId the caller cannot access → 403 ════
   await step('buildingId the caller cannot access', async () => {
     const { status, body } = await notifyCall(personas.user.jwt, {
@@ -296,11 +337,15 @@ try {
   for (const b of strayBuildings ?? []) {
     await fetch(`${URL_BASE}/rest/v1/buildings?id=eq.${b.id}`, { method: 'DELETE', headers: SVC });
   }
+  // sweep stray ZZTEST push subscriptions from earlier aborted runs (they cascade with the
+  // persona's profile, but a run killed before persona deletion leaves them behind).
+  await fetch(`${URL_BASE}/rest/v1/push_subscriptions?endpoint=like.*%2FZZTEST-*`, { method: 'DELETE', headers: SVC });
   // orphan check: nothing ZZTEST-NOTIFY-tagged may survive
   const leftBuildings = await (await fetch(`${URL_BASE}/rest/v1/buildings?name=like.ZZTEST-NOTIFY-*&select=id`, { headers: SVC })).json();
   const leftNotifs = await (await fetch(`${URL_BASE}/rest/v1/notifications?title=like.ZZTEST-NOTIFY*&select=id`, { headers: SVC })).json();
-  if ((leftBuildings.length ?? 0) > 0 || (leftNotifs.length ?? 0) > 0) {
-    console.error(`  WARN  teardown incomplete: ${leftBuildings.length} buildings, ${leftNotifs.length} notifications left (grep ZZTEST-NOTIFY)`);
+  const leftSubs = await (await fetch(`${URL_BASE}/rest/v1/push_subscriptions?endpoint=like.*%2FZZTEST-*&select=id`, { headers: SVC })).json();
+  if ((leftBuildings.length ?? 0) > 0 || (leftNotifs.length ?? 0) > 0 || (leftSubs.length ?? 0) > 0) {
+    console.error(`  WARN  teardown incomplete: ${leftBuildings.length} buildings, ${leftNotifs.length} notifications, ${leftSubs.length} push subscriptions left (grep ZZTEST-NOTIFY / ZZTEST-)`);
   } else {
     console.log('  teardown: clean (no ZZTEST-NOTIFY remnants)');
   }

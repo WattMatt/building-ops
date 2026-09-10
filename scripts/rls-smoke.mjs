@@ -480,6 +480,12 @@ try {
   // canInsert deletes what it creates, so the -b row needs no cleanup entry.
   assert('push_subscriptions insert own as userA', (await canInsert(personas.userA.jwt, 'push_subscriptions', { user_id: personas.userA.id, endpoint: `https://push.example/${RUN}-b`, p256dh: 'x', auth: 'y' })) === true, 'user could not register their device');
   assert('push_subscriptions insert for someone else as userA', (await canInsert(personas.userA.jwt, 'push_subscriptions', { user_id: personas.admin.id, endpoint: `https://push.example/${RUN}-c`, p256dh: 'x', auth: 'y' })) === false, 'user registered a device for another user');
+  // R2c: the client touches last_seen_at on every app open (and the sender clears/stamps
+  // failed_at server-side). ps_update_own must scope both USING and WITH CHECK to the owner.
+  assert('push_subscriptions update own (last_seen_at) as userA', (await canUpdate(personas.userA.jwt, 'push_subscriptions', psA, { last_seen_at: new Date().toISOString() })) === true, 'user could not touch their own subscription');
+  const psAdmin = (await svcInsert('push_subscriptions', { user_id: personas.admin.id, endpoint: `https://push.example/${RUN}-d`, p256dh: 'x', auth: 'y' })).id;
+  cleanup.push(['push_subscriptions', psAdmin]);
+  assert("push_subscriptions foreign update as userA", (await canUpdate(personas.userA.jwt, 'push_subscriptions', psAdmin, { last_seen_at: new Date().toISOString() })) === false, "user updated another user's subscription");
   assert('push_subscriptions delete own as userA', (await canDelete(personas.userA.jwt, 'push_subscriptions', psA)) === true, 'user could not remove their device');
   console.log('  R1 mine (assignee, building_members, notifications): done');
 } catch (e) {
