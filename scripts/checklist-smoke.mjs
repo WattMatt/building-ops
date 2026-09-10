@@ -147,6 +147,37 @@ try {
     });
     assert('signed URL issues for the stored photo (display path works)', signed.ok, `HTTP ${signed.status}`);
   }
+
+  // ── R2a: complete_task is atomic and idempotent; mark_overdue_tasks flips back-dated tasks ──
+  // The task above was completed through the two direct writes, so use a fresh pending one.
+  const rpc = (tok, fn, body) => fetch(`${URL_BASE}/rest/v1/rpc/${fn}`, { method: 'POST', headers: authed(tok), body: JSON.stringify(body) });
+  const task2 = (await svcInsert('task_instances', {
+    building_id: building, task_name: `ZZTEST-CHK rpc ${RUN}`, due_date: today, status: 'pending', frequency: 'daily',
+  })).id;
+  cleanup.unshift(['task_instances', `id=eq.${task2}`]);
+  cleanup.unshift(['task_completions', `task_instance_id=eq.${task2}`]); // in front: child before parent
+  const cid = crypto.randomUUID();
+  let r = await rpc(jwt, 'complete_task', { p_completion_id: cid, p_task_instance_id: task2, p_notes: 'ZZTEST', p_signature_confirmed: true, p_photo_urls: [] });
+  let body = await r.json();
+  assert('complete_task first call inserts', r.ok && body[0]?.completion_id === cid && body[0]?.already_completed === false, `HTTP ${r.status} ${JSON.stringify(body)}`);
+  const ti = await (await fetch(`${URL_BASE}/rest/v1/task_instances?id=eq.${task2}&select=status,completed_by`, { headers: SVC })).json();
+  assert('complete_task stamps the instance in the same call', ti[0]?.status === 'completed' && ti[0]?.completed_by === userId, JSON.stringify(ti[0]));
+  r = await rpc(jwt, 'complete_task', { p_completion_id: cid, p_task_instance_id: task2, p_notes: 'ZZTEST', p_signature_confirmed: true, p_photo_urls: [] });
+  body = await r.json();
+  assert('complete_task replay is a no-op that reports already_completed', r.ok && body[0]?.completion_id === cid && body[0]?.already_completed === true, `HTTP ${r.status} ${JSON.stringify(body)}`);
+  const tcs = await (await fetch(`${URL_BASE}/rest/v1/task_completions?task_instance_id=eq.${task2}&select=id`, { headers: SVC })).json();
+  assert('exactly one completion row after replay', tcs.length === 1, `${tcs.length} rows`);
+
+  // Sweep: flips every genuinely back-dated pending task on the project (what the cron does nightly).
+  const late = (await svcInsert('task_instances', {
+    building_id: building, task_name: `ZZTEST-late-${RUN}`, frequency: 'daily', status: 'pending', due_date: '2020-01-01', responsible_role: 'user',
+  })).id;
+  cleanup.unshift(['task_instances', `id=eq.${late}`]);
+  r = await fetch(`${URL_BASE}/rest/v1/rpc/mark_overdue_tasks`, { method: 'POST', headers: SVC, body: '{}' });
+  assert('mark_overdue_tasks runs as service role', r.ok, `HTTP ${r.status}`);
+  const lateRow = await (await fetch(`${URL_BASE}/rest/v1/task_instances?id=eq.${late}&select=status`, { headers: SVC })).json();
+  assert('back-dated pending task is now overdue', lateRow[0]?.status === 'overdue', JSON.stringify(lateRow[0]));
+  await svcDelete('task_instances', `id=eq.${late}`);
 } catch (e) {
   fail('smoke run', e.message);
 } finally {

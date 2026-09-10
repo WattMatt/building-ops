@@ -441,6 +441,32 @@ try {
   assert('notifications recipient reassign as userA', (await canUpdate(personas.userA.jwt, 'notifications', notifA, { recipient_id: personas.admin.id })) === false, 'recipient handed their notification to someone else');
   assert('notifications delete as userA (no delete policy)', (await canDelete(personas.userA.jwt, 'notifications', notifA)) === false, 'recipient deleted a notification row');
   assert('notifications delete as admin (no delete policy)', (await canDelete(personas.admin.jwt, 'notifications', notifA)) === false, 'admin deleted a notification row');
+
+  // ── R2a: RPC executability + push_subscriptions ownership ──
+  // An empty 200 never proves a revoked grant — only a real HTTP denial does.
+  for (const [fn, args] of [
+    ['generate_scheduled_tasks', {}],
+    ['complete_task', { p_completion_id: crypto.randomUUID(), p_task_instance_id: rows.task_instances.A }],
+    ['search_entities', { q: 'zz' }],
+    ['mark_overdue_tasks', {}],
+  ]) {
+    const r = await rpcCall(null, fn, args);
+    assert(`${fn} not executable by anon`, r.status === 401 || r.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${r.status}`);
+  }
+  assert('mark_overdue_tasks not executable by authenticated', (await rpcCall(personas.admin.jwt, 'mark_overdue_tasks', {})).status !== 200, 'admin ran the cron-only sweep');
+  assert('generate_scheduled_tasks refused for a site user', (await rpcCall(personas.userA.jwt, 'generate_scheduled_tasks', { p_building: A })).status !== 200, 'site user generated tasks');
+  // Inserts real task_instances for building A from every active unscoped template on the
+  // project; the teardown deletes generated rows for A/B before the buildings themselves.
+  assert('generate_scheduled_tasks runs for admin', (await rpcCall(personas.admin.jwt, 'generate_scheduled_tasks', { p_building: A })).status === 200, 'admin generate failed');
+  assert('search_entities runs for a site user', (await rpcCall(personas.userA.jwt, 'search_entities', { q: 'ZZTEST' })).status === 200, 'search failed');
+  const psA = (await svcInsert('push_subscriptions', { user_id: personas.userA.id, endpoint: `https://push.example/${RUN}-a`, p256dh: 'x', auth: 'y' })).id;
+  cleanup.push(['push_subscriptions', psA]);
+  // Owner-only, like notifications: admin/manager see nothing here.
+  await probeMatrix('push_subscriptions(userA row) select', { admin: false, manager: false, userA: true, reviewerB: false }, (jwt) => canSelect(jwt, 'push_subscriptions', psA));
+  // canInsert deletes what it creates, so the -b row needs no cleanup entry.
+  assert('push_subscriptions insert own as userA', (await canInsert(personas.userA.jwt, 'push_subscriptions', { user_id: personas.userA.id, endpoint: `https://push.example/${RUN}-b`, p256dh: 'x', auth: 'y' })) === true, 'user could not register their device');
+  assert('push_subscriptions insert for someone else as userA', (await canInsert(personas.userA.jwt, 'push_subscriptions', { user_id: personas.admin.id, endpoint: `https://push.example/${RUN}-c`, p256dh: 'x', auth: 'y' })) === false, 'user registered a device for another user');
+  assert('push_subscriptions delete own as userA', (await canDelete(personas.userA.jwt, 'push_subscriptions', psA)) === true, 'user could not remove their device');
   console.log('  R1 mine (assignee, building_members, notifications): done');
 } catch (e) {
   fail('smoke run', e.message);
@@ -448,6 +474,11 @@ try {
   // ════ Teardown (service role): storage, rows (LIFO = children first), personas ════
   for (const [bucket, path] of storageCleanup) {
     await fetch(`${URL_BASE}/storage/v1/object/${bucket}/${path}`, { method: 'DELETE', headers: SVC });
+  }
+  // generate_scheduled_tasks (R2a probe) inserted template-backed task_instances for A/B that
+  // no cleanup entry names — remove them before the buildings themselves are deleted.
+  if (A || B) {
+    await fetch(`${URL_BASE}/rest/v1/task_instances?building_id=in.(${[A, B].filter(Boolean).join(',')})&template_item_id=not.is.null`, { method: 'DELETE', headers: SVC });
   }
   for (const [table, id] of cleanup.reverse()) await svcDelete(table, id);
   for (const uid of createdUsers) {
