@@ -268,7 +268,7 @@ export default function FortressReportEditor() {
           {/* Building names always display uppercase; the name is baked into the composed title. */}
           <h1 className="text-2xl font-semibold">{report.title?.toUpperCase()}</h1>
           <p className="text-sm text-muted-foreground">
-            {REPORT_TYPE_LABELS[report.report_type]} · {formatPeriodLabel(report.report_period)}
+            {REPORT_TYPE_LABELS[report.report_type as ReportType]} · {formatPeriodLabel(report.report_period)}
           </p>
           {editable ? (
             <div className="mt-2">

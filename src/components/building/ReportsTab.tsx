@@ -15,7 +15,7 @@ import { NewReportDialog } from '@/components/reports/fortress/NewReportDialog';
 import { OhsComplianceTab } from '@/components/reports/fortress/OhsComplianceTab';
 import { KpiCard } from '@/components/reports/fortress/KpiCard';
 import { REPORT_STATUS_VARIANT, formatPeriodLabel } from '@/lib/fortressReports';
-import { REPORT_TYPE_LABELS } from '@/integrations/supabase/fortress-db';
+import { REPORT_TYPE_LABELS, type ReportType } from '@/integrations/supabase/fortress-db';
 import { useState } from 'react';
 import { format, subDays } from 'date-fns';
 import { Button } from '@/components/ui/button';
@@ -116,7 +116,7 @@ export default function ReportsTab({ buildingId, buildingName }: { buildingId: s
                 {reports.map((r) => (
                   <TableRow key={r.id} className="cursor-pointer" onClick={() => navigate(`/reports/fortress/${r.id}`)}>
                     <TableCell className="font-medium">{r.title}</TableCell>
-                    <TableCell>{REPORT_TYPE_LABELS[r.report_type]}</TableCell>
+                    <TableCell>{REPORT_TYPE_LABELS[r.report_type as ReportType]}</TableCell>
                     <TableCell>{formatPeriodLabel(r.report_period)}</TableCell>
                     <TableCell><Badge variant={REPORT_STATUS_VARIANT[r.status] ?? 'outline'} className="capitalize">{r.status}</Badge></TableCell>
                   </TableRow>
