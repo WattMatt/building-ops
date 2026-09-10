@@ -59,4 +59,5 @@ export interface QueuedOp {
 export type RunOutcome =
   | { status: 'synced'; result: unknown }
   | { status: 'queued' }             // offline or network failure: it will replay later
-  | { status: 'failed'; error: string };
+  /** `code` is the handler's machine-readable reason (e.g. RESOLVE_DENIED) so a dialog can tell terminal from retryable. */
+  | { status: 'failed'; error: string; code?: string };

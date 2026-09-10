@@ -164,7 +164,7 @@ describe('offline replay', () => {
     state.results.issues = { data: [], error: null };
     const denied = await enqueue(UID, resolve, []);
     expect(await runOne(denied)).toEqual({
-      status: 'failed', error: 'Your note was saved, but you do not have permission to resolve this issue.',
+      status: 'failed', error: 'Your note was saved, but you do not have permission to resolve this issue.', code: 'RESOLVE_DENIED',
     });
     const [stored] = await listOps(UID);
     expect(stored).toMatchObject({ id: denied.id, status: 'failed', attempts: 1, lastError: expect.stringContaining('permission') });
@@ -248,7 +248,7 @@ describe('offline replay', () => {
     state.from.length = 0;
     vi.mocked(postIssueComment).mockRejectedValueOnce({ code: '42501', message: 'permission denied' });
     const denied = await enqueue(UID, resolve, []);
-    expect(await runOne(denied)).toEqual({ status: 'failed', error: 'permission denied' });
+    expect(await runOne(denied)).toEqual({ status: 'failed', error: 'permission denied', code: '42501' });
     expect(state.from).toHaveLength(0);
   });
 
@@ -270,14 +270,14 @@ describe('offline replay', () => {
     state.from.length = 0;
     state.results.issues = { data: null, error: { code: '42501', message: 'permission denied' } };
     const denied = await enqueue(UID, create('t1'), []);
-    expect(await runOne(denied)).toEqual({ status: 'failed', error: 'permission denied' });
+    expect(await runOne(denied)).toEqual({ status: 'failed', error: 'permission denied', code: '42501' });
     expect(state.from.map((c) => c.table)).toEqual(['issues']);
   });
 
   it('8. any other rejection marks the op failed with the message', async () => {
     state.rpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'permission denied' } });
     const op = await enqueue(UID, complete(), []);
-    expect(await runOne(op)).toEqual({ status: 'failed', error: 'permission denied' });
+    expect(await runOne(op)).toEqual({ status: 'failed', error: 'permission denied', code: '42501' });
     expect((await listOps(UID))[0]).toMatchObject({ id: op.id, status: 'failed', attempts: 1, lastError: 'permission denied' });
   });
 

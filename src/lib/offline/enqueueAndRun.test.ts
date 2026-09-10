@@ -28,11 +28,12 @@ describe('enqueueAndRun', () => {
 
   it('offline: persists the op and reports queued without touching replay', async () => {
     onLine.mockReturnValue(false);
-    expect(await enqueueAndRun(UID, payload, [])).toEqual({ status: 'queued' });
+    const outcome = await enqueueAndRun(UID, payload, []);
     expect(replayAll).not.toHaveBeenCalled();
     expect(runOne).not.toHaveBeenCalled();
     const [stored] = await listOps(UID);
     expect(stored).toMatchObject({ uid: UID, status: 'pending', attempts: 0, payload });
+    expect(outcome).toEqual({ status: 'queued', opId: stored.id });
   });
 
   it('online: replays everything older first (stopping at its own op), then runs its op and returns that outcome', async () => {
@@ -43,19 +44,22 @@ describe('enqueueAndRun', () => {
     expect(runOne).toHaveBeenCalledTimes(1);
     expect(runOne).toHaveBeenCalledWith(expect.objectContaining({ id: stored.id, uid: UID, payload }));
     expect(vi.mocked(replayAll).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(runOne).mock.invocationCallOrder[0]);
-    expect(outcome).toEqual({ status: 'synced', result: { ok: true } });
+    expect(outcome).toEqual({ status: 'synced', result: { ok: true }, opId: stored.id });
 
-    // The caller sees its own op's outcome, whatever it is.
-    vi.mocked(runOne).mockResolvedValueOnce({ status: 'failed', error: 'permission denied' });
-    expect(await enqueueAndRun(UID, payload, [])).toEqual({ status: 'failed', error: 'permission denied' });
+    // The caller sees its own op's outcome, whatever it is, plus the op id so it can discard a terminal failure.
+    vi.mocked(runOne).mockResolvedValueOnce({ status: 'failed', error: 'permission denied', code: 'RESOLVE_DENIED' });
+    const failed = await enqueueAndRun(UID, payload, []);
+    const [, second] = await listOps(UID);
+    expect(failed).toEqual({ status: 'failed', error: 'permission denied', code: 'RESOLVE_DENIED', opId: second.id });
   });
 
   it('online but older ops cannot reach the server: the new op waits behind them (queued, not run)', async () => {
     vi.mocked(replayAll).mockResolvedValue({ blocked: true });
-    expect(await enqueueAndRun(UID, payload, [])).toEqual({ status: 'queued' });
+    const outcome = await enqueueAndRun(UID, payload, []);
     expect(replayAll).toHaveBeenCalledTimes(1);
     expect(runOne).not.toHaveBeenCalled();
     const [stored] = await listOps(UID);
     expect(stored).toMatchObject({ status: 'pending', attempts: 0, payload });
+    expect(outcome).toEqual({ status: 'queued', opId: stored.id });
   });
 });

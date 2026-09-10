@@ -58,23 +58,33 @@ describe('SyncStatusPill', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('shows the queued count while offline', () => {
+  it('shows the queued count while offline, with the full label in aria-label and a bare count for phones', () => {
     status.online = false;
     setQueue([op(), op()]);
     render(<SyncStatusPill />);
-    expect(screen.getByRole('button', { name: /Offline · 2 queued/ })).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: 'Offline · 2 queued' });
+    expect(button).toHaveAttribute('aria-label', 'Offline · 2 queued');
+    // Full words only from `sm` up; below that the icon + count is all that fits in the header.
+    expect(within(button).getByText('Offline · 2 queued')).toHaveClass('hidden', 'sm:inline');
+    expect(within(button).getByText('2')).toHaveClass('sm:hidden');
+    expect(button).toHaveClass('min-h-11');
   });
 
-  it('shows Syncing while online with pending ops', () => {
+  it('shows Syncing while online with pending ops (icon only on phones)', () => {
     setQueue([op()]);
     render(<SyncStatusPill />);
-    expect(screen.getByRole('button', { name: /Syncing…/ })).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: 'Syncing…' });
+    expect(button).toHaveAttribute('aria-label', 'Syncing…');
+    expect(within(button).getByText('Syncing…')).toHaveClass('hidden', 'sm:inline');
+    expect(within(button).queryByText('1')).toBeNull();
   });
 
   it('shows the failed count when ops need attention', () => {
     setQueue([op(), op({ status: 'failed', lastError: 'Not allowed' })]);
     render(<SyncStatusPill />);
-    expect(screen.getByRole('button', { name: /1 need attention/ })).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: '1 need attention' });
+    expect(button).toHaveAttribute('aria-label', '1 need attention');
+    expect(within(button).getByText('1')).toHaveClass('sm:hidden');
   });
 
   it('opens the queue sheet, tracks it, and lists ops oldest-first with titles and photo counts', async () => {

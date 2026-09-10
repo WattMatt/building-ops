@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { useIssues } from '@/hooks/useIssues';
 import type { QueuedOp } from '@/lib/offline/types';
@@ -12,8 +12,13 @@ const state = vi.hoisted(() => ({
 }));
 
 const toast = vi.hoisted(() => Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }));
+/** The queue emitter, captured so a test can fire it the way a background sync would. */
+const queueListeners = vi.hoisted(() => new Set<() => void>());
 
 vi.mock('@/hooks/useIssues', () => ({ useIssues: () => state.data }));
+vi.mock('@/lib/offline/queue', () => ({
+  subscribeQueue: (fn: () => void) => { queueListeners.add(fn); return () => { queueListeners.delete(fn); }; },
+}));
 vi.mock('@/hooks/useOfflineQueue', () => ({
   useOfflineQueue: () => ({
     ops: state.queuedOps,
@@ -34,6 +39,8 @@ vi.mock('@/components/issues/IssueDetailDialog', () => ({
 }));
 vi.mock('sonner', () => ({ toast }));
 
+import { queryClient } from '@/lib/queryClient';
+import type { MyTask } from '@/lib/myWork';
 import Issues from './Issues';
 
 const liveIssue: IssuesData['issues'][number] = {
@@ -53,7 +60,7 @@ const liveIssue: IssuesData['issues'][number] = {
   task_instance_id: null,
 };
 
-const queuedIssueOp = (status: QueuedOp['status'] = 'pending'): QueuedOp => ({
+const queuedIssueOp = (status: QueuedOp['status'] = 'pending', buildingId = 'b1'): QueuedOp => ({
   id: 'op-1',
   uid: 'u1',
   createdAt: Date.UTC(2026, 8, 10, 8, 0, 0),
@@ -69,7 +76,7 @@ const queuedIssueOp = (status: QueuedOp['status'] = 'pending'): QueuedOp => ({
       description: 'Gate stuck open',
       priority: 'critical',
       status: 'open',
-      building_id: 'b1',
+      building_id: buildingId,
       deadline: null,
       corrective_action: null,
       reported_by: 'u1',
@@ -103,6 +110,8 @@ const renderPage = () =>
 describe('Issues', () => {
   beforeEach(() => {
     toast.mockClear();
+    queueListeners.clear();
+    queryClient.clear();
     state.queuedOps = [];
     state.data = baseData();
   });
@@ -154,6 +163,35 @@ describe('Issues', () => {
     fireEvent.change(screen.getByPlaceholderText('Search issues...'), { target: { value: 'gate' } });
     expect(screen.getByText('Broken gate motor')).toBeInTheDocument();
     expect(screen.queryByText('Leaking pipe')).not.toBeInTheDocument();
+  });
+
+  it('names the building of a queued issue from the persisted My Day cache when the live list lacks it', () => {
+    const cachedTask: MyTask = {
+      id: 't1', task_name: 'Check gate', task_description: null, due_date: '2026-09-10',
+      building_id: 'b2', building_name: 'Beta House', requires_photo: false, requires_signature: false, status: 'pending',
+    };
+    queryClient.setQueryData<MyTask[]>(['my-work', 'tasks', 'u1'], [cachedTask]);
+    state.queuedOps = [queuedIssueOp('pending', 'b2')];
+    renderPage();
+    const queuedCard = screen.getByTestId('queued-issue');
+    expect(within(queuedCard).getByText('BETA HOUSE')).toBeInTheDocument();
+  });
+
+  it('leaves the building blank when neither the live list nor the My Day cache knows it', () => {
+    state.queuedOps = [queuedIssueOp('pending', 'b9')];
+    renderPage();
+    const queuedCard = screen.getByTestId('queued-issue');
+    expect(within(queuedCard).queryByText(/ALPHA TOWER|BETA HOUSE/)).toBeNull();
+  });
+
+  it('refetches the live list whenever the queue changes, so a background sync replaces the queued row', () => {
+    const refetch = vi.fn().mockResolvedValue(undefined);
+    state.data = baseData({ refetch });
+    renderPage();
+    expect(queueListeners.size).toBe(1);
+    expect(refetch).not.toHaveBeenCalled();
+    act(() => { for (const fn of queueListeners) fn(); });
+    expect(refetch).toHaveBeenCalledTimes(1);
   });
 
   it('shows the queued row even when the server list is empty', () => {

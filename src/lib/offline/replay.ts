@@ -33,6 +33,11 @@ function messageOf(e: unknown): string {
   return (e as { message?: string })?.message || 'The change was rejected.';
 }
 
+function codeOf(e: unknown): string | undefined {
+  const code = (e as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
 /** Runs one op and records the result on it. */
 export async function runOne(op: QueuedOp): Promise<RunOutcome> {
   try {
@@ -55,8 +60,9 @@ export async function runOne(op: QueuedOp): Promise<RunOutcome> {
       return { status: 'queued' };
     }
     const error = messageOf(e);
+    const code = codeOf(e);
     await updateOp(op.uid, op.id, { status: 'failed', lastError: error, attempts });
-    return { status: 'failed', error };
+    return code ? { status: 'failed', error, code } : { status: 'failed', error };
   }
 }
 

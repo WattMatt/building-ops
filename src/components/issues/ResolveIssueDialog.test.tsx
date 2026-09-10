@@ -3,8 +3,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { mockViewport } from '@/test/mobile';
 
 const enqueueAndRun = vi.hoisted(() => vi.fn());
+const removeOp = vi.hoisted(() => vi.fn());
 const toast = vi.hoisted(() => Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }));
 vi.mock('@/lib/offline/enqueueAndRun', () => ({ enqueueAndRun }));
+vi.mock('@/lib/offline/queue', () => ({ removeOp }));
 vi.mock('sonner', () => ({ toast }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'me', email: 'me@example.com' } }) }));
 vi.mock('@/components/ui/photo-capture', () => ({ PhotoCapture: () => null }));
@@ -28,7 +30,8 @@ const submit = async (note = '  Replaced the breaker.  ') => {
 
 describe('ResolveIssueDialog', () => {
   beforeEach(() => {
-    enqueueAndRun.mockReset().mockResolvedValue({ status: 'synced', result: {} });
+    enqueueAndRun.mockReset().mockResolvedValue({ status: 'synced', result: {}, opId: 'op-1' });
+    removeOp.mockReset().mockResolvedValue(undefined);
     toast.mockClear(); toast.success.mockClear(); toast.error.mockClear();
   });
   afterEach(() => mockViewport(1024));
@@ -64,7 +67,7 @@ describe('ResolveIssueDialog', () => {
   });
 
   it('closes with the queued guardrail toast when the write is held on the device', async () => {
-    enqueueAndRun.mockResolvedValueOnce({ status: 'queued' });
+    enqueueAndRun.mockResolvedValueOnce({ status: 'queued', opId: 'op-1' });
     const { onOpenChange, onResolved } = renderDialog();
     await submit();
     expect(toast).toHaveBeenCalledWith("Saved on this device — it will resolve when you're back online");
@@ -72,13 +75,25 @@ describe('ResolveIssueDialog', () => {
     expect(onResolved).toHaveBeenCalledTimes(1);
   });
 
-  it('stays open and shows the message when the status flip is refused', async () => {
-    const denied = 'Your note was saved, but you do not have permission to resolve this issue.';
-    enqueueAndRun.mockResolvedValueOnce({ status: 'failed', error: denied });
+  it('stays open and keeps the op queued when the write is rejected for a retryable reason', async () => {
+    enqueueAndRun.mockResolvedValueOnce({ status: 'failed', error: 'Issue not found', opId: 'op-1' });
     const { onOpenChange, onResolved } = renderDialog();
     await submit();
-    expect(toast.error).toHaveBeenCalledWith(denied);
+    expect(toast.error).toHaveBeenCalledWith('Issue not found');
+    expect(removeOp).not.toHaveBeenCalled();
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
     expect(onResolved).not.toHaveBeenCalled();
+  });
+
+  it('treats a refused status flip as terminal: the note is saved, so it discards the op, closes and refreshes', async () => {
+    const denied = 'Your note was saved, but you do not have permission to resolve this issue.';
+    enqueueAndRun.mockResolvedValueOnce({ status: 'failed', error: denied, code: 'RESOLVE_DENIED', opId: 'op-7' });
+    const { onOpenChange, onResolved } = renderDialog();
+    await submit();
+    await waitFor(() => expect(removeOp).toHaveBeenCalledWith('me', 'op-7'));
+    expect(toast.error).toHaveBeenCalledWith(denied);
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onResolved).toHaveBeenCalledTimes(1);
   });
 });

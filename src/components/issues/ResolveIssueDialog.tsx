@@ -19,6 +19,7 @@ import { PhotoCapture, type PhotoFile } from '@/components/ui/photo-capture';
 import { useAuth } from '@/contexts/AuthContext';
 import { enqueueAndRun } from '@/lib/offline/enqueueAndRun';
 import { toastForOutcome } from '@/lib/offline/outcomeToast';
+import { removeOp } from '@/lib/offline/queue';
 
 interface Props {
   issueId: string;
@@ -39,11 +40,20 @@ export function ResolveIssueDialog({ issueId, open, onOpenChange, onResolved, ne
     if (!user || !note.trim()) return;
     setBusy(true);
     try {
-      // The handler saves the note even if the status flip is refused; that case comes back as a
-      // failed outcome whose message ("Your note was saved, but…") is already user-facing.
       const outcome = await enqueueAndRun(user.id, {
         kind: 'issue_resolve', activityId: crypto.randomUUID(), issueId, note: note.trim(), userEmail: user.email ?? null,
       }, photos.map((p) => ({ file: p.file })));
+      if (outcome.status === 'failed' && outcome.code === 'RESOLVE_DENIED') {
+        // The handler saved the note before the status flip was refused, so the op is done as far
+        // as it ever can be: a retry would only re-post the note and be refused again. Drop it from
+        // the queue, close, refresh (the note is on the issue) and tell the user what happened.
+        await removeOp(user.id, outcome.opId);
+        setNote(''); setPhotos([]);
+        onOpenChange(false);
+        onResolved();
+        toast.error(outcome.error);
+        return;
+      }
       toastForOutcome(outcome, {
         synced: 'Issue resolved',
         queued: "Saved on this device — it will resolve when you're back online",

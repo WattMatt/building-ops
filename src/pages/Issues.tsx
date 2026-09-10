@@ -4,6 +4,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useIssues } from '@/hooks/useIssues';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { queuedIssues, type QueuedIssueRow } from '@/lib/offline/pendingOverlay';
+import { subscribeQueue } from '@/lib/offline/queue';
+import type { MyTask } from '@/lib/myWork';
+import { queryClient } from '@/lib/queryClient';
 import IssueDetailDialog from '@/components/issues/IssueDetailDialog';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -53,16 +56,26 @@ const statusLabels: Record<IssueStatus, string> = {
 };
 
 export default function Issues() {
-  const { isAdminOrManager } = useAuth();
+  const { isAdminOrManager, user } = useAuth();
   const { issues, stats, loading, error, refetch } = useIssues();
+  // The live list is not react-query backed, so a background replay (OfflineQueueRunner) would
+  // otherwise leave a just-synced issue as a stale queued row: every queue mutation refetches.
+  useEffect(() => subscribeQueue(() => { void refetch(); }), [refetch]);
   // Issues reported while offline sit in the queue until they sync; the server does not have
-  // them yet, so they are overlaid at the top of the list. Names come from the live list — the
-  // only building lookup this page already holds — so a building with no other issue shows blank.
+  // them yet, so they are overlaid at the top of the list. Names come from the live list first,
+  // then from the persisted My Day tasks cache (the building the caretaker was working in when
+  // the issue was reported is usually there); a building in neither shows blank.
   const { ops: queuedOps } = useOfflineQueue();
   const buildingNames = new Map<string, string>();
   for (const issue of issues) {
     if (issue.building_name && !buildingNames.has(issue.building_id)) {
       buildingNames.set(issue.building_id, issue.building_name);
+    }
+  }
+  const cachedTasks = user ? queryClient.getQueryData<MyTask[]>(['my-work', 'tasks', user.id]) : undefined;
+  for (const task of cachedTasks ?? []) {
+    if (task.building_name && !buildingNames.has(task.building_id)) {
+      buildingNames.set(task.building_id, task.building_name);
     }
   }
   const pendingIssues = queuedIssues(queuedOps, buildingNames);

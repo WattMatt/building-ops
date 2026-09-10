@@ -10,6 +10,9 @@
  *
  * Offline outranks failed because a retry cannot succeed without a connection; online, a failed
  * op outranks the transient "Syncing…" because it will not clear itself.
+ *
+ * Below `sm` the header only has ~100 px to spare, so the pill shows icon + count and keeps the
+ * full label in `aria-label` (and in the wider layout).
  */
 import { useState } from 'react';
 import { AlertTriangle, Loader2, WifiOff } from 'lucide-react';
@@ -33,19 +36,24 @@ export function SyncStatusPill() {
   const [open, setOpen] = useState(false);
 
   let label: string;
+  /** What survives on a phone: the number, or nothing for the spinner. */
+  let compact: string | null;
   let tone: Tone;
   let Icon: typeof WifiOff;
   let spin = false;
   if (!online && pending > 0) {
     label = `Offline · ${pending} queued`;
+    compact = String(pending);
     tone = 'warning';
     Icon = WifiOff;
   } else if (failed > 0) {
     label = `${failed} need attention`;
+    compact = String(failed);
     tone = 'destructive';
     Icon = AlertTriangle;
   } else if (pending > 0) {
     label = 'Syncing…';
+    compact = null;
     tone = 'muted';
     Icon = Loader2;
     spin = true;
@@ -67,6 +75,7 @@ export function SyncStatusPill() {
         onClick={openSheet}
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-label={label}
         className={cn(
           'inline-flex min-h-11 items-center gap-1.5 rounded-full px-3 text-xs font-medium whitespace-nowrap',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
@@ -74,7 +83,8 @@ export function SyncStatusPill() {
         )}
       >
         <Icon className={cn('h-4 w-4 shrink-0', spin && 'animate-spin')} aria-hidden="true" />
-        <span>{label}</span>
+        {compact !== null && <span className="sm:hidden" aria-hidden="true">{compact}</span>}
+        <span className="hidden sm:inline" aria-hidden="true">{label}</span>
       </button>
       <QueueSheet open={open} onOpenChange={setOpen} ops={ops} retry={retry} discard={discard} />
     </>
