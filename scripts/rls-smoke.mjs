@@ -23,6 +23,10 @@
  *   R3b "Calendar" → calendar_tokens owner-only (a building token also needs building
  *                    access); user_can_access_building(p_user, p_building) is service-role
  *                    only — never anon, never authenticated
+ *   R3c "PPM"      → building_ppm_services select by access, write admin/manager, month/year
+ *                    rules only; contractor_ratings: insert own (rated_by = caller) on an
+ *                    accessible issue, select any authenticated, no update/delete;
+ *                    generate_ppm_tasks never anon, admin/manager only, building required
  *
  * Personas: admin, manager, userA (user role, assigned building A only),
  * userB (user role, assigned building B only). userA probing building B
@@ -600,6 +604,56 @@ try {
     assert('user_can_access_building not executable by authenticated (admin)', authR.status === 403, `expected HTTP 403 (revoked grant), got HTTP ${authR.status}`);
   }
   console.log('  R3b calendar (calendar_tokens, user_can_access_building): done');
+
+  // ── R3c "PPM": building_ppm_services by access / write admin-manager, contractor_ratings own insert, generate_ppm_tasks grants ──
+  const BPS = 'building_ppm_services';
+  const monthly = { every: 1, unit: 'month', monthDay: 1 };
+  const bpsA = (await svcInsert(BPS, { building_id: A, service_name: `ZZTEST-RLS-${RUN}`, recurrence: monthly })).id;
+  const bpsB = (await svcInsert(BPS, { building_id: B, service_name: `ZZTEST-RLS-${RUN}`, recurrence: monthly })).id;
+  cleanup.push([BPS, bpsA], [BPS, bpsB]);
+  await probeMatrix(`${BPS}[A] select`, byAccess('A'), (jwt) => canSelect(jwt, BPS, bpsA));
+  await probeMatrix(`${BPS}[B] select`, byAccess('B'), (jwt) => canSelect(jwt, BPS, bpsB));
+  // canInsert deletes what it creates; (building_id, service_name) is unique, so name the probe row per persona.
+  await probeMatrix(`${BPS}[A] insert`, adminMgr(), (jwt, who) => canInsert(jwt, BPS, { building_id: A, service_name: `ZZTEST-RLS-${who}-${RUN}`, recurrence: monthly }));
+  await probeMatrix(`${BPS}[A] update`, adminMgr(), (jwt) => canUpdate(jwt, BPS, bpsA, { notes: 'ZZTEST-RLS-upd' }));
+  assert(`${BPS} delete as userA (own bldg)`, (await canDelete(personas.userA.jwt, BPS, bpsA)) === false, 'site user deleted a PPM plan line');
+  assert(`${BPS} delete as admin`, (await canDelete(personas.admin.jwt, BPS, bpsB)) === true, 'admin delete failed');
+  // The CHECK admits month/year rules only, whoever writes it.
+  assert(`${BPS} insert with a weekly rule rejected (admin)`,
+    (await canInsert(personas.admin.jwt, BPS, { building_id: A, service_name: `ZZTEST-RLS-week-${RUN}`, recurrence: { every: 1, unit: 'week', weekdays: [1] } })) === false, 'CHECK let a week rule through');
+
+  // contractor_ratings: rated_by must be the caller and the issue's building accessible;
+  // select any authenticated; no update or delete policy at all.
+  const CR = 'contractor_ratings';
+  // issueA (Phase 3) is the building-A issue; the admin delete probe took only the B row.
+  assert(`${CR} insert own on issue A as userA`, (await canInsert(personas.userA.jwt, CR, { contractor_id: contractor, issue_id: issueA, rating: 4, rated_by: personas.userA.id })) === true, 'member could not rate a contractor on an issue in their building');
+  assert(`${CR} insert with a foreign rated_by as userA`, (await canInsert(personas.userA.jwt, CR, { contractor_id: contractor, issue_id: issueA, rating: 4, rated_by: personas.admin.id })) === false, 'user recorded a rating as someone else');
+  assert(`${CR} insert on issue A as userB (no access)`, (await canInsert(personas.userB.jwt, CR, { contractor_id: contractor, issue_id: issueA, rating: 4, rated_by: personas.userB.id })) === false, 'LEAK: user rated a contractor on an issue in a building they cannot access');
+  const crA = (await svcInsert(CR, { contractor_id: contractor, issue_id: issueA, rating: 3, rated_by: personas.admin.id })).id;
+  cleanup.push([CR, crA]);
+  await probeMatrix(`${CR} select`, anyAuth(), (jwt) => canSelect(jwt, CR, crA));
+  assert(`${CR} update as admin (no update policy)`, (await canUpdate(personas.admin.jwt, CR, crA, { rating: 1 })) === false, 'admin edited a rating row');
+  assert(`${CR} delete as admin (no delete policy)`, (await canDelete(personas.admin.jwt, CR, crA)) === false, 'admin deleted a rating row');
+  {
+    const c = await (await fetch(`${URL_BASE}/rest/v1/contractors?id=eq.${contractor}&select=rating`, { headers: SVC })).json();
+    assert('contractors.rating refreshed by the ratings trigger (3 after the probe rows came and went)', Number(c[0]?.rating) === 3, JSON.stringify(c[0]));
+  }
+
+  // generate_ppm_tasks: same gate as generate_scheduled_tasks. An empty 200 never proves a revoked
+  // grant — only a real HTTP denial does; 403 exactly for a signed-in caller (a 404 must not pass).
+  {
+    const anonR = await rpcCall(null, 'generate_ppm_tasks', { p_building: A, p_horizon_days: 30 });
+    assert('generate_ppm_tasks not executable by anon', anonR.status === 401 || anonR.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${anonR.status}`);
+    const siteR = await rpcCall(personas.userA.jwt, 'generate_ppm_tasks', { p_building: A, p_horizon_days: 30 });
+    assert('generate_ppm_tasks refused for a site user', siteR.status === 403, `expected HTTP 403 (raised 42501), got HTTP ${siteR.status}`);
+    const mgrR = await rpcCall(personas.manager.jwt, 'generate_ppm_tasks', { p_horizon_days: 30 });
+    assert('generate_ppm_tasks refused without a building for a signed-in manager', mgrR.status === 403, `expected HTTP 403 (raised 42501), got HTTP ${mgrR.status}`);
+    // Inserts PPM-backed task_instances for building A (bpsA, monthly); the teardown deletes
+    // source_ppm_id rows for A/B before the plan lines and buildings go.
+    const adminR = await rpcCall(personas.admin.jwt, 'generate_ppm_tasks', { p_building: A, p_horizon_days: 30 });
+    assert('generate_ppm_tasks runs for admin', adminR.status === 200, `HTTP ${adminR.status}`);
+  }
+  console.log('  R3c ppm (building_ppm_services, contractor_ratings, generate_ppm_tasks): done');
 } catch (e) {
   fail('smoke run', e.message);
 } finally {
@@ -607,10 +661,11 @@ try {
   for (const [bucket, path] of storageCleanup) {
     await fetch(`${URL_BASE}/storage/v1/object/${bucket}/${path}`, { method: 'DELETE', headers: SVC });
   }
-  // generate_scheduled_tasks (R2a probe) inserted template-backed task_instances for A/B that
-  // no cleanup entry names — remove them before the buildings themselves are deleted.
+  // generate_scheduled_tasks (R2a probe) and generate_ppm_tasks (R3c probe) inserted template-
+  // and plan-backed task_instances for A/B that no cleanup entry names — remove them before the
+  // plan lines (source_ppm_id would be nulled, hiding them) and the buildings are deleted.
   if (A || B) {
-    await fetch(`${URL_BASE}/rest/v1/task_instances?building_id=in.(${[A, B].filter(Boolean).join(',')})&template_item_id=not.is.null`, { method: 'DELETE', headers: SVC });
+    await fetch(`${URL_BASE}/rest/v1/task_instances?building_id=in.(${[A, B].filter(Boolean).join(',')})&or=(template_item_id.not.is.null,source_ppm_id.not.is.null)`, { method: 'DELETE', headers: SVC });
   }
   for (const [table, id] of cleanup.reverse()) await svcDelete(table, id);
   for (const uid of createdUsers) {
