@@ -1,5 +1,6 @@
 // Opt-in daily digest: one email per person who set `profiles.daily_digest`, summarising the
-// tasks they owe (overdue + due today), the issues assigned to them, and how much is unread in
+// tasks they owe (overdue + due today), the issues assigned to them, for admins and managers
+// the portfolio's expiry counts (expiring_items(90), R4a §5.6), and how much is unread in
 // their inbox. Cron-triggered (pg_cron -> pg_net), so it is guarded by a shared secret rather
 // than a user JWT — the same shape as `signoff-reminders`.
 //
@@ -21,6 +22,7 @@ import {
   type DigestIssue,
   type DigestSection,
   type DigestTask,
+  type ExpiryBuckets,
 } from "../_shared/digest.ts";
 
 const DIGEST_SECRET = Deno.env.get("DAILY_DIGEST_SECRET");
@@ -105,6 +107,24 @@ serve(async (req: Request): Promise<Response> => {
       (buildings ?? []).map((b: { id: string; name: string | null }) => [b.id, b.name ?? ""]),
     );
     const nameFor = (id: string | null): string | null => (id ? buildingName.get(id) || null : null);
+
+    // Portfolio expiry counts for admins and managers (site users see only their buildings, and the
+    // per-person RLS view is not worth a query each; they get the widget in the app).
+    const { data: adminRoleRows } = await supabase.from("user_roles").select("user_id").in("role", ["admin", "manager"]);
+    const adminIds = new Set((adminRoleRows ?? []).map((r: { user_id: string }) => r.user_id));
+    let expiring: ExpiryBuckets | null = null;
+    try {
+      const { data: expRows, error: expErr } = await supabase.rpc("expiring_items", { p_days: 90 });
+      if (expErr) throw expErr;
+      const b: ExpiryBuckets = { expired: 0, d30: 0, d60: 0, d90: 0 };
+      for (const r of (expRows ?? []) as { days_left: number }[]) {
+        if (r.days_left < 0) b.expired++; else if (r.days_left <= 30) b.d30++; else if (r.days_left <= 60) b.d60++; else if (r.days_left <= 90) b.d90++;
+      }
+      expiring = b;
+    } catch (e) {
+      // The digest still goes out without the expiry line; the widget and the alerts cron cover it.
+      console.error("daily-digest: expiring_items failed", e);
+    }
 
     // ---- Push pass: one task_due_today per person with a live device --------------------
     // Runs first so a slow email pass cannot delay the morning push. Nothing here throws out
@@ -260,7 +280,9 @@ serve(async (req: Request): Promise<Response> => {
           }),
         );
 
-        const sections = composeDigest({ today, tasks, issues, unread: unreadCount ?? 0 });
+        const sections = composeDigest({
+          today, tasks, issues, expiring: adminIds.has(p.id) ? expiring : null, unread: unreadCount ?? 0,
+        });
         if (!sections) { skipped++; continue; }
 
         const html = renderEmail({

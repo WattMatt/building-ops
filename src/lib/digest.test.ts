@@ -3,7 +3,7 @@ import { PUSH_NAME_MAX, SECTION_MAX, composeDigest, dueTodayPush } from '../../s
 
 const TODAY = '2026-09-11';
 
-const empty = { today: TODAY, tasks: [], issues: [], unread: 0 };
+const empty = { today: TODAY, tasks: [], issues: [], expiring: null, unread: 0 };
 
 describe('composeDigest', () => {
   it('returns null when there is nothing to say', () => {
@@ -65,7 +65,7 @@ describe('composeDigest', () => {
     ).toBeNull();
   });
 
-  it('orders the sections overdue, today, issues, unread', () => {
+  it('orders the sections overdue, today, issues, expiring, unread', () => {
     const sections = composeDigest({
       today: TODAY,
       tasks: [
@@ -73,14 +73,28 @@ describe('composeDigest', () => {
         { id: 't2', task_name: 'Now', due_date: TODAY, building_name: null },
       ],
       issues: [{ id: 'i1', title: 'Lift stuck', priority: 'high', building_name: null }],
+      expiring: { expired: 0, d30: 1, d60: 0, d90: 0 },
       unread: 2,
     });
     expect(sections!.map((s) => s.heading)).toEqual([
       '1 overdue task',
       '1 due today',
       '1 open issue assigned to you',
+      '1 expiring document, warranty or service',
       '2 unread notifications',
     ]);
+  });
+
+  it('lists the expiry buckets that have anything in them, with the total in the heading', () => {
+    const sections = composeDigest({ ...empty, expiring: { expired: 1, d30: 3, d60: 0, d90: 2 } });
+    expect(sections).toHaveLength(1);
+    expect(sections![0].heading).toBe('6 expiring documents, warranties and services');
+    expect(sections![0].lines).toEqual(['1 already expired', '3 within 30 days', '2 within 61–90 days']);
+  });
+
+  it('adds no expiry section when every bucket is zero', () => {
+    expect(composeDigest({ ...empty, expiring: { expired: 0, d30: 0, d60: 0, d90: 0 } })).toBeNull();
+    expect(composeDigest({ ...empty, unread: 1, expiring: { expired: 0, d30: 0, d60: 0, d90: 0 } })).toHaveLength(1);
   });
 
   const overdueTasks = (n: number) =>

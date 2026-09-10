@@ -1,188 +1,100 @@
-import { useState, useEffect } from 'react';
+/**
+ * Portfolio-wide expiry alerts for admins and managers: building, tenant and contractor documents,
+ * asset warranties and service dates, read in one go through `useExpiringItems` (the
+ * `expiring_items()` RPC — security invoker, so RLS scopes what each caller sees). Bucket pills
+ * narrow the list to expired / ≤ 30 / 31–60 / 61–90 days; the two tabs split documents-and-
+ * warranties from service dates, as they always did.
+ */
+import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { AlertTriangle, ArrowRight, Building2, FileWarning, Loader2, Wrench } from 'lucide-react';
 import { formatBuildingName } from '@/lib/buildingName';
-import { supabase } from '@/integrations/supabase/client';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useExpiringItems } from '@/hooks/useExpiringItems';
+import { BUCKETS, BUCKET_LABELS, KIND_LABELS, bucketOf, countBuckets, expiryPhrase, itemUrl, type ExpiringItem, type ExpiryBucket } from '@/lib/expiry';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  FileWarning,
-  Wrench,
-  AlertTriangle,
-  Building2,
-  ArrowRight,
-  Loader2,
-} from 'lucide-react';
-import { Link } from 'react-router-dom';
-import { format, differenceInDays, addDays } from 'date-fns';
+import { cn } from '@/lib/utils';
 
-interface ExpiringDocument {
-  id: string;
-  name: string;
-  document_type: string;
-  expiry_date: string;
-  building_id: string;
-  building_name: string;
+const SHOW = 5;
+
+function ExpiryBadge({ item }: { item: ExpiringItem }) {
+  const n = item.days_left;
+  if (n < 0) return <Badge variant="destructive">{item.kind === 'asset_service' ? `${-n}d overdue` : 'Expired'}</Badge>;
+  if (n <= 7) return <Badge className="bg-destructive/80 text-destructive-foreground">{n}d</Badge>;
+  if (n <= 30) return <Badge className="bg-warning text-warning-foreground">{n}d</Badge>;
+  return <Badge variant="secondary">{n}d</Badge>;
 }
 
-interface OverdueMaintenance {
-  id: string;
-  name: string;
-  category: string;
-  next_service_date: string;
-  building_id: string;
-  building_name: string;
-  days_overdue: number;
+function Row({ item }: { item: ExpiringItem }) {
+  const Icon = item.entity_type === 'asset' ? Wrench : FileWarning;
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg border bg-card p-3">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        <Icon className={cn('mt-0.5 h-5 w-5 shrink-0', item.days_left < 0 ? 'text-destructive' : 'text-warning')} />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{item.name}</p>
+          <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+            {item.building_name && (<><Building2 className="h-3 w-3" /><span className="truncate">{formatBuildingName(item.building_name)}</span><span>•</span></>)}
+            <span>{KIND_LABELS[item.kind]}{item.detail ? ` · ${item.detail}` : ''}</span>
+            <span>•</span>
+            <span>{expiryPhrase(item)}</span>
+          </div>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <ExpiryBadge item={item} />
+        <Button variant="ghost" size="icon" className="h-11 w-11" asChild>
+          <Link to={itemUrl(item)} aria-label={`Open ${item.name}`}><ArrowRight className="h-4 w-4" /></Link>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function List({ items, empty }: { items: ExpiringItem[]; empty: string }) {
+  if (!items.length) return <p className="py-4 text-center text-sm text-muted-foreground">{empty}</p>;
+  return (
+    <>
+      {items.slice(0, SHOW).map((i) => <Row key={`${i.kind}-${i.entity_id}`} item={i} />)}
+      {items.length > SHOW && <p className="pt-2 text-center text-xs text-muted-foreground">+{items.length - SHOW} more</p>}
+    </>
+  );
 }
 
 export default function GlobalAlertsWidget() {
-  const [loading, setLoading] = useState(true);
-  const [expiringDocuments, setExpiringDocuments] = useState<ExpiringDocument[]>([]);
-  const [overdueMaintenance, setOverdueMaintenance] = useState<OverdueMaintenance[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const query = useExpiringItems(90);
+  const [bucket, setBucket] = useState<ExpiryBucket | 'all'>('all');
+  const items = useMemo(() => query.data ?? [], [query.data]);
+  const counts = useMemo(() => countBuckets(items), [items]);
+  const visible = useMemo(() => (bucket === 'all' ? items : items.filter((i) => bucketOf(i.days_left) === bucket)), [items, bucket]);
+  const documents = visible.filter((i) => i.entity_type === 'document' || i.kind === 'asset_warranty');
+  const maintenance = visible.filter((i) => i.kind === 'asset_service');
 
-  useEffect(() => {
-    fetchAlerts();
-  }, []);
-
-  const fetchAlerts = async () => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const today = new Date();
-      const thirtyDaysFromNow = addDays(today, 30);
-
-      // Fetch expiring documents (within 30 days or expired)
-      const { data: documentsData, error: documentsError } = await supabase
-        .from('building_documents')
-        .select(`
-          id,
-          name,
-          document_type,
-          expiry_date,
-          building_id,
-          buildings (name)
-        `)
-        .not('expiry_date', 'is', null)
-        .lte('expiry_date', format(thirtyDaysFromNow, 'yyyy-MM-dd'))
-        .order('expiry_date');
-
-      if (documentsError) throw documentsError;
-
-      if (documentsData) {
-        setExpiringDocuments(documentsData.map(doc => ({
-          id: doc.id,
-          name: doc.name,
-          document_type: doc.document_type,
-          expiry_date: doc.expiry_date!,
-          building_id: doc.building_id,
-          building_name: (doc.buildings as any)?.name || 'Unknown',
-        })));
-      }
-
-      // Fetch overdue maintenance (past next_service_date)
-      const { data: assetsData, error: assetsError } = await supabase
-        .from('building_assets')
-        .select(`
-          id,
-          name,
-          category,
-          next_service_date,
-          building_id,
-          buildings (name)
-        `)
-        .not('next_service_date', 'is', null)
-        .lt('next_service_date', format(today, 'yyyy-MM-dd'))
-        .order('next_service_date');
-
-      if (assetsError) throw assetsError;
-
-      if (assetsData) {
-        setOverdueMaintenance(assetsData.map(asset => ({
-          id: asset.id,
-          name: asset.name,
-          category: asset.category,
-          next_service_date: asset.next_service_date!,
-          building_id: asset.building_id,
-          building_name: (asset.buildings as any)?.name || 'Unknown',
-          days_overdue: differenceInDays(today, new Date(asset.next_service_date!)),
-        })));
-      }
-    } catch (error) {
-      console.error('Error fetching global alerts:', error);
-      // A failed read must not collapse this card into the "no alerts" no-op.
-      setLoadError(error instanceof Error ? error.message : 'An unexpected error occurred.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const getExpiryBadge = (expiryDate: string) => {
-    const days = differenceInDays(new Date(expiryDate), new Date());
-    if (days < 0) {
-      return <Badge variant="destructive">Expired</Badge>;
-    } else if (days <= 7) {
-      return <Badge className="bg-destructive/80 text-destructive-foreground">Expires in {days}d</Badge>;
-    } else if (days <= 14) {
-      return <Badge className="bg-warning text-warning-foreground">Expires in {days}d</Badge>;
-    } else {
-      return <Badge variant="secondary">Expires in {days}d</Badge>;
-    }
-  };
-
-  const getOverdueBadge = (daysOverdue: number) => {
-    if (daysOverdue > 30) {
-      return <Badge variant="destructive">{daysOverdue}d overdue</Badge>;
-    } else if (daysOverdue > 14) {
-      return <Badge className="bg-destructive/80 text-destructive-foreground">{daysOverdue}d overdue</Badge>;
-    } else {
-      return <Badge className="bg-warning text-warning-foreground">{daysOverdue}d overdue</Badge>;
-    }
-  };
-
-  const totalAlerts = expiringDocuments.length + overdueMaintenance.length;
-
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </CardContent>
-      </Card>
-    );
+  if (query.isLoading) {
+    return <Card><CardContent className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></CardContent></Card>;
   }
-
-  if (loadError) {
+  if (query.isError) {
     return (
       <Card className="border-destructive/50">
         <CardHeader>
           <div className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-destructive" />
-            <div>
-              <CardTitle>Global Alerts</CardTitle>
-              <CardDescription>Alerts could not be checked</CardDescription>
-            </div>
+            <div><CardTitle>Global Alerts</CardTitle><CardDescription>Alerts could not be checked</CardDescription></div>
           </div>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col items-center justify-center py-6 text-center">
-            <p className="text-sm font-medium mb-1">Failed to load global alerts</p>
-            <p className="text-xs text-muted-foreground max-w-sm mb-4">
-              {loadError} Expiring documents and overdue maintenance across the portfolio are
-              not visible right now.
-            </p>
-            <Button onClick={() => fetchAlerts()} variant="outline" size="sm">
-              Try Again
-            </Button>
+            <p className="mb-1 text-sm font-medium">Failed to load global alerts</p>
+            <p className="mb-4 max-w-sm text-xs text-muted-foreground">{(query.error as Error)?.message} Expiring documents and overdue maintenance across the portfolio are not visible right now.</p>
+            <Button onClick={() => void query.refetch()} variant="outline" className="h-11">Try Again</Button>
           </div>
         </CardContent>
       </Card>
     );
   }
-
-  if (totalAlerts === 0) {
-    return null;
-  }
+  if (items.length === 0) return null;
 
   return (
     <Card className="border-warning/50 bg-warning/5">
@@ -191,110 +103,26 @@ export default function GlobalAlertsWidget() {
           <AlertTriangle className="h-5 w-5 text-warning" />
           <div>
             <CardTitle>Global Alerts</CardTitle>
-            <CardDescription>
-              {totalAlerts} alert{totalAlerts !== 1 ? 's' : ''} across all buildings requiring attention
-            </CardDescription>
+            <CardDescription>{items.length} item{items.length === 1 ? '' : 's'} expiring within 90 days or already past</CardDescription>
           </div>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Expiry window">
+          <Button variant={bucket === 'all' ? 'default' : 'outline'} size="sm" className="h-11" aria-pressed={bucket === 'all'} onClick={() => setBucket('all')}>All ({items.length})</Button>
+          {BUCKETS.map((b) => (
+            <Button key={b} variant={bucket === b ? 'default' : 'outline'} size="sm" className="h-11" aria-pressed={bucket === b} onClick={() => setBucket(b)}>
+              {BUCKET_LABELS[b]} ({counts[b]})
+            </Button>
+          ))}
         </div>
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="documents" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-4">
-            <TabsTrigger value="documents" className="gap-2">
-              <FileWarning className="h-4 w-4" />
-              Documents ({expiringDocuments.length})
-            </TabsTrigger>
-            <TabsTrigger value="maintenance" className="gap-2">
-              <Wrench className="h-4 w-4" />
-              Maintenance ({overdueMaintenance.length})
-            </TabsTrigger>
+          <TabsList className="mb-4 grid w-full grid-cols-2">
+            <TabsTrigger value="documents" className="h-11 gap-2"><FileWarning className="h-4 w-4" />Documents ({documents.length})</TabsTrigger>
+            <TabsTrigger value="maintenance" className="h-11 gap-2"><Wrench className="h-4 w-4" />Maintenance ({maintenance.length})</TabsTrigger>
           </TabsList>
-
-          <TabsContent value="documents" className="space-y-3">
-            {expiringDocuments.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                No expiring documents
-              </p>
-            ) : (
-              <>
-                {expiringDocuments.slice(0, 5).map((doc) => (
-                  <div
-                    key={doc.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-card border"
-                  >
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      <FileWarning className="h-5 w-5 text-warning shrink-0 mt-0.5" />
-                      <div className="min-w-0">
-                        <p className="font-medium text-sm truncate">{doc.name}</p>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Building2 className="h-3 w-3" />
-                          <span className="truncate">{formatBuildingName(doc.building_name)}</span>
-                          <span>•</span>
-                          <span>{doc.document_type}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {getExpiryBadge(doc.expiry_date)}
-                      <Button variant="ghost" size="sm" asChild>
-                        <Link to={`/buildings/${doc.building_id}?tab=documents`}>
-                          <ArrowRight className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-                {expiringDocuments.length > 5 && (
-                  <p className="text-xs text-muted-foreground text-center pt-2">
-                    +{expiringDocuments.length - 5} more documents
-                  </p>
-                )}
-              </>
-            )}
-          </TabsContent>
-
-          <TabsContent value="maintenance" className="space-y-3">
-            {overdueMaintenance.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                No overdue maintenance
-              </p>
-            ) : (
-              <>
-                {overdueMaintenance.slice(0, 5).map((asset) => (
-                  <div
-                    key={asset.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-card border"
-                  >
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      <Wrench className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
-                      <div className="min-w-0">
-                        <p className="font-medium text-sm truncate">{asset.name}</p>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Building2 className="h-3 w-3" />
-                          <span className="truncate">{formatBuildingName(asset.building_name)}</span>
-                          <span>•</span>
-                          <span>{asset.category}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {getOverdueBadge(asset.days_overdue)}
-                      <Button variant="ghost" size="sm" asChild>
-                        <Link to={`/buildings/${asset.building_id}?tab=maintenance`}>
-                          <ArrowRight className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-                {overdueMaintenance.length > 5 && (
-                  <p className="text-xs text-muted-foreground text-center pt-2">
-                    +{overdueMaintenance.length - 5} more assets
-                  </p>
-                )}
-              </>
-            )}
-          </TabsContent>
+          <TabsContent value="documents" className="space-y-3"><List items={documents} empty="No expiring documents or warranties in this window" /></TabsContent>
+          <TabsContent value="maintenance" className="space-y-3"><List items={maintenance} empty="No service dates in this window" /></TabsContent>
         </Tabs>
       </CardContent>
     </Card>

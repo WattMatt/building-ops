@@ -1,3 +1,9 @@
+// Expiry alerts across four tables in one read: `expiring_items(30)` (R4a §5.6) returns building,
+// tenant and contractor documents, asset warranties and asset service dates that expire within
+// 30 days, expired rows included. Inbox rows: `document_expiring` for the four document-shaped
+// kinds (a warranty row carries entity_type `asset`), `asset_service_due` for overdue service
+// dates only; the summary email lists the same items. Once per entity per SAST day.
+//
 // DEPLOY PREREQUISITES — this function is not on production yet, and the cron
 // path stays unauthorized until both of these are done:
 //   1. supabase secrets set EXPIRING_ALERTS_SECRET=<random> --project-ref qdzgkttiosahdfqresvz
@@ -75,14 +81,25 @@ function documentTitle(doc: ExpiringDocument): string {
   return `${doc.name} expired ${days(Math.abs(n))} ago`;
 }
 
+/** One row of `expiring_items()`; the kinds and columns are pinned by the R4a plan's Contracts section. */
+type Item = {
+  kind: "building_document" | "tenant_document" | "contractor_document" | "asset_warranty" | "asset_service";
+  entity_type: "document" | "asset"; entity_id: string; parent_id: string | null; building_id: string | null;
+  building_name: string | null; name: string; detail: string | null; expiry_date: string; days_left: number;
+};
+
 interface ExpiringDocument {
   id: string;
   name: string;
   document_type: string;
   expiry_date: string;
+  /** Empty for a contractor document (no building); the email column shows the company instead. */
   building_name: string;
+  /** Empty for a contractor document. */
   building_id: string;
   days_until_expiry: number;
+  kind: Item["kind"];
+  parent_id: string | null;
 }
 
 interface OverdueMaintenance {
@@ -161,103 +178,38 @@ const handler = async (req: Request): Promise<Response> => {
       // No body or invalid JSON, use defaults
     }
 
-    const today = new Date();
-    const thirtyDaysFromNow = new Date(today);
-    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+    console.log("Checking for expiring documents, warranties and overdue maintenance...");
 
-    console.log("Checking for expiring documents and overdue maintenance...");
-    console.log(`Today: ${today.toISOString()}`);
-    console.log(`30 days from now: ${thirtyDaysFromNow.toISOString()}`);
-
-    // Fetch expiring documents (expiring within 30 days or already expired)
-    const { data: documents, error: docError } = await supabase
-      .from("building_documents")
-      .select(`
-        id,
-        name,
-        document_type,
-        expiry_date,
-        buildings!inner(id, name)
-      `)
-      .not("expiry_date", "is", null)
-      .lte("expiry_date", thirtyDaysFromNow.toISOString().split("T")[0])
-      .order("expiry_date", { ascending: true });
-
-    if (docError) {
-      console.error("Error fetching documents:", docError);
-      throw docError;
+    // One read for every expiry source (building/tenant/contractor documents, asset warranties, service
+    // dates): expiring_items(30) is security invoker, and the service role sees every row. Rows with a
+    // positive days_left for asset service dates are "due soon", not overdue — they are listed in the email
+    // but do not get an inbox row (the inbox keeps its old meaning: overdue service).
+    const { data: expiring, error: expErr } = await supabase.rpc("expiring_items", { p_days: 30 });
+    if (expErr) {
+      console.error("Error reading expiring items:", expErr);
+      throw expErr;
     }
+    const items = (expiring ?? []) as Item[];
+    console.log(`Found ${items.length} expiring items within 30 days (incl. expired)`);
 
-    console.log(`Found ${documents?.length || 0} documents expiring soon or expired`);
-
-    // Fetch overdue maintenance (assets with next_service_date in the past)
-    const { data: assets, error: assetError } = await supabase
-      .from("building_assets")
-      .select(`
-        id,
-        name,
-        category,
-        next_service_date,
-        buildings!inner(id, name)
-      `)
-      .not("next_service_date", "is", null)
-      .lt("next_service_date", today.toISOString().split("T")[0])
-      .order("next_service_date", { ascending: true });
-
-    if (assetError) {
-      console.error("Error fetching assets:", assetError);
-      throw assetError;
-    }
-
-    console.log(`Found ${assets?.length || 0} assets with overdue maintenance`);
-
-    // Process documents
     const expiringDocuments: ExpiringDocument[] = [];
     const expiredDocuments: ExpiringDocument[] = [];
-
-    for (const doc of documents || []) {
-      const expiryDate = new Date(doc.expiry_date);
-      const diffTime = expiryDate.getTime() - today.getTime();
-      const daysUntilExpiry = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      
-      const building = (doc.buildings as unknown) as { id: string; name: string };
-      
-      const docInfo: ExpiringDocument = {
-        id: doc.id,
-        name: doc.name,
-        document_type: doc.document_type,
-        expiry_date: doc.expiry_date,
-        building_name: building.name,
-        building_id: building.id,
-        days_until_expiry: daysUntilExpiry,
-      };
-
-      if (daysUntilExpiry < 0) {
-        expiredDocuments.push(docInfo);
-      } else {
-        expiringDocuments.push(docInfo);
-      }
-    }
-
-    // Process overdue maintenance
     const overdueMaintenance: OverdueMaintenance[] = [];
-
-    for (const asset of assets || []) {
-      const serviceDate = new Date(asset.next_service_date);
-      const diffTime = today.getTime() - serviceDate.getTime();
-      const daysOverdue = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      
-      const building = (asset.buildings as unknown) as { id: string; name: string };
-      
-      overdueMaintenance.push({
-        id: asset.id,
-        name: asset.name,
-        category: asset.category,
-        next_service_date: asset.next_service_date,
-        building_name: building.name,
-        building_id: building.id,
-        days_overdue: daysOverdue,
-      });
+    for (const it of items) {
+      if (it.kind === "asset_service") {
+        if (it.days_left < 0) {
+          overdueMaintenance.push({ id: it.entity_id, name: it.name, category: it.detail ?? "", next_service_date: it.expiry_date,
+            building_name: it.building_name ?? "", building_id: it.building_id ?? "", days_overdue: -it.days_left });
+        }
+        continue;
+      }
+      const doc: ExpiringDocument = {
+        id: it.entity_id, name: it.kind === "asset_warranty" ? `Warranty: ${it.name}` : it.name,
+        document_type: it.kind === "contractor_document" ? `Contractor document · ${it.detail ?? ""}` : it.kind === "tenant_document" ? `Tenant document · ${it.detail ?? ""}` : (it.detail ?? ""),
+        expiry_date: it.expiry_date, building_name: it.building_name ?? (it.kind === "contractor_document" ? (it.detail ?? "Contractor") : ""),
+        building_id: it.building_id ?? "", days_until_expiry: it.days_left, kind: it.kind, parent_id: it.parent_id,
+      };
+      (it.days_left < 0 ? expiredDocuments : expiringDocuments).push(doc);
     }
 
     const alertSummary: AlertSummary = {
@@ -287,6 +239,9 @@ const handler = async (req: Request): Promise<Response> => {
     // ---- Inbox pass ---------------------------------------------------------------------
     // One `document_expiring` / `asset_service_due` row per admin and manager per item per day,
     // so the same alerts the summary email lists are also in the in-app inbox (R3a Task 6).
+    // `document_expiring` covers all four document-shaped kinds; the row's entity_type and url
+    // follow the kind (a warranty is an `asset` row deep-linking to the assets tab, a contractor
+    // document has no building and opens the contractor register).
     // Both kinds are DIGEST_ONLY in notifyRules.ts, so createNotifications writes the row and
     // sends no per-item email — the summary email below stays the only email this function
     // sends. `notifyAdmins` governs that email only; inbox rows are written regardless of it,
@@ -313,7 +268,7 @@ const handler = async (req: Request): Promise<Response> => {
           kind: "document_expiring" | "asset_service_due";
           entityType: "document" | "asset";
           entityId: string;
-          buildingId: string;
+          buildingId: string | null;
           title: string;
           body: string | null;
           url: string;
@@ -321,12 +276,15 @@ const handler = async (req: Request): Promise<Response> => {
         const items: InboxItem[] = [
           ...[...expiredDocuments, ...expiringDocuments].map((doc): InboxItem => ({
             kind: "document_expiring",
-            entityType: "document",
+            entityType: doc.kind === "asset_warranty" ? "asset" : "document",
             entityId: doc.id,
-            buildingId: doc.building_id,
+            buildingId: doc.building_id || null,
             title: documentTitle(doc),
-            body: doc.document_type ?? null,
-            url: `/buildings/${doc.building_id}?tab=documents`,
+            body: doc.document_type || null,
+            url: doc.kind === "tenant_document" ? `/buildings/${doc.building_id}?tab=tenants`
+               : doc.kind === "contractor_document" ? (doc.parent_id ? `/contractors?open=${doc.parent_id}` : "/contractors")
+               : doc.kind === "asset_warranty" ? `/buildings/${doc.building_id}?tab=assets`
+               : `/buildings/${doc.building_id}?tab=documents`,
           })),
           ...overdueMaintenance.map((asset): InboxItem => ({
             kind: "asset_service_due",

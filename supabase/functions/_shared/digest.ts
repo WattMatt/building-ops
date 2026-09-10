@@ -23,11 +23,16 @@ export interface DigestIssue {
   building_name: string | null;
 }
 
+/** Portfolio-wide expiry counts by window (expiring_items(90) bucketed by days_left). */
+export interface ExpiryBuckets { expired: number; d30: number; d60: number; d90: number }
+
 export interface DigestInput {
   /** Today in the operating timezone, `YYYY-MM-DD`. */
   today: string;
   tasks: DigestTask[];
   issues: DigestIssue[];
+  /** Portfolio-wide expiry counts; only admins and managers get this section. */
+  expiring?: ExpiryBuckets | null;
   unread: number;
 }
 
@@ -54,8 +59,9 @@ function capLines(lines: string[]): string[] {
 
 /**
  * Build the digest sections for one person, in reading order: overdue tasks, tasks due
- * today, open issues assigned to them, then the unread-inbox count. Returns `null` when
- * there is nothing to say, so the caller can skip the send entirely.
+ * today, open issues assigned to them, the portfolio expiry counts (admins and managers
+ * only — the caller passes null for everyone else), then the unread-inbox count. Returns
+ * `null` when there is nothing to say, so the caller can skip the send entirely.
  */
 export function composeDigest(input: DigestInput): DigestSection[] | null {
   const overdue = input.tasks.filter((t) => t.due_date < input.today);
@@ -79,6 +85,16 @@ export function composeDigest(input: DigestInput): DigestSection[] | null {
       heading: `${input.issues.length} open ${plural(input.issues.length, 'issue', 'issues')} assigned to you`,
       lines: capLines(input.issues.map(issueLine)),
     });
+  }
+  const e = input.expiring;
+  if (e && (e.expired || e.d30 || e.d60 || e.d90)) {
+    const lines: string[] = [];
+    if (e.expired) lines.push(`${e.expired} already expired`);
+    if (e.d30) lines.push(`${e.d30} within 30 days`);
+    if (e.d60) lines.push(`${e.d60} within 31–60 days`);
+    if (e.d90) lines.push(`${e.d90} within 61–90 days`);
+    const total = e.expired + e.d30 + e.d60 + e.d90;
+    sections.push({ heading: `${total} expiring ${plural(total, 'document, warranty or service', 'documents, warranties and services')}`, lines });
   }
   if (input.unread) {
     sections.push({

@@ -30,7 +30,16 @@
  *   building document expiring in 3 days, notifyAdmins:false → 200, inboxRows ≥ 1, exactly one
  *                                                    document_expiring row for the admin persona
  *   same call again                                → still exactly one (idempotent per day)
+ *   also a tenant document expiring in 3 days      → one document_expiring row deep-linking to
+ *                                                    `?tab=tenants`
+ *   an asset warranty expiring in 5 days           → one document_expiring row with entity_type
+ *                                                    asset deep-linking to `?tab=assets`
  * Without the secret that step is SKIPped, not failed.
+ *
+ * Step 9 — `mark_sla_breaches` (SQL, cron-shaped): an issue past its target → issue_sla_breached
+ * rows for the assignee and every admin/manager; second call adds none; a site user is refused.
+ * Inbox only; on a shared backend this also breaches any real overdue issue (inbox rows to real
+ * admins; no email).
  */
 
 const URL_BASE = process.env.SUPABASE_URL;
@@ -95,6 +104,12 @@ async function svcSelectF(table, filter) {
 
 // ── persona-scoped REST probes (notifications table RLS) ──
 function authed(jwt) { return { apikey: ANON, Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' }; }
+/** Persona-scoped RPC: `{ status, body }` with the JSON body (or null when the response is not JSON). */
+async function rpcAs(jwt, fn, args) {
+  const res = await fetch(`${URL_BASE}/rest/v1/rpc/${fn}`, { method: 'POST', headers: authed(jwt), body: JSON.stringify(args) });
+  const body = await res.json().catch(() => null);
+  return { status: res.status, body };
+}
 
 async function canSelectF(jwt, table, filter) {
   const res = await fetch(`${URL_BASE}/rest/v1/${table}?${filter}&select=*&limit=1`, { headers: authed(jwt) });
@@ -338,6 +353,13 @@ try {
       building_id: A, name: `ZZTEST-NOTIFY-DOC-${RUN}`, document_type: 'Fire certificate', expiry_date: expiry,
     });
     cleanup.push(['building_documents', doc.id]);
+    const tenant = await svcInsert('building_tenants', { building_id: A, name: `ZZTEST-NOTIFY-TENANT-${RUN}`, shop_name: 'Shop 1' });
+    cleanup.push(['building_tenants', tenant.id]);
+    const tdoc = await svcInsert('tenant_documents', { tenant_id: tenant.id, document_name: `ZZTEST-NOTIFY-TDOC-${RUN}`, document_type: 'Lease', expiry_date: expiry });
+    cleanup.unshift(['tenant_documents', tdoc.id]);
+    const warrantyExpiry = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10);
+    const asset = await svcInsert('building_assets', { building_id: A, name: `ZZTEST-NOTIFY-ASSET-${RUN}`, category: 'HVAC', warranty_expiry: warrantyExpiry });
+    cleanup.push(['building_assets', asset.id]);
 
     const call = async () => {
       const res = await fetch(`${URL_BASE}/functions/v1/notify-expiring-alerts`, {
@@ -362,6 +384,14 @@ try {
     assert('expiring alerts: exactly one document_expiring row for the admin', rows.length === 1, `found ${rows.length} row(s)`);
     assert('expiring alerts: row deep-links to the building documents tab', rows[0]?.url === `/buildings/${A}?tab=documents`, `url=${rows[0]?.url}`);
     assert('expiring alerts: row title names the document', typeof rows[0]?.title === 'string' && rows[0].title.startsWith(`ZZTEST-NOTIFY-DOC-${RUN}`), `title=${rows[0]?.title}`);
+    await registerCleanup(tdoc.id);
+    await registerCleanup(asset.id);
+    const tRows = await svcSelectF('notifications', `kind=eq.document_expiring&entity_id=eq.${tdoc.id}&recipient_id=eq.${personas.admin.id}`);
+    assert('expiring alerts: one row for the tenant document', tRows.length === 1, `found ${tRows.length} row(s)`);
+    assert('expiring alerts: tenant document deep-links to the tenants tab', tRows[0]?.url === `/buildings/${A}?tab=tenants`, `url=${tRows[0]?.url}`);
+    const wRows = await svcSelectF('notifications', `kind=eq.document_expiring&entity_id=eq.${asset.id}&recipient_id=eq.${personas.admin.id}`);
+    assert('expiring alerts: one row for the asset warranty', wRows.length === 1, `found ${wRows.length} row(s)`);
+    assert('expiring alerts: warranty row is entity_type asset and links to the assets tab', wRows[0]?.entity_type === 'asset' && wRows[0]?.url === `/buildings/${A}?tab=assets`, JSON.stringify(wRows[0]));
 
     const second = await call();
     assert('expiring alerts re-run: HTTP 200', second.status === 200, `HTTP ${second.status} ${JSON.stringify(second.body).slice(0, 160)}`);
@@ -370,7 +400,39 @@ try {
     assert('expiring alerts re-run: still exactly one row (idempotent per day)', rowsAfter.length === 1, `found ${rowsAfter.length} row(s)`);
   });
 
-  console.log('  notify function + inbox RLS: done');
+  // ════ 9: mark_sla_breaches writes issue_sla_breached rows for the assignee and every admin/manager ════
+  await step('mark_sla_breaches: inbox rows', async () => {
+    const issue = await svcInsert('issues', {
+      building_id: A, title: `ZZTEST-NOTIFY-SLA-${RUN}`, description: 'sla smoke', priority: 'high',
+      reported_by: personas.admin.id, assigned_to: personas.manager.id,
+    });
+    cleanup.push(['issues', issue.id]);
+    // The trigger gave it the org default (24 h for high); push the target and the clock so it is past due.
+    const patched = await fetch(`${URL_BASE}/rest/v1/issues?id=eq.${issue.id}`, {
+      method: 'PATCH', headers: { ...SVC, Prefer: 'return=representation' },
+      body: JSON.stringify({ sla_target_hours: 0.01, created_at: new Date(Date.now() - 3_600_000).toISOString() }),
+    });
+    assert('sla fixture: default target was 24 h before the patch', Number(issue.sla_target_hours) === 24, `sla_target_hours=${issue.sla_target_hours}`);
+    assert('sla fixture: patched', patched.ok, `HTTP ${patched.status}`);
+    const sweep = await rpcAs(personas.admin.jwt, 'mark_sla_breaches', {});
+    assert('mark_sla_breaches as admin: HTTP 200', sweep.status === 200, `HTTP ${sweep.status}`);
+    assert('mark_sla_breaches: at least one issue breached', Number(sweep.body) >= 1, `returned ${JSON.stringify(sweep.body)}`);
+    await registerCleanup(issue.id);
+    const forManager = await svcSelectF('notifications', `kind=eq.issue_sla_breached&entity_id=eq.${issue.id}&recipient_id=eq.${personas.manager.id}`);
+    const forAdmin = await svcSelectF('notifications', `kind=eq.issue_sla_breached&entity_id=eq.${issue.id}&recipient_id=eq.${personas.admin.id}`);
+    assert('sla breach: one row for the assignee (manager)', forManager.length === 1, `found ${forManager.length}`);
+    assert('sla breach: one row for the admin', forAdmin.length === 1, `found ${forAdmin.length}`);
+    assert('sla breach: row deep-links to the issue', forAdmin[0]?.url === `/issues?open=${issue.id}`, `url=${forAdmin[0]?.url}`);
+    assert('sla breach: title names the issue', forAdmin[0]?.title === `SLA breached: ZZTEST-NOTIFY-SLA-${RUN}`, `title=${forAdmin[0]?.title}`);
+    const beforeAgain = (await svcSelectF('notifications', `kind=eq.issue_sla_breached&entity_id=eq.${issue.id}`)).length;
+    const again = await rpcAs(personas.admin.jwt, 'mark_sla_breaches', {});
+    const afterAgain = (await svcSelectF('notifications', `kind=eq.issue_sla_breached&entity_id=eq.${issue.id}`)).length;
+    assert('sla breach re-run: no new rows for the same issue', again.status === 200 && afterAgain === beforeAgain, `${beforeAgain} → ${afterAgain} rows`);
+    const asUser = await rpcAs(personas.user.jwt, 'mark_sla_breaches', {});
+    assert('mark_sla_breaches refused for a site user', asUser.status === 403, `HTTP ${asUser.status}`);
+  });
+
+  console.log('  notify function + inbox RLS + SLA sweep: done');
 } catch (e) {
   fail('smoke run', e.message);
 } finally {
@@ -387,8 +449,10 @@ try {
     }
   }
   // sweep stray ZZTEST-NOTIFY-* building documents first (step 8 fixture); they may
-  // not cascade with their building.
+  // not cascade with their building. Same for the tenant document (step 8) — its tenant,
+  // the asset and the issue (step 9) cascade with building A below.
   await fetch(`${URL_BASE}/rest/v1/building_documents?name=like.ZZTEST-NOTIFY-*`, { method: 'DELETE', headers: SVC });
+  await fetch(`${URL_BASE}/rest/v1/tenant_documents?document_name=like.ZZTEST-NOTIFY-*`, { method: 'DELETE', headers: SVC });
   // sweep stray ZZTEST-NOTIFY-* buildings from earlier aborted runs — their
   // notification rows cascade-delete with the building, so a killed run
   // self-heals here rather than accumulating.

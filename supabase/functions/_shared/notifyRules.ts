@@ -7,7 +7,7 @@ export const NOTIFICATION_KINDS = [
   'task_assigned', 'issue_assigned', 'issue_comment', 'issue_mention',
   'report_submitted', 'report_returned', 'report_approved',
   'form_submitted', 'form_reviewed', 'signoff_requested', 'signoff_complete', 'signoff_overdue',
-  'document_expiring', 'asset_service_due', 'task_due_today',
+  'document_expiring', 'asset_service_due', 'task_due_today', 'issue_sla_breached',
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -189,9 +189,11 @@ export function senderName(name: string): string {
 /**
  * Kinds that reach the inbox but never send a per-item email (the digest covers them).
  * This cannot be derived from the governing flag: `signoff_overdue` shares `overdue_alerts`
- * with these two, yet it does email per item.
+ * with these, yet it does email per item. `issue_sla_breached` rows are written by the SQL
+ * sweep (`mark_sla_breaches`) and never pass through `createNotifications`, so it neither
+ * emails nor pushes in R4a; it is listed here so the rule holds if a sender is ever retrofitted.
  */
-const DIGEST_ONLY: ReadonlySet<NotificationKind> = new Set(['document_expiring', 'asset_service_due', 'task_due_today']);
+const DIGEST_ONLY: ReadonlySet<NotificationKind> = new Set(['document_expiring', 'asset_service_due', 'task_due_today', 'issue_sla_breached']);
 
 export function governingFlag(kind: NotificationKind): PrefFlag {
   switch (kind) {
@@ -203,6 +205,7 @@ export function governingFlag(kind: NotificationKind): PrefFlag {
     case 'signoff_overdue':
     case 'document_expiring':
     case 'asset_service_due':
+    case 'issue_sla_breached':
       return 'overdue_alerts';
     case 'issue_assigned':
     case 'issue_comment':

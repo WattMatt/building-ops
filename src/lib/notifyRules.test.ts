@@ -48,6 +48,7 @@ describe('governingFlag', () => {
     document_expiring: 'overdue_alerts',
     asset_service_due: 'overdue_alerts',
     task_due_today: 'task_reminders',
+    issue_sla_breached: 'overdue_alerts',
   };
 
   it('maps every kind to the flag the design says governs it', () => {
@@ -342,6 +343,14 @@ describe('push', () => {
   it('task_due_today is inbox + push only, never an email', () => {
     expect(governingFlag('task_due_today')).toBe('task_reminders');
     expect(shouldEmail('task_due_today', { email_notifications: true, issue_updates: true, task_reminders: true, overdue_alerts: true, daily_digest: true })).toBe(false);
+  });
+  it('issue_sla_breached is inbox only in R4a: written by SQL, no email, no push, not client-sendable', () => {
+    const on = { email_notifications: true, issue_updates: true, task_reminders: true, overdue_alerts: true, daily_digest: true };
+    expect(governingFlag('issue_sla_breached')).toBe('overdue_alerts');
+    expect(shouldEmail('issue_sla_breached', on)).toBe(false);
+    expect(shouldPush('issue_sla_breached', on)).toBe(false);
+    expect(CLIENT_KINDS.has('issue_sla_breached')).toBe(false);
+    expect(parseNotifyBody({ ...input(), kind: 'issue_sla_breached' })).toEqual({ ok: false, reason: 'Unsupported notification kind' });
   });
   it('allows /my-day deep links', () => {
     expect(isAllowedUrl('/my-day')).toBe(true);
