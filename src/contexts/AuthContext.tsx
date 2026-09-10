@@ -34,6 +34,9 @@ interface AuthContextType {
   onboardingCompleted: boolean;
   isRecovery: boolean;
   loading: boolean;
+  /** Re-run the role/profile fetch for the current session (M-8: a transient failure
+   *  must not read as a permissions problem, and the user needs a way to retry). */
+  refreshRole: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signUp: (email: string, password: string, fullName?: string) => Promise<{ error: Error | null }>;
   clearMustSetPassword: () => Promise<void>;
@@ -177,6 +180,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // M-8: lets a role-gated route retry after a transient user_roles fetch
+  // failure instead of leaving the user stuck behind a permanent-looking
+  // "Access Denied" screen.
+  const refreshRole = async () => {
+    if (!user?.id) return;
+    setLoading(true);
+    await fetchUserRole(user.id);
+  };
+
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -316,6 +328,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         onboardingCompleted,
         isRecovery,
         loading,
+        refreshRole,
         signIn,
         signUp,
         clearMustSetPassword,

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import type { AppRole } from '@/lib/constants';
 
 // Guard unit tests (Standard A11). ProtectedRoute consumes AuthContext via
@@ -15,6 +16,7 @@ interface AuthStub {
   mustSetPassword: boolean;
   onboardingCompleted: boolean;
   loading: boolean;
+  refreshRole: () => Promise<void>;
 }
 
 const authState = vi.hoisted(() => ({
@@ -25,6 +27,7 @@ const authState = vi.hoisted(() => ({
     mustSetPassword: false,
     onboardingCompleted: true,
     loading: false,
+    refreshRole: () => Promise.resolve(),
   } as {
     user: { id: string } | null;
     role: string | null;
@@ -32,6 +35,7 @@ const authState = vi.hoisted(() => ({
     mustSetPassword: boolean;
     onboardingCompleted: boolean;
     loading: boolean;
+    refreshRole: () => Promise<void>;
   },
 }));
 
@@ -43,6 +47,7 @@ vi.mock('react-router-dom', async () => {
   const { createElement: h } = await import('react');
   return {
     Navigate: ({ to }: { to: string }) => h('div', { 'data-testid': 'redirect' }, to),
+    Link: ({ to, children }: { to: string; children: ReactNode }) => h('a', { href: to }, children),
     useLocation: () => ({
       pathname: '/dashboard',
       search: '',
@@ -80,6 +85,7 @@ describe('ProtectedRoute', () => {
       mustSetPassword: false,
       onboardingCompleted: true,
       loading: false,
+      refreshRole: () => Promise.resolve(),
     };
   });
 
@@ -113,8 +119,11 @@ describe('ProtectedRoute', () => {
     setAuth({ role: 'admin', authError: true });
     renderGuard(['admin']);
 
-    expect(accessDenied()).toBe(true);
+    // A fetch error shows the "couldn't verify" copy (asserted in the
+    // 'access-denied copy' suite below), not the plain "Access Denied"
+    // message — but it must still deny access, not admit or redirect.
     expect(contentShown()).toBe(false);
+    expect(redirectTarget()).toBeNull();
   });
 
   it('denies a role-gated route on role mismatch', () => {
@@ -163,5 +172,21 @@ describe('ProtectedRoute', () => {
 
     expect(contentShown()).toBe(true);
     expect(accessDenied()).toBe(false);
+  });
+});
+
+describe('access-denied copy', () => {
+  it('names a role-fetch failure and offers a retry', () => {
+    authState.current = { ...authState.current, role: null, authError: true };
+    renderGuard(['admin']);
+    expect(screen.getByText(/couldn.t verify your access/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
+  });
+
+  it('keeps the plain permission message when the role is simply wrong', () => {
+    authState.current = { ...authState.current, role: 'user', authError: false };
+    renderGuard(['admin']);
+    expect(screen.getByText(/don.t have permission/i)).toBeInTheDocument();
+    expect(screen.getByText(/back to dashboard/i)).toBeInTheDocument();
   });
 });

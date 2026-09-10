@@ -131,7 +131,7 @@ interface DashboardLayoutProps {
 }
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
-  const { user, role, signOut } = useAuth();
+  const { user, role, signOut, isAdminOrManager } = useAuth();
   const { organization } = useOrganization();
   const { profile } = useUserProfile();
   const navigate = useNavigate();
@@ -279,10 +279,12 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                   <User className="w-4 h-4 mr-2" />
                   My Profile
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => navigate('/settings')}>
-                  <Settings className="w-4 h-4 mr-2" />
-                  Settings
-                </DropdownMenuItem>
+                {isAdminOrManager && (
+                  <DropdownMenuItem onClick={() => navigate('/settings')}>
+                    <Settings className="w-4 h-4 mr-2" />
+                    Settings
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={handleSignOut}
