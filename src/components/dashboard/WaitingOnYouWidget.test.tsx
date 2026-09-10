@@ -10,19 +10,34 @@ import { MemoryRouter } from 'react-router-dom';
 // `head` is captured off the `.select(fields, { count, head })` call so the same chain can serve
 // both the head-only count query and the row query for a table. Every chained call is also
 // recorded in `state.calls` so tests can assert which filters were actually applied.
-const state = vi.hoisted(() => {
-  const calls: { table: string; method: string; args: any[] }[] = [];
+type Row = Record<string, unknown>;
+type QueryResult = { data?: Row[] | null; count?: number | null; error: { message: string } | null };
 
-  function fromFactory(getResult: (table: string, head: boolean) => Promise<{ data?: any[]; count?: number; error: null }>) {
+/** The slice of PostgrestFilterBuilder the widget touches — see the note above. */
+interface Chain {
+  select: (...args: unknown[]) => Chain;
+  eq: (...args: unknown[]) => Chain;
+  lt: (...args: unknown[]) => Chain;
+  order: (...args: unknown[]) => Chain;
+  limit: (...args: unknown[]) => Chain;
+  in: (...args: unknown[]) => Chain;
+  then: (resolve: (r: QueryResult) => unknown, reject?: (e: unknown) => unknown) => unknown;
+}
+
+const state = vi.hoisted(() => {
+  const calls: { table: string; method: string; args: unknown[] }[] = [];
+
+  function fromFactory(getResult: (table: string, head: boolean) => Promise<QueryResult>) {
     return (table: string) => {
-      const chain: any = {};
+      // Assembled field by field because every method closes over `chain` itself.
+      const chain = {} as Chain;
       let head = false;
-      const record = (method: string) => (...args: any[]) => {
+      const record = (method: string) => (...args: unknown[]) => {
         calls.push({ table, method, args });
         return chain;
       };
-      chain.select = (...args: any[]) => {
-        head = !!(args[1] && (args[1] as any).head);
+      chain.select = (...args: unknown[]) => {
+        head = !!(args[1] as { head?: boolean } | undefined)?.head;
         calls.push({ table, method: 'select', args });
         return chain;
       };
@@ -31,18 +46,18 @@ const state = vi.hoisted(() => {
       chain.order = record('order');
       chain.limit = record('limit');
       chain.in = record('in');
-      chain.then = (resolve: any, reject?: any) => getResult(table, head).then(resolve, reject);
+      chain.then = (resolve, reject) => getResult(table, head).then(resolve, reject);
       return chain;
     };
   }
 
   return {
-    reports: [] as any[],
+    reports: [] as Row[],
     reportsCount: 0,
-    signoffRequests: [] as any[],
+    signoffRequests: [] as Row[],
     signoffsCount: 0,
-    formSubmissions: [] as any[],
-    buildings: [] as any[],
+    formSubmissions: [] as Row[],
+    buildings: [] as Row[],
     calls,
     fromFactory,
   };
@@ -52,7 +67,7 @@ const state = vi.hoisted(() => {
 // query source being broken while the other (built with the normal factory above) is fine.
 function erroringFromFactory(message: string) {
   return (_table: string) => {
-    const chain: any = {};
+    const chain = {} as Chain;
     const pass = () => chain;
     chain.select = pass;
     chain.eq = pass;
@@ -60,7 +75,7 @@ function erroringFromFactory(message: string) {
     chain.order = pass;
     chain.limit = pass;
     chain.in = pass;
-    chain.then = (resolve: any) => Promise.resolve({ data: null, count: null, error: { message } }).then(resolve);
+    chain.then = (resolve) => Promise.resolve({ data: null, count: null, error: { message } }).then(resolve);
     return chain;
   };
 }
@@ -218,7 +233,7 @@ describe('WaitingOnYouWidget', () => {
     state.signoffRequests = [{ id: 's1', submission_id: 'sub1', due_at: '2026-09-01T00:00:00Z' }];
     state.formSubmissions = [{ id: 'sub1', form_name: 'Fire Safety Checklist', building_id: null }];
 
-    const fdbFromSpy = vi.spyOn(fdb, 'from').mockImplementation(erroringFromFactory('boom') as any);
+    const fdbFromSpy = vi.spyOn(fdb, 'from').mockImplementation(erroringFromFactory('boom') as unknown as typeof fdb.from);
     const supabaseFromSpy = vi.spyOn(supabase, 'from');
 
     render(createElement(WaitingOnYouWidget), { wrapper });
@@ -244,7 +259,7 @@ describe('WaitingOnYouWidget', () => {
     state.formSubmissions = [{ id: 'sub1', form_name: 'Fire Safety Checklist', building_id: 'b2' }];
     state.buildings = [{ id: 'b2', name: 'Rosebank Mall' }];
 
-    vi.spyOn(fdb, 'from').mockImplementation(erroringFromFactory('boom') as any);
+    vi.spyOn(fdb, 'from').mockImplementation(erroringFromFactory('boom') as unknown as typeof fdb.from);
 
     render(createElement(WaitingOnYouWidget), { wrapper });
 

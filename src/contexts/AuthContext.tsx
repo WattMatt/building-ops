@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { ROLE_PRECEDENCE, type AppRole } from '@/lib/constants';
@@ -65,6 +65,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [onboardingCompleted, setOnboardingCompleted] = useState(true);
   const [isRecovery, setIsRecovery] = useState(false);
   const [loading, setLoading] = useState(true);
+  /**
+   * Whether a signed-in session has been seen since this tab loaded. Supabase fires a
+   * no-session auth event on first load for a signed-out visitor too, and resetting there
+   * would rotate the anonymous PostHog distinct id on every cold start — orphaning the
+   * pre-login pageviews from the session they belong to. Only a session that actually
+   * ended is worth a reset.
+   */
+  const hadSessionRef = useRef(false);
 
   useEffect(() => {
     // Set up auth state listener FIRST
@@ -95,6 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // Defer role fetching to avoid deadlock
         if (session?.user) {
+          hadSessionRef.current = true;
           setTimeout(() => {
             fetchUserRole(session.user.id);
           }, 0);
@@ -107,7 +116,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Sessions also end without going through signOut() — an expired or revoked
           // token, or a sign-out in another tab. Drop the analytics identity here too,
           // so the next person on this browser is not attributed to the outgoing user.
-          resetAnalytics();
+          // Guarded on a session having actually existed: see hadSessionRef.
+          if (hadSessionRef.current) {
+            hadSessionRef.current = false;
+            resetAnalytics();
+          }
         }
       }
     );
@@ -117,6 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
+        hadSessionRef.current = true;
         fetchUserRole(session.user.id);
       } else {
         setLoading(false);

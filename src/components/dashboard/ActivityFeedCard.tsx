@@ -22,7 +22,9 @@ const ROW_TIME_FORMATTER = new Intl.DateTimeFormat('en-ZA', {
   timeZone: OPERATING_TZ,
   hour: '2-digit',
   minute: '2-digit',
-  hour12: false,
+  // hourCycle over hour12: `hour12: false` renders midnight as 24:00 in some engines,
+  // while 'h23' pins it to the 00:00-23:59 clock the rest of the app uses.
+  hourCycle: 'h23',
 });
 
 const ROW_FULL_TIMESTAMP_FORMATTER = new Intl.DateTimeFormat('en-ZA', {

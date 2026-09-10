@@ -38,8 +38,19 @@ let ready: Promise<void> = Promise.resolve();
 /** Query params worth stripping defensively, in case a link ever puts a token in the query. */
 const TOKEN_PARAMS = ['access_token', 'refresh_token', 'code'];
 
-/** PostHog properties that hold a URL and therefore need scrubbing. */
-const URL_PROPERTIES = ['$current_url', '$initial_current_url', '$referrer'] as const;
+/**
+ * PostHog properties that hold a URL and therefore need scrubbing. The `$initial_*`
+ * spellings are person properties rather than event properties — PostHog writes them
+ * into `$set_once` — so they are looked for in every bag, not just on the event.
+ */
+const URL_PROPERTIES = [
+  '$current_url',
+  '$initial_current_url',
+  '$referrer',
+  '$initial_referrer',
+  '$pathname',
+  '$initial_pathname',
+] as const;
 
 /**
  * Strip credential material out of a URL before it is handed to a third party.
@@ -70,14 +81,36 @@ export function scrubUrl(url: string): string {
   return rest ? `${base}?${rest}` : base;
 }
 
-/** PostHog `before_send`: rewrite every URL-bearing property on the outgoing event. */
-function scrubCapture(captured: CaptureResult | null): CaptureResult | null {
-  const properties = captured?.properties;
-  if (!properties) return captured;
+type PropertyBag = Record<string, unknown>;
+
+/** Rewrite every URL-bearing key of one property bag, in place. Tolerates a missing bag. */
+function scrubPropertyBag(bag: unknown): void {
+  if (!bag || typeof bag !== 'object') return;
+  const properties = bag as PropertyBag;
   for (const key of URL_PROPERTIES) {
     const value = properties[key];
     if (typeof value === 'string') properties[key] = scrubUrl(value);
   }
+}
+
+/**
+ * PostHog `before_send`: rewrite every URL-bearing property on the outgoing event.
+ *
+ * Event properties are only half of it. Person properties travel in their own bags —
+ * PostHog puts `$initial_current_url` and `$initial_referrer` into `$set_once` and
+ * refreshes `$current_url`/`$referrer` in `$set` — so an invite link's fragment reaches
+ * the vendor as a *person* property, and permanently, unless those bags are walked too.
+ * Both placements are covered: nested under `properties` (how the payload is shaped on
+ * the wire) and the top-level `$set`/`$set_once` on `CaptureResult`.
+ */
+function scrubCapture(captured: CaptureResult | null): CaptureResult | null {
+  if (!captured) return captured;
+  const properties = captured.properties as PropertyBag | undefined;
+  scrubPropertyBag(properties);
+  scrubPropertyBag(properties?.$set);
+  scrubPropertyBag(properties?.$set_once);
+  scrubPropertyBag(captured.$set);
+  scrubPropertyBag(captured.$set_once);
   return captured;
 }
 
@@ -91,6 +124,10 @@ async function initPostHog(): Promise<void> {
     // SPA, and plain `true` would only ever record the first hard load.
     capture_pageview: 'history_change',
     autocapture: false,
+    // Belt to `scrubCapture`'s braces: PostHog drops `location.hash` from every URL it
+    // records (pageviews, web vitals, autocapture hrefs, replay meta) before our hook
+    // ever sees the event. The app has no hash routes, so nothing of ours is lost.
+    disable_capture_url_hashes: true,
     persistence: 'localStorage',
     // Note: PostHog's `ip` init option is a documented no-op in this version. IP
     // collection is switched off in the PostHog project ("Discard client IP data") —
@@ -111,6 +148,24 @@ async function initSentry(): Promise<void> {
     // cost bundle size and sample nothing. Errors only, deliberately.
     beforeSend(event) {
       if (event.request?.url) event.request.url = scrubUrl(event.request.url);
+      // Breadcrumbs keep their own copies of the URL: a navigation crumb records
+      // `data.from` and `data.to`, and fetch/xhr crumbs a `data.url`. Landing on
+      // `/set-password#access_token=…` and navigating away therefore ships the token to
+      // Sentry via the crumb trail even when `request.url` is already clean.
+      const breadcrumbs = event.breadcrumbs ?? [];
+      // Only reassigned when there is something to scrub, so an event that carried no
+      // breadcrumbs is handed on exactly as it arrived rather than growing an empty array.
+      if (breadcrumbs.length) {
+        event.breadcrumbs = breadcrumbs.map((crumb) => {
+          if (!crumb.data) return crumb;
+          const data = { ...crumb.data };
+          for (const key of ['from', 'to', 'url'] as const) {
+            const value = data[key];
+            if (typeof value === 'string') data[key] = scrubUrl(value);
+          }
+          return { ...crumb, data };
+        });
+      }
       return event;
     },
   });

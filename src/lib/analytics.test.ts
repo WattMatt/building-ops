@@ -16,8 +16,9 @@ vi.mock('@sentry/react', () => ({
   captureException,
 }));
 
-/** The shape PostHog hands `before_send`; only `properties` matters here. */
-type Captured = { properties: Record<string, unknown> };
+/** The shape PostHog hands `before_send`; only the property bags matter here. */
+type PropertyBag = Record<string, unknown>;
+type Captured = { properties: PropertyBag; $set?: PropertyBag; $set_once?: PropertyBag };
 type BeforeSend = (c: Captured | null) => Captured | null;
 
 /** Pull the `before_send` hook back out of the options PostHog's init was called with. */
@@ -115,6 +116,8 @@ describe('analytics', () => {
           autocapture: false,
           // 'history_change', not true: SPA route changes must count as pageviews.
           capture_pageview: 'history_change',
+          // PostHog strips location.hash itself, before before_send ever runs.
+          disable_capture_url_hashes: true,
           persistence: 'localStorage',
           before_send: expect.any(Function),
         }),
@@ -173,7 +176,7 @@ describe('analytics', () => {
   });
 
   describe('URL scrubbing is wired into the vendors', () => {
-    it("strips a token fragment from PostHog's $current_url before it is sent", async () => {
+    it("strips a token fragment from PostHog's event and person URL properties", async () => {
       vi.stubEnv('VITE_POSTHOG_KEY', 'phc_test123');
       const { initAnalytics } = await import('./analytics');
       await initAnalytics();
@@ -182,15 +185,30 @@ describe('analytics', () => {
       const result = beforeSend({
         properties: {
           $current_url: 'https://app.example.com/set-password#access_token=eyJ.abc&refresh_token=r3f',
-          $initial_current_url: 'https://app.example.com/reset#access_token=eyJ.def',
           $referrer: 'https://app.example.com/set-password#access_token=eyJ.ghi',
+          $pathname: '/set-password#access_token=eyJ.jkl',
           building_id: 42,
+          // Person properties ride along in their own bags. $initial_* is written once,
+          // so a token that lands here is attached to the person for good.
+          $set: { $current_url: 'https://app.example.com/reset#access_token=eyJ.mno' },
+          $set_once: {
+            $initial_current_url: 'https://app.example.com/reset#access_token=eyJ.def',
+            $initial_referrer: 'https://app.example.com/set-password#refresh_token=r3f',
+          },
         },
+        // The same two bags also exist at the top level of CaptureResult.
+        $set_once: { $initial_current_url: 'https://app.example.com/reset#access_token=eyJ.pqr' },
       });
 
       expect(result?.properties.$current_url).toBe('https://app.example.com/set-password');
-      expect(result?.properties.$initial_current_url).toBe('https://app.example.com/reset');
       expect(result?.properties.$referrer).toBe('https://app.example.com/set-password');
+      expect(result?.properties.$pathname).toBe('/set-password');
+      const set = result?.properties.$set as Record<string, unknown>;
+      const setOnce = result?.properties.$set_once as Record<string, unknown>;
+      expect(set.$current_url).toBe('https://app.example.com/reset');
+      expect(setOnce.$initial_current_url).toBe('https://app.example.com/reset');
+      expect(setOnce.$initial_referrer).toBe('https://app.example.com/set-password');
+      expect(result?.$set_once?.$initial_current_url).toBe('https://app.example.com/reset');
       // Nothing token-shaped survives anywhere in the payload.
       expect(JSON.stringify(result)).not.toContain('access_token');
       expect(JSON.stringify(result)).not.toContain('refresh_token');
@@ -222,6 +240,39 @@ describe('analytics', () => {
 
       // An event with no request block must survive untouched.
       expect(beforeSend({ message: 'boom' }, {})).toEqual({ message: 'boom' });
+    });
+
+    it("strips a token fragment from a Sentry navigation breadcrumb's from/to", async () => {
+      vi.stubEnv('VITE_SENTRY_DSN', 'https://public@sentry.example.com/1');
+      const { initAnalytics } = await import('./analytics');
+      await initAnalytics();
+
+      const { beforeSend } = sentryInit.mock.calls[0][0];
+      const event = beforeSend(
+        {
+          message: 'boom',
+          breadcrumbs: [
+            {
+              category: 'navigation',
+              data: {
+                from: 'https://app.example.com/set-password#access_token=eyJ.abc&refresh_token=r3f',
+                to: 'https://app.example.com/dashboard?building=42',
+              },
+            },
+            { category: 'fetch', data: { url: 'https://api.example.com/cb?access_token=a&page=2' } },
+            // A crumb with no data at all must survive the map untouched.
+            { category: 'console', message: 'hello' },
+          ],
+        },
+        {},
+      );
+
+      expect(event.breadcrumbs[0].data.from).toBe('https://app.example.com/set-password');
+      expect(event.breadcrumbs[0].data.to).toBe('https://app.example.com/dashboard?building=42');
+      expect(event.breadcrumbs[1].data.url).toBe('https://api.example.com/cb?page=2');
+      expect(event.breadcrumbs[2]).toEqual({ category: 'console', message: 'hello' });
+      expect(JSON.stringify(event)).not.toContain('access_token');
+      expect(JSON.stringify(event)).not.toContain('refresh_token');
     });
   });
 

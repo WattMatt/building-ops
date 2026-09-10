@@ -44,6 +44,9 @@ interface WaitingResult<T> {
   rows: T[];
 }
 
+/** The `reports` select above, before the joined building is flattened into the row. */
+type RawReportRow = Omit<SubmittedReportRow, 'building_name'> & { buildings: { name: string | null } | null };
+
 const ROW_LINK_FOCUS_CLASSES = 'focus-visible:ring-2 focus-visible:ring-ring rounded-lg';
 
 async function fetchSubmittedReports(): Promise<WaitingResult<SubmittedReportRow>> {
@@ -61,7 +64,7 @@ async function fetchSubmittedReports(): Promise<WaitingResult<SubmittedReportRow
 
   return {
     count: count ?? 0,
-    rows: (data ?? []).map((r: any) => ({
+    rows: ((data ?? []) as unknown as RawReportRow[]).map((r) => ({
       id: r.id,
       title: r.title,
       status: r.status,

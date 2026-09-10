@@ -3,23 +3,41 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
+/** Every filter call the hook makes against one table, recorded for assertions. */
+interface RecordedCall {
+  eq: [string, unknown][];
+  neq: [string, unknown][];
+  in: [string, unknown[]][];
+}
+
+/** The slice of PostgrestFilterBuilder these queries touch: filters chain, `order` resolves. */
+interface Chain {
+  select: () => Chain;
+  eq: (col: string, val: unknown) => Chain;
+  neq: (col: string, val: unknown) => Chain;
+  in: (col: string, vals: unknown[]) => Chain;
+  order: () => Promise<{ data: Record<string, unknown>[]; error: null }>;
+}
+
 const state = vi.hoisted(() => ({
-  tasksCalls: [] as { eq: [string, unknown][]; in: [string, unknown[]][] }[],
-  issuesCalls: [] as { eq: [string, unknown][]; neq: [string, unknown][] }[],
-  reportsCalls: [] as { eq: [string, unknown][] }[],
+  tasksCalls: [] as RecordedCall[],
+  issuesCalls: [] as RecordedCall[],
+  reportsCalls: [] as RecordedCall[],
   tasks: [] as Record<string, unknown>[],
   issues: [] as Record<string, unknown>[],
   reports: [] as Record<string, unknown>[],
+  /** Non-null makes the useMySignoffs mock report a failed load. */
+  signoffError: null as string | null,
 }));
 
 vi.mock('@/integrations/supabase/client', () => {
-  function makeChain(table: string) {
-    const call: any = { eq: [], neq: [], in: [] };
-    const chain: any = {
+  function makeChain(table: string): Chain {
+    const call: RecordedCall = { eq: [], neq: [], in: [] };
+    const chain: Chain = {
       select: () => chain,
-      eq: (col: string, val: unknown) => { call.eq.push([col, val]); return chain; },
-      neq: (col: string, val: unknown) => { call.neq.push([col, val]); return chain; },
-      in: (col: string, vals: unknown[]) => { call.in.push([col, vals]); return chain; },
+      eq: (col, val) => { call.eq.push([col, val]); return chain; },
+      neq: (col, val) => { call.neq.push([col, val]); return chain; },
+      in: (col, vals) => { call.in.push([col, vals]); return chain; },
       order: () => {
         if (table === 'task_instances') { state.tasksCalls.push(call); return Promise.resolve({ data: state.tasks, error: null }); }
         if (table === 'issues') { state.issuesCalls.push(call); return Promise.resolve({ data: state.issues, error: null }); }
@@ -32,11 +50,13 @@ vi.mock('@/integrations/supabase/client', () => {
 });
 
 vi.mock('@/integrations/supabase/fortress-db', () => {
-  function makeChain() {
-    const call: any = { eq: [] };
-    const chain: any = {
+  function makeChain(): Chain {
+    const call: RecordedCall = { eq: [], neq: [], in: [] };
+    const chain: Chain = {
       select: () => chain,
-      eq: (col: string, val: unknown) => { call.eq.push([col, val]); return chain; },
+      eq: (col, val) => { call.eq.push([col, val]); return chain; },
+      neq: (col, val) => { call.neq.push([col, val]); return chain; },
+      in: (col, vals) => { call.in.push([col, vals]); return chain; },
       order: () => { state.reportsCalls.push(call); return Promise.resolve({ data: state.reports, error: null }); },
     };
     return chain;
@@ -45,7 +65,7 @@ vi.mock('@/integrations/supabase/fortress-db', () => {
 });
 
 vi.mock('@/hooks/useMySignoffs', () => ({
-  useMySignoffs: () => ({ items: [], loading: false, reload: vi.fn() }),
+  useMySignoffs: () => ({ items: [], loading: false, error: state.signoffError, reload: vi.fn() }),
 }));
 
 vi.mock('@/hooks/useNotifications', () => ({
@@ -69,6 +89,7 @@ beforeEach(() => {
   state.tasks = [];
   state.issues = [];
   state.reports = [];
+  state.signoffError = null;
 });
 
 describe('useMyWork', () => {
@@ -131,6 +152,20 @@ describe('useMyWork', () => {
     expect(result.current.issues[0].building_name).toBe('Block B');
     expect(result.current.issues[0]).not.toHaveProperty('buildings');
 
+    expect(result.current.isEmpty).toBe(false);
+  });
+
+  // useMySignoffs is not a TanStack query, so its failure has to be folded in by hand.
+  // The regression this guards: a denied sign-off read used to render as a cheerful
+  // "you're all caught up" instead of an error.
+  it('reports a sign-off load failure as an error, not as an empty day', async () => {
+    state.signoffError = 'permission denied for table form_signoff_requests';
+
+    const { result } = renderHook(() => useMyWork(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.isError).toBe(true);
+    expect(result.current.error?.message).toBe('permission denied for table form_signoff_requests');
     expect(result.current.isEmpty).toBe(false);
   });
 });
