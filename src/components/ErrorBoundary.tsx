@@ -1,6 +1,7 @@
 /** Top-level error boundary: a runtime error renders a recoverable screen with a
  *  reload action instead of a blank white page. Keeps the app usable after a crash. */
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { reportError } from '@/lib/analytics';
 
 interface Props { children: ReactNode }
 interface State { error: Error | null }
@@ -13,8 +14,13 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    // Errors are reported to Sentry only when a DSN is configured (owner action,
+    // roadmap decision D8); with no DSN this is a no-op and the console is the only
+    // record. The component stack is truncated because oversized context gets dropped.
+    reportError(error, { componentStack: info.componentStack?.slice(0, 500) });
     if (import.meta.env.DEV) console.error('App crashed:', error, info);
-    // production: surface to the console for support; no PII sent anywhere.
+    // production: also surface to the console for support. Note the error message is
+    // whatever the throwing code put there, so it can carry user data either way.
     else console.error('App error:', error.message);
   }
 

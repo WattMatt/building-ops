@@ -104,6 +104,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setAuthError(false);
           setMustSetPassword(false);
           setOnboardingCompleted(true);
+          // Sessions also end without going through signOut() — an expired or revoked
+          // token, or a sign-out in another tab. Drop the analytics identity here too,
+          // so the next person on this browser is not attributed to the outgoing user.
+          resetAnalytics();
         }
       }
     );
