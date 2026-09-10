@@ -1,12 +1,13 @@
 /**
- * Client-side seam for in-app notifications. R1a records the intent; R1b replaces the body
- * with `supabase.functions.invoke('notify')` so the row lands in the recipient's inbox and
- * email fans out according to their preferences. Fire-and-forget: a failure to notify must
- * never fail the action that caused it.
+ * Client-side seam for in-app notifications. Calls the `notify` edge function so the row
+ * lands in the recipient's inbox and email fans out according to their preferences.
+ * Fire-and-forget: a failure to notify must never fail the action that caused it.
  *
  * Bulk task assignment sends one notification keyed on the first task id; the `url`
  * deep-links to the building's checklist tab, not to a single task.
  */
+import { supabase } from '@/integrations/supabase/client';
+
 export type NotificationKind =
   | 'task_assigned' | 'issue_assigned' | 'issue_comment' | 'issue_mention'
   | 'report_submitted' | 'report_returned' | 'report_approved'
@@ -28,7 +29,15 @@ export interface NotifyInput {
   url: string;
 }
 
+const ORG_WIDE: ReadonlySet<NotificationKind> = new Set(['report_submitted', 'form_submitted', 'signoff_overdue']);
+
+/** Fire-and-forget: a failure to notify must never fail the action that caused it. */
 export async function notify(input: NotifyInput): Promise<void> {
-  if (!input.recipients.length) return;
-  if (import.meta.env.DEV) console.info('[notify] (not wired yet)', input.kind, input.recipients.length, 'recipient(s)');
+  if (!input.recipients.length && !ORG_WIDE.has(input.kind)) return;
+  try {
+    const { error } = await supabase.functions.invoke('notify', { body: input });
+    if (error && import.meta.env.DEV) console.warn('[notify] failed:', error.message ?? error);
+  } catch (e) {
+    if (import.meta.env.DEV) console.warn('[notify] failed:', e);
+  }
 }

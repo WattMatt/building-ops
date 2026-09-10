@@ -8,6 +8,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { fdb, type Report, type ReportType, type ReportStatus, type FTableName } from '@/integrations/supabase/fortress-db';
 import { useAuth } from '@/contexts/AuthContext';
+import { notify } from '@/lib/notify';
 
 const REPORTS_KEY = ['fortress-reports'];
 
@@ -196,6 +197,17 @@ export function useReportLifecycle(reportId: string) {
     },
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: REPORTS_KEY });
+      const label = r.title ?? 'Building report';
+      const url = `/reports/fortress/${r.id}`;
+      if (r.status === 'submitted') {
+        void notify({ kind: 'report_submitted', entityType: 'report', entityId: r.id, buildingId: r.building_id, recipients: [], title: `Report submitted for review: ${label}`, url });
+      } else if ((r.status === 'rejected' || r.status === 'approved') && r.author_id && r.author_id !== user?.id) {
+        void notify({
+          kind: r.status === 'rejected' ? 'report_returned' : 'report_approved', entityType: 'report', entityId: r.id, buildingId: r.building_id,
+          recipients: [r.author_id], title: r.status === 'rejected' ? `Report returned: ${label}` : `Report approved: ${label}`,
+          body: r.status === 'rejected' ? (r.review_notes ?? undefined) : undefined, url,
+        });
+      }
       const verb: Record<string, string> = {
         submitted: 'submitted for review',
         reviewed: 'marked reviewed',
