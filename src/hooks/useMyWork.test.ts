@@ -155,6 +155,18 @@ describe('useMyWork', () => {
     expect(result.current.isEmpty).toBe(false);
   });
 
+  it('opts its queries into the offline read cache', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const ownWrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children);
+    const { result } = renderHook(() => useMyWork(), { wrapper: ownWrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    for (const key of [['my-work', 'tasks', 'me'], ['my-work', 'issues', 'me'], ['my-work', 'returned-reports', 'me']]) {
+      const q = client.getQueryCache().find({ queryKey: key });
+      expect(q?.meta?.persist, key.join('/')).toBe(true);
+      expect(q?.options.networkMode, key.join('/')).toBe('offlineFirst');
+    }
+  });
+
   // useMySignoffs is not a TanStack query, so its failure has to be folded in by hand.
   // The regression this guards: a denied sign-off read used to render as a cheerful
   // "you're all caught up" instead of an error.

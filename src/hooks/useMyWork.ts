@@ -11,6 +11,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useMySignoffs } from '@/hooks/useMySignoffs';
 import { useNotifications } from '@/hooks/useNotifications';
 import { bucketTasks, todayInOperatingTz, type MyTask } from '@/lib/myWork';
+import { PERSIST_DEFAULTS } from '@/lib/persist';
 import type { IssuePriority, IssueStatus } from '@/lib/constants';
 
 export interface MyIssue { id: string; title: string; priority: IssuePriority; status: IssueStatus; deadline: string | null; building_id: string; building_name: string; created_at: string; reported_by: string; assigned_to: string | null; description: string; corrective_action: string | null; photo_urls: string[] | null; task_instance_id: string | null }
@@ -29,6 +30,7 @@ export function useMyWork() {
 
   const tasks = useQuery({
     queryKey: ['my-work', 'tasks', uid],
+    ...PERSIST_DEFAULTS,
     enabled: !!uid,
     queryFn: async (): Promise<MyTask[]> => {
       if (!uid) return [];
@@ -42,6 +44,7 @@ export function useMyWork() {
 
   const issues = useQuery({
     queryKey: ['my-work', 'issues', uid],
+    ...PERSIST_DEFAULTS,
     enabled: !!uid,
     queryFn: async (): Promise<MyIssue[]> => {
       const { data, error } = await supabase.from('issues')
@@ -54,6 +57,7 @@ export function useMyWork() {
 
   const returned = useQuery({
     queryKey: ['my-work', 'returned-reports', uid],
+    ...PERSIST_DEFAULTS,
     enabled: !!uid,
     queryFn: async (): Promise<ReturnedReport[]> => {
       const { data, error } = await fdb.from('reports').select('id, title, building_id, report_period, review_notes')

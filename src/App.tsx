@@ -1,8 +1,7 @@
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { queryClient } from "@/lib/queryClient";
+import { PersistedQueryProvider } from "@/components/PersistedQueryProvider";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { HintsProvider } from "@/hooks/useHints";
@@ -39,7 +38,7 @@ import NotFound from "./pages/NotFound";
 
 const App = () => (
   <ErrorBoundary>
-  <QueryClientProvider client={queryClient}>
+  <PersistedQueryProvider>
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
       <TooltipProvider>
         <Toaster />
@@ -164,7 +163,7 @@ const App = () => (
         </BrowserRouter>
       </TooltipProvider>
     </ThemeProvider>
-  </QueryClientProvider>
+  </PersistedQueryProvider>
   </ErrorBoundary>
 );
 

@@ -1,3 +1,4 @@
+import 'fake-indexeddb/auto';
 import "@testing-library/jest-dom";
 
 // This jsdom setup exposes no Web Storage (and Node's own `localStorage` global is

@@ -7,6 +7,7 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { PERSIST_DEFAULTS } from '@/lib/persist';
 
 export interface BuildingMember {
   id: string;
@@ -22,6 +23,7 @@ export function memberDisplayName(m: BuildingMember): string {
 export function useBuildingMembers(buildingId: string | undefined) {
   const query = useQuery({
     queryKey: ['building-members', buildingId],
+    ...PERSIST_DEFAULTS,
     enabled: !!buildingId,
     staleTime: 60 * 1000,
     queryFn: async (): Promise<BuildingMember[]> => {
