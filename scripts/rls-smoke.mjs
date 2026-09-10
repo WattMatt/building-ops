@@ -34,6 +34,12 @@
  *                    access, no client writes; snapshot_building_metrics / mark_sla_breaches / delete_empty_report /
  *                    expiring_items never anon; delete_empty_report admin only; media_attachments admin only;
  *                    a user with two user_roles rows still passes is_admin_or_manager (21000 fix)
+ *   R4b "Distribute"→ report_schedules admin/manager CRUD, insert only as oneself, recipients shape CHECKed,
+ *                    run bookkeeping (last_run_on / last_result) service-role only by column privilege;
+ *                    report_shares admin/manager with building access: create only without a passcode and
+ *                    with zero counters, on an artifact of that very report (trigger), revoke only, never
+ *                    delete; report_distributions read-only for admin/manager; none of the three nor
+ *                    report_recipients_valid reachable by anon
  *
  * Personas: admin, manager, userA (user role, assigned building A only),
  * userB (user role, assigned building B only). userA probing building B
@@ -820,6 +826,84 @@ try {
       throw new Error(`fixture insert user_roles: HTTP ${secondRole.status} ${await secondRole.text()}`);
     }
     console.log('  R4a (organizations, branding view, building_metrics_daily, SLA sweep, delete_empty_report, expiring_items, media_attachments, two-role user): done');
+  }
+
+  // ════ R4b "Distribute": report_schedules, report_shares, report_distributions, report_recipients_valid ════
+  {
+    const mintToken = () => { const b = new Uint8Array(32); crypto.getRandomValues(b); return Buffer.from(b).toString('base64url'); };
+    const in30d = () => new Date(Date.now() + 30 * 86_400_000).toISOString();
+    const recipients = [{ email: `zztest-rls-${RUN}@example.invalid` }];
+    // Fixtures (service role): a schedule owned by the admin persona; an approved report on A with an issued
+    // artifact row, plus a report on B with its own artifact for the cross-report trigger probe.
+    const sched = (await svcInsert('report_schedules', { report_type: 'ops_monthly', building_ids: [A], recipients, created_by: personas.admin.id })).id;
+    cleanup.push(['report_schedules', sched]);
+    // schedules
+    await probeMatrix('report_schedules select', adminMgr(), (jwt) => canSelect(jwt, 'report_schedules', sched));
+    await probeMatrix('report_schedules insert (created_by = caller)', adminMgr(), (jwt, who) => canInsert(jwt, 'report_schedules', { report_type: 'cm_monthly', building_ids: [A], recipients, created_by: personas[who].id }));
+    await probeMatrix('report_schedules insert with a foreign created_by', nobody(), (jwt, who) => canInsert(jwt, 'report_schedules', { report_type: 'cm_monthly', building_ids: [A], recipients, created_by: who === 'admin' ? personas.manager.id : personas.admin.id }));
+    await probeMatrix('report_schedules insert with an invalid recipient (CHECK)', nobody(), (jwt, who) => canInsert(jwt, 'report_schedules', { report_type: 'cm_monthly', building_ids: [A], recipients: [{ email: 'nope' }], created_by: personas[who].id }));
+    await probeMatrix('report_schedules update send_day', adminMgr(), (jwt) => canUpdate(jwt, 'report_schedules', sched, { send_day: 9 }));
+    await probeMatrix('report_schedules update last_run_on (column privilege)', nobody(), (jwt) => canUpdate(jwt, 'report_schedules', sched, { last_run_on: '2030-01-01' }));
+    {
+      // A denied column privilege must be a real HTTP refusal (42501 → 4xx), not a 200 with zero rows.
+      const res = await fetch(`${URL_BASE}/rest/v1/report_schedules?id=eq.${sched}`, { method: 'PATCH', headers: { ...authed(personas.admin.jwt), Prefer: 'return=representation' }, body: JSON.stringify({ last_result: { ok: true } }) });
+      assert('report_schedules update last_result as admin is an HTTP refusal', res.status >= 400 && res.status < 500, `HTTP ${res.status}`);
+    }
+    await probeMatrix('report_schedules delete', adminMgr(), async (jwt) => {
+      const row = (await svcInsert('report_schedules', { report_type: 'annual_inspection', building_ids: [B], recipients, created_by: personas.admin.id })).id;
+      const got = await canDelete(jwt, 'report_schedules', row);
+      if (!got) await svcDelete('report_schedules', row);
+      return got;
+    });
+    // shares + distributions need an artifact row, which needs an organizations row to own it.
+    const orgRow = (await (await fetch(`${URL_BASE}/rest/v1/organizations?select=id&limit=1`, { headers: SVC })).json())[0];
+    if (orgRow?.id) {
+      const repA = (await svcInsert('reports', { building_id: A, report_type: 'ops_monthly', report_period: '2029-03-01', status: 'approved', title: `ZZTEST-RLS-share-A-${RUN}` })).id;
+      cleanup.push(['reports', repA]);
+      const repB = (await svcInsert('reports', { building_id: B, report_type: 'ops_monthly', report_period: '2029-03-01', status: 'approved', title: `ZZTEST-RLS-share-B-${RUN}` })).id;
+      cleanup.push(['reports', repB]);
+      const mkArtifact = async (reportId, bid, tag) => (await svcInsert('report_artifacts', {
+        org_id: orgRow.id, kind: 'fortress_ops_monthly', source_id: reportId, building_id: bid, version: 1,
+        file_path: `zztest-rls/${RUN}/${tag}.pdf`, file_name: `ZZTEST-RLS-${tag}-${RUN}.pdf`, size_bytes: 0, generated_by: personas.admin.id, status: 'issued', report_status: 'approved',
+      })).id;
+      const artA = await mkArtifact(repA, A, 'a');
+      cleanup.push(['report_artifacts', artA]);
+      const artB = await mkArtifact(repB, B, 'b');
+      cleanup.push(['report_artifacts', artB]);
+      const shareA = (await svcInsert('report_shares', { report_id: repA, artifact_id: artA, token: mintToken(), created_by: personas.admin.id, expires_at: in30d() })).id;
+      cleanup.push(['report_shares', shareA]);
+      const shareRow = (who, extra = {}) => ({ report_id: repA, artifact_id: artA, token: mintToken(), created_by: personas[who].id, expires_at: in30d(), ...extra });
+      await probeMatrix('report_shares[A] insert (own, no passcode)', adminMgr(), (jwt, who) => canInsert(jwt, 'report_shares', shareRow(who)));
+      await probeMatrix('report_shares[A] insert with a passcode_hash', nobody(), (jwt, who) => canInsert(jwt, 'report_shares', shareRow(who, { passcode_hash: 'x' })));
+      await probeMatrix('report_shares[A] insert with a non-zero view_count', nobody(), (jwt, who) => canInsert(jwt, 'report_shares', shareRow(who, { view_count: 1 })));
+      await probeMatrix('report_shares[A] insert as someone else', nobody(), (jwt, who) => canInsert(jwt, 'report_shares', shareRow(who, { created_by: who === 'admin' ? personas.manager.id : personas.admin.id })));
+      await probeMatrix("report_shares[A] insert with another report's artifact (trigger 23514)", nobody(), (jwt, who) => canInsert(jwt, 'report_shares', shareRow(who, { artifact_id: artB })));
+      await probeMatrix('report_shares[A] select', adminMgr(), (jwt) => canSelect(jwt, 'report_shares', shareA));
+      await probeMatrix('report_shares[A] update revoked_at', adminMgr(), (jwt) => canUpdate(jwt, 'report_shares', shareA, { revoked_at: null }));
+      await probeMatrix('report_shares[A] update view_count (column privilege)', nobody(), (jwt) => canUpdate(jwt, 'report_shares', shareA, { view_count: 5 }));
+      await probeMatrix('report_shares[A] update expires_at (column privilege)', nobody(), (jwt) => canUpdate(jwt, 'report_shares', shareA, { expires_at: in30d() }));
+      await probeMatrix('report_shares[A] delete', nobody(), (jwt) => canDelete(jwt, 'report_shares', shareA));
+      const dist = (await svcInsert('report_distributions', { schedule_id: sched, report_id: repA, building_id: A, report_period: '2029-03-01', artifact_id: artA, share_id: shareA, status: 'sent', sent_to: [] })).id;
+      cleanup.push(['report_distributions', dist]);
+      await probeMatrix('report_distributions select', adminMgr(), (jwt) => canSelect(jwt, 'report_distributions', dist));
+      await probeMatrix('report_distributions insert', nobody(), (jwt) => canInsert(jwt, 'report_distributions', { schedule_id: sched, report_period: '2029-03-01', status: 'sent' }));
+      await probeMatrix('report_distributions update', nobody(), (jwt) => canUpdate(jwt, 'report_distributions', dist, { status: 'failed' }));
+      await probeMatrix('report_distributions delete', nobody(), (jwt) => canDelete(jwt, 'report_distributions', dist));
+    } else {
+      skip('report_shares / report_distributions probes', 'no organizations row to own a report_artifacts fixture');
+    }
+    // anon: apikey only, no JWT — every one of the three tables and the recipients function is refused.
+    for (const table of ['report_schedules', 'report_shares', 'report_distributions']) {
+      const res = await fetch(`${URL_BASE}/rest/v1/${table}?select=id&limit=1`, { headers: { apikey: ANON } });
+      assert(`${table} not readable by anon`, !res.ok, `expected a non-2xx, got HTTP ${res.status}`);
+    }
+    {
+      const anonFn = await rpcCall(null, 'report_recipients_valid', { p: [] });
+      assert('report_recipients_valid not executable by anon', anonFn.status === 401 || anonFn.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${anonFn.status}`);
+      const authFn = await rpcCall(personas.userA.jwt, 'report_recipients_valid', { p: [{ email: 'nope' }] });
+      assert('report_recipients_valid answers a signed-in user (false for a bad address)', authFn.ok && authFn.body === false, `HTTP ${authFn.status} ${JSON.stringify(authFn.body)}`);
+    }
+    console.log('  R4b distribute (report_schedules, report_shares, report_distributions, report_recipients_valid): done');
   }
 
 } catch (e) {

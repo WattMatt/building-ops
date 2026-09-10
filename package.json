@@ -17,7 +17,8 @@
     "smoke:ppm": "node scripts/ppm-smoke.mjs",
     "smoke:snapshot": "node scripts/snapshot-smoke.mjs",
     "smoke:offline": "VITE_SUPABASE_URL=$SUPABASE_URL VITE_SUPABASE_PUBLISHABLE_KEY=$SUPABASE_ANON_KEY npx vite-node scripts/offline-smoke.ts",
-    "smoke:calendar": "node scripts/calendar-smoke.mjs"
+    "smoke:calendar": "node scripts/calendar-smoke.mjs",
+    "smoke:distribution": "node scripts/distribution-smoke.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -60,6 +61,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^3.6.0",
     "embla-carousel-react": "^8.6.0",
+    "fflate": "^0.8.3",
     "heic2any": "^0.0.4",
     "idb-keyval": "^6.3.0",
     "input-otp": "^1.4.2",
