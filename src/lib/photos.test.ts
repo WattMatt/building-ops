@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 type UploadOpts = { contentType?: string; upsert?: boolean };
 const storage = vi.hoisted(() => ({
   buckets: [] as string[],
-  upload: vi.fn(async (_path: string, _file: File, _opts?: UploadOpts): Promise<{ error: { message: string } | null }> => ({ error: null })),
+  upload: vi.fn<(path: string, file: File, opts?: UploadOpts) => Promise<{ error: { message: string } | null }>>(async () => ({ error: null })),
 }));
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {

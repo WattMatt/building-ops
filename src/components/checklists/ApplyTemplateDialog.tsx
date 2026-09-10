@@ -113,10 +113,9 @@ export default function ApplyTemplateDialog({
     try {
       let totalCreated = 0;
       for (const buildingId of selectedBuildings) {
-        // generate_scheduled_tasks is not yet in the generated types; regenerate after the migration ships.
-        const { data, error } = await supabase.rpc('generate_scheduled_tasks' as never, { p_building: buildingId, p_template: template.id } as never);
+        const { data, error } = await supabase.rpc('generate_scheduled_tasks', { p_building: buildingId, p_template: template.id });
         if (error) throw new Error(error.message);
-        totalCreated += (data as unknown as number) ?? 0;
+        totalCreated += data ?? 0;
       }
 
       if (totalCreated > 0) {

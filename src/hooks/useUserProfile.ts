@@ -1,14 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 
-interface UserProfile {
-  full_name: string | null;
-  avatar_url: string | null;
-  phone: string | null;
-  email: string;
-  geotag_photos: boolean | null;
-}
+type UserProfile = Pick<Tables<'profiles'>, 'full_name' | 'avatar_url' | 'phone' | 'email' | 'geotag_photos'>;
 
 export function useUserProfile() {
   const { user } = useAuth();
@@ -24,15 +19,14 @@ export function useUserProfile() {
 
     const fetchProfile = async () => {
       try {
-        // geotag_photos is not yet in the generated types; regenerate after the migration ships.
         const { data, error } = await supabase
           .from('profiles')
-          .select('full_name, avatar_url, phone, email, geotag_photos' as 'full_name, avatar_url, phone, email')
+          .select('full_name, avatar_url, phone, email, geotag_photos')
           .eq('id', user.id)
           .maybeSingle();
 
         if (error) throw error;
-        setProfile(data as UserProfile | null);
+        setProfile(data);
       } catch (error) {
         console.error('Error fetching profile:', error);
       } finally {

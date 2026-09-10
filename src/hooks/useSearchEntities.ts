@@ -33,9 +33,10 @@ export function useSearchEntities(q: string) {
     enabled: debounced.length >= MIN_CHARS,
     staleTime: 30_000,
     queryFn: async () => {
-      // search_entities is not yet in the generated types; regenerate after the migration ships.
-      const { data, error } = await supabase.rpc('search_entities' as never, { q: debounced, lim: 20 } as never);
+      const { data, error } = await supabase.rpc('search_entities', { q: debounced, lim: 20 });
       if (error) throw error;
+      // The function returns `kind` as plain text and `subtitle` as non-null text; the literal
+      // union and nullable subtitle are the app's contract, so narrow once here.
       return (data ?? []) as SearchHit[];
     },
   });

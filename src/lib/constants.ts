@@ -3,8 +3,6 @@
  * Centralized to avoid duplication across components
  */
 
-import type { Database } from '@/integrations/supabase/types';
-
 // Type exports from database
 // AppRole is defined here (single source of truth) rather than derived from
 // Database['public']['Enums']: production has NO app_role enum — user_roles.role
@@ -16,10 +14,14 @@ export type AppRole = 'admin' | 'manager' | 'user' | 'reviewer';
 // Privilege order for deriving a user's effective role when user_roles holds
 // multiple rows (highest wins). Index 0 = most privileged.
 export const ROLE_PRECEDENCE: readonly AppRole[] = ['admin', 'manager', 'reviewer', 'user'] as const;
-export type TaskFrequency = Database['public']['Enums']['task_frequency'];
-export type TaskStatus = Database['public']['Enums']['task_status'];
-export type IssuePriority = Database['public']['Enums']['issue_priority'];
-export type IssueStatus = Database['public']['Enums']['issue_status'];
+
+// Production has NO Postgres enums for these either — the columns are plain text guarded by
+// check constraints (supabase/schema/2026-08-04_04_enum_check_constraints.sql). The literal
+// unions below mirror those constraints; a Database['public']['Enums'] lookup collapses to `any`.
+export type TaskFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually';
+export type TaskStatus = 'pending' | 'completed' | 'overdue' | 'issue_logged';
+export type IssuePriority = 'low' | 'medium' | 'high' | 'critical';
+export type IssueStatus = 'open' | 'in_progress' | 'escalated' | 'resolved';
 
 // Frequency display labels
 export const FREQUENCY_LABELS: Record<TaskFrequency, string> = {

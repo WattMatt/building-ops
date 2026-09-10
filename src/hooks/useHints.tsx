@@ -97,8 +97,7 @@ export function HintsProvider({ children }: { children: ReactNode }) {
       if (user?.id) {
         void supabase
           .from('profiles')
-          // show_hints is not yet in the generated types; regenerate after the migration ships.
-          .update({ show_hints: on } as never)
+          .update({ show_hints: on })
           .eq('id', user.id)
           .then(({ error }) => {
             if (error && import.meta.env.DEV) {

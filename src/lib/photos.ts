@@ -1,7 +1,10 @@
 /**
  * The one upload path for evidence photos. Non-admins may only write photos/<uid>/… in the
  * private tenant-documents bucket (storage policy "td write own photos"); annual inspection
- * photos live under documents/<building>/annual/<section>/ and are written by admins/managers.
+ * photos live under documents/<building>/annual/<section>/ and may be written by anyone who
+ * passes `can_access_building` for that building (storage policy "td write building docs").
+ * Overwriting an existing object (`upsert: true`) needs the update policy, which is
+ * admin/manager-only — a non-admin retry must use a fresh path.
  * Public-style URLs are stored by convention and re-signed on read by SignedImage. A failure
  * throws — silently dropping compliance evidence the user believes they attached is worse than
  * a failed submit.

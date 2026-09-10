@@ -19,14 +19,13 @@ export function useGeotagPreference(): boolean {
     enabled: !!user?.id,
     staleTime: 60_000,
     queryFn: async () => {
-      // geotag_photos is not yet in the generated types; regenerate after the migration ships.
       const { data, error } = await supabase
         .from('profiles')
-        .select('geotag_photos' as 'id')
+        .select('geotag_photos')
         .eq('id', user!.id)
         .maybeSingle();
       if (error) throw error;
-      return !!(data as { geotag_photos?: boolean | null } | null)?.geotag_photos;
+      return !!data?.geotag_photos;
     },
   });
   return data ?? false;

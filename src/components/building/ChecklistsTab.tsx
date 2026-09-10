@@ -209,10 +209,10 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
   };
 
   const generate = async (frequency?: TaskFrequency) => {
-    // generate_scheduled_tasks is not yet in the generated types; regenerate after the migration ships.
-    const { data, error } = await supabase.rpc('generate_scheduled_tasks' as never, { p_building: buildingId, p_frequency: frequency ?? null } as never);
+    // An omitted p_frequency is dropped from the JSON body, so the function sees its `default null`.
+    const { data, error } = await supabase.rpc('generate_scheduled_tasks', { p_building: buildingId, p_frequency: frequency });
     if (error) throw new Error(error.message);
-    return (data as unknown as number) ?? 0;
+    return data ?? 0;
   };
 
   const handleGenerateTasks = async () => {
@@ -338,7 +338,7 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
       {/* Frequency Tabs */}
       <Tabs value={selectedFrequency} onValueChange={v => setSelectedFrequency(v as TaskFrequency)}>
         <TabsList className="grid w-full grid-cols-5">
-          {(ALL_FREQUENCIES as TaskFrequency[]).map(freq => {
+          {ALL_FREQUENCIES.map(freq => {
             const count = tasks.filter(t => t.frequency === freq).length;
             return (
               <TabsTrigger key={freq} value={freq} className="relative">

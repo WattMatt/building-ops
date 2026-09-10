@@ -2245,6 +2245,7 @@ export type Database = {
           email: string | null
           email_notifications: boolean | null
           full_name: string | null
+          geotag_photos: boolean
           id: string
           issue_updates: boolean | null
           must_set_password: boolean
@@ -2263,6 +2264,7 @@ export type Database = {
           email?: string | null
           email_notifications?: boolean | null
           full_name?: string | null
+          geotag_photos?: boolean
           id: string
           issue_updates?: boolean | null
           must_set_password?: boolean
@@ -2281,6 +2283,7 @@ export type Database = {
           email?: string | null
           email_notifications?: boolean | null
           full_name?: string | null
+          geotag_photos?: boolean
           id?: string
           issue_updates?: boolean | null
           must_set_password?: boolean
@@ -2292,6 +2295,50 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: []
+      }
+      push_subscriptions: {
+        Row: {
+          auth: string
+          created_at: string
+          endpoint: string
+          failed_at: string | null
+          id: string
+          last_seen_at: string
+          p256dh: string
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          auth: string
+          created_at?: string
+          endpoint: string
+          failed_at?: string | null
+          id?: string
+          last_seen_at?: string
+          p256dh: string
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          auth?: string
+          created_at?: string
+          endpoint?: string
+          failed_at?: string | null
+          id?: string
+          last_seen_at?: string
+          p256dh?: string
+          user_agent?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "push_subscriptions_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       report_artifacts: {
         Row: {
@@ -3870,11 +3917,29 @@ export type Database = {
         }[]
       }
       can_access_building: { Args: { b: string }; Returns: boolean }
+      complete_task: {
+        Args: {
+          p_completion_id: string
+          p_notes?: string
+          p_photo_urls?: Json
+          p_signature_confirmed?: boolean
+          p_task_instance_id: string
+        }
+        Returns: {
+          already_completed: boolean
+          completion_id: string
+        }[]
+      }
       delete_own_account: { Args: never; Returns: undefined }
       generate_certificate_renewal_tasks: { Args: never; Returns: number }
+      generate_scheduled_tasks: {
+        Args: { p_building?: string; p_frequency?: string; p_template?: string }
+        Returns: number
+      }
       is_active_user: { Args: never; Returns: boolean }
       is_admin: { Args: never; Returns: boolean }
       is_admin_or_manager: { Args: never; Returns: boolean }
+      mark_overdue_tasks: { Args: never; Returns: number }
       postgres_fdw_disconnect: { Args: { "": string }; Returns: boolean }
       postgres_fdw_disconnect_all: { Args: never; Returns: boolean }
       postgres_fdw_get_connections: {
@@ -3887,6 +3952,20 @@ export type Database = {
         Returns: Json
       }
       revoke_user_sessions: { Args: { p_user_id: string }; Returns: number }
+      scheduled_due_date: {
+        Args: { p_frequency: string; p_today: string }
+        Returns: string
+      }
+      search_entities: {
+        Args: { lim?: number; q: string }
+        Returns: {
+          building_id: string
+          id: string
+          kind: string
+          subtitle: string
+          title: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 import { queryClient } from '@/lib/queryClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -28,18 +29,12 @@ import { gatePassword } from '@/lib/password-strength';
 import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare, Upload, Lock, Eye, EyeOff, Trash2, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 
-interface ProfileData {
-  full_name: string | null;
-  avatar_url: string | null;
-  phone: string | null;
-  email: string;
-  email_notifications: boolean | null;
-  overdue_alerts: boolean | null;
-  daily_digest: boolean | null;
-  issue_updates: boolean | null;
-  task_reminders: boolean | null;
-  geotag_photos: boolean | null;
-}
+type ProfileData = Pick<
+  Tables<'profiles'>,
+  | 'full_name' | 'avatar_url' | 'phone' | 'email'
+  | 'email_notifications' | 'overdue_alerts' | 'daily_digest' | 'issue_updates' | 'task_reminders'
+  | 'geotag_photos'
+>;
 
 export default function Profile() {
   const { user, signOut } = useAuth();
@@ -81,16 +76,13 @@ export default function Profile() {
     const fetchProfile = async () => {
       setIsLoading(true);
       try {
-        const cols = 'full_name, avatar_url, phone, email, email_notifications, overdue_alerts, daily_digest, issue_updates, task_reminders';
-        // geotag_photos is not yet in the generated types; regenerate after the migration ships.
-        const { data: raw, error } = await supabase
+        const { data, error } = await supabase
           .from('profiles')
-          .select(`${cols}, geotag_photos` as typeof cols)
+          .select('full_name, avatar_url, phone, email, email_notifications, overdue_alerts, daily_digest, issue_updates, task_reminders, geotag_photos')
           .eq('id', userId)
           .maybeSingle();
 
         if (error) throw error;
-        const data = raw as ProfileData | null;
 
         if (data && !cancelled) {
           setProfile(data);
@@ -158,7 +150,6 @@ export default function Profile() {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        // geotag_photos is not yet in the generated types; regenerate after the migration ships.
         .update({
           email_notifications: emailNotifications,
           overdue_alerts: overdueAlerts,
@@ -167,7 +158,7 @@ export default function Profile() {
           task_reminders: taskReminders,
           geotag_photos: geotagPhotos,
           updated_at: new Date().toISOString(),
-        } as Record<string, unknown>)
+        })
         .eq('id', user.id)
         .select('id');
 
