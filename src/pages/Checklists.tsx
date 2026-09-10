@@ -56,24 +56,20 @@ import ApplyTemplateDialog from '@/components/checklists/ApplyTemplateDialog';
 import TemplateDialog, { archiveTemplate } from '@/components/checklists/TemplateDialog';
 import PreviewTemplateDialog, { type PreviewItem } from '@/components/checklists/PreviewTemplateDialog';
 import { categoryMeta, BUILDING_TYPES } from '@/lib/compliance';
-import { describeRule, type RecurrenceRule } from '@/lib/recurrence';
+import { describeRule, isValidRule, type RecurrenceRule } from '@/lib/recurrence';
+import type { Tables } from '@/integrations/supabase/types';
 
 type TaskFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually';
 
-interface Template {
-  id: string;
-  name: string;
-  description: string | null;
+/**
+ * A `checklist_templates` row as the page uses it. The DB types `frequency` as any string
+ * (a check constraint pins the five buckets) and `recurrence` as jsonb; both are narrowed once
+ * in `fetchData`. `archived_at` set = archived: hidden by default, no new tasks, never deleted.
+ */
+interface Template extends Omit<Tables<'checklist_templates'>, 'frequency' | 'recurrence'> {
   frequency: TaskFrequency;
-  responsible_role: string;
-  is_active: boolean;
-  organization_id: string;
-  applies_to_building_types: string[] | null;
   /** null = legacy five-bucket schedule driven by `frequency`. */
   recurrence: RecurrenceRule | null;
-  /** Set = archived: hidden by default, no new tasks generated, never deleted. */
-  archived_at: string | null;
-  version: number;
 }
 
 interface TemplateItem {
@@ -192,8 +188,12 @@ export default function Checklists() {
 
       if (itemsError) throw itemsError;
 
-      // recurrence/archived_at/version are not yet in the generated types; regenerate after the migration ships.
-      setTemplates((templatesData || []) as unknown as Template[]);
+      // jsonb → RecurrenceRule after isValidRule (anything else reads as the legacy bucket); frequency string → TaskFrequency per the check constraint.
+      setTemplates((templatesData ?? []).map((t) => ({
+        ...t,
+        frequency: t.frequency as TaskFrequency,
+        recurrence: isValidRule(t.recurrence) ? t.recurrence : null,
+      })));
       setItems(
         (itemsData || []).map((item) => ({
           ...item,

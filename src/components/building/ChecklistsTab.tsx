@@ -50,7 +50,6 @@ import { RoleAssignmentsPanel } from '@/components/building/RoleAssignmentsPanel
 import { UpcomingTasks, HORIZON_DAYS, groupUpcoming } from '@/components/building/UpcomingTasks';
 import { todayInOperatingTz } from '@/lib/myWork';
 import { ALL_FREQUENCIES } from '@/lib/taskSchedule';
-import type { Database } from '@/integrations/supabase/types';
 
 /** Days ahead the on-demand generate buttons fill (the nightly job uses its own horizon). */
 const GENERATE_HORIZON_DAYS = 90;
@@ -245,9 +244,11 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
 
   const generate = async (frequency?: TaskFrequency) => {
     // An omitted p_frequency is dropped from the JSON body, so the function sees its `default null`.
-    // p_horizon_days is not yet in the generated types; regenerate after the migration ships.
-    const args = { p_building: buildingId, p_frequency: frequency, p_horizon_days: GENERATE_HORIZON_DAYS } as Database['public']['Functions']['generate_scheduled_tasks']['Args'];
-    const { data, error } = await supabase.rpc('generate_scheduled_tasks', args);
+    const { data, error } = await supabase.rpc('generate_scheduled_tasks', {
+      p_building: buildingId,
+      p_frequency: frequency,
+      p_horizon_days: GENERATE_HORIZON_DAYS,
+    });
     if (error) throw new Error(error.message);
     return data ?? 0;
   };

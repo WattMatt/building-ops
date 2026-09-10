@@ -18,7 +18,6 @@ import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
-import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 import {
   ResponsiveDialog,
   ResponsiveDialogContent,
@@ -112,8 +111,7 @@ export const effectiveRule = (t: EditableTemplate | null): RecurrenceRule =>
 export async function archiveTemplate(id: string, archive: boolean): Promise<void> {
   const { data, error } = await supabase
     .from('checklist_templates')
-    // recurrence/archived_at/version are not yet in the generated types; regenerate after the migration ships.
-    .update({ archived_at: archive ? new Date().toISOString() : null } as TablesUpdate<'checklist_templates'>)
+    .update({ archived_at: archive ? new Date().toISOString() : null })
     .eq('id', id)
     .select('id');
   if (error) throw new Error(error.message);
@@ -123,14 +121,9 @@ export async function archiveTemplate(id: string, archive: boolean): Promise<voi
 type RescheduleResult = { deleted: number; generated: number };
 
 async function rescheduleTemplate(templateId: string): Promise<RescheduleResult> {
-  // reschedule_template is not yet in the generated types; regenerate after the migration ships.
-  const rpc = supabase.rpc as unknown as (
-    fn: string,
-    args: Record<string, unknown>,
-  ) => PromiseLike<{ data: unknown; error: { message: string } | null }>;
-  const { data, error } = await rpc('reschedule_template', { p_template: templateId });
+  const { data, error } = await supabase.rpc('reschedule_template', { p_template: templateId });
   if (error) throw new Error(error.message);
-  const row = (Array.isArray(data) ? data[0] : data) as Partial<RescheduleResult> | null | undefined;
+  const row = data?.[0];
   return { deleted: row?.deleted ?? 0, generated: row?.generated ?? 0 };
 }
 
@@ -225,8 +218,7 @@ export default function TemplateDialog({ open, onOpenChange, template, onSaved, 
       if (template) {
         const { data, error } = await supabase
           .from('checklist_templates')
-          // recurrence/archived_at/version are not yet in the generated types; regenerate after the migration ships.
-          .update(fields as TablesUpdate<'checklist_templates'>)
+          .update(fields)
           .eq('id', template.id)
           .select('id');
         if (error) throw new Error(error.message);
@@ -248,8 +240,7 @@ export default function TemplateDialog({ open, onOpenChange, template, onSaved, 
       if (!organization_id) throw new Error('No organisation found to file this template under.');
       const { data, error } = await supabase
         .from('checklist_templates')
-        // recurrence/archived_at/version are not yet in the generated types; regenerate after the migration ships.
-        .insert({ ...fields, organization_id } as TablesInsert<'checklist_templates'>)
+        .insert({ ...fields, organization_id })
         .select('id');
       if (error) throw new Error(error.message);
       if (!data || data.length === 0) throw new Error('You do not have permission to create templates.');

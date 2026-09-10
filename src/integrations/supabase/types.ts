@@ -336,6 +336,42 @@ export type Database = {
           },
         ]
       }
+      building_role_assignments: {
+        Row: {
+          building_id: string
+          role: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          building_id: string
+          role: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          building_id?: string
+          role?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "building_role_assignments_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "building_role_assignments_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       building_tenants: {
         Row: {
           area: string | null
@@ -658,6 +694,7 @@ export type Database = {
       checklist_templates: {
         Row: {
           applies_to_building_types: string[] | null
+          archived_at: string | null
           created_at: string | null
           description: string | null
           frequency: string
@@ -665,10 +702,14 @@ export type Database = {
           is_active: boolean | null
           name: string
           organization_id: string | null
+          recurrence: Json | null
           responsible_role: string | null
+          updated_at: string
+          version: number
         }
         Insert: {
           applies_to_building_types?: string[] | null
+          archived_at?: string | null
           created_at?: string | null
           description?: string | null
           frequency?: string
@@ -676,10 +717,14 @@ export type Database = {
           is_active?: boolean | null
           name: string
           organization_id?: string | null
+          recurrence?: Json | null
           responsible_role?: string | null
+          updated_at?: string
+          version?: number
         }
         Update: {
           applies_to_building_types?: string[] | null
+          archived_at?: string | null
           created_at?: string | null
           description?: string | null
           frequency?: string
@@ -687,7 +732,10 @@ export type Database = {
           is_active?: boolean | null
           name?: string
           organization_id?: string | null
+          recurrence?: Json | null
           responsible_role?: string | null
+          updated_at?: string
+          version?: number
         }
         Relationships: [
           {
@@ -3933,12 +3981,18 @@ export type Database = {
       delete_own_account: { Args: never; Returns: undefined }
       generate_certificate_renewal_tasks: { Args: never; Returns: number }
       generate_scheduled_tasks: {
-        Args: { p_building?: string; p_frequency?: string; p_template?: string }
+        Args: {
+          p_building?: string
+          p_frequency?: string
+          p_horizon_days?: number
+          p_template?: string
+        }
         Returns: number
       }
       is_active_user: { Args: never; Returns: boolean }
       is_admin: { Args: never; Returns: boolean }
       is_admin_or_manager: { Args: never; Returns: boolean }
+      legacy_frequency: { Args: { r: Json }; Returns: string }
       mark_overdue_tasks: { Args: never; Returns: number }
       postgres_fdw_disconnect: { Args: { "": string }; Returns: boolean }
       postgres_fdw_disconnect_all: { Args: never; Returns: boolean }
@@ -3947,9 +4001,21 @@ export type Database = {
         Returns: Record<string, unknown>[]
       }
       postgres_fdw_handler: { Args: never; Returns: unknown }
+      recurrence_is_valid: { Args: { r: Json }; Returns: boolean }
+      recurrence_occurrences: {
+        Args: { p_from: string; p_to: string; r: Json }
+        Returns: string[]
+      }
       report_electrical_compliance: {
         Args: { p_building_id: string }
         Returns: Json
+      }
+      reschedule_template: {
+        Args: { p_template: string }
+        Returns: {
+          deleted: number
+          generated: number
+        }[]
       }
       revoke_user_sessions: { Args: { p_user_id: string }; Returns: number }
       scheduled_due_date: {

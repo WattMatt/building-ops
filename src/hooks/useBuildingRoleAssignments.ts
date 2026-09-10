@@ -18,24 +18,7 @@ import { notify } from '@/lib/notify';
 /** Labels every building can rule on, whatever its templates say. Always listed first, in this order. */
 export const FIXED_ROLES: readonly string[] = ['user', 'manager'];
 
-interface PgErrLike { message: string }
 interface RuleRow { role: string; user_id: string }
-interface RulesSelect extends PromiseLike<{ data: RuleRow[] | null; error: PgErrLike | null }> {
-  eq(column: 'building_id', value: string): RulesSelect;
-}
-interface RulesDelete extends PromiseLike<{ error: PgErrLike | null }> {
-  eq(column: 'building_id' | 'role', value: string): RulesDelete;
-}
-// building_role_assignments is not yet in the generated types; regenerate after the migration ships.
-// Until then this is the narrow slice of the client the hook uses (reportArtifacts.ts pattern).
-interface RoleAssignmentsClient {
-  from(table: 'building_role_assignments'): {
-    select(columns: 'role, user_id'): RulesSelect;
-    upsert(row: RuleRow & { building_id: string }, opts: { onConflict: 'building_id,role' }): PromiseLike<{ error: PgErrLike | null }>;
-    delete(): RulesDelete;
-  };
-}
-const rolesClient = supabase as unknown as RoleAssignmentsClient;
 
 export const buildingRolesKey = (buildingId: string | undefined) => ['building-roles', buildingId] as const;
 
@@ -54,7 +37,7 @@ interface TemplateRow {
   template_items: { responsible_party: string | null }[] | null;
 }
 
-/** The template columns the labels query reads; `archived_at` lands with the R3a migration. */
+/** The template columns the labels query reads. */
 const TEMPLATE_LABEL_COLUMNS = 'responsible_role, applies_to_building_types, is_active, archived_at, template_items(responsible_party)';
 
 /** Distinct labels the generator could stamp on this building's tasks, from the templates that apply to it. */
@@ -97,7 +80,7 @@ export function useBuildingRoleAssignments(buildingId: string | undefined): Buil
     enabled: !!buildingId,
     queryFn: async (): Promise<RuleRow[]> => {
       if (!buildingId) return [];
-      const { data, error } = await rolesClient.from('building_role_assignments').select('role, user_id').eq('building_id', buildingId);
+      const { data, error } = await supabase.from('building_role_assignments').select('role, user_id').eq('building_id', buildingId);
       if (error) throw new Error(error.message);
       return data ?? [];
     },
@@ -111,13 +94,12 @@ export function useBuildingRoleAssignments(buildingId: string | undefined): Buil
       if (!buildingId) return { roles: sortRoles([]), buildingName: null };
       const [building, templates] = await Promise.all([
         supabase.from('buildings').select('name, building_type').eq('id', buildingId).maybeSingle(),
-        // archived_at is not yet in the generated types; regenerate after the migration ships.
-        supabase.from('checklist_templates').select(TEMPLATE_LABEL_COLUMNS as 'responsible_role'),
+        supabase.from('checklist_templates').select(TEMPLATE_LABEL_COLUMNS),
       ]);
       if (building.error) throw new Error(building.error.message);
       if (templates.error) throw new Error(templates.error.message);
       return {
-        roles: roleLabelsFor((templates.data ?? []) as unknown as TemplateRow[], building.data?.building_type),
+        roles: roleLabelsFor(templates.data ?? [], building.data?.building_type),
         buildingName: building.data?.name ?? null,
       };
     },
@@ -150,7 +132,7 @@ export function useBuildingRoleAssignments(buildingId: string | undefined): Buil
 
   const setRule = useCallback(async (role: string, userId: string | null) => {
     if (!buildingId) return;
-    const table = rolesClient.from('building_role_assignments');
+    const table = supabase.from('building_role_assignments');
     const { error } = userId
       ? await table.upsert({ building_id: buildingId, role, user_id: userId }, { onConflict: 'building_id,role' })
       : await table.delete().eq('building_id', buildingId).eq('role', role);
