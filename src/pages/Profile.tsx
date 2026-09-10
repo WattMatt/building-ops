@@ -543,10 +543,10 @@ export default function Profile() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Bell className="h-5 w-5" />
-            Notification Preferences
+            Notifications
           </CardTitle>
           <CardDescription>
-            Choose how and when you want to be notified
+            Everything below also appears in your inbox in the app. These switches control email.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -555,10 +555,10 @@ export default function Profile() {
               <div className="space-y-0.5">
                 <Label className="flex items-center gap-2">
                   <Mail className="h-4 w-4" />
-                  Email Notifications
+                  Email me at all
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  Receive notifications via email
+                  Turn this off to stop every email; the inbox still updates.
                 </p>
               </div>
               <Switch
@@ -573,10 +573,10 @@ export default function Profile() {
               <div className="space-y-0.5">
                 <Label className="flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4" />
-                  Overdue Task Alerts
+                  Overdue and expiring
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  Get alerted when tasks become overdue
+                  Overdue sign-offs, expiring documents, and asset service due.
                 </p>
               </div>
               <Switch
@@ -591,10 +591,10 @@ export default function Profile() {
               <div className="space-y-0.5">
                 <Label className="flex items-center gap-2">
                   <Calendar className="h-4 w-4" />
-                  Daily Digest
+                  Daily digest
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  Receive a daily summary of pending tasks
+                  One email each morning with what's on my day.
                 </p>
               </div>
               <Switch
@@ -609,10 +609,10 @@ export default function Profile() {
               <div className="space-y-0.5">
                 <Label className="flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4" />
-                  Issue Updates
+                  Issues and reports
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  Get notified when issues you reported or are assigned to are updated
+                  Assignments, comments, mentions, and report reviews.
                 </p>
               </div>
               <Switch
@@ -627,10 +627,10 @@ export default function Profile() {
               <div className="space-y-0.5">
                 <Label className="flex items-center gap-2">
                   <CheckSquare className="h-4 w-4" />
-                  Task Reminders
+                  Tasks and sign-offs
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  Receive reminders for upcoming task deadlines
+                  When a task or a sign-off is assigned to me.
                 </p>
               </div>
               <Switch
