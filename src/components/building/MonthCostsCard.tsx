@@ -15,6 +15,9 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { todayInOperatingTz } from '@/lib/myWork';
 import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
+import { formatRand } from '@/lib/money';
+
+export { formatRand };
 
 export interface MonthCostRow {
   building_id: string;
@@ -43,18 +46,6 @@ export function lastMonths(month: string, count: number): string[] {
     out.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`);
   }
   return out;
-}
-
-/** 'R 12 345' — en-ZA style: space-grouped thousands, comma decimals, and no decimals unless cents exist. */
-export function formatRand(value: number | null | undefined): string {
-  const n = Number(value ?? 0);
-  const negative = n < 0;
-  const cents = Math.round(Math.abs(n) * 100);
-  const whole = Math.floor(cents / 100);
-  const frac = cents % 100;
-  const grouped = String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  const text = frac === 0 ? grouped : `${grouped},${String(frac).padStart(2, '0')}`;
-  return `${negative ? '-' : ''}R ${text}`;
 }
 
 const MONTH_LABEL = new Intl.DateTimeFormat('en-ZA', { month: 'short', year: 'numeric', timeZone: 'UTC' });

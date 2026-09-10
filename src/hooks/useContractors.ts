@@ -262,7 +262,9 @@ export function useContractorDocuments(contractorId: string | null | undefined) 
         if (storageError) throw new Error(`The record was removed but the file could not be deleted from storage: ${storageError.message}`);
       }
     },
-    onSuccess: invalidate,
+    // Settled, not success: the row is already gone when the storage delete fails, so the
+    // list must refresh either way while the error still reaches the caller.
+    onSettled: invalidate,
   });
 
   return {

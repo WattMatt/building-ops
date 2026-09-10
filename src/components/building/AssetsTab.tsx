@@ -553,11 +553,12 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="purchase-date">Purchase date</Label>
                     <Input
                       id="purchase-date"
+                      className="h-11"
                       type="date"
                       value={purchaseDate}
                       onChange={(e) => setPurchaseDate(e.target.value)}
@@ -567,6 +568,7 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
                     <Label htmlFor="purchase-price">Purchase price (R)</Label>
                     <Input
                       id="purchase-price"
+                      className="h-11"
                       type="number"
                       inputMode="decimal"
                       min={0}
@@ -580,6 +582,7 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
                     <Label htmlFor="replacement-cost">Replacement cost (R)</Label>
                     <Input
                       id="replacement-cost"
+                      className="h-11"
                       type="number"
                       inputMode="decimal"
                       min={0}
@@ -591,11 +594,12 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="warranty-expiry">Warranty expiry</Label>
                     <Input
                       id="warranty-expiry"
+                      className="h-11"
                       type="date"
                       value={warrantyExpiry}
                       onChange={(e) => setWarrantyExpiry(e.target.value)}
@@ -605,6 +609,7 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
                     <Label htmlFor="warranty-provider">Warranty provider</Label>
                     <Input
                       id="warranty-provider"
+                      className="h-11"
                       placeholder="e.g., Carrier SA"
                       value={warrantyProvider}
                       onChange={(e) => setWarrantyProvider(e.target.value)}
@@ -614,6 +619,7 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
                     <Label htmlFor="expected-lifespan">Expected lifespan (years)</Label>
                     <Input
                       id="expected-lifespan"
+                      className="h-11"
                       type="number"
                       inputMode="numeric"
                       min={0}

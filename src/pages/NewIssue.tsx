@@ -23,14 +23,7 @@ import { PhotoCapture, type PhotoFile } from '@/components/ui/photo-capture';
 import { enqueueAndRun } from '@/lib/offline/enqueueAndRun';
 import { toastForOutcome } from '@/lib/offline/outcomeToast';
 import { toast } from 'sonner';
-
-/** '' → null; a non-negative amount → number; anything else → undefined (rejected). */
-function parseCost(text: string): number | null | undefined {
-  const t = text.trim();
-  if (!t) return null;
-  const n = Number(t.replace(/\s/g, '').replace(',', '.'));
-  return Number.isFinite(n) && n >= 0 ? n : undefined;
-}
+import { parseCost } from '@/lib/money';
 
 export default function NewIssue() {
   const navigate = useNavigate();

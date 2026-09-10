@@ -168,9 +168,9 @@ function SheetBody({
         <h3 id="contractor-history-heading" className="text-sm font-semibold">History</h3>
         <Tabs defaultValue="issues">
           <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="issues" className="min-h-9">Issues ({history.issues.length})</TabsTrigger>
-            <TabsTrigger value="services" className="min-h-9">Services ({history.services.length})</TabsTrigger>
-            <TabsTrigger value="ratings" className="min-h-9">Ratings ({history.ratings.length})</TabsTrigger>
+            <TabsTrigger value="issues" className="min-h-11">Issues ({history.issues.length})</TabsTrigger>
+            <TabsTrigger value="services" className="min-h-11">Services ({history.services.length})</TabsTrigger>
+            <TabsTrigger value="ratings" className="min-h-11">Ratings ({history.ratings.length})</TabsTrigger>
           </TabsList>
           <TabsContent value="issues">
             {history.isError && <p className="text-sm text-destructive">Could not load history.</p>}

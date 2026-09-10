@@ -18,6 +18,7 @@ const state = vi.hoisted(() => ({
   uploads: [] as { bucket: string; path: string; file: File; opts: unknown }[],
   removes: [] as { bucket: string; keys: string[] }[],
   uploadError: null as string | null,
+  removeError: null as string | null,
 }));
 
 vi.mock('@/integrations/supabase/client', () => {
@@ -48,7 +49,7 @@ vi.mock('@/integrations/supabase/client', () => {
           },
           remove: async (keys: string[]) => {
             state.removes.push({ bucket, keys });
-            return { error: null };
+            return { error: state.removeError ? { message: state.removeError } : null };
           },
           getPublicUrl: (path: string) => ({ data: { publicUrl: `https://x.supabase.co/storage/v1/object/public/${bucket}/${path}` } }),
         }),
@@ -96,6 +97,7 @@ beforeEach(() => {
   state.uploads = [];
   state.removes = [];
   state.uploadError = null;
+  state.removeError = null;
   openStorageFile.mockClear();
 });
 
@@ -238,6 +240,18 @@ describe('useContractorDocuments', () => {
     const { result } = renderHook(() => useContractorDocuments('c1'), { wrapper });
     await expect(result.current.remove.mutateAsync({ id: 'd1', file_url: 'contractor-docs/c1/abc.pdf' })).rejects.toThrow(CONTRACTOR_PERMISSION_MESSAGE);
     expect(state.removes).toHaveLength(0);
+  });
+
+  it('still refreshes the list when the row is gone but the storage delete fails', async () => {
+    state.results.contractor_documents = (call) => (call.ops.some(([m]) => m === 'delete') ? { data: [{ id: 'd1' }], error: null } : { data: [], error: null });
+    state.removeError = 'bucket offline';
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+    const spiedWrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children);
+    const { result } = renderHook(() => useContractorDocuments('c1'), { wrapper: spiedWrapper });
+    await expect(result.current.remove.mutateAsync({ id: 'd1', file_url: 'contractor-docs/c1/abc.pdf' }))
+      .rejects.toThrow('The record was removed but the file could not be deleted from storage: bucket offline');
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['contractor-documents', 'c1'] }));
   });
 });
 

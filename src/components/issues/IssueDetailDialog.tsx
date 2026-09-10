@@ -31,6 +31,7 @@ import { ContractorPicker } from '@/components/contractors/ContractorPicker';
 import { IssueCommentComposer } from '@/components/issues/IssueCommentComposer';
 import { ResolveIssueDialog } from '@/components/issues/ResolveIssueDialog';
 import { notify } from '@/lib/notify';
+import { parseCost } from '@/lib/money';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface Issue {
@@ -82,13 +83,6 @@ const STATUS_ORDER: IssueStatus[] = ['open', 'in_progress', 'escalated', 'resolv
 type CostField = 'estimated_cost' | 'actual_cost';
 const COST_LABELS: Record<CostField, string> = { estimated_cost: 'Estimated cost', actual_cost: 'Actual cost' };
 
-/** '' → null; a non-negative amount → number; anything else → undefined (rejected). */
-function parseCost(text: string): number | null | undefined {
-  const t = text.trim();
-  if (!t) return null;
-  const n = Number(t.replace(/\s/g, '').replace(',', '.'));
-  return Number.isFinite(n) && n >= 0 ? n : undefined;
-}
 const costText = (v: number | null | undefined) => (v == null ? '' : String(v));
 
 interface Props {

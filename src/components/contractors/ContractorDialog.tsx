@@ -202,7 +202,7 @@ function ContractorForm({
         <Switch id="contractor-active" checked={form.is_active} onCheckedChange={(v) => set('is_active', v)} />
       </div>
       {!form.is_active && (
-        <p className="text-sm text-muted-foreground">Inactive contractors stay on past work but are hidden from pickers.</p>
+        <Hint icon={false}>Inactive contractors stay on past work but are hidden from pickers.</Hint>
       )}
 
       {error && (
