@@ -830,3 +830,33 @@ git commit -m "Add a live smoke for the notify function and inbox visibility"
 - Spec §6 coverage: one sender + prefs matrix → T1; `notify` fn → T2; client seam + report transitions → T3; inbox UI, realtime, badges → T4; preferences consolidated → T5; retrofit of the existing senders → T6 (five user-facing ones; `notify-expiring-alerts` keeps its own digest email and already honours prefs — deliberately untouched, noted); daily digest → T7; smoke → T8. Analytics scaffold is R1c.
 - Placeholders: none; T6 gives one worked function and an explicit mapping for the other four.
 - Type consistency: `NotificationKind`/`NotificationEntityType` defined once in `notifyRules.ts` and mirrored (same literal unions) in `src/lib/notify.ts`; `createNotifications` input fields used identically in T2 and T6; `useNotifications` return shape used by the bell, the page, and the layout in T4.
+
+## Status (2026-09-10)
+
+Tasks 1–8 implemented on `feat/reports-access-hardening` (commits bc05679..f5c6fe1), each through a
+spec review and a quality review, seven fix commits, and a whole-slice final review; 309 tests pass,
+typecheck baseline 64, build green. Task 9 remains with the owner. Nothing in this slice has run
+against a live project: the `notify` and `daily-digest` functions and the five retrofitted senders are
+verified by reading and by the vitest-covered pure modules only, so `npm run smoke:notifications` on
+staging is the first real proof.
+
+Deviations from the plan text, all reviewed: recipients are filtered (unknown, deactivated) BEFORE the
+inbox insert; results carry `failed` separately from `skipped`; title/body are clamped once and shared
+by inbox and email; `buildInboxRows` rejects empty titles and non-allowlisted URLs; the `notify`
+function accepts only the seven client kinds and `report_submitted` is the only org-wide client kind;
+`parseNotifyBody` and `isAllowedUrl` live in `notifyRules.ts` under test; the realtime channel has one
+owner (`useNotificationsRealtime`, mounted by the layout) with a debounced invalidation; unread is an
+exact head count; emails render `detailHtml` before a labelled, pre-wrapped body; `corsHeaders` takes
+extra header names; the reminder cron survives a bad row; the digest is gated on the master email
+switch and caps each section at 15 lines; the smoke refuses the production ref and opts personas out
+of email.
+
+Follow-ups deliberately left:
+- `notify-expiring-alerts` still sends its own digest email and writes no inbox rows (spec §6 listed
+  it; the plan excluded it).
+- The same duplicate-channel defect exists in `useUserProfile` / `useOrganization` (queued as a
+  separate task chip).
+- `notify-form-submission`'s client still posts the legacy body without `submissionId`; the
+  "most recent submission" fallback is therefore the live path. Fix on the client, then delete it.
+- Notifications are not idempotent: a client retry within the freshness window duplicates inbox rows.
+- `notify-signoff-complete` drops the submitter when they were also the last signer (actor rule).
