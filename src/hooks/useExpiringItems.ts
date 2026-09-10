@@ -14,12 +14,11 @@ export function useExpiringItems(days = 90) {
     // Same cap as the snapshot readers: a missing function (PGRST202, before the migration) is never retried.
     retry: snapshotQueryDefaults.retry,
     queryFn: async (): Promise<ExpiringItem[]> => {
-      // expiring_items is not yet in the generated types; regenerate after the migration ships.
-      const { data, error } = await (supabase as unknown as {
-        rpc(fn: 'expiring_items', args: { p_days: number }): Promise<{ data: ExpiringItem[] | null; error: { message: string } | null }>;
-      }).rpc('expiring_items', { p_days: days });
+      const { data, error } = await supabase.rpc('expiring_items', { p_days: days });
       if (error) throw error;
-      return data ?? [];
+      // The function returns `kind` and `entity_type` as text; the CASE that emits them is pinned to the
+      // ExpiringKind / entity_type literals in supabase/functions/_shared/expiry.ts, which this narrows to.
+      return (data ?? []) as ExpiringItem[];
     },
   });
 }

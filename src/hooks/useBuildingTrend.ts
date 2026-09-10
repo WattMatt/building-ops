@@ -37,7 +37,7 @@ export function useBuildingTrend(buildingId: string | undefined, days = 90) {
     ...snapshotQueryDefaults,
     queryFn: async (): Promise<TrendRow[]> => {
       const res = await fetchAll(() =>
-        snapshots<TrendRow>(TREND_COLUMNS).eq('building_id', buildingId!).gte('day', sinceDay(days)).order('day', { ascending: true }));
+        snapshots(TREND_COLUMNS).eq('building_id', buildingId!).gte('day', sinceDay(days)).order('day', { ascending: true }));
       if (res.error) throw res.error;
       return res.data;
     },
@@ -75,7 +75,7 @@ export function useBuildingsTrends(days = 30) {
       // 47 buildings × 365 days ≈ 17 000 rows, well past the server's 1 000-row cap: fetchAll pages.
       // The secondary order makes the pages deterministic where several buildings share a day.
       const res = await fetchAll(() =>
-        snapshots<TrendRow>(TREND_COLUMNS).gte('day', sinceDay(days)).order('day', { ascending: true }).order('building_id', { ascending: true }));
+        snapshots(TREND_COLUMNS).gte('day', sinceDay(days)).order('day', { ascending: true }).order('building_id', { ascending: true }));
       if (res.error) throw res.error;
       return res.data;
     },

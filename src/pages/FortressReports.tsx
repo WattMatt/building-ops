@@ -15,7 +15,7 @@ import { useDiscardDraft, useFortressReports, useSetBuildingReportTypes } from '
 import { REPORT_TYPE_LABELS, type ReportType } from '@/integrations/supabase/fortress-db';
 import { REPORT_STATUS_VARIANT, formatPeriodLabel } from '@/lib/fortressReports';
 import { formatBuildingName } from '@/lib/buildingName';
-import { DEFAULT_REPORT_TYPES, buildCoverage, previousMonthPeriod } from '@/lib/reportCoverage';
+import { buildCoverage, previousMonthPeriod } from '@/lib/reportCoverage';
 import { CoverageGrid } from '@/components/reports/fortress/CoverageGrid';
 import { DiscardDraftDialog } from '@/components/reports/fortress/DiscardDraftDialog';
 import { Badge } from '@/components/ui/badge';
@@ -40,10 +40,9 @@ export default function FortressReports() {
   const { data: buildings } = useQuery({
     queryKey: ['buildings-for-reports'],
     queryFn: async () => {
-      // buildings.report_types is not yet in the generated types; regenerate after the migration ships.
-      const { data, error: bErr } = await supabase.from('buildings').select('id, name, report_types' as 'id, name').order('name');
+      const { data, error: bErr } = await supabase.from('buildings').select('id, name, report_types').order('name');
       if (bErr) throw bErr;
-      return (data ?? []) as { id: string; name: string; report_types?: string[] | null }[];
+      return data ?? [];
     },
   });
 
@@ -92,7 +91,7 @@ export default function FortressReports() {
   const coverage = useMemo(() => {
     if (period === ALL || !buildings?.length) return null;
     return buildCoverage(
-      buildings.map((b) => ({ id: b.id, name: b.name, report_types: b.report_types ?? DEFAULT_REPORT_TYPES })),
+      buildings.map((b) => ({ id: b.id, name: b.name, report_types: b.report_types })),
       (reports ?? []).map((r) => ({ id: r.id, building_id: r.building_id, report_type: r.report_type, report_period: r.report_period, status: r.status })),
       period,
     );

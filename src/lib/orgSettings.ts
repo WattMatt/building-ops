@@ -3,6 +3,11 @@
  * a missing or malformed key never reaches a component: every consumer gets a complete OrgSettings.
  * The SLA defaults are the same numbers as public.org_sla_hours() in 2026-09-14_01 — change both together.
  */
+import type { Json } from '@/integrations/supabase/types';
+
+/** A jsonb object as PostgREST returns it: every value is itself JSON, so it can be written straight back. */
+export type JsonObject = { [key: string]: Json | undefined };
+
 export const FEATURE_NAMES = ['share_links', 'report_schedules', 'tenant_intake'] as const;
 export type FeatureName = (typeof FEATURE_NAMES)[number];
 
@@ -43,8 +48,8 @@ function num(v: unknown, fallback: number, min: number, max: number): number {
 }
 
 /** A plain object or `{}` — never an array, null or a scalar. Used by the save path to merge into the stored jsonb. */
-export function obj(v: unknown): Record<string, unknown> {
-  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+export function obj(v: unknown): JsonObject {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as JsonObject) : {};
 }
 
 /** Never throws: anything unreadable falls back to the default for that key. */

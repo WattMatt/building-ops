@@ -6,12 +6,6 @@ import type { Tables } from '@/integrations/supabase/types';
 import { ORG_SETTINGS_KEY } from '@/hooks/useOrgSettings';
 
 type Organization = Tables<'organizations'>;
-// organization_branding (id, name, logo_url, primary_color) is a view for signed-out branding; it is not yet in
-// the generated types — regenerate after the migration ships.
-type BrandingRow = Pick<Organization, 'id' | 'name' | 'logo_url' | 'primary_color'>;
-interface BrandingClient {
-  select(cols: string): { limit(n: number): { maybeSingle(): Promise<{ data: BrandingRow | null; error: { message: string } | null }> } };
-}
 
 export function useOrganization() {
   const qc = useQueryClient();
@@ -52,10 +46,14 @@ export function useOrganization() {
           if (error) throw error;
           if (!cancelled) setOrganization(data);
         } else {
-          const { data, error } = await (supabase.from('organization_branding' as 'organizations') as unknown as BrandingClient)
-            .select('id,name,logo_url,primary_color').limit(1).maybeSingle();
+          // The signed-out branding view: id, name, logo_url, primary_color only. The generator types a view's
+          // columns nullable; `id` is the table's key and never is. The columns the view does not expose are
+          // nulled/emptied here — an anonymous page must not read a setting from this row (see useOrgSettings).
+          const { data, error } = await supabase.from('organization_branding').select('id,name,logo_url,primary_color').limit(1).maybeSingle();
           if (error) throw error;
-          if (!cancelled) setOrganization(data ? ({ ...data, email: null, created_at: null, updated_at: null } as Organization) : null);
+          if (!cancelled) {
+            setOrganization(data?.id ? { ...data, id: data.id, email: null, created_at: null, updated_at: null, settings: {} } : null);
+          }
         }
       } catch (error) {
         if (import.meta.env.DEV) console.error('Error fetching organization:', error);

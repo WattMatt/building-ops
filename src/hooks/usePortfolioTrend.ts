@@ -4,7 +4,7 @@
  * is the one snapshot read that keeps `*`.
  */
 import { useQuery } from '@tanstack/react-query';
-import { daysAgo, fetchAll, portfolioSnapshots, snapshotQueryDefaults, type PortfolioRow } from '@/lib/snapshotClient';
+import { daysAgo, fetchAll, isPortfolioRow, portfolioSnapshots, snapshotQueryDefaults, type PortfolioRow } from '@/lib/snapshotClient';
 
 export function usePortfolioTrend(days: number) {
   return useQuery({
@@ -15,7 +15,8 @@ export function usePortfolioTrend(days: number) {
       // range can grow. `days - 1`: 30 d means today and the 29 before it.
       const res = await fetchAll(() => portfolioSnapshots().gte('day', daysAgo(days - 1)).order('day', { ascending: true }));
       if (res.error) throw res.error;
-      return res.data;
+      // The view's key columns are typed nullable by the generator but never are; see isPortfolioRow.
+      return res.data.filter(isPortfolioRow);
     },
   });
 }

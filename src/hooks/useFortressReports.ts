@@ -12,7 +12,8 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { fdb, type Report, type ReportType, type ReportStatus, type FTableName, type FUpdate } from '@/integrations/supabase/fortress-db';
+import { supabase } from '@/integrations/supabase/client';
+import { fdb, type Report, type ReportType, type ReportStatus, type FTableName } from '@/integrations/supabase/fortress-db';
 import { useAuth } from '@/contexts/AuthContext';
 import { notify } from '@/lib/notify';
 import { describeSeed, seedPpmFromPlan } from '@/hooks/useReportPpm';
@@ -305,10 +306,7 @@ export function useDiscardDraft() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (reportId: string): Promise<string> => {
-      // delete_empty_report is not yet in the generated types; regenerate after the migration ships.
-      const { error } = await (fdb as unknown as {
-        rpc(fn: string, args: Record<string, string>): Promise<{ error: { message: string; code?: string } | null }>;
-      }).rpc('delete_empty_report', { p_report: reportId });
+      const { error } = await supabase.rpc('delete_empty_report', { p_report: reportId });
       if (error) throw error;
       return reportId;
     },
@@ -330,8 +328,8 @@ export function useSetBuildingReportTypes() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ buildingId, reportTypes }: { buildingId: string; reportTypes: ReportType[] }): Promise<void> => {
-      // buildings.report_types is not yet in the generated types; regenerate after the migration ships.
-      const { error } = await fdb.from('buildings').update({ report_types: reportTypes } as unknown as FUpdate<'buildings'>).eq('id', buildingId);
+      // buildings.report_types lives in the generated (production) types, not the Fortress slice `fdb` is typed to.
+      const { error } = await supabase.from('buildings').update({ report_types: reportTypes }).eq('id', buildingId);
       if (error) throw error;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['buildings-for-reports'] }); },

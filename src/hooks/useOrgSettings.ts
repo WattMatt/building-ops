@@ -11,20 +11,19 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
-import type { TablesUpdate } from '@/integrations/supabase/types';
-import { DEFAULT_ORG_SETTINGS, obj, parseOrgSettings, type FeatureName, type OrgSettings } from '@/lib/orgSettings';
+import { DEFAULT_ORG_SETTINGS, obj, parseOrgSettings, type FeatureName, type JsonObject, type OrgSettings } from '@/lib/orgSettings';
 
 export const ORG_SETTINGS_KEY = ['org-settings'] as const;
 
 interface OrgSettingsData {
   id: string | null;
   /** The jsonb as stored, unknown keys included — the base every save merges into. */
-  raw: Record<string, unknown>;
+  raw: JsonObject;
   settings: OrgSettings;
 }
 
 /** The stored jsonb with `next` laid over it; `sla_hours` and `features` merge per key so unknown entries survive. */
-export function mergeOrgSettings(raw: Record<string, unknown>, next: OrgSettings): Record<string, unknown> {
+export function mergeOrgSettings(raw: JsonObject, next: OrgSettings): JsonObject {
   return {
     ...raw,
     ...next,
@@ -39,26 +38,22 @@ export function useOrgSettings() {
     queryKey: ORG_SETTINGS_KEY,
     staleTime: 5 * 60_000,
     queryFn: async (): Promise<OrgSettingsData> => {
-      // organizations.settings is not yet in the generated types; regenerate after the migration ships.
-      const { data, error } = await supabase.from('organizations').select('id, settings' as 'id').limit(1).maybeSingle();
+      const { data, error } = await supabase.from('organizations').select('id, settings').limit(1).maybeSingle();
       if (error) throw error;
-      const row = data as { id: string; settings?: unknown } | null;
-      const raw = obj(row?.settings);
-      return { id: row?.id ?? null, raw, settings: parseOrgSettings(raw) };
+      const raw = obj(data?.settings);
+      return { id: data?.id ?? null, raw, settings: parseOrgSettings(raw) };
     },
   });
 
   const mutation = useMutation({
-    mutationFn: async (next: OrgSettings): Promise<Record<string, unknown>> => {
+    mutationFn: async (next: OrgSettings): Promise<JsonObject> => {
       const current = qc.getQueryData<OrgSettingsData>(ORG_SETTINGS_KEY);
       const id = current?.id;
       if (!id) throw new Error('No organization row to save settings on.');
       // A refetch landing mid-save would overwrite the optimistic cache with the pre-save row.
       await qc.cancelQueries({ queryKey: ORG_SETTINGS_KEY });
       const merged = mergeOrgSettings(current?.raw ?? {}, next);
-      // organizations.settings is not yet in the generated types; regenerate after the migration ships.
-      const patch = { settings: merged, updated_at: new Date().toISOString() } as unknown as TablesUpdate<'organizations'>;
-      const { error } = await supabase.from('organizations').update(patch).eq('id', id);
+      const { error } = await supabase.from('organizations').update({ settings: merged, updated_at: new Date().toISOString() }).eq('id', id);
       if (error) throw error;
       return merged;
     },

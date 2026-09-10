@@ -1,65 +1,33 @@
 /**
- * Typed access to the R4a snapshot table and its portfolio view. Both are absent from the generated types
- * until the controller regenerates them after the migration ships, so this is the one file that casts —
- * every hook and the PDF read through here and stay cast-free.
- *
- * Also the home of the three behaviours every snapshot reader shares:
+ * Access to the R4a snapshot table (building_metrics_daily) and its portfolio view (portfolio_metrics_daily)
+ * through the generated types, plus the three behaviours every snapshot reader shares:
  *  - `fetchAll` pages past PostgREST's server-side max-rows cap (see the note on it);
  *  - `snapshotRowsOrEmpty` turns a read error into "no rows", so hooks with a live fallback take it;
  *  - `snapshotQueryDefaults` stops react-query hammering a table that does not exist yet.
  */
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 import { todayInOperatingTz } from '@/lib/myWork';
 
-export interface SnapshotRow {
-  building_id: string;
-  day: string;
-  compliance_pct: number | string | null;
-  critical_pct: number | string | null;
-  inspection_pass_pct: number | string | null;
-  compliance_period: string | null;
-  ohs_open_nc: number | null;
-  ppm_done_pct: number | string | null;
-  task_completion_30d_pct: number | string | null;
-  tasks_overdue: number | null;
-  tasks_due_7d: number | null;
-  issues_open: number | null;
-  issues_open_by_priority: Record<string, number> | null;
-  issues_breached: number | null;
-  issues_resolved_30d: number | null;
-  docs_expiring_30: number | null;
-  docs_expiring_60: number | null;
-  docs_expiring_90: number | null;
-  docs_expired: number | null;
-  assets_overdue: number | null;
-  report_state: Record<string, { period: string; status: string }> | null;
-  reconstructed: boolean;
-  computed_at: string;
-}
+/**
+ * The generator types Postgres `numeric` as `number`, but a numeric can arrive as a string on the wire, so
+ * the percentage columns are widened and every reader goes through `num`. The client's own row type is
+ * narrower and assigns into these without a cast.
+ */
+type Widen<Row, K extends keyof Row> = Omit<Row, K> & { [P in K]: number | string | null };
 
-export interface PortfolioRow {
-  day: string;
-  buildings: number;
-  compliance_avg: number | string | null;
-  critical_avg: number | string | null;
-  inspection_pass_avg: number | string | null;
-  ppm_done_avg: number | string | null;
-  task_completion_avg: number | string | null;
-  tasks_overdue: number | null;
-  tasks_due_7d: number | null;
-  issues_open: number | null;
-  issues_breached: number | null;
-  issues_resolved_30d: number | null;
-  docs_expiring_30: number | null;
-  docs_expiring_60: number | null;
-  docs_expiring_90: number | null;
-  docs_expired: number | null;
-  assets_overdue: number | null;
-  contractor_docs_expiring_30: number | null;
-  contractor_docs_expiring_60: number | null;
-  contractor_docs_expiring_90: number | null;
-  contractor_docs_expired: number | null;
-  reconstructed: boolean;
+/** One row of building_metrics_daily. */
+export type SnapshotRow = Widen<Tables<'building_metrics_daily'>, 'compliance_pct' | 'critical_pct' | 'inspection_pass_pct' | 'ppm_done_pct' | 'task_completion_30d_pct'>;
+
+/** portfolio_metrics_daily as generated: a view, so the generator marks every column nullable. */
+export type PortfolioViewRow = Widen<Tables<'portfolio_metrics_daily'>, 'compliance_avg' | 'critical_avg' | 'inspection_pass_avg' | 'ppm_done_avg' | 'task_completion_avg'>;
+/**
+ * A portfolio row the page can use: `day` is the view's GROUP BY key, `buildings` its count(*) and
+ * `reconstructed` its bool_and, none of which is ever null. `isPortfolioRow` narrows a fetched row.
+ */
+export type PortfolioRow = Omit<PortfolioViewRow, 'day' | 'buildings' | 'reconstructed'> & { day: string; buildings: number; reconstructed: boolean };
+export function isPortfolioRow<R extends PortfolioViewRow>(r: R): r is R & Pick<PortfolioRow, 'day' | 'buildings' | 'reconstructed'> {
+  return r.day !== null && r.buildings !== null && r.reconstructed !== null;
 }
 
 /** The columns the series, sparklines, leaderboard and PDF trend need — a fraction of the row. */
@@ -83,22 +51,16 @@ export interface RowBuilder<Row> extends PromiseLike<PgResult<Row>> {
   limit(n: number): RowBuilder<Row>;
   range(from: number, to: number): RowBuilder<Row>;
 }
-interface SnapshotClient {
-  // `select` takes any column string: the caller names the row type it expects back (TrendRow for the
-  // narrow TREND_COLUMNS read, the full row for '*'). Nothing checks the list against the type — keep
-  // TREND_COLUMNS and TrendRow in step by hand.
-  from(table: 'building_metrics_daily'): { select<Row = SnapshotRow>(columns: string): RowBuilder<Row> };
-  from(table: 'portfolio_metrics_daily'): { select<Row = PortfolioRow>(columns: string): RowBuilder<Row> };
+/**
+ * A select on the snapshot table. The column list is a literal so the client's own select parser types the
+ * rows: `snapshots()` reads the full SnapshotRow, `snapshots(TREND_COLUMNS)` exactly the TrendRow columns.
+ */
+export function snapshots<Columns extends string = '*'>(columns: Columns = '*' as Columns) {
+  return supabase.from('building_metrics_daily').select(columns);
 }
-// building_metrics_daily and portfolio_metrics_daily are not yet in the generated types; regenerate after the
-// migration ships and replace this cast with the typed client.
-const client = supabase as unknown as SnapshotClient;
-
-export function snapshots<Row = SnapshotRow>(columns: string = '*'): RowBuilder<Row> {
-  return client.from('building_metrics_daily').select<Row>(columns);
-}
-export function portfolioSnapshots<Row = PortfolioRow>(columns: string = '*'): RowBuilder<Row> {
-  return client.from('portfolio_metrics_daily').select<Row>(columns);
+/** The whole portfolio view (the /trends CSV prints every column); narrow the rows with `isPortfolioRow`. */
+export function portfolioSnapshots() {
+  return supabase.from('portfolio_metrics_daily').select('*');
 }
 
 /**

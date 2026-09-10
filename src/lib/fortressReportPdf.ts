@@ -16,7 +16,7 @@ import { doneMonthsFromGrid, fiscalWindow, gridHasData } from '@/lib/ppmGrid';
 import { fetchMergedPpmGrids } from '@/lib/ppmGridFetch';
 import { REPORT_SECTIONS, watermarkFor } from '@/lib/fortressReports';
 import { fetchReportElectricalCompliance } from '@/integrations/supabase/insight-linker';
-import { TREND_COLUMNS, fetchAll, snapshots, type TrendRow } from '@/lib/snapshotClient';
+import { TREND_COLUMNS, fetchAll, snapshots } from '@/lib/snapshotClient';
 import { monthEnd, monthShift, monthlyPoints } from '@/lib/trendSeries';
 import { reportError } from '@/lib/analytics';
 
@@ -185,7 +185,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     // blank months.
     try {
       const endPeriod = report.report_period.slice(0, 10);
-      const snapRes = await fetchAll(() => snapshots<TrendRow>(TREND_COLUMNS).eq('building_id', report.building_id)
+      const snapRes = await fetchAll(() => snapshots(TREND_COLUMNS).eq('building_id', report.building_id)
         .gte('day', `${monthShift(endPeriod, 11)}-01`).lte('day', monthEnd(endPeriod))
         .order('day', { ascending: true }));
       if (snapRes.error) throw new Error(`Could not read the trend snapshots: ${snapRes.error.message}`);

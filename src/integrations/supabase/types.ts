@@ -299,6 +299,92 @@ export type Database = {
           },
         ]
       }
+      building_metrics_daily: {
+        Row: {
+          assets_overdue: number | null
+          building_id: string
+          compliance_pct: number | null
+          compliance_period: string | null
+          computed_at: string
+          critical_pct: number | null
+          day: string
+          docs_expired: number | null
+          docs_expiring_30: number | null
+          docs_expiring_60: number | null
+          docs_expiring_90: number | null
+          inspection_pass_pct: number | null
+          issues_breached: number | null
+          issues_open: number | null
+          issues_open_by_priority: Json | null
+          issues_resolved_30d: number | null
+          ohs_open_nc: number | null
+          ppm_done_pct: number | null
+          reconstructed: boolean
+          report_state: Json | null
+          task_completion_30d_pct: number | null
+          tasks_due_7d: number | null
+          tasks_overdue: number | null
+        }
+        Insert: {
+          assets_overdue?: number | null
+          building_id: string
+          compliance_pct?: number | null
+          compliance_period?: string | null
+          computed_at?: string
+          critical_pct?: number | null
+          day: string
+          docs_expired?: number | null
+          docs_expiring_30?: number | null
+          docs_expiring_60?: number | null
+          docs_expiring_90?: number | null
+          inspection_pass_pct?: number | null
+          issues_breached?: number | null
+          issues_open?: number | null
+          issues_open_by_priority?: Json | null
+          issues_resolved_30d?: number | null
+          ohs_open_nc?: number | null
+          ppm_done_pct?: number | null
+          reconstructed?: boolean
+          report_state?: Json | null
+          task_completion_30d_pct?: number | null
+          tasks_due_7d?: number | null
+          tasks_overdue?: number | null
+        }
+        Update: {
+          assets_overdue?: number | null
+          building_id?: string
+          compliance_pct?: number | null
+          compliance_period?: string | null
+          computed_at?: string
+          critical_pct?: number | null
+          day?: string
+          docs_expired?: number | null
+          docs_expiring_30?: number | null
+          docs_expiring_60?: number | null
+          docs_expiring_90?: number | null
+          inspection_pass_pct?: number | null
+          issues_breached?: number | null
+          issues_open?: number | null
+          issues_open_by_priority?: Json | null
+          issues_resolved_30d?: number | null
+          ohs_open_nc?: number | null
+          ppm_done_pct?: number | null
+          reconstructed?: boolean
+          report_state?: Json | null
+          task_completion_30d_pct?: number | null
+          tasks_due_7d?: number | null
+          tasks_overdue?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "building_metrics_daily_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       building_notes: {
         Row: {
           building_id: string
@@ -581,6 +667,7 @@ export type Database = {
           name: string
           organization_id: string | null
           professional_team: Json | null
+          report_types: string[]
           timezone: string | null
           updated_at: string | null
           utility_tariffs: Json | null
@@ -604,6 +691,7 @@ export type Database = {
           name: string
           organization_id?: string | null
           professional_team?: Json | null
+          report_types?: string[]
           timezone?: string | null
           updated_at?: string | null
           utility_tariffs?: Json | null
@@ -627,11 +715,19 @@ export type Database = {
           name?: string
           organization_id?: string | null
           professional_team?: Json | null
+          report_types?: string[]
           timezone?: string | null
           updated_at?: string | null
           utility_tariffs?: Json | null
         }
         Relationships: [
+          {
+            foreignKeyName: "buildings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organization_branding"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "buildings_organization_id_fkey"
             columns: ["organization_id"]
@@ -847,6 +943,13 @@ export type Database = {
           version?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "checklist_templates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organization_branding"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "checklist_templates_organization_id_fkey"
             columns: ["organization_id"]
@@ -1241,6 +1344,13 @@ export type Database = {
           vat_number?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "contractors_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organization_branding"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "contractors_organization_id_fkey"
             columns: ["organization_id"]
@@ -2388,6 +2498,7 @@ export type Database = {
           logo_url: string | null
           name: string | null
           primary_color: string | null
+          settings: Json
           updated_at: string | null
         }
         Insert: {
@@ -2397,6 +2508,7 @@ export type Database = {
           logo_url?: string | null
           name?: string | null
           primary_color?: string | null
+          settings?: Json
           updated_at?: string | null
         }
         Update: {
@@ -2406,6 +2518,7 @@ export type Database = {
           logo_url?: string | null
           name?: string | null
           primary_color?: string | null
+          settings?: Json
           updated_at?: string | null
         }
         Relationships: []
@@ -2642,6 +2755,13 @@ export type Database = {
             foreignKeyName: "report_artifacts_org_id_fkey"
             columns: ["org_id"]
             isOneToOne: false
+            referencedRelation: "organization_branding"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_artifacts_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
@@ -2865,6 +2985,13 @@ export type Database = {
             columns: ["cloned_from_report_id"]
             isOneToOne: false
             referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reports_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organization_branding"
             referencedColumns: ["id"]
           },
           {
@@ -4087,6 +4214,54 @@ export type Database = {
           },
         ]
       }
+      organization_branding: {
+        Row: {
+          id: string | null
+          logo_url: string | null
+          name: string | null
+          primary_color: string | null
+        }
+        Insert: {
+          id?: string | null
+          logo_url?: string | null
+          name?: string | null
+          primary_color?: string | null
+        }
+        Update: {
+          id?: string | null
+          logo_url?: string | null
+          name?: string | null
+          primary_color?: string | null
+        }
+        Relationships: []
+      }
+      portfolio_metrics_daily: {
+        Row: {
+          assets_overdue: number | null
+          buildings: number | null
+          compliance_avg: number | null
+          contractor_docs_expired: number | null
+          contractor_docs_expiring_30: number | null
+          contractor_docs_expiring_60: number | null
+          contractor_docs_expiring_90: number | null
+          critical_avg: number | null
+          day: string | null
+          docs_expired: number | null
+          docs_expiring_30: number | null
+          docs_expiring_60: number | null
+          docs_expiring_90: number | null
+          inspection_pass_avg: number | null
+          issues_breached: number | null
+          issues_open: number | null
+          issues_resolved_30d: number | null
+          ppm_done_avg: number | null
+          reconstructed: boolean | null
+          task_completion_avg: number | null
+          tasks_due_7d: number | null
+          tasks_overdue: number | null
+        }
+        Relationships: []
+      }
       ppm_monthly_status: {
         Row: {
           building_id: string | null
@@ -4200,7 +4375,38 @@ export type Database = {
           completion_id: string
         }[]
       }
+      delete_empty_report: { Args: { p_report: string }; Returns: undefined }
       delete_own_account: { Args: never; Returns: undefined }
+      expiring_items: {
+        Args: { p_days: number }
+        Returns: {
+          building_id: string
+          building_name: string
+          days_left: number
+          detail: string
+          entity_id: string
+          entity_type: string
+          expiry_date: string
+          kind: string
+          name: string
+          parent_id: string
+        }[]
+      }
+      expiring_items_at: {
+        Args: { p_day: string; p_days: number }
+        Returns: {
+          building_id: string
+          building_name: string
+          days_left: number
+          detail: string
+          entity_id: string
+          entity_type: string
+          expiry_date: string
+          kind: string
+          name: string
+          parent_id: string
+        }[]
+      }
       generate_certificate_renewal_tasks: { Args: never; Returns: number }
       generate_ppm_tasks: {
         Args: { p_building?: string; p_horizon_days?: number }
@@ -4220,6 +4426,8 @@ export type Database = {
       is_admin_or_manager: { Args: never; Returns: boolean }
       legacy_frequency: { Args: { r: Json }; Returns: string }
       mark_overdue_tasks: { Args: never; Returns: number }
+      mark_sla_breaches: { Args: never; Returns: number }
+      org_sla_hours: { Args: { p_priority: string }; Returns: number }
       postgres_fdw_disconnect: { Args: { "": string }; Returns: boolean }
       postgres_fdw_disconnect_all: { Args: never; Returns: boolean }
       postgres_fdw_get_connections: {
@@ -4258,6 +4466,10 @@ export type Database = {
           subtitle: string
           title: string
         }[]
+      }
+      snapshot_building_metrics: {
+        Args: { p_building?: string; p_day?: string }
+        Returns: number
       }
       user_can_access_building: {
         Args: { p_building: string; p_user: string }
