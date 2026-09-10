@@ -10,21 +10,26 @@
  *
  * Talks to the PostgREST/Auth API directly with node's built-in fetch — the same
  * endpoints @supabase/supabase-js calls — so it has no node_modules dependency and
- * can run in CI. Usage (env carries staging creds; nothing secret is committed):
- *   STAGING_URL=… STAGING_ANON=… STAGING_SROLE=… node scripts/fortress-smoke.mjs
+ * can run in CI. Usage (env carries staging creds; nothing secret is committed).
+ * Takes the same SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY as
+ * every other smoke (the older STAGING_URL / STAGING_ANON / STAGING_SROLE names
+ * still work):
+ *   npm run smoke            (or)   node scripts/fortress-smoke.mjs
  *
- * Test users (staging only): zztest-manager@test.local / zztest-restricted@test.local
- * Buildings: A = 1111… (restricted is assigned), B = 2222… (restricted is NOT).
+ * Self-provisioning: creates a manager and a restricted user plus two buildings
+ * (A = restricted is assigned, B = restricted is NOT) per run and removes them
+ * again in teardown, like the other smokes. Nothing has to be pre-seeded.
  */
-const URL = process.env.STAGING_URL;
-const ANON = process.env.STAGING_ANON;
-const SROLE = process.env.STAGING_SROLE;
+const URL = process.env.SUPABASE_URL ?? process.env.STAGING_URL;
+const ANON = process.env.SUPABASE_ANON_KEY ?? process.env.STAGING_ANON;
+const SROLE = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.STAGING_SROLE;
 const PW = 'ZZtest!Pass123';
-const BUILDING_A = '11111111-1111-4111-8111-111111111111';
-const BUILDING_B = '22222222-2222-4222-8222-222222222222';
+const RUN = crypto.randomUUID().slice(0, 8);
+let BUILDING_A = null;
+let BUILDING_B = null;
 
 if (!URL || !ANON || !SROLE) {
-  console.error('Missing STAGING_URL / STAGING_ANON / STAGING_SROLE env.');
+  console.error('Missing SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY env.');
   process.exit(2);
 }
 
@@ -84,12 +89,66 @@ function rest(token, isServiceRole = false) {
 
 const uuid = () => crypto.randomUUID();
 
+const SVC = { apikey: SROLE, Authorization: `Bearer ${SROLE}`, 'Content-Type': 'application/json' };
+const createdUsers = [];
+
+/** Service-role provisioning: auth user + role row (+ optional building assignment). */
+async function persona(key, role, buildingId) {
+  const email = `zztest-fortress-${key}-${RUN}@buildingops.app`;
+  const r = await fetch(`${URL}/auth/v1/admin/users`, {
+    method: 'POST', headers: SVC, body: JSON.stringify({ email, password: PW, email_confirm: true }),
+  });
+  const id = (await r.json()).id;
+  if (!id) throw new Error(`persona ${key} create failed (HTTP ${r.status})`);
+  createdUsers.push(id);
+  await fetch(`${URL}/rest/v1/user_roles?on_conflict=user_id`, {
+    method: 'POST', headers: { ...SVC, Prefer: 'resolution=merge-duplicates' },
+    body: JSON.stringify({ user_id: id, role }),
+  });
+  if (buildingId) {
+    await fetch(`${URL}/rest/v1/user_buildings`, { method: 'POST', headers: SVC, body: JSON.stringify({ user_id: id, building_id: buildingId }) });
+  }
+  return email;
+}
+
+async function setup(admin) {
+  BUILDING_A = uuid();
+  BUILDING_B = uuid();
+  const b = await admin.insert('buildings', [
+    { id: BUILDING_A, name: `ZZSMOKE Fortress A ${RUN}` },
+    { id: BUILDING_B, name: `ZZSMOKE Fortress B ${RUN}` },
+  ]);
+  if (!b.ok) throw new Error(`building setup failed: ${b.error}`);
+  const mgrEmail = await persona('manager', 'manager');
+  const resEmail = await persona('restricted', 'user', BUILDING_A);
+  console.log(`  setup: 2 buildings, manager + restricted (assigned to A), run ${RUN}`);
+  return { mgrEmail, resEmail };
+}
+
+async function teardown(admin) {
+  await admin.del('reports', 'title=like.ZZSMOKE*');
+  for (const id of createdUsers) {
+    await fetch(`${URL}/auth/v1/admin/users/${id}`, { method: 'DELETE', headers: SVC });
+  }
+  if (BUILDING_A) await admin.del('buildings', `id=in.(${BUILDING_A},${BUILDING_B})`);
+  console.log('  teardown: clean');
+}
+
 async function main() {
   const admin = rest(SROLE, true);
-  await admin.del('reports', 'title=like.ZZSMOKE*');
+  const { mgrEmail, resEmail } = await setup(admin);
+  try {
+    await run(admin, mgrEmail, resEmail);
+  } finally {
+    await teardown(admin);
+  }
+  console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);
+  process.exit(failures === 0 ? 0 : 1);
+}
 
-  const mgrToken = await login('zztest-manager@test.local');
-  const resToken = await login('zztest-restricted@test.local');
+async function run(admin, mgrEmail, resEmail) {
+  const mgrToken = await login(mgrEmail);
+  const resToken = await login(resEmail);
   const mgrId = JSON.parse(Buffer.from(mgrToken.split('.')[1], 'base64').toString()).sub;
   const mgr = rest(mgrToken);
   const res = rest(resToken);
@@ -163,10 +222,6 @@ async function main() {
     check('restricted user is BLOCKED from building B report', visB.length === 0, visB.length ? 'LEAK' : 'isolated');
   }
 
-  await admin.del('reports', 'title=like.ZZSMOKE*');
-
-  console.log(`\n${failures === 0 ? 'ALL PASS' : `${failures} FAILURE(S)`}`);
-  process.exit(failures === 0 ? 0 : 1);
 }
 
 main().catch((e) => { console.error('SMOKE ERROR:', e.message); process.exit(1); });
