@@ -1,11 +1,12 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { enqueue, listOps, updateOp, removeOp, clearQueue, subscribeQueue, queueStoreName } from './queue';
 import { File as NodeFile } from 'node:buffer';
 
 const payload = { kind: 'task_complete', completionId: 'c1', taskInstanceId: 't1', taskName: 'Check', notes: null, signatureConfirmed: false } as const;
 
 describe('offline queue store', () => {
-  beforeEach(async () => { await clearQueue('u1'); await clearQueue('u2'); });
+  beforeEach(async () => { await clearQueue('u1'); await clearQueue('u2'); await clearQueue('u3'); await clearQueue('u4'); });
+  afterEach(() => { vi.restoreAllMocks(); });
 
   it('enqueues, lists oldest-first, and isolates users', async () => {
     const a = await enqueue('u1', payload, []);
@@ -46,5 +47,29 @@ describe('offline queue store', () => {
 
   it('names the store per user', () => {
     expect(queueStoreName('u1')).toBe('bo-queue-u1');
+  });
+
+  it('gives same-millisecond ops strictly increasing createdAt so they list in enqueue order', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1000);
+    const a = await enqueue('u3', payload, []);
+    const b = await enqueue('u3', { ...payload, completionId: 'c2', taskInstanceId: 't2' }, []);
+    const c = await enqueue('u3', { ...payload, completionId: 'c3', taskInstanceId: 't3' }, []);
+    const ops = await listOps('u3');
+    expect(ops.map((o) => o.id)).toEqual([a.id, b.id, c.id]);
+    expect(ops.map((o) => o.createdAt)).toEqual([1000, 1001, 1002]);
+  });
+
+  it('keeps createdAt increasing across a reload by seeding from the store', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1000);
+    const first = await enqueue('u4', payload, []);
+    expect(first.createdAt).toBe(1000);
+    // A fresh module instance (as after a page reload) has no in-memory high-water mark; it must
+    // recover it from what is already persisted rather than hand out 1000 again.
+    vi.resetModules();
+    const fresh = await import('./queue');
+    const second = await fresh.enqueue('u4', { ...payload, completionId: 'c2', taskInstanceId: 't2' }, []);
+    expect(second.createdAt).toBe(1001);
+    const ops = await fresh.listOps('u4');
+    expect(ops.map((o) => o.id)).toEqual([first.id, second.id]);
   });
 });

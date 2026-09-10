@@ -21,8 +21,36 @@ const listeners = new Set<Listener>();
 export function subscribeQueue(fn: Listener): () => void { listeners.add(fn); return () => { listeners.delete(fn); }; }
 function emit() { for (const fn of listeners) fn(); }
 
+/**
+ * Replay order is `createdAt` order, and replay depends on it: an issue_comment enqueued right
+ * after its issue_create must never replay first (it would fail its FK). Two enqueues can land in
+ * the same millisecond, so `createdAt` is not read straight from the clock — it is forced to be
+ * strictly greater than the last value this user was handed. The high-water mark is seeded once
+ * per user from whatever is already in the store, so the guarantee also survives a reload.
+ */
+const lastCreatedAt = new Map<string, number>();
+const seeding = new Map<string, Promise<void>>();
+function ensureSeeded(uid: string): Promise<void> {
+  let p = seeding.get(uid);
+  if (!p) {
+    p = entries<string, QueuedOp>(storeFor(uid)).then((rows) => {
+      const max = rows.reduce((m, [, v]) => Math.max(m, v.createdAt), 0);
+      lastCreatedAt.set(uid, Math.max(max, lastCreatedAt.get(uid) ?? 0));
+    });
+    seeding.set(uid, p);
+  }
+  return p;
+}
+function nextCreatedAt(uid: string): number {
+  const createdAt = Math.max(Date.now(), (lastCreatedAt.get(uid) ?? 0) + 1);
+  lastCreatedAt.set(uid, createdAt);
+  return createdAt;
+}
+
 export async function enqueue(uid: string, payload: OpPayload, photos: QueuedPhoto[]): Promise<QueuedOp> {
-  const op: QueuedOp = { id: crypto.randomUUID(), uid, createdAt: Date.now(), attempts: 0, status: 'pending', lastError: null, payload, photos };
+  await ensureSeeded(uid);
+  // Read-then-bump is synchronous after the await, so concurrent enqueues cannot share a value.
+  const op: QueuedOp = { id: crypto.randomUUID(), uid, createdAt: nextCreatedAt(uid), attempts: 0, status: 'pending', lastError: null, payload, photos };
   await set(op.id, op, storeFor(uid));
   emit();
   return op;
@@ -30,6 +58,7 @@ export async function enqueue(uid: string, payload: OpPayload, photos: QueuedPho
 
 export async function listOps(uid: string): Promise<QueuedOp[]> {
   const rows = (await entries<string, QueuedOp>(storeFor(uid))).map(([, v]) => v);
+  // `createdAt` is unique per user (see enqueue); the id tiebreak is only a defensive fallback.
   return rows.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 }
 
