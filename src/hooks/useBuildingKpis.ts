@@ -29,9 +29,14 @@ export interface OhsAction {
 }
 export interface SectionScore { section_no: string; section_title: string | null; section_pct: number | null }
 
-async function latestApproved(buildingId: string, type: string) {
+/**
+ * The newest APPROVED report of a type for a building. Dashboards and KPI cards
+ * read from this, so a half-filled draft or a rejected report can never become the
+ * building's headline numbers (finding K1). Exported for the unit test.
+ */
+export async function latestApprovedReport(buildingId: string, type: string) {
   const rows = await fdb.from('reports').select('*')
-    .eq('building_id', buildingId).eq('report_type', type)
+    .eq('building_id', buildingId).eq('report_type', type).eq('status', 'approved')
     .order('report_period', { ascending: false }).limit(1);
   return rows.data?.[0] ?? null;
 }
@@ -43,9 +48,9 @@ export function useBuildingKpis(buildingId: string | undefined) {
     queryFn: async () => {
       const bid = buildingId!;
       const [ops, cm, annual] = await Promise.all([
-        latestApproved(bid, 'ops_monthly'),
-        latestApproved(bid, 'cm_monthly'),
-        latestApproved(bid, 'annual_inspection'),
+        latestApprovedReport(bid, 'ops_monthly'),
+        latestApprovedReport(bid, 'cm_monthly'),
+        latestApprovedReport(bid, 'annual_inspection'),
       ]);
 
       const kpis: Kpi[] = [];
