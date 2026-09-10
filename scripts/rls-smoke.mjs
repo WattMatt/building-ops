@@ -575,7 +575,7 @@ try {
   // is owner-only RLS, so admin/manager see nothing here — like push_subscriptions. A building
   // token additionally needs the owner to pass can_access_building at mint time.
   const CT = 'calendar_tokens';
-  const mintToken = () => crypto.randomBytes(32).toString('base64url');
+  const mintToken = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
   // canInsert deletes what it creates, so these probe rows need no cleanup entry.
   assert(`${CT} insert own (my feed) as userA`, (await canInsert(personas.userA.jwt, CT, { user_id: personas.userA.id, token: mintToken() })) === true, 'user could not mint their own feed token');
   assert(`${CT} insert for someone else as userA`, (await canInsert(personas.userA.jwt, CT, { user_id: personas.admin.id, token: mintToken() })) === false, 'user minted a feed token for another user');
