@@ -7,7 +7,7 @@ export const NOTIFICATION_KINDS = [
   'task_assigned', 'issue_assigned', 'issue_comment', 'issue_mention',
   'report_submitted', 'report_returned', 'report_approved',
   'form_submitted', 'form_reviewed', 'signoff_requested', 'signoff_complete', 'signoff_overdue',
-  'document_expiring', 'asset_service_due',
+  'document_expiring', 'asset_service_due', 'task_due_today',
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 
@@ -33,6 +33,16 @@ export const CLIENT_KINDS: ReadonlySet<NotificationKind> = new Set([
  */
 export const ORG_WIDE_KINDS: ReadonlySet<NotificationKind> = new Set(['report_submitted']);
 
+/**
+ * The kinds worth interrupting someone's day for. Everything else stays in the inbox (and the
+ * email/digest) so push never becomes noise: a comment on an issue can wait, a task landing on
+ * your list right now cannot. `task_due_today` exists only for push and the inbox — the daily
+ * digest raises it and it never emails per item.
+ */
+export const PUSH_KINDS: ReadonlySet<NotificationKind> = new Set([
+  'task_assigned', 'issue_mention', 'signoff_requested', 'task_due_today',
+]);
+
 export type PrefFlag = 'issue_updates' | 'task_reminders' | 'overdue_alerts';
 export interface NotificationPrefs {
   email_notifications: boolean | null;
@@ -54,7 +64,7 @@ export const MAX_RECIPIENTS = 50;
  * `/` test would happily accept `/logout`, `/settings` or any other path a caller invented.
  */
 export const ALLOWED_URL_PREFIXES = [
-  '/issues', '/buildings/', '/reports/fortress/', '/my-signoffs', '/forms', '/inbox',
+  '/issues', '/buildings/', '/reports/fortress/', '/my-signoffs', '/forms', '/inbox', '/my-day',
 ] as const;
 
 /**
@@ -180,13 +190,14 @@ export function senderName(name: string): string {
  * This cannot be derived from the governing flag: `signoff_overdue` shares `overdue_alerts`
  * with these two, yet it does email per item.
  */
-const DIGEST_ONLY: ReadonlySet<NotificationKind> = new Set(['document_expiring', 'asset_service_due']);
+const DIGEST_ONLY: ReadonlySet<NotificationKind> = new Set(['document_expiring', 'asset_service_due', 'task_due_today']);
 
 export function governingFlag(kind: NotificationKind): PrefFlag {
   switch (kind) {
     case 'task_assigned':
     case 'signoff_requested':
     case 'signoff_complete':
+    case 'task_due_today':
       return 'task_reminders';
     case 'signoff_overdue':
     case 'document_expiring':
@@ -215,6 +226,15 @@ export function shouldEmail(kind: NotificationKind, prefs: NotificationPrefs): b
   if (DIGEST_ONLY.has(kind)) return false;
   if (prefs.email_notifications === false) return false;
   return prefs[governingFlag(kind)] !== false;
+}
+
+/**
+ * Push is governed by the kind's preference flag alone. `email_notifications` is the email
+ * master switch, so turning email off must not also silence the phone — the two channels are
+ * separate opt-ins. Null flags mean opted in, as for email.
+ */
+export function shouldPush(kind: NotificationKind, prefs: NotificationPrefs): boolean {
+  return PUSH_KINDS.has(kind) && prefs[governingFlag(kind)] !== false;
 }
 
 export interface InboxInput {
@@ -268,4 +288,21 @@ export function buildInboxRows(input: InboxInput): InboxRow[] {
     });
   }
   return rows;
+}
+
+/** What the service worker shows. `tag` collapses repeat pushes for the same entity into one card. */
+export interface PushPayload {
+  title: string;
+  body: string | null;
+  url: string;
+  tag: string;
+}
+
+export function pushPayloadFor(row: Pick<InboxRow, 'kind' | 'title' | 'body' | 'url' | 'entity_id'>): PushPayload {
+  return {
+    title: row.title,
+    body: row.body,
+    url: row.url,
+    tag: row.entity_id ? `${row.kind}:${row.entity_id}` : row.kind,
+  };
 }

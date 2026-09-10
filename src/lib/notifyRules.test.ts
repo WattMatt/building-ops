@@ -14,6 +14,9 @@ import {
   CLIENT_KINDS,
   ORG_WIDE_KINDS,
   MAX_RECIPIENTS,
+  PUSH_KINDS,
+  shouldPush,
+  pushPayloadFor,
   type InboxInput,
   type NotificationKind,
   type PrefFlag,
@@ -44,6 +47,7 @@ describe('governingFlag', () => {
     signoff_overdue: 'overdue_alerts',
     document_expiring: 'overdue_alerts',
     asset_service_due: 'overdue_alerts',
+    task_due_today: 'task_reminders',
   };
 
   it('maps every kind to the flag the design says governs it', () => {
@@ -140,6 +144,9 @@ describe('isAllowedUrl', () => {
     ['/my-signoffs', true],
     ['/forms', true],
     ['/inbox', true],
+    ['/my-day', true],
+    ['/my-day?d=2026-09-10', true],
+    ['/my-dayx', false],
     // Not on the allowlist, however in-app it looks.
     ['/settings', false],
     ['/', false],
@@ -311,5 +318,32 @@ describe('senderName', () => {
   });
   it('falls back when nothing usable is left', () => {
     expect(senderName('***')).toBe('Building Ops');
+  });
+});
+
+describe('push', () => {
+  it('pushes only the four urgent kinds', () => {
+    expect([...PUSH_KINDS].sort()).toEqual(['issue_mention', 'signoff_requested', 'task_assigned', 'task_due_today']);
+  });
+  it('honours the governing flag and never pushes other kinds', () => {
+    const on = { email_notifications: true, issue_updates: true, task_reminders: true, overdue_alerts: true, daily_digest: false };
+    expect(shouldPush('task_assigned', on)).toBe(true);
+    expect(shouldPush('task_assigned', { ...on, task_reminders: false })).toBe(false);
+    expect(shouldPush('issue_mention', { ...on, issue_updates: false })).toBe(false);
+    expect(shouldPush('issue_comment', on)).toBe(false);
+    expect(shouldPush('task_due_today', { ...on, email_notifications: false })).toBe(true); // email master switch does not govern push
+  });
+  it('task_due_today is inbox + push only, never an email', () => {
+    expect(governingFlag('task_due_today')).toBe('task_reminders');
+    expect(shouldEmail('task_due_today', { email_notifications: true, issue_updates: true, task_reminders: true, overdue_alerts: true, daily_digest: true })).toBe(false);
+  });
+  it('allows /my-day deep links', () => {
+    expect(isAllowedUrl('/my-day')).toBe(true);
+    expect(isAllowedUrl('/my-dayx')).toBe(false);
+  });
+  it('shapes a push payload from an inbox row', () => {
+    const p = pushPayloadFor({ kind: 'task_assigned', title: 'T', body: 'B', url: '/my-day', entity_id: 'e1' });
+    expect(p).toEqual({ title: 'T', body: 'B', url: '/my-day', tag: 'task_assigned:e1' });
+    expect(pushPayloadFor({ kind: 'task_due_today', title: 'T', body: null, url: '/my-day', entity_id: null }).tag).toBe('task_due_today');
   });
 });
