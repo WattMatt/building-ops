@@ -15,6 +15,10 @@
  * storage-policy/path mismatch (the F-30 failure class) shows up HERE as a
  * real client would hit it, not as an abstract policy probe.
  *
+ * R3a adds: a template with a weekly recurrence rule, generated over a horizon with
+ * assigned_to resolved through building_role_assignments, then rescheduled after a
+ * rule change. Expected date sets are computed from today's SAST date.
+ *
  * The final overdue-sweep assertions call `mark_overdue_tasks` as the service
  * role, which flips EVERY genuinely back-dated pending task on the target
  * project, not just the fixture. Against production (SUPABASE_URL containing
@@ -55,14 +59,26 @@ async function svcInsert(table, row) {
 async function svcDelete(table, filter) {
   await fetch(`${URL_BASE}/rest/v1/${table}?${filter}`, { method: 'DELETE', headers: SVC });
 }
+async function svcPatch(table, filter, patch) {
+  const res = await fetch(`${URL_BASE}/rest/v1/${table}?${filter}`, {
+    method: 'PATCH', headers: { ...SVC, Prefer: 'return=representation' }, body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`fixture patch ${table}: HTTP ${res.status} ${await res.text()}`);
+  return (await res.json())[0];
+}
+async function svcSelect(table, filter) {
+  const res = await fetch(`${URL_BASE}/rest/v1/${table}?${filter}`, { headers: SVC });
+  if (!res.ok) throw new Error(`fixture select ${table}: HTTP ${res.status} ${await res.text()}`);
+  return res.json();
+}
 
 const cleanup = [];       // [table, filter] LIFO
 const storageCleanup = [];
 const userIds = [];       // disposable site users, torn down after the rows that reference them
 let building = null;
 
-/** A confirmed site user ('user' role) assigned to `buildingId`, signed in. Registered for teardown. */
-async function siteUser(tag, buildingId) {
+/** A confirmed user with `role`, optionally assigned to `buildingId`, signed in. Registered for teardown. */
+async function persona(tag, role, buildingId) {
   const email = `zztest-chk-${tag}-${RUN}@buildingops.app`;
   let res = await fetch(`${URL_BASE}/auth/v1/admin/users`, {
     method: 'POST', headers: SVC, body: JSON.stringify({ email, password: PASSWORD, email_confirm: true }),
@@ -72,9 +88,9 @@ async function siteUser(tag, buildingId) {
   userIds.push(id);
   await fetch(`${URL_BASE}/rest/v1/user_roles?on_conflict=user_id`, {
     method: 'POST', headers: { ...SVC, Prefer: 'resolution=merge-duplicates' },
-    body: JSON.stringify({ user_id: id, role: 'user' }),
+    body: JSON.stringify({ user_id: id, role }),
   });
-  await svcInsert('user_buildings', { user_id: id, building_id: buildingId });
+  if (buildingId) await svcInsert('user_buildings', { user_id: id, building_id: buildingId });
   res = await fetch(`${URL_BASE}/auth/v1/token?grant_type=password`, {
     method: 'POST', headers: { apikey: ANON, 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password: PASSWORD }),
@@ -83,6 +99,23 @@ async function siteUser(tag, buildingId) {
   if (!jwt) throw new Error(`persona ${tag} login failed`);
   return { id, jwt };
 }
+/** A confirmed site user ('user' role) assigned to `buildingId`, signed in. */
+const siteUser = (tag, buildingId) => persona(tag, 'user', buildingId);
+/** A confirmed admin (all buildings), signed in. */
+const adminUser = (tag) => persona(tag, 'admin', null);
+
+// Calendar helpers for the R3a assertions: the server works in Africa/Johannesburg dates, and the
+// expected occurrence sets are computed here from today's date rather than hard-coded.
+const sastToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Johannesburg', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+const addDays = (iso, n) => { const [y, m, d] = iso.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
+const isoWeekday = (iso) => { const [y, m, d] = iso.split('-').map(Number); return ((new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7) + 1; }; // 1 = Mon … 7 = Sun
+/** Dates in [from, from + horizonDays] (inclusive) whose ISO weekday is in `weekdays`. */
+const weekdayDates = (from, horizonDays, weekdays) => {
+  const out = [];
+  for (let i = 0; i <= horizonDays; i++) { const d = addDays(from, i); if (weekdays.includes(isoWeekday(d))) out.push(d); }
+  return out;
+};
+const sameSet = (a, b) => a.length === b.length && [...a].sort().every((x, i) => x === [...b].sort()[i]);
 
 try {
   console.log(`checklist-smoke vs ${URL_BASE} (run ${RUN})`);
@@ -213,6 +246,65 @@ try {
     const lateRow = await (await fetch(`${URL_BASE}/rest/v1/task_instances?id=eq.${late}&select=status`, { headers: SVC })).json();
     assert('back-dated pending task is now overdue', lateRow[0]?.status === 'overdue', JSON.stringify(lateRow[0]));
     await svcDelete('task_instances', `id=eq.${late}`);
+  }
+
+  // ── R3a: recurrence rule -> horizon generation with per-role assignment -> reschedule ──
+  // A weekly Mon/Wed template scoped to `mixed_use` buildings (the fixture building becomes one, so
+  // reschedule_template's fan-out across every accessible building stays countable), one item whose
+  // responsible_party is 'Maintenance', and a building_role_assignments row mapping that label to
+  // the site user. Expected dates are computed from today's SAST date, never hard-coded.
+  {
+    const { jwt: adminJwt } = await adminUser('admin');
+    await svcPatch('buildings', `id=eq.${building}`, { building_type: 'mixed_use' });
+    const rule = { every: 1, unit: 'week', weekdays: [1, 3] };
+    const tpl = await svcInsert('checklist_templates', {
+      name: `ZZTEST-CHK-R3-${RUN}`, frequency: 'daily', is_active: true, recurrence: rule, applies_to_building_types: ['mixed_use'],
+    });
+    cleanup.push(['checklist_templates', `id=eq.${tpl.id}`]);
+    const item = (await svcInsert('template_items', { template_id: tpl.id, task_name: `ZZTEST-CHK-R3 item ${RUN}`, responsible_party: 'Maintenance' })).id;
+    cleanup.push(['template_items', `id=eq.${item}`]);
+    // Generated rows land in every mixed_use building the reschedule fan-out reaches, not just ours.
+    cleanup.unshift(['task_instances', `template_item_id=eq.${item}`]);
+    await svcInsert('building_role_assignments', { building_id: building, role: 'Maintenance', user_id: userId });
+    cleanup.unshift(['building_role_assignments', `building_id=eq.${building}`]);
+    assert('template trigger derives frequency weekly from the rule (daily was passed) and starts at version 1',
+      tpl.frequency === 'weekly' && tpl.version === 1 && tpl.recurrence?.unit === 'week', JSON.stringify({ frequency: tpl.frequency, version: tpl.version }));
+
+    const today = sastToday();
+    const expectMonWed = weekdayDates(today, 28, [1, 3]);
+    r = await rpc(adminJwt, 'generate_scheduled_tasks', { p_building: building, p_template: tpl.id, p_horizon_days: 28 });
+    body = await r.json();
+    assert(`generate_scheduled_tasks(horizon 28) as admin inserts every Mon/Wed in [today, today+28] (${expectMonWed.length})`,
+      r.ok && body === expectMonWed.length, `HTTP ${r.status} ${JSON.stringify(body)}`);
+    let gen = await svcSelect('task_instances', `template_item_id=eq.${item}&select=building_id,due_date,assigned_to,responsible_role,status`);
+    assert('generated rows: due dates are exactly the expected set, all for the fixture building',
+      sameSet(gen.map((t) => t.due_date), expectMonWed) && gen.every((t) => t.building_id === building), JSON.stringify(gen.map((t) => t.due_date)));
+    assert('generated rows: assigned_to = the Maintenance assignee, responsible_role = Maintenance, pending',
+      gen.length > 0 && gen.every((t) => t.assigned_to === userId && t.responsible_role === 'Maintenance' && t.status === 'pending'), JSON.stringify(gen[0]));
+    r = await rpc(adminJwt, 'generate_scheduled_tasks', { p_building: building, p_template: tpl.id, p_horizon_days: 28 });
+    assert('generate_scheduled_tasks re-run is idempotent (0)', r.ok && (await r.json()) === 0, `HTTP ${r.status}`);
+    r = await rpc(jwt, 'generate_scheduled_tasks', { p_building: building, p_template: tpl.id, p_horizon_days: 28 });
+    assert('generate_scheduled_tasks refused for the site user', r.status === 403, `expected HTTP 403, got ${r.status}`);
+
+    // Rule change -> reschedule: untouched future rows go, Mondays come back over the 90-day weekly cap.
+    const tpl2 = await svcPatch('checklist_templates', `id=eq.${tpl.id}`, { recurrence: { every: 1, unit: 'week', weekdays: [1] } });
+    assert('rule change bumps version to 2 and keeps frequency weekly', tpl2.version === 2 && tpl2.frequency === 'weekly', JSON.stringify({ version: tpl2.version, frequency: tpl2.frequency }));
+    const surviving = gen.filter((t) => t.due_date <= today).map((t) => t.due_date);   // due today is not "future"
+    const expectDeleted = gen.length - surviving.length;
+    const mondays90 = weekdayDates(today, 90, [1]);
+    const mixedUse = await svcSelect('buildings', 'building_type=eq.mixed_use&select=id');
+    const expectGenerated = mondays90.filter((d) => !surviving.includes(d)).length + (mixedUse.length - 1) * mondays90.length;
+    r = await rpc(adminJwt, 'reschedule_template', { p_template: tpl.id });
+    body = await r.json();
+    assert(`reschedule_template deletes the ${expectDeleted} untouched future rows`, r.ok && body[0]?.deleted === expectDeleted, `HTTP ${r.status} ${JSON.stringify(body)}`);
+    assert(`reschedule_template regenerates ${expectGenerated} rows (Mondays over 90 days x ${mixedUse.length} mixed_use building(s))`,
+      r.ok && body[0]?.generated === expectGenerated, `HTTP ${r.status} ${JSON.stringify(body)}`);
+    gen = await svcSelect('task_instances', `template_item_id=eq.${item}&building_id=eq.${building}&select=due_date,assigned_to`);
+    assert('after reschedule: fixture building holds exactly Mondays (90 days) plus any row already due today',
+      sameSet(gen.map((t) => t.due_date), [...new Set([...mondays90, ...surviving])]), JSON.stringify(gen.map((t) => t.due_date)));
+    assert('after reschedule: regenerated rows are assigned through the role assignment', gen.every((t) => t.assigned_to === userId), JSON.stringify(gen[0]));
+    r = await rpc(jwt, 'reschedule_template', { p_template: tpl.id });
+    assert('reschedule_template refused for the site user', r.status === 403, `expected HTTP 403, got ${r.status}`);
   }
 } catch (e) {
   fail('smoke run', e.message);
