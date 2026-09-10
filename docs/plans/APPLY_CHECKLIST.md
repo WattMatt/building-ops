@@ -89,7 +89,8 @@ Spec `docs/superpowers/specs/2026-09-10-r2-field-design.md` §4–§5; plan `doc
 `mark_overdue_tasks`, `complete_task`, `search_entities` (per-kind limits), `push_subscriptions` + RLS,
 `profiles.geotag_photos`, `notifications.kind` gains `task_due_today`, crons `task-generation-daily`
 (`0 2 * * *` = 04:00 SAST) and `task-overdue-sweep` (`5 22 * * *` = 00:05 SAST). Idempotent; re-applied on
-staging after the per-kind-limit revision. No edge-function changes in R2a (push lands in R2c).
+staging and prod after the per-kind-limit and building-required revisions (GMI `c1873b2`). No edge-function
+changes in R2a (push lands in R2c).
 
 ### Staging — DONE 2026-09-10
 
@@ -102,7 +103,8 @@ staging after the per-kind-limit revision. No edge-function changes in R2a (push
 - [x] Backlog counted before apply: **101 of 123 pending tasks were already past due**. The first
       `task-overdue-sweep` (00:05 SAST) marks them `overdue`; dashboard/building KPIs will jump accordingly.
       Nothing was flipped manually.
-- [x] Applied (HTTP 201); functions, crons, table, column and grants verified; `rls-smoke` on prod 432/0, teardown clean.
+- [x] Applied (HTTP 201, re-applied after the tightening); functions, crons, table, column and grants verified;
+      `rls-smoke` on prod 433/0, teardown clean.
 - [x] Types regenerated from prod; boundary casts dropped.
 - [ ] `building_type` on production buildings that lack it — `generate_scheduled_tasks` only creates tasks from
       type-scoped templates for classified buildings (unscoped templates apply everywhere). Owner decision.
