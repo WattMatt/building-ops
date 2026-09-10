@@ -22,6 +22,10 @@ import { Building2, Calendar, Clock, Loader2, UserCircle2, ArrowRight, Plus } fr
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import type { IssuePriority, IssueStatus } from '@/lib/constants';
+import { useBuildingMembers, memberDisplayName } from '@/hooks/useBuildingMembers';
+import { AssigneePicker } from '@/components/people/AssigneePicker';
+import { notify } from '@/lib/notify';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Issue {
   id: string;
@@ -48,6 +52,9 @@ interface Activity {
   comment: string | null;
   author_name: string | null;
   created_at: string;
+  user_id: string | null;
+  photo_urls: string[] | null;
+  mentions: string[] | null;
 }
 
 const statusColors: Record<IssueStatus, string> = {
@@ -73,9 +80,10 @@ interface Props {
 }
 
 export default function IssueDetailDialog({ issue, open, onOpenChange, canManage, onUpdated }: Props) {
+  const { user } = useAuth();
+  const { byId: members } = useBuildingMembers(issue.building_id);
+  const nameOf = (id: string | null | undefined) => (id && members.get(id) ? memberDisplayName(members.get(id)!) : null);
   const [activity, setActivity] = useState<Activity[]>([]);
-  const [people, setPeople] = useState<Record<string, string>>({});
-  const [assignable, setAssignable] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
   const [savingAssignee, setSavingAssignee] = useState(false);
@@ -83,26 +91,12 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [{ data: acts }, { data: profs }] = await Promise.all([
-        supabase
-          .from('issue_activity')
-          .select('id, activity_type, old_value, new_value, comment, author_name, created_at')
-          .eq('issue_id', issue.id)
-          .order('created_at', { ascending: true }),
-        // Assignable people = anyone with access to this building (admin/manager
-        // see all; the picker is only shown to managers anyway).
-        supabase.from('profiles').select('id, full_name, email'),
-      ]);
-      setActivity((acts as Activity[]) ?? []);
-      const map: Record<string, string> = {};
-      const list: { id: string; name: string }[] = [];
-      for (const p of profs ?? []) {
-        const name = (p.full_name as string) || (p.email as string) || 'Unknown';
-        map[p.id as string] = name;
-        list.push({ id: p.id as string, name });
-      }
-      setPeople(map);
-      setAssignable(list.sort((a, b) => a.name.localeCompare(b.name)));
+      const { data: acts } = await supabase
+        .from('issue_activity')
+        .select('id, activity_type, old_value, new_value, comment, author_name, created_at, user_id, photo_urls, mentions')
+        .eq('issue_id', issue.id)
+        .order('created_at', { ascending: true });
+      setActivity((acts as unknown as Activity[]) ?? []);
     } finally {
       setLoading(false);
     }
@@ -129,14 +123,17 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
     }
   };
 
-  const changeAssignee = async (value: string) => {
-    const assigned_to = value === '__unassigned__' ? null : value;
+  const changeAssignee = async (assigned_to: string | null) => {
     if (assigned_to === issue.assigned_to) return;
     setSavingAssignee(true);
     try {
-      const { error } = await supabase.from('issues').update({ assigned_to }).eq('id', issue.id);
+      const { data, error } = await supabase.from('issues').update({ assigned_to }).eq('id', issue.id).select('id');
       if (error) throw error;
-      toast.success(assigned_to ? `Assigned to ${people[assigned_to] ?? 'user'}` : 'Unassigned');
+      if (!data?.length) throw new Error('You do not have permission to assign this issue.');
+      toast.success(assigned_to ? `Assigned to ${nameOf(assigned_to) ?? 'user'}` : 'Unassigned');
+      if (assigned_to && assigned_to !== user?.id) {
+        void notify({ kind: 'issue_assigned', entityType: 'issue', entityId: issue.id, buildingId: issue.building_id, recipients: [assigned_to], title: `Issue assigned to you: ${issue.title}`, url: `/issues?open=${issue.id}` });
+      }
       onUpdated();
       await load();
     } catch (e) {
@@ -154,12 +151,12 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
         return `changed status ${statusLabels[a.old_value as IssueStatus] ?? a.old_value} → ${statusLabels[a.new_value as IssueStatus] ?? a.new_value}`;
       case 'assignment':
         return a.new_value
-          ? `assigned to ${people[a.new_value] ?? 'a user'}`
+          ? `assigned to ${nameOf(a.new_value) ?? 'a user'}`
           : 'removed the assignee';
       case 'contractor_assignment':
         return `assigned contractor ${a.new_value ?? ''}`.trim();
       case 'comment':
-        return a.comment ?? 'commented';
+        return '';
       default:
         return a.activity_type;
     }
@@ -213,15 +210,7 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Assignee</Label>
-                <Select value={issue.assigned_to ?? '__unassigned__'} onValueChange={changeAssignee} disabled={savingAssignee}>
-                  <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                    {assignable.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <AssigneePicker buildingId={issue.building_id} value={issue.assigned_to} onChange={changeAssignee} disabled={savingAssignee} />
               </div>
             </div>
           )}
@@ -246,6 +235,21 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
                       <p>
                         <span className="font-medium">{a.author_name ?? 'Someone'}</span> {activityText(a)}
                       </p>
+                      {a.activity_type === 'comment' && a.comment && (
+                        <p className="whitespace-pre-wrap">{a.comment}</p>
+                      )}
+                      {a.photo_urls && a.photo_urls.length > 0 && (
+                        <div className="mt-1 flex gap-2 flex-wrap">
+                          {a.photo_urls.map((url, i) => (
+                            <SignedImage key={i} src={url} alt={`Comment photo ${i + 1}`} className="h-16 w-16 rounded-md object-cover border" />
+                          ))}
+                        </div>
+                      )}
+                      {a.mentions && a.mentions.length > 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          Mentioned: {a.mentions.map((id) => nameOf(id)).filter((n): n is string => !!n).join(', ')}
+                        </p>
+                      )}
                       <p className="text-xs text-muted-foreground">{format(new Date(a.created_at), 'MMM d, yyyy • h:mm a')}</p>
                     </div>
                   </li>
