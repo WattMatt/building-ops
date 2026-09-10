@@ -16,8 +16,9 @@ import { doneMonthsFromGrid, fiscalWindow, gridHasData } from '@/lib/ppmGrid';
 import { fetchMergedPpmGrids } from '@/lib/ppmGridFetch';
 import { REPORT_SECTIONS, watermarkFor } from '@/lib/fortressReports';
 import { fetchReportElectricalCompliance } from '@/integrations/supabase/insight-linker';
-import { snapshots } from '@/lib/snapshotClient';
+import { TREND_COLUMNS, fetchAll, snapshots, type TrendRow } from '@/lib/snapshotClient';
 import { monthEnd, monthShift, monthlyPoints } from '@/lib/trendSeries';
+import { reportError } from '@/lib/analytics';
 
 pdfMake.vfs = pdfFonts.vfs;
 
@@ -176,15 +177,22 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       }));
     }
 
-    // Trend: the last twelve month-end snapshot rows for this building (R4a). Read errors fail the export
-    // like every other section; an empty table (before the first snapshot) just yields blank months.
-    {
+    // Trend: the last twelve month-end snapshot rows for this building (R4a). Unlike every other section
+    // this read is NOT fatal: the section is derived from a table that may not exist yet (the migration
+    // is staged before prod) and is a nicety, not report content — failing every OPS export over it would
+    // block the reports the trend is drawn from. On error the section is omitted and the failure is
+    // reported (Sentry + dev console) so it does not pass for "no snapshots yet", which merely yields
+    // blank months.
+    try {
       const endPeriod = report.report_period.slice(0, 10);
-      const snapRes = await snapshots().eq('building_id', report.building_id)
+      const snapRes = await fetchAll(() => snapshots<TrendRow>(TREND_COLUMNS).eq('building_id', report.building_id)
         .gte('day', `${monthShift(endPeriod, 11)}-01`).lte('day', monthEnd(endPeriod))
-        .order('day', { ascending: true }).range(0, 999);
+        .order('day', { ascending: true }));
       if (snapRes.error) throw new Error(`Could not read the trend snapshots: ${snapRes.error.message}`);
-      data.trend = monthlyPoints(snapRes.data ?? [], endPeriod, 12);
+      data.trend = monthlyPoints(snapRes.data, endPeriod, 12);
+    } catch (err) {
+      reportError(err, { where: 'generateReportPdf.trend', reportId });
+      if (import.meta.env.DEV) console.warn('[generateReportPdf] trend snapshots unavailable; the Trend section is omitted:', err);
     }
 
     // Monthly building inspection (template walk-through). Same honesty rule as the

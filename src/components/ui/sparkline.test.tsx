@@ -26,4 +26,18 @@ describe('Sparkline', () => {
     const dot = container.querySelector('circle');
     expect(dot?.getAttribute('cy')).toBe('1');
   });
+
+  it('draws an all-equal series as a level line through the middle, never NaN', () => {
+    const { container } = render(<Sparkline values={[50, 50, 50]} height={20} label="flat" />);
+    const points = container.querySelector('polyline')?.getAttribute('points') ?? '';
+    expect(points).not.toContain('NaN');
+    const ys = points.split(' ').map((p) => p.split(',')[1]);
+    expect(ys).toEqual(['10.0', '10.0', '10.0']);
+  });
+
+  it('an all-equal series on a fixed scale keeps its true height', () => {
+    const { container } = render(<Sparkline values={[100, 100]} min={0} max={100} height={20} label="full" />);
+    const points = container.querySelector('polyline')?.getAttribute('points') ?? '';
+    expect(points.split(' ').map((p) => p.split(',')[1])).toEqual(['1.0', '1.0']);
+  });
 });

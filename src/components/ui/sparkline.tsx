@@ -21,10 +21,12 @@ export function Sparkline({ values, width = 72, height = 20, min, max, className
   if (pts.length < 2) return null;
   const lo = min ?? Math.min(...pts.map((p) => p.v));
   const hi = max ?? Math.max(...pts.map((p) => p.v));
-  const span = hi - lo || 1;
+  const span = hi - lo;
   const n = values.length - 1 || 1;
   const x = (i: number) => (i / n) * (width - 2) + 1;
-  const y = (v: number) => height - 1 - ((v - lo) / span) * (height - 2);
+  // A flat series on an auto scale has no span: draw it through the middle rather than along the floor,
+  // where "steady at 80%" would read as "zero".
+  const y = (v: number) => (span === 0 ? height / 2 : height - 1 - ((v - lo) / span) * (height - 2));
   const d = pts.map((p) => `${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
   const last = pts[pts.length - 1];
   return (

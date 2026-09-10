@@ -3,13 +3,12 @@
  * buildings whose compliance moved most. The one recharts import outside the OHS tab; loaded lazily.
  */
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Download } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { supabase } from '@/integrations/supabase/client';
 import { usePortfolioTrend } from '@/hooks/usePortfolioTrend';
 import { useBuildingsTrends } from '@/hooks/useBuildingTrend';
+import { useBuildingNames } from '@/hooks/useBuildingNames';
 import { deltaLeaderboard, reconstructionBoundary } from '@/lib/trendSeries';
 import { num, type PortfolioRow } from '@/lib/snapshotClient';
 import { exportCsv } from '@/lib/exportCsv';
@@ -17,6 +16,7 @@ import { formatBuildingName } from '@/lib/buildingName';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Hint } from '@/components/ui/hint';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 const RANGES = [30, 90, 365] as const;
@@ -30,19 +30,24 @@ const CHARTS: ChartSpec[] = [
   { key: 'docs_expiring_30', title: 'Documents expiring within 30 days' },
 ];
 
+/** Tick labels show MM-DD; the axis itself is keyed on the full day so two years' 09-10 never collide. */
+const tickDay = (day: string) => day.slice(5);
+// Theme tokens, so the tooltip is legible on the dark background too (recharts defaults to white/black).
+const TOOLTIP_STYLE = { backgroundColor: 'hsl(var(--popover))', borderColor: 'hsl(var(--border))', color: 'hsl(var(--popover-foreground))', fontSize: 12 };
+
 function TrendChart({ rows, spec, boundaryDay }: { rows: PortfolioRow[]; spec: ChartSpec; boundaryDay: string | null }) {
-  const data = rows.map((r) => ({ day: r.day, label: r.day.slice(5), value: num(r[spec.key]) }));
+  const data = rows.map((r) => ({ day: r.day, value: num(r[spec.key]) }));
   return (
     <Card>
       <CardHeader className="pb-2"><CardTitle className="text-base">{spec.title}</CardTitle></CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={200}>
           <LineChart data={data} margin={{ left: -20, right: 8, top: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="label" tick={{ fontSize: 11 }} minTickGap={24} />
+            <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+            <XAxis dataKey="day" tickFormatter={tickDay} tick={{ fontSize: 11 }} minTickGap={24} />
             <YAxis domain={spec.pct ? [0, 100] : ['auto', 'auto']} tick={{ fontSize: 11 }} allowDecimals={false} />
-            <Tooltip formatter={(v: number) => (spec.pct ? `${v}%` : v)} labelFormatter={(l, p) => (p?.[0]?.payload as { day?: string })?.day ?? String(l)} />
-            {boundaryDay && <ReferenceLine x={boundaryDay.slice(5)} stroke="hsl(var(--muted-foreground))" strokeDasharray="4 4" />}
+            <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v: number) => (spec.pct ? `${v}%` : v)} />
+            {boundaryDay && <ReferenceLine x={boundaryDay} stroke="hsl(var(--muted-foreground))" strokeDasharray="4 4" />}
             <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} connectNulls={false} />
           </LineChart>
         </ResponsiveContainer>
@@ -55,19 +60,13 @@ export default function Trends() {
   const [range, setRange] = useState<Range>(90);
   const portfolio = usePortfolioTrend(range);
   const buildings = useBuildingsTrends(range);
-  const { data: names } = useQuery({
-    queryKey: ['buildings-for-reports'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('buildings').select('id, name').order('name');
-      if (error) throw error;
-      return data ?? [];
-    },
-  });
+  const { data: names } = useBuildingNames();
   const nameOf = useMemo(() => new Map((names ?? []).map((b) => [b.id, b.name])), [names]);
 
   const rows = portfolio.data ?? [];
   const boundary = reconstructionBoundary(rows);
   const boundaryDay = boundary > 0 ? rows[boundary].day : null;
+  const allReconstructed = rows.length > 0 && boundary === -1;
   const board = useMemo(() => deltaLeaderboard(buildings.rows, 'compliance_pct'), [buildings.rows]);
   const up = board.filter((b) => b.delta > 0).slice(0, 5);
   const down = board.filter((b) => b.delta < 0).slice(-5).reverse();
@@ -88,19 +87,29 @@ export default function Trends() {
           <p className="text-sm text-muted-foreground">Portfolio metrics from the nightly snapshot (05:00).</p>
         </div>
         <div className="flex items-center gap-2">
-          {RANGES.map((r) => (
-            <Button key={r} variant={r === range ? 'default' : 'outline'} className="h-11 min-w-16" onClick={() => setRange(r)} aria-pressed={r === range}>{r} d</Button>
-          ))}
+          <div role="group" aria-label="Range" className="flex items-center gap-2">
+            {RANGES.map((r) => (
+              <Button key={r} variant={r === range ? 'default' : 'outline'} className="h-11 min-w-16" onClick={() => setRange(r)} aria-pressed={r === range}>{r} days</Button>
+            ))}
+          </div>
           <Button variant="outline" className="h-11" onClick={onExport} disabled={!rows.length}><Download className="mr-2 h-4 w-4" />CSV</Button>
         </div>
       </div>
       <Hint>Sparklines on each building header show the same series for that building; this page is the whole portfolio.</Hint>
+      {/* Provenance, not coaching: stays visible with hints off. */}
       {boundaryDay && (
         <p className="text-xs text-muted-foreground">Days before {boundaryDay} were reconstructed from today's data when snapshots began; report and expiry figures for those days are not historical.</p>
       )}
+      {allReconstructed && (
+        <p className="text-xs text-muted-foreground">All days in this range were reconstructed from today's data when snapshots began; report and expiry figures are not historical yet.</p>
+      )}
       {portfolio.isError ? (
         <Card><CardContent className="p-6 text-sm text-destructive">Could not load the portfolio snapshots.</CardContent></Card>
-      ) : !portfolio.isLoading && !rows.length ? (
+      ) : portfolio.isLoading ? (
+        <div className="grid gap-4 md:grid-cols-2" aria-busy="true" aria-label="Loading trends">
+          {CHARTS.map((spec) => <Skeleton key={spec.key} className="h-[260px]" />)}
+        </div>
+      ) : !rows.length ? (
         <Card><CardContent className="p-6 text-sm text-muted-foreground">No snapshots yet. The first one is written at 05:00 after the migration is applied.</CardContent></Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
@@ -116,7 +125,7 @@ export default function Trends() {
           {[{ title: 'Improved', list: up }, { title: 'Declined', list: down }].map(({ title, list }) => (
             <div key={title}>
               <p className="mb-2 text-sm font-medium">{title}</p>
-              {list.length === 0 ? <p className="text-sm text-muted-foreground">Nothing moved.</p> : (
+              {buildings.isLoading ? <Skeleton className="h-24" /> : list.length === 0 ? <p className="text-sm text-muted-foreground">Nothing moved.</p> : (
                 <Table>
                   <TableHeader><TableRow><TableHead>Building</TableHead><TableHead className="text-right">From</TableHead><TableHead className="text-right">To</TableHead><TableHead className="text-right">Δ</TableHead></TableRow></TableHeader>
                   <TableBody>

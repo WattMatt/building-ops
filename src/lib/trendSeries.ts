@@ -1,12 +1,13 @@
 /**
  * Pure shaping of snapshot rows into series, monthly points (PDF) and a change leaderboard (/trends).
- * Rows are the SnapshotRow shape, ordered by day ascending as the hooks return them.
+ * Rows are the TrendRow shape (the narrow TREND_COLUMNS read; a full SnapshotRow also fits), ordered by
+ * day ascending as the hooks return them.
  */
-import { num, type SnapshotRow } from '@/lib/snapshotClient';
+import { num, type TrendRow } from '@/lib/snapshotClient';
 
 export type SeriesKey = 'compliance_pct' | 'task_completion_30d_pct' | 'issues_open' | 'tasks_overdue' | 'docs_expiring_30' | 'issues_breached';
 
-export function series(rows: SnapshotRow[], key: SeriesKey): (number | null)[] {
+export function series(rows: Pick<TrendRow, SeriesKey>[], key: SeriesKey): (number | null)[] {
   return rows.map((r) => num(r[key]));
 }
 
@@ -31,12 +32,14 @@ export function monthEnd(period: string): string {
   return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
 }
 
+type MonthlyRow = Pick<TrendRow, 'day' | 'compliance_pct' | 'task_completion_30d_pct' | 'issues_open' | 'tasks_overdue'>;
+
 /**
  * The last snapshot row of each of the `months` months ending with the month of `endPeriod`. A month with no
- * row yields nulls (never a fabricated value), so the PDF says "blank" where the data starts.
+ * row yields nulls (never a fabricated value), so the PDF says "—" where the data starts.
  */
-export function monthlyPoints(rows: SnapshotRow[], endPeriod: string, months = 12): MonthlyPoint[] {
-  const last = new Map<string, SnapshotRow>();
+export function monthlyPoints(rows: MonthlyRow[], endPeriod: string, months = 12): MonthlyPoint[] {
+  const last = new Map<string, MonthlyRow>();
   for (const r of rows) {
     const key = r.day.slice(0, 7);
     const prev = last.get(key);
@@ -59,8 +62,12 @@ export function monthlyPoints(rows: SnapshotRow[], endPeriod: string, months = 1
 
 export interface DeltaRow { buildingId: string; first: number; last: number; delta: number }
 
-/** Change in `key` from the first to the last non-null value per building; buildings with < 2 values are left out. */
-export function deltaLeaderboard(byBuilding: Record<string, SnapshotRow[]>, key: SeriesKey): DeltaRow[] {
+/**
+ * Change in `key` from the first to the last non-null value per building; buildings with < 2 values are
+ * left out. "First" and "last" are positional: the rows of each building MUST already be in ascending
+ * day order (the hooks order the read that way and group without re-sorting) — this does not sort.
+ */
+export function deltaLeaderboard(byBuilding: Record<string, Pick<TrendRow, SeriesKey>[]>, key: SeriesKey): DeltaRow[] {
   const out: DeltaRow[] = [];
   for (const [buildingId, rows] of Object.entries(byBuilding)) {
     const vals = series(rows, key).filter((v): v is number => v !== null);

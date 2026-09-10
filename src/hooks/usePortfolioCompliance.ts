@@ -1,17 +1,23 @@
 /**
  * Portfolio OHS compliance rollup (audit finding H1, spec KPI O9).
  *
- * Since R4a the figures come from the nightly snapshot (building_metrics_daily, D10: compliance of the
- * latest APPROVED ops report) — one query for every building — plus one query for the latest FILED ops
- * report per building so the card can still say "submitted, awaiting approval" rather than "no report".
- * A building with no fresh snapshot row falls back to the original per-building live queries (buildingRow).
+ * Two sources, and they do NOT share semantics — the row says which one it used via `scorePeriod`:
  *
- * Note the semantics: compliancePct is approved-only (it was "latest filed" before R4a); period/status are
- * still the latest filed report's. The dashboard card and sparklines therefore agree (spec §3).
+ *  - Snapshot path (R4a, one query for every building): `compliancePct`/`criticalPct`/`openNonCompliances`
+ *    are the nightly snapshot's, i.e. the latest APPROVED ops report (D10). `scorePeriod` is that report's
+ *    period. A second query lists the latest FILED ops report per building so `period`/`status` can still
+ *    say "submitted, awaiting approval" rather than "no report".
+ *  - Live fallback (`buildingRow`, per building, for any building without a FRESH snapshot row and for
+ *    every building when the snapshot read fails): the figures are the latest FILED report's (submitted,
+ *    reviewed or approved), because a filed-but-unsigned report must not read as "nothing filed". Here
+ *    `scorePeriod` is that filed report's period whenever it produced a score.
+ *
+ * So a building's score can be from an approved report on the snapshot path and from a merely submitted
+ * one on the live path; the card is right to show `scorePeriod` next to the number.
  */
 import { useQuery } from '@tanstack/react-query';
 import { fdb } from '@/integrations/supabase/fortress-db';
-import { SNAPSHOT_FRESH_DAYS, daysAgo, num, snapshots, type SnapshotRow } from '@/lib/snapshotClient';
+import { SNAPSHOT_FRESH_DAYS, daysAgo, fetchAll, num, snapshotQueryDefaults, snapshotRowsOrEmpty, snapshots, type SnapshotRow } from '@/lib/snapshotClient';
 
 export interface PortfolioComplianceRow {
   buildingId: string;
@@ -19,9 +25,12 @@ export interface PortfolioComplianceRow {
   compliancePct: number | null;
   criticalPct: number | null;
   openNonCompliances: number | null;
+  /** Period of the latest FILED ops report (any of submitted/reviewed/approved), null when none. */
   period: string | null;
-  /** Lifecycle status of the report the figures came from; null when none was found. */
+  /** Lifecycle status of that latest filed report; null when none was found. */
   status: string | null;
+  /** Period of the report `compliancePct` was scored from — approved-only on the snapshot path. Null when unscored. */
+  scorePeriod: string | null;
 }
 
 export interface PortfolioCompliance {
@@ -45,6 +54,7 @@ async function buildingRow(buildingId: string, name: string): Promise<PortfolioC
     openNonCompliances: null,
     period: null,
     status: null,
+    scorePeriod: null,
   };
 
   // Latest FILED ops_monthly report for this building.
@@ -85,20 +95,23 @@ async function buildingRow(buildingId: string, name: string): Promise<PortfolioC
     openNonCompliances = respRes.data?.length ?? 0;
   }
 
+  const period = (report.report_period as string | null) ?? null;
   return {
     buildingId,
     name,
     compliancePct,
     criticalPct,
     openNonCompliances,
-    period: (report.report_period as string | null) ?? null,
+    period,
     status: (report.status as string | null) ?? null,
+    scorePeriod: compliancePct === null ? null : period,
   };
 }
 
 export function usePortfolioCompliance() {
   const query = useQuery({
     queryKey: ['portfolio-compliance'],
+    ...snapshotQueryDefaults,
     queryFn: async (): Promise<PortfolioCompliance> => {
       const bRes = await fdb.from('buildings').select('id,name').order('name');
       // Without this the query "succeeds" with zero buildings on any failure, and
@@ -107,17 +120,20 @@ export function usePortfolioCompliance() {
       const buildings = (bRes.data ?? []) as { id: string; name: string | null }[];
 
       const [snapRes, repRes] = await Promise.all([
-        snapshots().gte('day', daysAgo(SNAPSHOT_FRESH_DAYS)).order('day', { ascending: false }).range(0, 4999),
+        // Fresh window only: ≤ 4 rows per building. Newest first, building_id as the tiebreak so paging is stable.
+        fetchAll(() => snapshots().gte('day', daysAgo(SNAPSHOT_FRESH_DAYS)).order('day', { ascending: false }).order('building_id', { ascending: true })),
         fdb.from('reports').select('building_id,report_period,status')
           .eq('report_type', 'ops_monthly').in('status', ['submitted', 'reviewed', 'approved'])
           .order('report_period', { ascending: false }).range(0, 4999),
       ]);
-      if (snapRes.error) throw snapRes.error;
+      // A failed snapshot read is "no fresh rows": every building takes the live path below, and the
+      // card shows live figures with no "as of" — never an error for a table that may not exist yet.
+      const snapRows = snapshotRowsOrEmpty(snapRes, 'usePortfolioCompliance');
       if (repRes.error) throw repRes.error;
 
       // Both lists are newest-first, so the first row seen per building is the latest.
       const latestSnap = new Map<string, SnapshotRow>();
-      for (const r of snapRes.data ?? []) if (!latestSnap.has(r.building_id)) latestSnap.set(r.building_id, r);
+      for (const r of snapRows) if (!latestSnap.has(r.building_id)) latestSnap.set(r.building_id, r);
       const latestFiled = new Map<string, { period: string; status: string }>();
       for (const r of repRes.data ?? []) if (!latestFiled.has(r.building_id)) latestFiled.set(r.building_id, { period: r.report_period, status: r.status });
 
@@ -126,13 +142,15 @@ export function usePortfolioCompliance() {
         const s = latestSnap.get(b.id);
         if (!s) return buildingRow(b.id, name);
         const filed = latestFiled.get(b.id);
+        const compliancePct = num(s.compliance_pct);
         return {
           buildingId: b.id, name,
-          compliancePct: num(s.compliance_pct),
+          compliancePct,
           criticalPct: num(s.critical_pct),
           openNonCompliances: s.ohs_open_nc ?? null,
           period: filed?.period ?? s.compliance_period ?? null,
           status: filed?.status ?? null,
+          scorePeriod: compliancePct === null ? null : s.compliance_period,
         };
       }));
 

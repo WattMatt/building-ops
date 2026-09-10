@@ -2,15 +2,16 @@
  * Lightweight per-building score for the detail header. Since R4a the numbers come from the latest nightly
  * snapshot row (building_metrics_daily: compliance of the latest APPROVED ops report, task completion over
  * the last 30 days) — one read instead of three. When no snapshot is fresh (a building created after the
- * last run, or the cron has not run for SNAPSHOT_FRESH_DAYS), the original live queries answer instead,
- * so the header is never blank because of the cron. Read-through; nothing is written.
+ * last run, or the cron has not run for SNAPSHOT_FRESH_DAYS) OR the snapshot read itself fails (table
+ * missing before the migration, permissions, 5xx), the original live queries answer instead, so the
+ * header is never blank because of the cron. Read-through; nothing is written.
  */
 import { useQuery } from '@tanstack/react-query';
 import { fdb } from '@/integrations/supabase/fortress-db';
 import { supabase } from '@/integrations/supabase/client';
 import { taskCompletionPct } from '@/lib/buildingScore';
 import { todayInOperatingTz } from '@/lib/myWork';
-import { SNAPSHOT_FRESH_DAYS, daysAgo, num, snapshots } from '@/lib/snapshotClient';
+import { SNAPSHOT_FRESH_DAYS, daysAgo, num, snapshotQueryDefaults, snapshotRowsOrEmpty, snapshots } from '@/lib/snapshotClient';
 
 const WINDOW_DAYS = 30;
 
@@ -53,10 +54,12 @@ export function useBuildingScore(buildingId: string | undefined) {
   const query = useQuery({
     queryKey: ['building-score', buildingId],
     enabled: !!buildingId,
+    ...snapshotQueryDefaults,
     queryFn: async (): Promise<BuildingScoreData> => {
       const bid = buildingId!;
       const snap = await snapshots().eq('building_id', bid).gte('day', daysAgo(SNAPSHOT_FRESH_DAYS)).order('day', { ascending: false }).limit(1);
-      const row = snap.data?.[0];
+      // A read error is "no fresh row": the live path answers, never an error state (see snapshotRowsOrEmpty).
+      const row = snapshotRowsOrEmpty(snap, 'useBuildingScore')[0];
       if (row) {
         return { ohsPct: num(row.compliance_pct), ohsPeriod: row.compliance_period, taskPct: num(row.task_completion_30d_pct), asOf: row.computed_at, source: 'snapshot' };
       }
@@ -71,5 +74,6 @@ export function useBuildingScore(buildingId: string | undefined) {
     asOf: query.data?.asOf ?? null,
     source: query.data?.source ?? null,
     isLoading: query.isLoading,
+    isError: query.isError,
   };
 }

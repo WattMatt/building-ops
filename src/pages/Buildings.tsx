@@ -30,13 +30,15 @@ import { BuildingAvatar } from '@/components/building/BuildingAvatar';
 import { BuildingAvatarDialog } from '@/components/building/BuildingAvatarDialog';
 import BuildingImportDialog from '@/components/building/BuildingImportDialog';
 import { BuildingScoreChips } from '@/components/building/BuildingScoreChips';
-import { useBuildingsScores } from '@/hooks/useBuildingsScores';
+import { chipValues, useBuildingsScores } from '@/hooks/useBuildingsScores';
 import { useBuildingsTrends } from '@/hooks/useBuildingTrend';
 import * as XLSX from 'xlsx';
 
 export default function Buildings() {
   const { isAdminOrManager } = useAuth();
   const { buildings, loading, error, refetch, deleteBuilding } = useBuildings();
+  // One snapshot read for the grid (sparklines AND chip values, from each building's latest fresh row);
+  // the live scores are only the fallback for buildings the snapshot does not cover yet.
   const { scores } = useBuildingsScores();
   const trends = useBuildingsTrends(30);
   const [searchQuery, setSearchQuery] = useState('');
@@ -72,8 +74,8 @@ export default function Buildings() {
   const filteredBuildings = buildings.filter(
     (building) =>
       building.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      building.address.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      building.city.toLowerCase().includes(searchQuery.toLowerCase())
+      (building.address ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (building.city ?? '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleDelete = async (id: string) => {
@@ -192,6 +194,7 @@ export default function Buildings() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredBuildings.map((building) => {
             const position = building.logo_position || 'top-left';
+            const chips = chipValues(trends.latest[building.id], scores[building.id]);
 
             return (
               <Card key={building.id} className="group hover:shadow-md transition-shadow relative overflow-hidden">
@@ -324,10 +327,11 @@ export default function Buildings() {
                   </p>
                   <div className="mb-4">
                     <BuildingScoreChips
-                      ohsPct={scores[building.id]?.ohsPct ?? null}
-                      taskPct={scores[building.id]?.taskPct ?? null}
+                      ohsPct={chips.ohsPct}
+                      taskPct={chips.taskPct}
                       ohsTrend={trends.byBuilding[building.id]?.compliance}
                       taskTrend={trends.byBuilding[building.id]?.tasks}
+                      asOf={chips.asOf}
                     />
                   </div>
                   <div className="flex items-center justify-between">

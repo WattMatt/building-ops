@@ -2,6 +2,11 @@
  * Typed access to the R4a snapshot table and its portfolio view. Both are absent from the generated types
  * until the controller regenerates them after the migration ships, so this is the one file that casts —
  * every hook and the PDF read through here and stay cast-free.
+ *
+ * Also the home of the three behaviours every snapshot reader shares:
+ *  - `fetchAll` pages past PostgREST's server-side max-rows cap (see the note on it);
+ *  - `snapshotRowsOrEmpty` turns a read error into "no rows", so hooks with a live fallback take it;
+ *  - `snapshotQueryDefaults` stops react-query hammering a table that does not exist yet.
  */
 import { supabase } from '@/integrations/supabase/client';
 import { todayInOperatingTz } from '@/lib/myWork';
@@ -57,8 +62,19 @@ export interface PortfolioRow {
   reconstructed: boolean;
 }
 
+/** The columns the series, sparklines, leaderboard and PDF trend need — a fraction of the row. */
+export const TREND_COLUMNS =
+  'building_id,day,compliance_pct,task_completion_30d_pct,issues_open,tasks_overdue,docs_expiring_30,issues_breached,reconstructed,computed_at';
+export type TrendRow = Pick<
+  SnapshotRow,
+  'building_id' | 'day' | 'compliance_pct' | 'task_completion_30d_pct' | 'issues_open' | 'tasks_overdue' | 'docs_expiring_30' | 'issues_breached' | 'reconstructed' | 'computed_at'
+>;
+
 export interface PgErrLike { message: string; code?: string }
-export interface RowBuilder<Row> extends PromiseLike<{ data: Row[] | null; error: PgErrLike | null }> {
+export interface PgResult<Row> { data: Row[] | null; error: PgErrLike | null }
+/** What `fetchAll` resolves to: the rows are always an array (possibly partial when `error` is set). */
+export interface PagedResult<Row> { data: Row[]; error: PgErrLike | null }
+export interface RowBuilder<Row> extends PromiseLike<PgResult<Row>> {
   eq(column: string, value: string): RowBuilder<Row>;
   in(column: string, values: string[]): RowBuilder<Row>;
   gte(column: string, value: string): RowBuilder<Row>;
@@ -68,15 +84,74 @@ export interface RowBuilder<Row> extends PromiseLike<{ data: Row[] | null; error
   range(from: number, to: number): RowBuilder<Row>;
 }
 interface SnapshotClient {
-  from(table: 'building_metrics_daily'): { select(columns: '*'): RowBuilder<SnapshotRow> };
-  from(table: 'portfolio_metrics_daily'): { select(columns: '*'): RowBuilder<PortfolioRow> };
+  // `select` takes any column string: the caller names the row type it expects back (TrendRow for the
+  // narrow TREND_COLUMNS read, the full row for '*'). Nothing checks the list against the type — keep
+  // TREND_COLUMNS and TrendRow in step by hand.
+  from(table: 'building_metrics_daily'): { select<Row = SnapshotRow>(columns: string): RowBuilder<Row> };
+  from(table: 'portfolio_metrics_daily'): { select<Row = PortfolioRow>(columns: string): RowBuilder<Row> };
 }
 // building_metrics_daily and portfolio_metrics_daily are not yet in the generated types; regenerate after the
 // migration ships and replace this cast with the typed client.
 const client = supabase as unknown as SnapshotClient;
 
-export function snapshots(): RowBuilder<SnapshotRow> { return client.from('building_metrics_daily').select('*'); }
-export function portfolioSnapshots(): RowBuilder<PortfolioRow> { return client.from('portfolio_metrics_daily').select('*'); }
+export function snapshots<Row = SnapshotRow>(columns: string = '*'): RowBuilder<Row> {
+  return client.from('building_metrics_daily').select<Row>(columns);
+}
+export function portfolioSnapshots<Row = PortfolioRow>(columns: string = '*'): RowBuilder<Row> {
+  return client.from('portfolio_metrics_daily').select<Row>(columns);
+}
+
+/**
+ * Read every row a query matches, `pageSize` at a time.
+ *
+ * PostgREST enforces a server-side `max-rows` cap (1 000 on a default Supabase project) on EVERY
+ * response, and `.range(0, 19999)` does not lift it — the server silently returns the first 1 000 and
+ * the caller never learns the rest were cut. 47 buildings × 365 days is 17 000 rows, so the /trends
+ * page would have shown the oldest month only. This pages with `.range(i, i + pageSize - 1)` until a
+ * page comes back short; `pageSize` must not exceed the server cap or the short-page test never fires.
+ * The factory is called once per page because a builder cannot be reused after it has been awaited.
+ * A page error stops the loop and is returned (not thrown) so callers choose between throwing and
+ * falling back to live data.
+ */
+export async function fetchAll<Row>(builderFactory: () => RowBuilder<Row>, pageSize = 1000): Promise<PagedResult<Row>> {
+  const out: Row[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const res = await builderFactory().range(from, from + pageSize - 1);
+    if (res.error) return { data: out, error: res.error };
+    const page = res.data ?? [];
+    out.push(...page);
+    if (page.length < pageSize) return { data: out, error: null };
+  }
+}
+
+/**
+ * Rows from a snapshot read, or `[]` when it failed. For hooks that have a live fallback: a missing table
+ * (before the migration), a permissions change or a 5xx should land on the live path, not on an error
+ * state, and "no rows" is exactly what makes them take that path. Loud in dev so the fallback is not
+ * mistaken for the snapshot working.
+ */
+export function snapshotRowsOrEmpty<Row>(res: PgResult<Row>, where: string): Row[] {
+  if (res.error) {
+    if (import.meta.env.DEV) console.warn(`[${where}] snapshot read failed; using live data:`, res.error.message);
+    return [];
+  }
+  return res.data ?? [];
+}
+
+/** PostgREST "relation does not exist" (PGRST205 via the schema cache, 42P01 straight from Postgres). */
+const MISSING_TABLE = /PGRST205|42P01/;
+
+/**
+ * react-query options every snapshot hook spreads in. Before the migration is applied the table is
+ * missing on every attempt, and the default three retries × N hooks × every mount was a storm of 404s;
+ * a missing table is never retried, anything else once. Snapshots change once a night, so ten minutes
+ * of staleness costs nothing.
+ */
+export const snapshotQueryDefaults = {
+  retry: (failureCount: number, error: unknown): boolean =>
+    failureCount < 1 && !MISSING_TABLE.test(String((error as PgErrLike | null)?.code ?? '')),
+  staleTime: 10 * 60_000,
+};
 
 /** `YYYY-MM-DD` n days before today in the operating timezone. */
 export function daysAgo(n: number, today: string = todayInOperatingTz()): string {
@@ -84,7 +159,12 @@ export function daysAgo(n: number, today: string = todayInOperatingTz()): string
   return new Date(Date.UTC(y, m - 1, d - n)).toISOString().slice(0, 10);
 }
 
-/** The cron writes at 05:00 SAST; anything older than this many days means it has not run and live data wins. */
+/**
+ * The cron writes at 05:00 SAST. A row dated within `daysAgo(SNAPSHOT_FRESH_DAYS)`..today counts as fresh
+ * — that is four calendar days inclusive, so one or two missed nights still show the (slightly old)
+ * snapshot with its "as of" caption rather than flipping every card to the live queries. Older than that
+ * means the cron is not running and live data wins.
+ */
 export const SNAPSHOT_FRESH_DAYS = 3;
 
 export function num(v: unknown): number | null {
@@ -93,7 +173,7 @@ export function num(v: unknown): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
-/** "05:02, 10 Sep" in the operating timezone, for the "as of" caption. */
+/** "10 Sept, 05:02" (en-ZA: day, abbreviated month, then time) in the operating timezone, for the "as of" caption. */
 export function formatAsOf(iso: string): string {
   return new Date(iso).toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg', hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' });
 }

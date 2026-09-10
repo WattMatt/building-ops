@@ -7,23 +7,47 @@ function watermarkText(doc: { watermark?: string | { text: string } }): string |
   return typeof doc.watermark === 'object' ? doc.watermark.text : doc.watermark;
 }
 
+// pdfmake's doc-definition is a loosely-typed tree; the walkers below read it structurally.
+type PdfNode = { [key: string]: unknown; image?: unknown; text?: unknown; columns?: unknown; stack?: unknown; content?: unknown; table?: { body?: unknown; widths?: unknown[] } };
+const asNode = (n: unknown): PdfNode | null => (n != null && typeof n === 'object' && !Array.isArray(n) ? (n as PdfNode) : null);
+
 // Walk a pdfmake doc-definition tree collecting every image data-URL and text string.
-function walk(node: any, images: string[], texts: string[]): void {
+function walk(node: unknown, images: string[], texts: string[]): void {
   if (node == null) return;
   if (Array.isArray(node)) { for (const n of node) walk(n, images, texts); return; }
-  if (typeof node !== 'object') return;
-  if (typeof node.image === 'string') images.push(node.image);
-  if (typeof node.text === 'string') texts.push(node.text);
-  else if (Array.isArray(node.text)) for (const t of node.text) texts.push(typeof t === 'string' ? t : (t?.text ?? ''));
-  if (node.columns) walk(node.columns, images, texts);
-  if (node.stack) walk(node.stack, images, texts);
-  if (node.content) walk(node.content, images, texts);
-  if (node.table?.body) walk(node.table.body, images, texts);
+  const o = asNode(node);
+  if (!o) return;
+  if (typeof o.image === 'string') images.push(o.image);
+  if (typeof o.text === 'string') texts.push(o.text);
+  else if (Array.isArray(o.text)) for (const t of o.text) texts.push(typeof t === 'string' ? t : (asNode(t)?.text as string | undefined) ?? '');
+  if (o.columns) walk(o.columns, images, texts);
+  if (o.stack) walk(o.stack, images, texts);
+  if (o.content) walk(o.content, images, texts);
+  if (o.table?.body) walk(o.table.body, images, texts);
 }
-function collect(doc: any): { images: string[]; text: string } {
+function collect(doc: { content: unknown }): { images: string[]; text: string } {
   const images: string[] = []; const texts: string[] = [];
   walk(doc.content, images, texts);
   return { images, text: texts.join(' | ') };
+}
+
+/** Every table whose fixed widths plus 4pt gutters overflow the 515pt text block, as "N cols / Wpt". */
+function overWideTables(root: unknown): string[] {
+  const over: string[] = [];
+  const visit = (n: unknown): void => {
+    if (n == null) return;
+    if (Array.isArray(n)) { n.forEach(visit); return; }
+    const o = asNode(n);
+    if (!o) return;
+    const widths = o.table?.widths;
+    if (Array.isArray(widths)) {
+      const fixed = widths.reduce<number>((a, w) => a + (typeof w === 'number' ? w : 0), 0);
+      if (fixed + widths.length * 4 > 515) over.push(`${widths.length} cols / ${fixed}pt`);
+    }
+    Object.values(o).forEach(visit);
+  };
+  visit(root);
+  return over;
 }
 
 const PHOTO = 'data:image/jpeg;base64,AAAA';
@@ -259,7 +283,7 @@ describe('buildReportDoc — export completeness', () => {
   });
 
   it('keeps every table inside the printable width', () => {
-    const doc: any = cmDoc({
+    const doc = cmDoc({
       tenantCompliance: [{
         shop: '1', tenant: 'B', gla: 1, occupancyCert: 'a', cocNumber: 'b', cocDate: 'c', leaseClause: 'd',
         hvacResponsibility: 'e', hvacRecords: 'f', hvacHandover: 'g', generatorResponsibility: 'h',
@@ -273,19 +297,7 @@ describe('buildReportDoc — export completeness', () => {
     });
     // pdfmake draws overflow off the paper rather than wrapping, so fixed widths plus
     // gutters must fit the 515pt text block. This is the guard the review found missing.
-    const over: string[] = [];
-    const visit = (n: any): void => {
-      if (n == null) return;
-      if (Array.isArray(n)) { n.forEach(visit); return; }
-      if (typeof n !== 'object') return;
-      if (n.table?.widths) {
-        const fixed = n.table.widths.reduce((a: number, w: any) => a + (typeof w === 'number' ? w : 0), 0);
-        if (fixed + n.table.widths.length * 4 > 515) over.push(`${n.table.widths.length} cols / ${fixed}pt`);
-      }
-      Object.values(n).forEach(visit);
-    };
-    visit(doc.content);
-    expect(over).toEqual([]);
+    expect(overWideTables(doc.content)).toEqual([]);
   });
 
   it('names the sections that carry nothing, and omits the block when none do', () => {
@@ -359,19 +371,7 @@ describe('buildReportDoc — CM Page 2 / Page 3 sections', () => {
   });
 
   it('keeps every new table inside the 515pt text block', () => {
-    const over: string[] = [];
-    const visit = (n: any): void => {
-      if (n == null) return;
-      if (Array.isArray(n)) { n.forEach(visit); return; }
-      if (typeof n !== 'object') return;
-      if (n.table?.widths) {
-        const fixed = n.table.widths.reduce((a: number, w: any) => a + (typeof w === 'number' ? w : 0), 0);
-        if (fixed + n.table.widths.length * 4 > 515) over.push(`${n.table.widths.length} cols / ${fixed}pt`);
-      }
-      Object.values(n).forEach(visit);
-    };
-    visit(full.content);
-    expect(over).toEqual([]);
+    expect(overWideTables(full.content)).toEqual([]);
   });
 });
 
@@ -523,6 +523,26 @@ describe('buildReportDoc — trend (R4a)', () => {
     const canvas = (doc.content as { canvas?: unknown[] }[]).find((c) => Array.isArray(c.canvas) && c.canvas.length === 12);
     expect(canvas).toBeTruthy();
     expect((canvas!.canvas as { color: string }[]).filter((r) => r.color === '#e5e7eb')).toHaveLength(3);
+  });
+
+  it('renders the Trend section when overdue tasks are the only figure any month carries', () => {
+    const trend = Array.from({ length: 12 }, (_, i) => ({ month: `2026-${String(i + 1).padStart(2, '0')}`, compliancePct: null, taskPct: null, issuesOpen: null, tasksOverdue: i === 11 ? 4 : null }));
+    const doc = buildReportDoc({ report_type: 'ops_monthly', title: 'T', report_period: '2026-12-01' }, { trend }, { color: '#2563eb', orgName: 'Org' });
+    const text = JSON.stringify(doc.content);
+    expect(text).toContain('Trend (12 months)');
+    // The note names the placeholder the cells actually print (the quotes are JSON-escaped in `text`).
+    expect(text).toContain('\\"—\\" means no snapshot existed for that month');
+    // Every bar is a 1pt grey stub, none is a zero-height rect.
+    const canvas = (doc.content as { canvas?: { h: number; color: string }[] }[]).find((c) => Array.isArray(c.canvas) && c.canvas.length === 12);
+    expect(canvas!.canvas!.every((r) => r.h === 1 && r.color === '#e5e7eb')).toBe(true);
+  });
+
+  it('keeps the bar strip inside the text block whatever the month count', () => {
+    const trend = Array.from({ length: 24 }, (_, i) => ({ month: `20${25 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`, compliancePct: 50, taskPct: null, issuesOpen: null, tasksOverdue: null }));
+    const doc = buildReportDoc({ report_type: 'ops_monthly', title: 'T', report_period: '2026-12-01' }, { trend }, { color: '#2563eb', orgName: 'Org' });
+    const canvas = (doc.content as { canvas?: { x: number; w: number }[] }[]).find((c) => Array.isArray(c.canvas) && c.canvas.length === 24);
+    const last = canvas!.canvas![23];
+    expect(last.x + last.w).toBeLessThanOrEqual(515);
   });
 
   it('omits the Trend section when every month is blank', () => {

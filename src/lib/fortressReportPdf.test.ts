@@ -12,7 +12,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@/integrations/supabase/client', () => {
-  const METHODS = ['select', 'eq', 'in', 'order', 'limit', 'maybeSingle', 'single'];
+  const METHODS = ['select', 'eq', 'in', 'gte', 'lte', 'order', 'limit', 'range', 'maybeSingle', 'single'];
   const from = (table: string): Chain => {
     const own: RecordedCall[] = [];
     const chain = {} as Chain;
@@ -28,12 +28,17 @@ vi.mock('@/integrations/supabase/client', () => {
   return { supabase: { from } };
 });
 // The PDF module drags in pdfmake and storage at import time; none of that is under test here.
-vi.mock('pdfmake/build/pdfmake', () => ({ default: { vfs: {}, createPdf: vi.fn() } }));
+const pdf = vi.hoisted(() => ({ docs: [] as { content: unknown }[] }));
+vi.mock('pdfmake/build/pdfmake', () => ({
+  default: { vfs: {}, createPdf: vi.fn((doc: { content: unknown }) => { pdf.docs.push(doc); return { getBlob: async () => new Blob(['pdf']), download: async () => {} }; }) },
+}));
+vi.mock('@/lib/analytics', () => ({ reportError: vi.fn() }));
 vi.mock('pdfmake/build/vfs_fonts', () => ({ default: { vfs: {} } }));
 vi.mock('@/integrations/supabase/storage', () => ({ resolveStorageUrl: vi.fn(async () => null) }));
 vi.mock('@/integrations/supabase/insight-linker', () => ({ fetchReportElectricalCompliance: vi.fn(async () => []) }));
 
-import { fetchPpmForPdf } from './fortressReportPdf';
+import { fetchPpmForPdf, generateReportPdf } from './fortressReportPdf';
+import { reportError } from '@/lib/analytics';
 
 const label = (mk: string) => new Date(`${mk}-01T00:00:00`).toLocaleDateString('en-ZA', { month: 'short', year: 'numeric' });
 const has = (calls: RecordedCall[], method: string, ...args: unknown[]) =>
@@ -44,6 +49,8 @@ const legacyRow = { id: 'r2', building_id: 'b1', report_id: 'rep1', service_name
 
 beforeEach(() => {
   state.queries = [];
+  pdf.docs = [];
+  vi.mocked(reportError).mockClear();
   state.result = () => ({ data: [], error: null });
 });
 
@@ -105,5 +112,51 @@ describe('fetchPpmForPdf — the PDF grid reads the merged grid', () => {
   it('fails the export loudly when the schedule cannot be read', async () => {
     state.result = (table) => (table === 'ppm_services' ? { data: null, error: { message: 'permission denied' } } : { data: [], error: null });
     await expect(fetchPpmForPdf('rep1', '2026-09-01')).rejects.toThrow('Could not load the PPM schedule for this report: permission denied');
+  });
+});
+
+describe('generateReportPdf — the trend section is not allowed to fail the export', () => {
+  const opsReport = { id: 'rep1', building_id: 'b1', report_type: 'ops_monthly', report_period: '2026-08-01', title: 'August OPS', status: 'approved', asset_manager: null, ops_manager: null, centre_manager: null, prepared_for: null };
+  const withReport = (extra: (table: string, calls: RecordedCall[]) => QueryResult | null) => (table: string, calls: RecordedCall[]): QueryResult => {
+    if (table === 'reports') return { data: opsReport, error: null };
+    return extra(table, calls) ?? { data: [], error: null };
+  };
+
+  it('still builds the PDF, minus the Trend section, when the snapshot read errors — and reports the error', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    state.result = withReport((table) => (table === 'building_metrics_daily' ? { data: null, error: { message: 'relation "building_metrics_daily" does not exist', code: '42P01' } } : null));
+
+    const out = await generateReportPdf('rep1', { name: 'Org', primaryColor: '#2563eb' });
+    expect(out.fileName).toBe('August_OPS.pdf');
+    expect(out.reportStatus).toBe('approved');
+    expect(pdf.docs).toHaveLength(1);
+    expect(JSON.stringify(pdf.docs[0].content)).not.toContain('Trend (12 months)');
+    expect(reportError).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(reportError).mock.calls[0][1]).toEqual({ where: 'generateReportPdf.trend', reportId: 'rep1' });
+    expect((vi.mocked(reportError).mock.calls[0][0] as Error).message).toContain('Could not read the trend snapshots');
+    warn.mockRestore();
+  });
+
+  it('reads the trend columns for the twelve months up to the report period and prints the section when rows exist', async () => {
+    state.result = withReport((table) => (table === 'building_metrics_daily'
+      ? { data: [{ building_id: 'b1', day: '2026-08-31', compliance_pct: '77', task_completion_30d_pct: 50, issues_open: 2, tasks_overdue: 1, docs_expiring_30: 0, issues_breached: 0, reconstructed: false, computed_at: '2026-08-31T03:00:00Z' }], error: null }
+      : null));
+
+    await generateReportPdf('rep1', { name: 'Org', primaryColor: '#2563eb' });
+    const snapQ = state.queries.filter((q) => q.table === 'building_metrics_daily');
+    expect(snapQ).toHaveLength(1);
+    expect(has(snapQ[0].calls, 'eq', 'building_id', 'b1')).toBe(true);
+    expect(has(snapQ[0].calls, 'gte', 'day', '2025-09-01')).toBe(true);
+    expect(has(snapQ[0].calls, 'lte', 'day', '2026-08-31')).toBe(true);
+    expect(has(snapQ[0].calls, 'range', 0, 999)).toBe(true);
+    expect(snapQ[0].calls.find((c) => c.method === 'select')?.args[0]).not.toBe('*');
+    expect(JSON.stringify(pdf.docs[0].content)).toContain('Trend (12 months)');
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it('every other section still fails the export loudly', async () => {
+    state.result = withReport((table) => (table === 'compliance_scores' ? { data: null, error: { message: 'permission denied' } } : null));
+    await expect(generateReportPdf('rep1', { name: 'Org', primaryColor: '#2563eb' })).rejects.toThrow('Could not load the compliance score for this report: permission denied');
+    expect(pdf.docs).toHaveLength(0);
   });
 });

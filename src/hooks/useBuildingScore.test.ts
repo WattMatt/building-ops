@@ -90,6 +90,23 @@ describe('useBuildingScore', () => {
     expect(state.queries.map((q) => q.table)).toEqual(['building_metrics_daily']);
   });
 
+  it('falls back to the live queries when the snapshot READ fails, with no error state', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    state.result = (table) => {
+      if (table === 'building_metrics_daily') return { data: null, error: { message: 'relation "building_metrics_daily" does not exist' } };
+      if (table === 'reports') return { data: [{ id: 'r1', report_period: '2026-08' }], error: null };
+      if (table === 'compliance_scores') return { data: [{ compliance_pct: '92.5' }], error: null };
+      if (table === 'task_instances') return { data: [{ status: 'completed' }, { status: 'overdue' }], error: null };
+      return { data: [], error: null };
+    };
+    const { result } = renderHook(() => useBuildingScore('b1'), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.isError).toBe(false);
+    expect(result.current).toMatchObject({ ohsPct: 92.5, ohsPeriod: '2026-08', taskPct: 50, source: 'live', asOf: null });
+    expect(state.queries.map((q) => q.table)).toEqual(['building_metrics_daily', 'reports', 'task_instances', 'compliance_scores']);
+    warn.mockRestore();
+  });
+
   it('does nothing without a building id', () => {
     renderHook(() => useBuildingScore(undefined), { wrapper });
     expect(state.queries).toHaveLength(0);

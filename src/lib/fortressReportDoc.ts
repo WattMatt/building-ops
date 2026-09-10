@@ -237,20 +237,25 @@ export function buildReportDoc(
         ['*', '*', 'auto']));
     }
 
-    if (data.trend && data.trend.some((p) => p.compliancePct != null || p.taskPct != null || p.issuesOpen != null)) {
+    // Every column counts as "has data": a month with only an overdue-task count is still a month worth printing.
+    if (data.trend && data.trend.some((p) => p.compliancePct != null || p.taskPct != null || p.issuesOpen != null || p.tasksOverdue != null)) {
       section('Trend (12 months)');
-      note('Month-end values from the nightly snapshot. A blank cell means no snapshot existed for that month.');
+      note('Month-end values from the nightly snapshot. "—" means no snapshot existed for that month.');
       const cell = (v: number | null) => (v == null ? '—' : String(v));
       const monthLabel = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString('en-ZA', { month: 'short', year: 'numeric' });
       content.push(compactTable(['Month', 'Compliance %', 'Tasks done %', 'Open issues', 'Overdue tasks'],
         data.trend.map((p) => [monthLabel(p.month), cell(p.compliancePct), cell(p.taskPct), cell(p.issuesOpen), cell(p.tasksOverdue)]),
         ['*', 'auto', 'auto', 'auto', 'auto']));
       // Bar strip: one bar per month, height ∝ compliance %, plain canvas rects (no chart library in pdfmake).
-      const BAR_W = 30, GAP = 12, BAR_H = 40;
+      // 12 months → 30pt bars; the width is derived from the text block so a longer series cannot draw
+      // off the right edge of the page the way an over-wide table would.
+      const GAP = 12, BAR_H = 40;
+      const BAR_W = Math.max(4, Math.min(30, Math.floor(USABLE_WIDTH / data.trend.length) - GAP));
       content.push({
         canvas: data.trend.map((p, i) => {
-          const h = p.compliancePct == null ? 0 : Math.max(1, Math.round((BAR_H * Math.min(100, Math.max(0, p.compliancePct))) / 100));
-          return { type: 'rect' as const, x: i * (BAR_W + GAP), y: BAR_H - h, w: BAR_W, h: h || 1, color: p.compliancePct == null ? '#e5e7eb' : color };
+          // A blank month is a 1pt grey stub so the strip still shows where the month sits.
+          const h = p.compliancePct == null ? 1 : Math.max(1, Math.round((BAR_H * Math.min(100, Math.max(0, p.compliancePct))) / 100));
+          return { type: 'rect' as const, x: i * (BAR_W + GAP), y: BAR_H - h, w: BAR_W, h, color: p.compliancePct == null ? '#e5e7eb' : color };
         }),
         margin: [0, 6, 0, 2],
       });

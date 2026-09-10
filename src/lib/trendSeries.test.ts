@@ -18,6 +18,13 @@ describe('trendSeries', () => {
     expect(monthShift('2026-09-01', 11)).toBe('2025-10');
     expect(monthEnd('2026-02-01')).toBe('2026-02-28');
   });
+  it('monthShift crosses the year boundary and monthEnd knows December and leap February', () => {
+    expect(monthShift('2026-01-01', 1)).toBe('2025-12');
+    expect(monthShift('2026-01-15', 13)).toBe('2024-12');
+    expect(monthEnd('2026-12-01')).toBe('2026-12-31');
+    expect(monthEnd('2028-02-01')).toBe('2028-02-29');
+    expect(monthEnd('2026-09-10')).toBe('2026-09-30');
+  });
   it('monthlyPoints takes the last row per month and fills missing months with nulls', () => {
     const pts = monthlyPoints([
       row('2026-08-03', { compliance_pct: 70 }), row('2026-08-30', { compliance_pct: 75, issues_open: 2 }), row('2026-09-10', { compliance_pct: 80 }),
@@ -35,6 +42,12 @@ describe('trendSeries', () => {
     }, 'compliance_pct');
     expect(board.map((b) => b.buildingId)).toEqual(['up', 'down']);
     expect(board[0].delta).toBe(12.4);
+  });
+  it('deltaLeaderboard skips null values at either end and takes rows in the order given', () => {
+    const board = deltaLeaderboard({
+      b: [row('2026-08-01'), row('2026-08-02', { compliance_pct: '40' }), row('2026-09-01', { compliance_pct: 55 }), row('2026-09-02')],
+    }, 'compliance_pct');
+    expect(board).toEqual([{ buildingId: 'b', first: 40, last: 55, delta: 15 }]);
   });
   it('reconstructionBoundary', () => {
     expect(reconstructionBoundary([{ reconstructed: true }, { reconstructed: true }, { reconstructed: false }])).toBe(2);

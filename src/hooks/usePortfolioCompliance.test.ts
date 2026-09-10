@@ -69,7 +69,8 @@ describe('usePortfolioCompliance', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     const b1 = result.current.rows.find((r) => r.buildingId === 'b1');
-    expect(b1).toMatchObject({ compliancePct: 81.3, criticalPct: 70, openNonCompliances: 3, status: 'submitted', period: '2026-08-01' });
+    // period/status are the latest FILED report's; scorePeriod is the APPROVED report the snapshot scored.
+    expect(b1).toMatchObject({ compliancePct: 81.3, criticalPct: 70, openNonCompliances: 3, status: 'submitted', period: '2026-08-01', scorePeriod: '2026-07-01' });
 
     // Snapshot rows are read once, fresh-window only, newest first.
     const snapQ = state.queries.filter((q) => q.table === 'building_metrics_daily');
@@ -82,7 +83,33 @@ describe('usePortfolioCompliance', () => {
     expect(liveReports).toHaveLength(1);
     expect(has(liveReports[0].calls, 'eq', 'building_id', 'b2')).toBe(true);
     const b2 = result.current.rows.find((r) => r.buildingId === 'b2');
-    expect(b2).toMatchObject({ compliancePct: null, period: null, status: null });
+    expect(b2).toMatchObject({ compliancePct: null, period: null, status: null, scorePeriod: null });
+  });
+
+  it('falls back to the live path for EVERY building when the snapshot read fails, with no error state', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const base = state.result;
+    state.result = (table, calls) => {
+      if (table === 'building_metrics_daily') return { data: null, error: { message: 'relation "building_metrics_daily" does not exist' } };
+      // Live per-building path: b1 has a submitted report with a score, b2 nothing.
+      if (table === 'reports' && calls.some((c) => c.method === 'eq' && c.args[0] === 'building_id' && c.args[1] === 'b1')) {
+        return { data: [{ id: 'r1', report_period: '2026-08-01', status: 'submitted' }], error: null };
+      }
+      if (table === 'compliance_scores') return { data: [{ compliance_pct: '64' }], error: null };
+      return base(table, calls);
+    };
+    const { result } = renderHook(() => usePortfolioCompliance(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.isError).toBe(false);
+    expect(result.current.asOf).toBeNull();
+    expect(result.current.rows).toHaveLength(2);
+    const liveReports = state.queries.filter((q) => q.table === 'reports' && q.calls.some((c) => c.method === 'eq' && c.args[0] === 'building_id'));
+    expect(liveReports.map((q) => q.calls.find((c) => c.method === 'eq' && c.args[0] === 'building_id')?.args[1]).sort()).toEqual(['b1', 'b2']);
+    // On the live path the score comes from the latest FILED report, and scorePeriod says which.
+    expect(result.current.rows.find((r) => r.buildingId === 'b1')).toMatchObject({ compliancePct: 64, status: 'submitted', period: '2026-08-01', scorePeriod: '2026-08-01' });
+    expect(result.current.rows.find((r) => r.buildingId === 'b2')).toMatchObject({ compliancePct: null, scorePeriod: null });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[usePortfolioCompliance]'), expect.any(String));
+    warn.mockRestore();
   });
 
   it('averages the non-null scores and counts filed vs scored buildings', async () => {
