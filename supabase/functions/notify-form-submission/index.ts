@@ -119,7 +119,7 @@ serve(async (req: Request): Promise<Response> => {
     const createdAtMs = submission.created_at ? Date.parse(submission.created_at) : NaN;
     if (!Number.isFinite(createdAtMs) || Date.now() - createdAtMs > FRESH_SUBMISSION_MS) {
       console.log(`Submission ${submission.id} is not freshly created; skipping notification`);
-      return json({ success: true, notified: 0, message: "Submission is not recent" });
+      return json({ success: true, inserted: 0, emailed: 0, skipped: 0, failed: 0, message: "Submission is not recent" });
     }
 
     const formName = submission.form_name || "Form";
@@ -145,7 +145,7 @@ serve(async (req: Request): Promise<Response> => {
 
     if (managerUserIds.length === 0) {
       console.log("No admins or managers found to notify");
-      return json({ success: true, notified: 0, message: "No managers to notify" });
+      return json({ success: true, inserted: 0, emailed: 0, skipped: 0, failed: 0, message: "No managers to notify" });
     }
 
     // Format the submission time

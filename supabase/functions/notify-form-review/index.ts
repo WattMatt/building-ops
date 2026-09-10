@@ -94,12 +94,12 @@ serve(async (req: Request): Promise<Response> => {
     // Only send notifications for approve/reject, not for "reviewed"
     if (status !== "approved" && status !== "rejected") {
       console.log(`Status is '${status}', no notification needed`);
-      return json({ success: true, notified: 0, message: "No notification for this status" });
+      return json({ success: true, inserted: 0, emailed: 0, skipped: 0, failed: 0, message: "No notification for this status" });
     }
 
     if (!submission.submitted_by) {
       console.log("Submission has no submitter");
-      return json({ success: true, notified: 0, message: "No submitter to notify" });
+      return json({ success: true, inserted: 0, emailed: 0, skipped: 0, failed: 0, message: "No submitter to notify" });
     }
 
     // Never fall back to the reviewer's email address — this body goes to the
@@ -134,7 +134,9 @@ serve(async (req: Request): Promise<Response> => {
     // body (so the inbox row carries them) and the details table as detailHtml.
     const result = await createNotifications(supabase, {
       recipients: [submission.submitted_by as string],
-      actorId: caller.id,
+      // The actor is whoever the row says reviewed it — the same person reviewerName was
+      // read for. Using caller.id would mislabel a review the caller only re-notified for.
+      actorId: reviewerId,
       actorName: reviewerName,
       kind: "form_reviewed",
       entityType: "form_submission",
@@ -142,6 +144,8 @@ serve(async (req: Request): Promise<Response> => {
       buildingId: (submission.building_id as string | null) ?? null,
       title: `Form ${status}: ${formName}`,
       body: reviewNotes,
+      // Named in the email so the notes read as the reviewer's words, not more boilerplate.
+      bodyLabel: reviewNotes ? "Reviewer notes" : undefined,
       url: "/forms",
       subject: `Form ${statusLabel}: ${subjectFormName}`,
       detailHtml: `

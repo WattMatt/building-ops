@@ -6,7 +6,6 @@ import { createNotifications } from "../_shared/notify.ts";
 
 interface SignoffRequestNotification {
   requestId: string;
-  reminder?: boolean;
 }
 
 serve(async (req: Request): Promise<Response> => {
@@ -81,6 +80,8 @@ serve(async (req: Request): Promise<Response> => {
       title: `${heading}: ${formName}`,
       // The requester's instructions are the one thing the signer needs in the inbox row.
       body: instructions,
+      // Named in the email so the requester's words are not mistaken for app boilerplate.
+      bodyLabel: instructions ? "Instructions" : undefined,
       url: "/my-signoffs",
       subject: `${heading}: ${formName}`,
       detailHtml: `
@@ -92,6 +93,7 @@ serve(async (req: Request): Promise<Response> => {
     return json({ success: true, ...result });
   } catch (error) {
     console.error("notify-signoff-request error:", error);
-    return json({ error: (error as Error).message }, 500);
+    // The detail stays in the log: an internal message must not reach the caller.
+    return json({ error: "An unexpected error occurred" }, 500);
   }
 });

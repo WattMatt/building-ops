@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { composeDigest } from '../../supabase/functions/_shared/digest';
+import { SECTION_MAX, composeDigest } from '../../supabase/functions/_shared/digest';
 
 const TODAY = '2026-09-11';
 
@@ -81,5 +81,45 @@ describe('composeDigest', () => {
       '1 open issue assigned to you',
       '2 unread notifications',
     ]);
+  });
+
+  const overdueTasks = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `t${i}`,
+      task_name: `Task ${i}`,
+      due_date: '2026-09-01',
+      building_name: null,
+    }));
+
+  it('caps a section at SECTION_MAX lines and says how many were left out', () => {
+    const sections = composeDigest({ ...empty, tasks: overdueTasks(SECTION_MAX + 1) });
+    // The heading still carries the true count — only the list is trimmed.
+    expect(sections![0].heading).toBe('16 overdue tasks');
+    expect(sections![0].lines).toHaveLength(SECTION_MAX + 1);
+    expect(sections![0].lines.slice(0, SECTION_MAX)).toEqual(
+      overdueTasks(SECTION_MAX).map((t) => t.task_name),
+    );
+    expect(sections![0].lines[SECTION_MAX]).toBe('…and 1 more');
+  });
+
+  it('adds no trailer at exactly SECTION_MAX lines', () => {
+    const sections = composeDigest({ ...empty, tasks: overdueTasks(SECTION_MAX) });
+    expect(sections![0].heading).toBe('15 overdue tasks');
+    expect(sections![0].lines).toHaveLength(SECTION_MAX);
+    expect(sections![0].lines.some((l) => l.includes('more'))).toBe(false);
+  });
+
+  it('caps the issues section too, counting only the overflow', () => {
+    const sections = composeDigest({
+      ...empty,
+      issues: Array.from({ length: SECTION_MAX + 4 }, (_, i) => ({
+        id: `i${i}`,
+        title: `Issue ${i}`,
+        priority: 'low',
+        building_name: null,
+      })),
+    });
+    expect(sections![0].lines).toHaveLength(SECTION_MAX + 1);
+    expect(sections![0].lines[SECTION_MAX]).toBe('…and 4 more');
   });
 });

@@ -40,6 +40,19 @@ export interface DigestSection {
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 
 /**
+ * Most lines any one section lists. Someone holding sixty overdue tasks needs a nudge to open
+ * the app, not sixty lines of email; the heading still carries the true count, so nothing is
+ * hidden by the cap.
+ */
+export const SECTION_MAX = 15;
+
+/** Cap a section's lines, replacing the remainder with a single "…and N more" line. */
+function capLines(lines: string[]): string[] {
+  if (lines.length <= SECTION_MAX) return lines;
+  return [...lines.slice(0, SECTION_MAX), `…and ${lines.length - SECTION_MAX} more`];
+}
+
+/**
  * Build the digest sections for one person, in reading order: overdue tasks, tasks due
  * today, open issues assigned to them, then the unread-inbox count. Returns `null` when
  * there is nothing to say, so the caller can skip the send entirely.
@@ -55,16 +68,16 @@ export function composeDigest(input: DigestInput): DigestSection[] | null {
   if (overdue.length) {
     sections.push({
       heading: `${overdue.length} overdue ${plural(overdue.length, 'task', 'tasks')}`,
-      lines: overdue.map(taskLine),
+      lines: capLines(overdue.map(taskLine)),
     });
   }
   if (dueToday.length) {
-    sections.push({ heading: `${dueToday.length} due today`, lines: dueToday.map(taskLine) });
+    sections.push({ heading: `${dueToday.length} due today`, lines: capLines(dueToday.map(taskLine)) });
   }
   if (input.issues.length) {
     sections.push({
       heading: `${input.issues.length} open ${plural(input.issues.length, 'issue', 'issues')} assigned to you`,
-      lines: input.issues.map(issueLine),
+      lines: capLines(input.issues.map(issueLine)),
     });
   }
   if (input.unread) {

@@ -75,7 +75,7 @@ serve(async (req: Request): Promise<Response> => {
     allRequests.forEach((r) => r.assigned_by && recipientIds.add(r.assigned_by));
 
     if (recipientIds.size === 0) {
-      return json({ success: true, inserted: 0, emailed: 0, skipped: 0 });
+      return json({ success: true, inserted: 0, emailed: 0, skipped: 0, failed: 0 });
     }
 
     const formName = submission.form_name ?? "a form";
@@ -99,6 +99,7 @@ serve(async (req: Request): Promise<Response> => {
     return json({ success: true, ...result });
   } catch (error) {
     console.error("notify-signoff-complete error:", error);
-    return json({ error: (error as Error).message }, 500);
+    // The detail stays in the log: an internal message must not reach the caller.
+    return json({ error: "An unexpected error occurred" }, 500);
   }
 });

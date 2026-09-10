@@ -6,23 +6,13 @@ import { adminAndManagerIds, createNotifications } from "../_shared/notify.ts";
 
 const SIGNOFF_SECRET = Deno.env.get("SIGNOFF_REMINDERS_SECRET");
 
-/**
- * The shared CORS policy (allow-listed origins, never `*`) plus the one header this
- * cron-triggered function accepts on top of the standard set.
- */
-function reminderCors(req: Request): Record<string, string> {
-  const base = corsHeaders(req);
-  return {
-    ...base,
-    "Access-Control-Allow-Headers": `${base["Access-Control-Allow-Headers"]}, x-signoff-secret`,
-  };
-}
-
 const dueLabel = (iso: string) =>
   new Date(iso).toLocaleString("en-ZA", { dateStyle: "medium", timeZone: "Africa/Johannesburg" });
 
 serve(async (req: Request): Promise<Response> => {
-  const cors = reminderCors(req);
+  // The shared CORS policy (allow-listed origins, never `*`) plus the one header this
+  // cron-triggered function accepts on top of the standard set.
+  const cors = corsHeaders(req, ["x-signoff-secret"]);
   if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   // Shared-secret guard — this function is cron-triggered, not user-facing.
@@ -69,69 +59,78 @@ serve(async (req: Request): Promise<Response> => {
       };
     };
 
-    let reminded = 0, escalated = 0, expired = 0;
+    let reminded = 0, escalated = 0, expired = 0, failed = 0;
 
     for (const r of pending || []) {
-      const due = new Date(r.due_at as string);
-      if (due < now) {
-        await supabase
-          .from("form_signoff_requests")
-          .update({ status: "expired", active: false, updated_at: nowIso })
-          .eq("id", r.id);
-        // expiry vetoes the submission (mirrors decline): reject + halt remaining
-        // steps so the chain can't stall and the re-request button reappears.
-        await supabase
-          .from("form_submissions")
-          .update({ signoff_status: "rejected", updated_at: nowIso })
-          .eq("id", r.submission_id);
-        await supabase
-          .from("form_signoff_requests")
-          .update({ active: false, updated_at: nowIso })
-          .eq("submission_id", r.submission_id)
-          .neq("id", r.id)
-          .eq("status", "pending");
-        expired++;
-        const form = await formInfo(r.submission_id);
-        await createNotifications(supabase, {
-          recipients: await getEscalationIds(),
-          actorId: null,
-          actorName: null,
-          kind: "signoff_overdue",
-          entityType: "signoff_request",
-          entityId: r.id as string,
-          buildingId: form.buildingId,
-          title: `Sign-off overdue: ${form.name}`,
-          body: "The request passed its due date and was marked expired. Reassign it if it is still required.",
-          url: "/my-signoffs",
-          subject: `Sign-off overdue: ${form.name}`,
-          detailHtml: `<p style="margin:0 0 16px;">A sign-off request for <strong>${escapeText(form.name)}</strong> has passed its due date and has been marked expired. Please reassign it if it is still required.</p>`,
-          ctaText: "Open sign-offs",
-        }, branding);
-        escalated++;
-      } else if ((due.toISOString() <= in48h) && (!r.reminded_at || (r.reminded_at as string) < reminderCutoff)) {
-        if (!r.assigned_to) continue;
-        const form = await formInfo(r.submission_id);
-        await createNotifications(supabase, {
-          recipients: [r.assigned_to as string],
-          actorId: null,
-          actorName: null,
-          kind: "signoff_requested",
-          entityType: "signoff_request",
-          entityId: r.id as string,
-          buildingId: form.buildingId,
-          title: `Reminder: sign-off due ${dueLabel(r.due_at as string)}`,
-          body: `${form.name} is awaiting your signature.`,
-          url: "/my-signoffs",
-          subject: `Sign-off reminder: ${form.name}`,
-          detailHtml: `<p style="margin:0 0 16px;">This is a reminder that <strong>${escapeText(form.name)}</strong> is awaiting your signature and is due on <strong>${escapeText(dueLabel(r.due_at as string))}</strong>.</p>`,
-          ctaText: "Open sign-offs",
-        }, branding);
-        await supabase.from("form_signoff_requests").update({ reminded_at: nowIso }).eq("id", r.id);
-        reminded++;
+      // One unreadable row must not end the run. This is a daily cron with no retry, so an
+      // exception here would silently leave every later request un-reminded until tomorrow.
+      try {
+        const due = new Date(r.due_at as string);
+        if (due < now) {
+          await supabase
+            .from("form_signoff_requests")
+            .update({ status: "expired", active: false, updated_at: nowIso })
+            .eq("id", r.id);
+          // expiry vetoes the submission (mirrors decline): reject + halt remaining
+          // steps so the chain can't stall and the re-request button reappears.
+          await supabase
+            .from("form_submissions")
+            .update({ signoff_status: "rejected", updated_at: nowIso })
+            .eq("id", r.submission_id);
+          await supabase
+            .from("form_signoff_requests")
+            .update({ active: false, updated_at: nowIso })
+            .eq("submission_id", r.submission_id)
+            .neq("id", r.id)
+            .eq("status", "pending");
+          const form = await formInfo(r.submission_id);
+          await createNotifications(supabase, {
+            recipients: await getEscalationIds(),
+            actorId: null,
+            actorName: null,
+            kind: "signoff_overdue",
+            entityType: "signoff_request",
+            entityId: r.id as string,
+            buildingId: form.buildingId,
+            title: `Sign-off overdue: ${form.name}`,
+            body: "The request passed its due date and was marked expired. Reassign it if it is still required.",
+            url: "/my-signoffs",
+            subject: `Sign-off overdue: ${form.name}`,
+            detailHtml: `<p style="margin:0 0 16px;">A sign-off request for <strong>${escapeText(form.name)}</strong> has passed its due date and has been marked expired. Please reassign it if it is still required.</p>`,
+            ctaText: "Open sign-offs",
+          }, branding);
+          // Counted only once the escalation is out, so the response can never report an
+          // expiry that nobody was told about.
+          expired++;
+          escalated++;
+        } else if ((due.toISOString() <= in48h) && (!r.reminded_at || (r.reminded_at as string) < reminderCutoff)) {
+          if (!r.assigned_to) continue;
+          const form = await formInfo(r.submission_id);
+          await createNotifications(supabase, {
+            recipients: [r.assigned_to as string],
+            actorId: null,
+            actorName: null,
+            kind: "signoff_requested",
+            entityType: "signoff_request",
+            entityId: r.id as string,
+            buildingId: form.buildingId,
+            title: `Reminder: ${form.name} due ${dueLabel(r.due_at as string)}`,
+            body: `${form.name} is awaiting your signature.`,
+            url: "/my-signoffs",
+            subject: `Sign-off reminder: ${form.name}`,
+            detailHtml: `<p style="margin:0 0 16px;">This is a reminder that <strong>${escapeText(form.name)}</strong> is awaiting your signature and is due on <strong>${escapeText(dueLabel(r.due_at as string))}</strong>.</p>`,
+            ctaText: "Open sign-offs",
+          }, branding);
+          await supabase.from("form_signoff_requests").update({ reminded_at: nowIso }).eq("id", r.id);
+          reminded++;
+        }
+      } catch (e) {
+        console.error("signoff-reminders: row failed", r.id, e);
+        failed++;
       }
     }
 
-    return new Response(JSON.stringify({ reminded, escalated, expired }), {
+    return new Response(JSON.stringify({ reminded, escalated, expired, failed }), {
       status: 200,
       headers: { "Content-Type": "application/json", ...cors },
     });

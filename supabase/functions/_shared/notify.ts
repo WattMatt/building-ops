@@ -53,8 +53,14 @@ const RECIPIENT_COLUMNS =
 export interface CreateNotificationsInput extends InboxInput {
   /** Email subject; defaults to the title. */
   subject?: string;
-  /** Extra HTML under the body line (already escaped by the caller). */
+  /** Explanatory HTML above the body line (already escaped by the caller). */
   detailHtml?: string;
+  /**
+   * Names what `body` is in the email — "Reviewer notes", "Instructions" — so a free-text
+   * paragraph arriving under the explanation reads as quoted input rather than more prose.
+   * The inbox row keeps the plain, unlabelled body.
+   */
+  bodyLabel?: string;
   ctaText?: string;
 }
 
@@ -127,7 +133,15 @@ export async function createNotifications(
       // renderEmail escapes heading, greeting and preheader itself — escaping here too would
       // render "O&#39;Brien" in the greeting. Only bodyHtml and footnote are raw.
       greeting: p.full_name ? `Hi ${p.full_name},` : undefined,
-      bodyHtml: `${body ? `<p style="margin:0 0 12px;">${escapeText(body)}</p>` : ""}${input.detailHtml ?? ""}`,
+      // detailHtml explains what happened; the body is the human's own words about it, so it
+      // reads second, labelled where the caller named it, and with newlines preserved.
+      bodyHtml: `${input.detailHtml ?? ""}${
+        body
+          ? `<p style="margin:0 0 12px;white-space:pre-wrap;">${
+            input.bodyLabel ? `<strong>${escapeText(input.bodyLabel)}:</strong> ` : ""
+          }${escapeText(body)}</p>`
+          : ""
+      }`,
       ctaText: input.ctaText ?? `Open in ${branding.appName}`,
       ctaUrl: `${APP_URL}${input.url}`,
       // Raw HTML by design; APP_URL and the branding colour are server constants.

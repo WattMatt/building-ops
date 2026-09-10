@@ -54,10 +54,16 @@ export function allowedOrigin(req: Request): string {
   return origin && isAllowed(origin) ? origin : canonicalOrigin();
 }
 
-export function corsHeaders(req: Request): Record<string, string> {
+/**
+ * `extraHeaders` names request headers this function accepts on top of the standard set —
+ * the cron-triggered functions add their shared-secret header this way rather than each
+ * rebuilding the Allow-Headers string and risking a drift from the allowlist above.
+ */
+export function corsHeaders(req: Request, extraHeaders: string[] = []): Record<string, string> {
+  const extra = extraHeaders.map((h) => h.trim().toLowerCase()).filter((h) => h.length > 0);
   return {
     "Access-Control-Allow-Origin": allowedOrigin(req),
-    "Access-Control-Allow-Headers": ALLOW_HEADERS,
+    "Access-Control-Allow-Headers": extra.length ? `${ALLOW_HEADERS}, ${extra.join(", ")}` : ALLOW_HEADERS,
     "Vary": "Origin",
   };
 }

@@ -8,21 +8,11 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { escapeText, loadBranding, renderEmail } from "../_shared/email.ts";
+import { corsHeaders } from "../_shared/cors.ts";
 import { APP_URL, senderName, sendEmail } from "../_shared/notify.ts";
 import { composeDigest, type DigestIssue, type DigestSection, type DigestTask } from "../_shared/digest.ts";
 
 const DIGEST_SECRET = Deno.env.get("DAILY_DIGEST_SECRET");
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-digest-secret",
-};
-
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), {
-    status,
-    headers: { "Content-Type": "application/json", ...corsHeaders },
-  });
 
 /** Today in the operating timezone as `YYYY-MM-DD` ('en-CA' formats exactly that way). */
 function todayInJohannesburg(): string {
@@ -49,7 +39,15 @@ function renderSections(sections: DigestSection[]): string {
 }
 
 serve(async (req: Request): Promise<Response> => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  // The shared CORS policy (allow-listed origins, never `*`) plus the cron secret header.
+  const cors = corsHeaders(req, ["x-digest-secret"]);
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { "Content-Type": "application/json", ...cors },
+    });
+
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
 
   // Shared-secret guard — this function is cron-triggered, not user-facing.
   if (!DIGEST_SECRET || req.headers.get("x-digest-secret") !== DIGEST_SECRET) {
@@ -70,7 +68,11 @@ serve(async (req: Request): Promise<Response> => {
       .select("id, email, full_name")
       .eq("daily_digest", true)
       .not("deactivated", "is", true)
-      .not("email", "is", null);
+      .not("email", "is", null)
+      // "Turn this off to stop every email; the inbox still updates." (My Profile →
+      // Notifications) — the digest is an email, so the master switch has to silence it.
+      // Null means opted in, matching shouldEmail in _shared/notifyRules.ts.
+      .not("email_notifications", "is", false);
     if (profErr) throw new Error(`Could not read digest recipients: ${profErr.message}`);
 
     // Building names are hydrated from one read of the (small, org-wide) buildings table
@@ -88,6 +90,10 @@ serve(async (req: Request): Promise<Response> => {
 
     for (const p of recipients ?? []) {
       considered++;
+      // `.not("email", "is", null)` lets a whitespace-only address through; Resend would
+      // reject it as a hard failure, so it is a skip, not a send.
+      const address = (p.email as string | null)?.trim();
+      if (!address) { skipped++; continue; }
       // One person's digest must never abort the run: log and move to the next.
       try {
         const [{ data: taskRows }, { data: issueRows }, { count: unreadCount }] = await Promise.all([
@@ -97,12 +103,14 @@ serve(async (req: Request): Promise<Response> => {
             .eq("assigned_to", p.id)
             .in("status", ["pending", "overdue"])
             .not("due_date", "is", null)
-            .lte("due_date", today),
+            .lte("due_date", today)
+            .order("due_date"),
           supabase
             .from("issues")
             .select("id, title, priority, building_id")
             .eq("assigned_to", p.id)
-            .neq("status", "resolved"),
+            .neq("status", "resolved")
+            .order("created_at"),
           supabase
             .from("notifications")
             .select("id", { count: "exact", head: true })
@@ -144,8 +152,8 @@ serve(async (req: Request): Promise<Response> => {
           footnote: "You can turn this digest off under My Profile → Notifications.",
         });
 
-        await sendEmail(from, [p.email as string], `Your ${branding.appName} digest`, html);
-        sent++;
+        if (await sendEmail(from, [address], `Your ${branding.appName} digest`, html)) sent++;
+        else skipped++;
       } catch (e) {
         console.error("daily-digest: recipient failed", p.id, e);
         failed++;
