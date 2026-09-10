@@ -42,6 +42,7 @@ export default function FortressReportEditor() {
   const [reviewOpen, setReviewOpen] = useState<null | ReportStatus>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [exportConfirm, setExportConfirm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Unsaved section edits (D1). Only the active section is mounted, so any dirty grid
@@ -74,6 +75,16 @@ export default function FortressReportEditor() {
   const { data: counts } = useReportSectionCounts(id, report?.building_id, report?.report_type);
   const filledCount = counts ? Object.values(counts).filter((n) => (n ?? 0) > 0).length : 0;
 
+  // Hoisted above the early returns: the export confirm (E1) needs the section list and
+  // the lifecycle status, and it is defined before them.
+  const sections = report ? (REPORT_SECTIONS[report.report_type as keyof typeof REPORT_SECTIONS] ?? []) : [];
+  const status = (report?.status ?? 'draft') as ReportStatus;
+  // Built sections only — an unbuilt one has no form to fill, so naming it as "empty"
+  // would ask the user for something they cannot give.
+  const emptySections = counts
+    ? sections.filter((s) => getSectionComponent(s.key) && counts[s.key] === 0).map((s) => s.label)
+    : [];
+
   const savePreparedFor = async () => {
     if (!id || !report) return;
     const next = preparedFor.trim() || null;
@@ -88,11 +99,8 @@ export default function FortressReportEditor() {
     qc.invalidateQueries({ queryKey: ['fortress-reports'] });
   };
 
-  const handleExport = async () => {
+  const runExport = async () => {
     if (!id) return;
-    // The PDF is generated from saved rows — exporting while dirty would quietly ship a
-    // document missing what is on screen.
-    if (anyDirty) { toast.error('Save your changes in this section before exporting.'); return; }
     setExporting(true);
     try {
       // Report header uses the organisation's configured name + logo (Settings).
@@ -108,10 +116,14 @@ export default function FortressReportEditor() {
           generatedBy: user.id,
           sourceId: id,
           buildingId: generated.buildingId,
+          reportStatus: generated.reportStatus,
         });
         if (saved.ok) {
           qc.invalidateQueries({ queryKey: ['report-artifacts', id] });
           toast.success('Report PDF downloaded and saved to Saved Reports.');
+          // The new version is issued either way, but silently dropping this left an
+          // older row still showing as current in Saved Versions.
+          if (saved.supersedeWarning) toast.warning(saved.supersedeWarning);
         } else {
           if (import.meta.env.DEV) console.error('Report persist failed:', saved.error);
           toast.warning('Report PDF downloaded, but could not be saved to Saved Reports.');
@@ -138,6 +150,15 @@ export default function FortressReportEditor() {
     }
   };
 
+  /** Every export becomes the current issued version, so an incomplete or unapproved one is confirmed first (E1). */
+  const handleExport = () => {
+    // The PDF is generated from saved rows — exporting while dirty would quietly ship a
+    // document missing what is on screen.
+    if (anyDirty) { toast.error('Save your changes in this section before exporting.'); return; }
+    if (emptySections.length || status !== 'approved') { setExportConfirm(true); return; }
+    void runExport();
+  };
+
   if (isLoading) {
     return <div className="p-6 text-sm text-muted-foreground">Loading report…</div>;
   }
@@ -152,9 +173,7 @@ export default function FortressReportEditor() {
     );
   }
 
-  const sections = REPORT_SECTIONS[report.report_type] ?? [];
   const current = activeKey ?? sections[0]?.key ?? null;
-  const status = report.status as ReportStatus;
   const isAuthor = report.author_id === user?.id;
   const editable = (status === 'draft' || status === 'rejected') && (isAuthor || isAdminOrManager);
   const SectionComp = current ? getSectionComponent(current) : undefined;
@@ -380,6 +399,24 @@ export default function FortressReportEditor() {
       </div>
 
       <ReportSavedVersions reportId={report.id} />
+
+      {/* Guardrail, not coaching — never routed through <Hint>. */}
+      <Dialog open={exportConfirm} onOpenChange={setExportConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Export this report as a PDF?</DialogTitle>
+            <DialogDescription>
+              {status !== 'approved' && <>This report is <b>{status}</b>, not approved — the PDF will carry a DRAFT watermark. </>}
+              {emptySections.length > 0 && <>{emptySections.length} of {sections.length} sections are empty: {emptySections.join(', ')}. </>}
+              Every export is kept as the next issued version.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExportConfirm(false)}>Cancel</Button>
+            <Button onClick={() => { setExportConfirm(false); void runExport(); }}>Export anyway</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={reviewOpen !== null} onOpenChange={(o) => !o && setReviewOpen(null)}>
         <DialogContent>

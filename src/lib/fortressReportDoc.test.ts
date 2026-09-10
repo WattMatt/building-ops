@@ -507,3 +507,23 @@ describe('buildReportDoc — sections previously captured but never exported', (
     expect(t).toContain('Planned');
   });
 });
+
+describe('buildReportDoc — provenance', () => {
+  it('watermarks the document when a watermark is requested', () => {
+    const doc = buildReportDoc(
+      { title: 'X', report_period: '2026-06-01', report_type: 'ops_monthly' },
+      {},
+      { color: '#2563eb', orgName: 'Org', watermark: 'DRAFT' },
+    );
+    expect((doc as { watermark?: { text: string } }).watermark?.text).toBe('DRAFT');
+  });
+
+  it('has no watermark by default', () => {
+    const doc = buildReportDoc(
+      { title: 'X', report_period: '2026-06-01', report_type: 'ops_monthly' },
+      {},
+      { color: '#2563eb', orgName: 'Org' },
+    );
+    expect((doc as { watermark?: unknown }).watermark).toBeUndefined();
+  });
+});

@@ -32,6 +32,8 @@ export interface GeneratedFortressPdf {
   fileName: string;
   buildingId: string;
   reportType: ReportType;
+  /** Lifecycle status of the report at the moment this PDF was rendered (E2). */
+  reportStatus: string;
 }
 
 const FLAGGED = new Set(['poor', 'critical']);
@@ -722,11 +724,15 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
   const doc = buildReportDoc(
     { title: report.title, report_period: report.report_period, report_type: report.report_type as ReportType, managers, prepared_for: report.prepared_for ?? null },
     data,
-    { color, orgName: branding.name, logoDataUrl },
+    {
+      color, orgName: branding.name, logoDataUrl,
+      // Anything not yet approved is visibly a draft in the client's hands (E2).
+      watermark: report.status === 'approved' ? null : 'DRAFT',
+    },
   );
   const fileName = `${(report.title ?? 'report').replace(/[^\w]+/g, '_')}.pdf`;
   const pdf = pdfMake.createPdf(doc);
   const blob = await pdf.getBlob();
   await pdf.download(fileName); // re-uses the buffered render; keeps current UX
-  return { blob, fileName, buildingId: report.building_id, reportType: report.report_type as ReportType };
+  return { blob, fileName, buildingId: report.building_id, reportType: report.report_type as ReportType, reportStatus: report.status };
 }

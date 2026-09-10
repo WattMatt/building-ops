@@ -100,8 +100,13 @@ export function ReportSavedVersions({ reportId }: { reportId: string }) {
                     v{a.version} · {fmtWhen(a.created_at)} · {fmtSize(a.size_bytes)}
                   </p>
                 </div>
+                {a.status === 'issued' && <Badge className="text-xs">Current</Badge>}
                 {a.status === 'superseded' && (
                   <Badge variant="outline" className="text-xs">superseded</Badge>
+                )}
+                {/* Which PDF is safe to send a client: one exported before approval is not (E2). */}
+                {a.report_status && a.report_status !== 'approved' && (
+                  <Badge variant="outline" className="text-xs">exported while {a.report_status}</Badge>
                 )}
                 <Button variant="outline" size="sm" disabled={busy === a.id} onClick={() => download(a)}>
                   {busy === a.id

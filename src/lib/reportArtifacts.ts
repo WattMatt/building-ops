@@ -51,6 +51,8 @@ export interface ReportArtifactRow {
   created_at: string;
   status: string;
   superseded_by: string | null;
+  /** Status of the source report when this PDF was generated; null for ad-hoc kinds. */
+  report_status: string | null;
 }
 
 export type ReportArtifactInsert = Omit<ReportArtifactRow, 'id' | 'created_at' | 'superseded_by'>;
@@ -124,6 +126,8 @@ export interface SaveReportArtifactInput {
   sourceId?: string | null;
   /** Building scope; null for portfolio-level reports. */
   buildingId?: string | null;
+  /** Lifecycle status of the source report at export time; omit for ad-hoc kinds. */
+  reportStatus?: string | null;
 }
 
 export type SaveReportArtifactResult =
@@ -181,6 +185,7 @@ export async function saveReportArtifact(
       size_bytes: blob.size,
       generated_by: generatedBy,
       status: 'issued',
+      report_status: input.reportStatus ?? null,
     })
     .select()
     .single();

@@ -140,7 +140,13 @@ export interface ReportData {
   narratives?: { heading: string; body: string; statusFlag?: string | null }[];
 }
 
-export interface DocOptions { color: string; orgName: string; logoDataUrl?: string | null }
+export interface DocOptions {
+  color: string;
+  orgName: string;
+  logoDataUrl?: string | null;
+  /** Diagonal page watermark, e.g. 'DRAFT' for a PDF issued before approval (E2). */
+  watermark?: string | null;
+}
 
 export const MARK: Record<string, string> = { yes: 'X', no: '—', na: 'N/A' };
 const FLAGGED = new Set(['poor', 'critical']);
@@ -602,6 +608,10 @@ export function buildReportDoc(
   const headerTitle = (report.title ?? 'Report').toUpperCase();
   return {
     pageMargins: [40, 40, 40, 50],
+    // Faint enough to read the report through, dark enough to survive printing.
+    ...(opts.watermark
+      ? { watermark: { text: opts.watermark, color: '#9ca3af', opacity: 0.08, bold: true, italics: false } }
+      : {}),
     content,
     defaultStyle: { font: 'Roboto', fontSize: 9 },
     // Repeating page header (standard C2): org name + report title on every
