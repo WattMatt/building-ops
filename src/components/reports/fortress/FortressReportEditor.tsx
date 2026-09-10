@@ -266,10 +266,11 @@ export default function FortressReportEditor() {
 
       {statusHint && <Hint className="-mt-2">{statusHint}</Hint>}
 
-      {report.review_notes && status === 'rejected' && (
+      {status === 'rejected' && (
         <Card className="border-destructive/40">
           <CardContent className="pt-4 text-sm">
-            <span className="font-medium text-destructive">Returned: </span>{report.review_notes}
+            <span className="font-medium text-destructive">Returned: </span>
+            {report.review_notes?.trim() || 'No note was left with this return. Ask the reviewer what needs to change.'}
           </CardContent>
         </Card>
       )}
@@ -351,9 +352,16 @@ export default function FortressReportEditor() {
             <DialogDescription>Add a note explaining what needs to change. The author will see this.</DialogDescription>
           </DialogHeader>
           <Textarea value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} placeholder="What needs fixing…" rows={4} />
+          {!reviewNotes.trim() && (
+            <p className="text-xs text-muted-foreground">A note is required — it is the only thing the author will see.</p>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setReviewOpen(null)}>Cancel</Button>
-            <Button variant="destructive" disabled={lifecycle.isPending} onClick={() => reviewOpen && transition(reviewOpen, reviewNotes)}>
+            <Button
+              variant="destructive"
+              disabled={lifecycle.isPending || !reviewNotes.trim()}
+              onClick={() => reviewOpen && transition(reviewOpen, reviewNotes.trim())}
+            >
               Return to author
             </Button>
           </DialogFooter>
