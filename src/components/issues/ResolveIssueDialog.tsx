@@ -1,4 +1,7 @@
-/** Closing an issue needs a note (what was done) — it becomes the last comment, then the status flips. */
+/**
+ * Closing an issue needs a note (what was done) — it becomes the last comment, then the status
+ * flips. Both run in the offline queue handler, now (online) or on replay (offline).
+ */
 import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -13,10 +16,9 @@ import {
   ResponsiveDialogTitle,
 } from '@/components/ui/responsive-dialog';
 import { PhotoCapture, type PhotoFile } from '@/components/ui/photo-capture';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { postIssueComment } from '@/lib/issueActivity';
-import { uploadPhotos, photoPrefix } from '@/lib/photos';
+import { enqueueAndRun } from '@/lib/offline/enqueueAndRun';
+import { toastForOutcome } from '@/lib/offline/outcomeToast';
 
 interface Props {
   issueId: string;
@@ -37,18 +39,19 @@ export function ResolveIssueDialog({ issueId, open, onOpenChange, onResolved, ne
     if (!user || !note.trim()) return;
     setBusy(true);
     try {
-      const photoUrls = photos.length ? await uploadPhotos(photos, { prefix: photoPrefix(user.id) }) : [];
-      await postIssueComment({ issueId, userId: user.id, userEmail: user.email, comment: note.trim(), photoUrls });
-      // The note is saved even if the status flip fails — it is true either way.
-      const { data, error } = await supabase.from('issues').update({ status: 'resolved' }).eq('id', issueId).select('id');
-      if (error) throw error;
-      const denied = !data?.length;
+      // The handler saves the note even if the status flip is refused; that case comes back as a
+      // failed outcome whose message ("Your note was saved, but…") is already user-facing.
+      const outcome = await enqueueAndRun(user.id, {
+        kind: 'issue_resolve', activityId: crypto.randomUUID(), issueId, note: note.trim(), userEmail: user.email ?? null,
+      }, photos.map((p) => ({ file: p.file })));
+      toastForOutcome(outcome, {
+        synced: 'Issue resolved',
+        queued: "Saved on this device — it will resolve when you're back online",
+      });
+      if (outcome.status === 'failed') return;
       setNote(''); setPhotos([]);
       onOpenChange(false);
-      // Either way the note landed, so the caller must refresh to show it in the timeline.
       onResolved();
-      if (denied) toast.error('Your note was saved, but you do not have permission to resolve this issue.');
-      else toast.success('Issue resolved');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not resolve the issue.');
     } finally {

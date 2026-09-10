@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { formatBuildingName } from '@/lib/buildingName';
-import { supabase } from '@/integrations/supabase/client';
-import { uploadPhotos, photoPrefix } from '@/lib/photos';
+import { enqueueAndRun } from '@/lib/offline/enqueueAndRun';
+import { toastForOutcome } from '@/lib/offline/outcomeToast';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   ResponsiveDialog,
@@ -90,37 +90,35 @@ export default function ReportIssueDialog({
     setLoading(true);
 
     try {
-      // Upload photos if any. Path MUST be photos/<uid>/… — the only
-      // tenant-documents prefix a non-admin may write (see src/lib/photos.ts).
-      // Throws on failure rather than silently dropping the evidence the
-      // user attached.
-      const photoUrls = await uploadPhotos(photos, { prefix: photoPrefix(user.id) });
-
-      // Create the issue
-      const { error: issueError } = await supabase.from('issues').insert({
-        title: title.trim(),
-        description: description.trim(),
-        priority,
-        status: 'open',
-        building_id: buildingId,
-        task_instance_id: taskId,
-        reported_by: user.id,
-        corrective_action: correctiveAction.trim() || null,
-        photo_urls: photoUrls.length > 0 ? photoUrls : [],
+      // The issue insert, its photo upload and the task's flip to issue_logged all run in the
+      // queue handler, now (online) or on replay (offline). The client-generated issue id makes
+      // a second attempt collide on the primary key, which the replay engine treats as applied.
+      const outcome = await enqueueAndRun(user.id, {
+        kind: 'issue_create',
+        issueId: crypto.randomUUID(),
+        row: {
+          title: title.trim(),
+          description: description.trim(),
+          priority,
+          status: 'open',
+          building_id: buildingId,
+          deadline: null,
+          corrective_action: correctiveAction.trim() || null,
+          reported_by: user.id,
+          assigned_to: null,
+          task_instance_id: taskId,
+        },
+        markTaskIssueLogged: taskId,
+      }, photos.map((p) => ({ file: p.file })));
+      toastForOutcome(outcome, {
+        synced: 'Issue reported successfully',
+        queued: "Issue saved on this device — it will be reported when you're back online",
       });
-
-      if (issueError) throw issueError;
-
-      // Update task status to issue_logged
-      await supabase
-        .from('task_instances')
-        .update({ status: 'issue_logged' })
-        .eq('id', taskId);
-
-      toast.success('Issue reported successfully');
-      resetForm();
-      onOpenChange(false);
-      onSuccess?.();
+      if (outcome.status !== 'failed') {
+        resetForm();
+        onOpenChange(false);
+        onSuccess?.();
+      }
     } catch (error: any) {
       console.error('Error reporting issue:', error);
       toast.error(error.message || 'Failed to report issue');

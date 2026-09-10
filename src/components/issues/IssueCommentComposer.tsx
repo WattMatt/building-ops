@@ -1,7 +1,8 @@
 /**
  * Comment on an issue: text, optional photos, @mentions from the building's members.
- * Writes one issue_activity row (activity_type 'comment'); the author name is denormalised
- * from the caller's own profile because other users cannot read it back later.
+ * The write goes through the offline queue: one issue_activity row (activity_type 'comment')
+ * with a client-generated id, plus the comment/mention notifications, all done by the queue
+ * handler so the path is identical now (online) or on replay (offline).
  */
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { Loader2, Send } from 'lucide-react';
@@ -11,10 +12,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { PhotoCapture, type PhotoFile } from '@/components/ui/photo-capture';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBuildingMembers, memberDisplayName } from '@/hooks/useBuildingMembers';
-import { postIssueComment } from '@/lib/issueActivity';
-import { uploadPhotos, photoPrefix } from '@/lib/photos';
+import { enqueueAndRun } from '@/lib/offline/enqueueAndRun';
+import { toastForOutcome } from '@/lib/offline/outcomeToast';
 import { mentionQueryAt, insertMention, mentionPresent, type MentionRange } from '@/lib/mentions';
-import { notify } from '@/lib/notify';
 import { track } from '@/lib/analytics';
 
 /** Keys the mention picker itself handles in onKeyDown; onKeyUp must not re-derive the range from them. */
@@ -87,15 +87,18 @@ export function IssueCommentComposer({ issueId, buildingId, issueTitle, reporter
     if (!comment || !user) return;
     setPosting(true);
     try {
-      const photoUrls = photos.length ? await uploadPhotos(photos, { prefix: photoPrefix(user.id) }) : [];
       // Keep only mentions whose @Name still appears in the text (exact, boundary-aware match).
       const kept = mentions.filter((id) => { const m = byId.get(id); return m && mentionPresent(comment, memberDisplayName(m)); });
-      const { authorName } = await postIssueComment({ issueId, userId: user.id, userEmail: user.email, comment, photoUrls, mentions: kept });
-      track('issue_commented', { issueId, mentions: kept.length, photos: photoUrls.length });
-      const others = Array.from(new Set([assigneeId, reporterId].filter((id): id is string => !!id && id !== user.id && !kept.includes(id))));
-      if (others.length) void notify({ kind: 'issue_comment', entityType: 'issue', entityId: issueId, buildingId, recipients: others, title: `${authorName} commented on: ${issueTitle}`, body: comment.slice(0, 200), url: `/issues?open=${issueId}` });
-      const mentioned = kept.filter((id) => id !== user.id);
-      if (mentioned.length) void notify({ kind: 'issue_mention', entityType: 'issue', entityId: issueId, buildingId, recipients: mentioned, title: `${authorName} mentioned you on: ${issueTitle}`, body: comment.slice(0, 200), url: `/issues?open=${issueId}` });
+      // The handler drops the author and anyone mentioned from notifyOthers before notifying.
+      const notifyOthers = Array.from(new Set([assigneeId, reporterId].filter((id): id is string => !!id)));
+      const outcome = await enqueueAndRun(user.id, {
+        kind: 'issue_comment', activityId: crypto.randomUUID(), issueId, issueTitle, buildingId, comment,
+        mentions: kept, notifyOthers, userEmail: user.email ?? null,
+      }, photos.map((p) => ({ file: p.file })));
+      // No success toast: the comment appearing in the timeline is the confirmation, as before.
+      toastForOutcome(outcome, { queued: "Comment saved on this device — it will post when you're back online" });
+      if (outcome.status === 'failed') return;
+      track('issue_commented', { issueId, mentions: kept.length, photos: photos.length });
       photos.forEach((p) => { if (p.preview) URL.revokeObjectURL(p.preview); });
       setText(''); setPhotos([]); setMentions([]);
       onPosted();

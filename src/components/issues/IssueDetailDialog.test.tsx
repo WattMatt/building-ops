@@ -19,8 +19,8 @@ vi.mock('@/hooks/useBuildingMembers', () => ({
   useBuildingMembers: () => ({ data: [], byId: new Map() }),
   memberDisplayName: (m: { full_name: string | null }) => m.full_name ?? 'Unnamed user',
 }));
-vi.mock('@/lib/issueActivity', () => ({ postIssueComment: async () => ({ id: 'a1', authorName: 'Me' }) }));
-vi.mock('@/lib/photos', () => ({ uploadPhotos: vi.fn().mockResolvedValue([]), photoPrefix: (u: string) => `photos/${u}` }));
+// The comment composer and resolve dialog inside write through the offline queue.
+vi.mock('@/lib/offline/enqueueAndRun', () => ({ enqueueAndRun: vi.fn().mockResolvedValue({ status: 'synced', result: {} }) }));
 vi.mock('@/lib/notify', () => ({ notify: async () => {} }));
 vi.mock('@/components/ui/photo-capture', () => ({ PhotoCapture: () => null }));
 

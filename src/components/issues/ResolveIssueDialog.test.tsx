@@ -2,38 +2,16 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { mockViewport } from '@/test/mobile';
 
-const state = vi.hoisted(() => ({
-  calls: [] as string[],
-  commentInputs: [] as Record<string, unknown>[],
-  updateRows: [{ id: 'i1' }] as { id: string }[],
-}));
-
-vi.mock('@/lib/issueActivity', () => ({
-  postIssueComment: vi.fn(async (input: Record<string, unknown>) => {
-    state.calls.push('postIssueComment');
-    state.commentInputs.push(input);
-    return { id: 'a1', authorName: 'Me' };
-  }),
-}));
-vi.mock('@/integrations/supabase/client', () => ({
-  supabase: {
-    from: () => ({
-      update: () => ({
-        eq: () => ({
-          select: () => {
-            state.calls.push('issues.update');
-            return Promise.resolve({ data: state.updateRows, error: null });
-          },
-        }),
-      }),
-    }),
-  },
-}));
+const enqueueAndRun = vi.hoisted(() => vi.fn());
+const toast = vi.hoisted(() => Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }));
+vi.mock('@/lib/offline/enqueueAndRun', () => ({ enqueueAndRun }));
+vi.mock('sonner', () => ({ toast }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'me', email: 'me@example.com' } }) }));
-vi.mock('@/lib/photos', () => ({ uploadPhotos: vi.fn().mockResolvedValue([]), photoPrefix: (u: string) => `photos/${u}` }));
 vi.mock('@/components/ui/photo-capture', () => ({ PhotoCapture: () => null }));
 
 import { ResolveIssueDialog } from './ResolveIssueDialog';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const renderDialog = (props: Partial<React.ComponentProps<typeof ResolveIssueDialog>> = {}) => {
   const onOpenChange = vi.fn();
@@ -42,11 +20,16 @@ const renderDialog = (props: Partial<React.ComponentProps<typeof ResolveIssueDia
   return { onOpenChange, onResolved };
 };
 
+const submit = async (note = '  Replaced the breaker.  ') => {
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: note } });
+  fireEvent.click(screen.getByRole('button', { name: /resolve/i }));
+  await waitFor(() => expect(enqueueAndRun).toHaveBeenCalledTimes(1));
+};
+
 describe('ResolveIssueDialog', () => {
   beforeEach(() => {
-    state.calls = [];
-    state.commentInputs = [];
-    state.updateRows = [{ id: 'i1' }];
+    enqueueAndRun.mockReset().mockResolvedValue({ status: 'synced', result: {} });
+    toast.mockClear(); toast.success.mockClear(); toast.error.mockClear();
   });
   afterEach(() => mockViewport(1024));
 
@@ -67,23 +50,35 @@ describe('ResolveIssueDialog', () => {
     expect(button).toBeEnabled();
   });
 
-  it('saves the note before flipping the status', async () => {
-    const { onResolved } = renderDialog();
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: '  Replaced the breaker.  ' } });
-    fireEvent.click(screen.getByRole('button', { name: /resolve/i }));
-    await waitFor(() => expect(onResolved).toHaveBeenCalled());
-    expect(state.calls).toEqual(['postIssueComment', 'issues.update']);
-    expect(state.commentInputs[0]).toMatchObject({ issueId: 'i1', userId: 'me', comment: 'Replaced the breaker.' });
+  it('queues an issue_resolve op with the trimmed note and a client-generated activity id', async () => {
+    const { onOpenChange, onResolved } = renderDialog();
+    await submit();
+    const [uid, payload, photos] = enqueueAndRun.mock.calls[0];
+    expect(uid).toBe('me');
+    expect(payload).toMatchObject({ kind: 'issue_resolve', issueId: 'i1', note: 'Replaced the breaker.', userEmail: 'me@example.com' });
+    expect(payload.activityId).toMatch(UUID);
+    expect(photos).toEqual([]);
+    expect(toast.success).toHaveBeenCalledWith('Issue resolved');
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onResolved).toHaveBeenCalledTimes(1);
   });
 
-  it('closes and refreshes without throwing when the status update is denied', async () => {
-    state.updateRows = [];
+  it('closes with the queued guardrail toast when the write is held on the device', async () => {
+    enqueueAndRun.mockResolvedValueOnce({ status: 'queued' });
     const { onOpenChange, onResolved } = renderDialog();
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Replaced the breaker.' } });
-    fireEvent.click(screen.getByRole('button', { name: /resolve/i }));
-    await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
+    await submit();
+    expect(toast).toHaveBeenCalledWith("Saved on this device — it will resolve when you're back online");
     expect(onOpenChange).toHaveBeenCalledWith(false);
-    // The note still landed, so the comment insert must have run.
-    expect(state.calls).toEqual(['postIssueComment', 'issues.update']);
+    expect(onResolved).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays open and shows the message when the status flip is refused', async () => {
+    const denied = 'Your note was saved, but you do not have permission to resolve this issue.';
+    enqueueAndRun.mockResolvedValueOnce({ status: 'failed', error: denied });
+    const { onOpenChange, onResolved } = renderDialog();
+    await submit();
+    expect(toast.error).toHaveBeenCalledWith(denied);
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(onResolved).not.toHaveBeenCalled();
   });
 });
