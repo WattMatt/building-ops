@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 import type { IssuePriority, IssueStatus } from '@/lib/constants';
 import { useBuildingMembers, memberDisplayName } from '@/hooks/useBuildingMembers';
 import { AssigneePicker } from '@/components/people/AssigneePicker';
+import { IssueCommentComposer } from '@/components/issues/IssueCommentComposer';
 import { notify } from '@/lib/notify';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -256,6 +257,15 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
                 ))}
               </ol>
             )}
+
+            <IssueCommentComposer
+              issueId={issue.id}
+              buildingId={issue.building_id}
+              issueTitle={issue.title}
+              reporterId={issue.reported_by}
+              assigneeId={issue.assigned_to}
+              onPosted={() => { void load(); onUpdated(); }}
+            />
           </div>
         </div>
       </DialogContent>
