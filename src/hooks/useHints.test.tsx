@@ -9,13 +9,16 @@ vi.mock('@/contexts/AuthContext', () => ({
 
 const selectState: { data: unknown; error: unknown } = { data: null, error: null };
 const updatePatches: Array<{ patch: unknown; id: unknown }> = [];
+// When set, maybeSingle() resolves from this instead of selectState, letting a
+// test control exactly when the profile read settles (e.g. to race a toggle).
+let deferredSelect: Promise<{ data: unknown; error: unknown }> | null = null;
 
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
     from: vi.fn(() => ({
       select: vi.fn(() => ({
         eq: vi.fn(() => ({
-          maybeSingle: vi.fn(() => Promise.resolve({ data: selectState.data, error: selectState.error })),
+          maybeSingle: vi.fn(() => deferredSelect ?? Promise.resolve({ data: selectState.data, error: selectState.error })),
         })),
       })),
       update: vi.fn((patch: unknown) => ({
@@ -39,6 +42,7 @@ describe('hints preference', () => {
     selectState.data = null;
     selectState.error = null;
     updatePatches.length = 0;
+    deferredSelect = null;
   });
 
   it('shows hints by default and hides them when switched off', async () => {
@@ -48,7 +52,8 @@ describe('hints preference', () => {
         <Toggle />
       </HintsProvider>,
     );
-    await waitFor(() => expect(screen.getByRole('button')).toBeInTheDocument());
+    // The button renders synchronously on mount; it doesn't wait on anything.
+    expect(screen.getByRole('button')).toBeInTheDocument();
     expect(screen.getByText('Fill in each section')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button'));
     expect(screen.queryByText('Fill in each section')).toBeNull();
@@ -141,5 +146,79 @@ describe('hints preference', () => {
     );
 
     await waitFor(() => expect(screen.getByText('off')).toBeInTheDocument());
+  });
+
+  it('falls back to localStorage when there is no profile row', async () => {
+    selectState.data = null;
+    selectState.error = null;
+    window.localStorage.setItem('fortress.hints.user-1', 'off');
+
+    function Reader() {
+      const { hintsEnabled } = useHints();
+      return <span>{hintsEnabled ? 'on' : 'off'}</span>;
+    }
+
+    render(
+      <HintsProvider>
+        <Reader />
+      </HintsProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByText('off')).toBeInTheDocument());
+  });
+
+  it('does not flash hints on for a signed-in user who turned them off, while the profile read is slow', () => {
+    window.localStorage.setItem('fortress.hints.user-1', 'off');
+    // Never resolves during this test, simulating a slow network round-trip.
+    deferredSelect = new Promise(() => {});
+
+    render(
+      <HintsProvider>
+        <Hint>Fill in each section</Hint>
+      </HintsProvider>,
+    );
+
+    // No waitFor: the point is that this is correct on the very first render,
+    // before any async work has had a chance to settle.
+    expect(screen.queryByText('Fill in each section')).toBeNull();
+  });
+
+  it('does not let a slow profile read undo a fresher toggle made while it was in flight', async () => {
+    selectState.data = { show_hints: true };
+    selectState.error = null;
+
+    let resolveSelect!: (value: { data: unknown; error: unknown }) => void;
+    deferredSelect = new Promise((resolve) => {
+      resolveSelect = resolve;
+    });
+
+    function Reader() {
+      const { hintsEnabled, setHintsEnabled } = useHints();
+      return (
+        <>
+          <span>{hintsEnabled ? 'on' : 'off'}</span>
+          <button onClick={() => setHintsEnabled(false)}>toggle off</button>
+        </>
+      );
+    }
+
+    render(
+      <HintsProvider>
+        <Reader />
+      </HintsProvider>,
+    );
+
+    // Toggle off while the profile read is still in flight.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button'));
+    });
+    expect(screen.getByText('off')).toBeInTheDocument();
+
+    // Now let the stale read resolve with a value that contradicts the fresh toggle.
+    await act(async () => {
+      resolveSelect({ data: { show_hints: true }, error: null });
+    });
+
+    expect(screen.getByText('off')).toBeInTheDocument();
   });
 });
