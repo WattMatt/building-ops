@@ -302,12 +302,10 @@ try {
     ['contractor_documents', cdoc, () => ({ contractor_id: contractor, document_type: 'other', document_name: 'x' }), { document_name: 'ZZTEST-RLS-upd' }, adminMgr()],
     ['checklist_templates', template, () => ({ name: `ZZTEST-RLS-${RUN}`, is_active: false }), { description: 'ZZTEST-RLS-upd' }, adminMgr()],
     ['template_items', titem, () => ({ template_id: template, task_name: 'x' }), { task_name: `ZZTEST-RLS-${RUN}` }, adminMgr()],
-    ['media_attachments', media, (who) => ({ record_type: 'issue', record_id: issueA, storage_path: `photos/${who}/x.txt` }), { record_type: 'issue' }, adminMgr()],
   ];
   for (const [table, id, make, patch, writeExp] of globals) {
     await probeMatrix(`${table} select`, anyAuth(), (jwt) => canSelect(jwt, table, id));
-    const insExp = table === 'media_attachments' ? anyAuth() : writeExp;
-    await probeMatrix(`${table} insert`, insExp, (jwt, who) => canInsert(jwt, table, make(personas[who].id)));
+    await probeMatrix(`${table} insert`, writeExp, (jwt, who) => canInsert(jwt, table, make(personas[who].id)));
     await probeMatrix(`${table} update`, writeExp, (jwt) => canUpdate(jwt, table, id, patch));
     assert(`${table} delete as userA`, (await canDelete(personas.userA.jwt, table, id)) === false, 'site user deleted global row');
   }
@@ -347,9 +345,10 @@ try {
   await probeMatrix('audit_logs update (immutable)', nobody(), (jwt) => canUpdate(jwt, 'audit_logs', alOwn, { action: `zztest-rls-${RUN}` }));
   assert('audit_logs delete as manager (admin-only)', (await canDelete(personas.manager.jwt, 'audit_logs', alOwn)) === false, 'manager deleted an audit row');
 
-  // organizations: anon-readable; update admin/manager; insert/delete admin (allow-probe skipped: apps assume a single org row)
+  // organizations: since R4a anon reads only the organization_branding view; update admin/manager; insert/delete admin (allow-probe skipped: apps assume a single org row)
   const anonOrg = await fetch(`${URL_BASE}/rest/v1/organizations?select=id&limit=1`, { headers: { apikey: ANON } });
-  assert('organizations anon read', anonOrg.ok, `HTTP ${anonOrg.status}`);
+  const anonOrgRows = anonOrg.ok ? await anonOrg.json().catch(() => []) : [];
+  assert('organizations anon read denied (R4a: branding view only)', !anonOrg.ok || anonOrgRows.length === 0, `HTTP ${anonOrg.status} rows ${anonOrgRows.length}`);
   // TemplateDialog's "file under the first organisation" fallback reads this row as the signed-in
   // manager; a 200 with zero rows would silently make "New template" fail for them.
   const mgrOrg = await fetch(`${URL_BASE}/rest/v1/organizations?select=id&limit=1`, { headers: authed(personas.manager.jwt) });

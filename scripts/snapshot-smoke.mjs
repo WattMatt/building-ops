@@ -289,7 +289,7 @@ try {
     assert('step 8: site user can comment on the A issue', comment.status === 201, `HTTP ${comment.status} ${await comment.text()}`);
     const afterComment = (await svcSelect('issues', `id=eq.${sla.id}&select=first_response_at`))[0];
     assert('step 8: first_response_at stamped by a non-reporter comment', !!afterComment?.first_response_at, JSON.stringify(afterComment));
-    await svcPatch('issues', `id=eq.${sla.id}`, { sla_target_hours: 0.01, created_at: hoursAgoIso(1) });
+    await svcPatch('issues', `id=eq.${sla.id}`, { sla_target_hours: 1, created_at: hoursAgoIso(2) });
     const before = (await svcSelect('notifications', `entity_id=eq.${sla.id}&kind=eq.issue_sla_breached&select=id`)).length;
     const sweep = await rpcJson(admin.jwt, 'mark_sla_breaches', {});
     assert('step 8: mark_sla_breaches as admin returns ≥ 1', sweep.status === 200 && Number(sweep.body) >= 1, `HTTP ${sweep.status} body ${JSON.stringify(sweep.body)}`);
@@ -299,7 +299,7 @@ try {
     assert('step 8: exactly one issue_sla_breached row for the admin persona', before === 0 && inbox.length === 1, `${inbox.length} rows (before: ${before})`);
     if (inbox.length === 1) {
       assert('step 8: inbox row shape (title, body, url, entity_type, building_id)',
-        inbox[0].title === `SLA breached: ZZTEST-SNAP sla ${RUN}` && inbox[0].body === 'Priority critical · target 0.01 h' && inbox[0].url === `/issues?open=${sla.id}`
+        inbox[0].title === `SLA breached: ZZTEST-SNAP sla ${RUN}` && inbox[0].body === 'Priority critical · target 1 h' && inbox[0].url === `/issues?open=${sla.id}`
           && inbox[0].entity_type === 'issue' && inbox[0].building_id === A,
         JSON.stringify(inbox[0]));
     }
