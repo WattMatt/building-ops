@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   ChevronLeft,
   ChevronRight,
@@ -19,9 +20,13 @@ import {
   User,
   Plus,
   ClipboardCheck,
+  UserPlus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { categoryMeta } from '@/lib/compliance';
+import { useBuildingMembers, memberDisplayName } from '@/hooks/useBuildingMembers';
+import { AssigneePicker } from '@/components/people/AssigneePicker';
+import { notify } from '@/lib/notify';
 import {
   format,
   startOfDay,
@@ -62,6 +67,7 @@ interface TaskInstance {
   responsible_role: string;
   building_id: string;
   category: string | null;
+  assigned_to: string | null;
   completion?: {
     completed_by: string;
     completed_at: string;
@@ -151,7 +157,8 @@ function getCurrentPeriodRange(frequency: TaskFrequency): { start: Date; end: Da
 }
 
 export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTabProps) {
-  const { isAdminOrManager } = useAuth();
+  const { user, isAdminOrManager } = useAuth();
+  const { byId: members } = useBuildingMembers(buildingId);
   const [tasks, setTasks] = useState<TaskInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -163,6 +170,20 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<TaskInstance | null>(null);
 
+  const nameOf = (id: string | null) => (id && members.get(id) ? memberDisplayName(members.get(id)!) : null);
+
+  const assignTasks = async (taskIds: string[], assigned_to: string | null) => {
+    if (!taskIds.length) return;
+    const { data, error } = await supabase.from('task_instances').update({ assigned_to } as never).in('id', taskIds).select('id');
+    if (error) { toast.error(`Could not assign: ${error.message}`); return; }
+    if ((data?.length ?? 0) < taskIds.length) toast.error(`Only ${data?.length ?? 0} of ${taskIds.length} tasks could be assigned — your role does not permit the rest.`);
+    else toast.success(assigned_to ? `Assigned ${taskIds.length} task${taskIds.length === 1 ? '' : 's'} to ${nameOf(assigned_to) ?? 'user'}` : 'Unassigned');
+    if (assigned_to && assigned_to !== user?.id && data?.length) {
+      void notify({ kind: 'task_assigned', entityType: 'task', entityId: data[0].id, buildingId, recipients: [assigned_to], title: `${data.length} task${data.length === 1 ? '' : 's'} assigned to you at ${buildingName ?? 'a building'}`, url: `/buildings/${buildingId}?tab=checklists` });
+    }
+    fetchTasks();
+  };
+
   useEffect(() => {
     fetchTasks();
   }, [buildingId]);
@@ -171,7 +192,8 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
     setLoading(true);
     try {
       // Fetch tasks with their completions
-      const { data: tasksData, error: tasksError } = await supabase
+      // `assigned_to` is not in the generated types until the migration ships; narrow at the boundary.
+      const { data: tasksRaw, error: tasksError } = await supabase
         .from('task_instances')
         .select(`
           id,
@@ -184,12 +206,15 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
           requires_signature,
           responsible_role,
           building_id,
-          category
+          category,
+          assigned_to
         `)
         .eq('building_id', buildingId)
         .order('due_date');
 
       if (tasksError) throw tasksError;
+
+      const tasksData = tasksRaw as unknown as Array<Omit<TaskInstance, 'completion'>> | null;
 
       // Fetch completions for these tasks
       const taskIds = (tasksData || []).map(t => t.id);
@@ -463,21 +488,34 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
               <span className="font-medium">{getPeriodLabel(selectedFrequency)}</span>
               <Badge variant="outline" className="text-xs">Current Period</Badge>
             </div>
-            {isAdminOrManager && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleGenerateTasks}
-                disabled={generating}
-              >
-                {generating ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : (
-                  <Plus className="h-4 w-4 mr-2" />
-                )}
-                Generate {frequencyLabels[selectedFrequency]}
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {isAdminOrManager && pendingTasks.length > 0 && (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm"><UserPlus className="mr-2 h-4 w-4" />Assign all pending</Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 space-y-2">
+                    <p className="text-sm">Assign the {pendingTasks.length} pending {frequencyLabels[selectedFrequency].toLowerCase()} tasks to:</p>
+                    <AssigneePicker buildingId={buildingId} value={null} onChange={(id) => id && assignTasks(pendingTasks.map((t) => t.id), id)} allowUnassigned={false} />
+                  </PopoverContent>
+                </Popover>
+              )}
+              {isAdminOrManager && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleGenerateTasks}
+                  disabled={generating}
+                >
+                  {generating ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Plus className="h-4 w-4 mr-2" />
+                  )}
+                  Generate {frequencyLabels[selectedFrequency]}
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Progress Card */}
@@ -619,6 +657,10 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
                   onReportIssue={handleReportIssue}
                   emptyMessage={`No ${frequencyLabels[selectedFrequency].toLowerCase()} tasks scheduled. Click "Generate ${frequencyLabels[selectedFrequency]}" to create tasks.`}
                   showDueDate
+                  buildingId={buildingId}
+                  nameOf={nameOf}
+                  canAssign={(t) => isAdminOrManager || t.assigned_to === user?.id}
+                  onAssign={(t, id) => assignTasks([t.id], id)}
                 />
               </CardContent>
             </Card>
@@ -640,6 +682,10 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
                   onReportIssue={handleReportIssue}
                   variant="issue"
                   showDueDate
+                  buildingId={buildingId}
+                  nameOf={nameOf}
+                  canAssign={(t) => isAdminOrManager || t.assigned_to === user?.id}
+                  onAssign={(t, id) => assignTasks([t.id], id)}
                 />
               </CardContent>
             </Card>
@@ -683,9 +729,13 @@ interface TasksListProps {
   emptyMessage?: string;
   variant?: 'default' | 'issue';
   showDueDate?: boolean;
+  buildingId: string;
+  nameOf: (id: string | null) => string | null;
+  canAssign: (task: TaskInstance) => boolean;
+  onAssign: (task: TaskInstance, userId: string | null) => void;
 }
 
-function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, variant = 'default', showDueDate = false }: TasksListProps) {
+function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, variant = 'default', showDueDate = false, buildingId, nameOf, canAssign, onAssign }: TasksListProps) {
   if (tasks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -740,6 +790,18 @@ function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, variant = '
                       Due: {format(new Date(task.due_date), 'MMM d, yyyy')}
                     </p>
                   )}
+                  <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                    <User className="h-3 w-3" />
+                    {task.assigned_to ? (nameOf(task.assigned_to) ?? 'Assigned') : 'Unassigned'}
+                    {canAssign(task) && task.status === 'pending' && (
+                      <Popover>
+                        <PopoverTrigger asChild><button type="button" className="underline">change</button></PopoverTrigger>
+                        <PopoverContent className="w-64">
+                          <AssigneePicker buildingId={buildingId} value={task.assigned_to} onChange={(id) => onAssign(task, id)} />
+                        </PopoverContent>
+                      </Popover>
+                    )}
+                  </div>
                 </div>
                 <Badge
                   variant={task.status === 'completed' ? 'secondary' : 'outline'}
