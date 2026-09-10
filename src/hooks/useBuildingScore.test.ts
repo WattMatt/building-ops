@@ -80,6 +80,16 @@ describe('useBuildingScore', () => {
     expect(reports && has(reports.calls, 'eq', 'status', 'approved')).toBe(true);
   });
 
+  it('reads the latest fresh snapshot row and skips the live queries', async () => {
+    state.result = (table) => table === 'building_metrics_daily'
+      ? { data: [{ building_id: 'b1', day: '2026-09-10', compliance_pct: '81.3', compliance_period: '2026-08-01', task_completion_30d_pct: 66.7, computed_at: '2026-09-10T03:00:00Z' }], error: null }
+      : { data: [], error: null };
+    const { result } = renderHook(() => useBuildingScore('b1'), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current).toMatchObject({ ohsPct: 81.3, ohsPeriod: '2026-08-01', taskPct: 66.7, source: 'snapshot', asOf: '2026-09-10T03:00:00Z' });
+    expect(state.queries.map((q) => q.table)).toEqual(['building_metrics_daily']);
+  });
+
   it('does nothing without a building id', () => {
     renderHook(() => useBuildingScore(undefined), { wrapper });
     expect(state.queries).toHaveLength(0);

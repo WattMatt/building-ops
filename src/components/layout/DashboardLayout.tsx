@@ -60,6 +60,7 @@ import {
   Search,
   CalendarDays,
   HardHat,
+  TrendingUp,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -132,6 +133,12 @@ const reportsNavItems: NavItem[] = [
     href: '/reports/fortress',
     icon: <FileText className="w-4 h-4" />,
     badgeKinds: ['report_submitted', 'report_returned', 'report_approved'],
+  },
+  {
+    title: 'Trends',
+    href: '/trends',
+    icon: <TrendingUp className="w-4 h-4" />,
+    roles: ['admin', 'manager'],
   },
   {
     // Note: a different thing — H&S scoring and PDF evidence packs, not the reports above.

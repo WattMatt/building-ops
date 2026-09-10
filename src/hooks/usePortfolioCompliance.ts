@@ -1,24 +1,17 @@
 /**
  * Portfolio OHS compliance rollup (audit finding H1, spec KPI O9).
  *
- * One row per building the user can see (RLS scopes the `buildings` query). For each
- * building we read its LATEST FILED `ops_monthly` report and pull, straight from the
- * Fortress SQL views/tables (never client math that can drift):
- *   - compliancePct      = compliance_scores.compliance_pct for that report
- *   - criticalPct        = compliance_critical_scores.critical_pct for that report's assessment
- *   - openNonCompliances = count of compliance_responses.response='no' for that assessment
- *   - period             = the report's report_period
- *   - status             = that report's lifecycle status, so a filed-but-unapproved
- *                          report is distinguishable from no report at all
- * Buildings with no filed ops report → all null / period null (never fabricated).
+ * Since R4a the figures come from the nightly snapshot (building_metrics_daily, D10: compliance of the
+ * latest APPROVED ops report) — one query for every building — plus one query for the latest FILED ops
+ * report per building so the card can still say "submitted, awaiting approval" rather than "no report".
+ * A building with no fresh snapshot row falls back to the original per-building live queries (buildingRow).
  *
- * O9 (portfolioAvg) = mean of the non-null compliancePct values across buildings,
- * rounded to 1dp; null when no building has a score.
- *
- * N+1 per-building queries are acceptable at pilot scale (a handful of buildings).
+ * Note the semantics: compliancePct is approved-only (it was "latest filed" before R4a); period/status are
+ * still the latest filed report's. The dashboard card and sparklines therefore agree (spec §3).
  */
 import { useQuery } from '@tanstack/react-query';
 import { fdb } from '@/integrations/supabase/fortress-db';
+import { SNAPSHOT_FRESH_DAYS, daysAgo, num, snapshots, type SnapshotRow } from '@/lib/snapshotClient';
 
 export interface PortfolioComplianceRow {
   buildingId: string;
@@ -39,12 +32,8 @@ export interface PortfolioCompliance {
   /** Buildings that additionally have a compliance SCORE — the average's denominator. */
   scoredCount: number;
   total: number;
-}
-
-function num(v: unknown): number | null {
-  if (v === null || v === undefined || v === '') return null;
-  const n = Number(v);
-  return Number.isNaN(n) ? null : n;
+  /** Newest snapshot computed_at among the rows, null when every row came from live queries. */
+  asOf: string | null;
 }
 
 async function buildingRow(buildingId: string, name: string): Promise<PortfolioComplianceRow> {
@@ -117,15 +106,39 @@ export function usePortfolioCompliance() {
       if (bRes.error) throw bRes.error;
       const buildings = (bRes.data ?? []) as { id: string; name: string | null }[];
 
-      const rows = await Promise.all(
-        buildings.map((b) => buildingRow(b.id, b.name ?? 'Unnamed building')),
-      );
+      const [snapRes, repRes] = await Promise.all([
+        snapshots().gte('day', daysAgo(SNAPSHOT_FRESH_DAYS)).order('day', { ascending: false }).range(0, 4999),
+        fdb.from('reports').select('building_id,report_period,status')
+          .eq('report_type', 'ops_monthly').in('status', ['submitted', 'reviewed', 'approved'])
+          .order('report_period', { ascending: false }).range(0, 4999),
+      ]);
+      if (snapRes.error) throw snapRes.error;
+      if (repRes.error) throw repRes.error;
+
+      // Both lists are newest-first, so the first row seen per building is the latest.
+      const latestSnap = new Map<string, SnapshotRow>();
+      for (const r of snapRes.data ?? []) if (!latestSnap.has(r.building_id)) latestSnap.set(r.building_id, r);
+      const latestFiled = new Map<string, { period: string; status: string }>();
+      for (const r of repRes.data ?? []) if (!latestFiled.has(r.building_id)) latestFiled.set(r.building_id, { period: r.report_period, status: r.status });
+
+      const rows = await Promise.all(buildings.map(async (b): Promise<PortfolioComplianceRow> => {
+        const name = b.name ?? 'Unnamed building';
+        const s = latestSnap.get(b.id);
+        if (!s) return buildingRow(b.id, name);
+        const filed = latestFiled.get(b.id);
+        return {
+          buildingId: b.id, name,
+          compliancePct: num(s.compliance_pct),
+          criticalPct: num(s.critical_pct),
+          openNonCompliances: s.ohs_open_nc ?? null,
+          period: filed?.period ?? s.compliance_period ?? null,
+          status: filed?.status ?? null,
+        };
+      }));
 
       const scored = rows.map((r) => r.compliancePct).filter((v): v is number => v !== null);
-      const portfolioAvg = scored.length
-        ? Math.round((scored.reduce((a, b) => a + b, 0) / scored.length) * 10) / 10
-        : null;
-
+      const portfolioAvg = scored.length ? Math.round((scored.reduce((a, b) => a + b, 0) / scored.length) * 10) / 10 : null;
+      const asOf = [...latestSnap.values()].map((s) => s.computed_at).sort().pop() ?? null;
       return {
         rows,
         portfolioAvg,
@@ -134,6 +147,7 @@ export function usePortfolioCompliance() {
         reportedCount: rows.filter((r) => r.period !== null).length,
         scoredCount: scored.length,
         total: rows.length,
+        asOf,
       };
     },
   });
@@ -144,6 +158,7 @@ export function usePortfolioCompliance() {
     reportedCount: query.data?.reportedCount ?? 0,
     scoredCount: query.data?.scoredCount ?? 0,
     total: query.data?.total ?? 0,
+    asOf: query.data?.asOf ?? null,
     isLoading: query.isLoading,
     isError: query.isError,
   };

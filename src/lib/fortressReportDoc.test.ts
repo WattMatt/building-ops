@@ -514,6 +514,24 @@ describe('buildReportDoc — sections previously captured but never exported', (
   });
 });
 
+describe('buildReportDoc — trend (R4a)', () => {
+  it('renders the Trend section as a table plus a 12-rect bar strip, blank for missing months', () => {
+    const trend = Array.from({ length: 12 }, (_, i) => ({ month: `2026-${String(i + 1).padStart(2, '0')}`, compliancePct: i < 3 ? null : 50 + i, taskPct: null, issuesOpen: i, tasksOverdue: 0 }));
+    const doc = buildReportDoc({ report_type: 'ops_monthly', title: 'T', report_period: '2026-12-01' }, { trend }, { color: '#2563eb', orgName: 'Org' });
+    const text = JSON.stringify(doc.content);
+    expect(text).toContain('Trend (12 months)');
+    const canvas = (doc.content as { canvas?: unknown[] }[]).find((c) => Array.isArray(c.canvas) && c.canvas.length === 12);
+    expect(canvas).toBeTruthy();
+    expect((canvas!.canvas as { color: string }[]).filter((r) => r.color === '#e5e7eb')).toHaveLength(3);
+  });
+
+  it('omits the Trend section when every month is blank', () => {
+    const trend = Array.from({ length: 12 }, (_, i) => ({ month: `2026-${String(i + 1).padStart(2, '0')}`, compliancePct: null, taskPct: null, issuesOpen: null, tasksOverdue: null }));
+    const doc = buildReportDoc({ report_type: 'ops_monthly', title: 'T', report_period: '2026-12-01' }, { trend }, { color: '#2563eb', orgName: 'Org' });
+    expect(JSON.stringify(doc.content)).not.toContain('Trend (12 months)');
+  });
+});
+
 describe('buildReportDoc — provenance', () => {
   it('watermarks the document when a watermark is requested', () => {
     const doc = buildReportDoc(

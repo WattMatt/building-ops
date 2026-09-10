@@ -31,12 +31,14 @@ import { BuildingAvatarDialog } from '@/components/building/BuildingAvatarDialog
 import BuildingImportDialog from '@/components/building/BuildingImportDialog';
 import { BuildingScoreChips } from '@/components/building/BuildingScoreChips';
 import { useBuildingsScores } from '@/hooks/useBuildingsScores';
+import { useBuildingsTrends } from '@/hooks/useBuildingTrend';
 import * as XLSX from 'xlsx';
 
 export default function Buildings() {
   const { isAdminOrManager } = useAuth();
   const { buildings, loading, error, refetch, deleteBuilding } = useBuildings();
   const { scores } = useBuildingsScores();
+  const trends = useBuildingsTrends(30);
   const [searchQuery, setSearchQuery] = useState('');
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [avatarDialogBuilding, setAvatarDialogBuilding] = useState<{
@@ -324,6 +326,8 @@ export default function Buildings() {
                     <BuildingScoreChips
                       ohsPct={scores[building.id]?.ohsPct ?? null}
                       taskPct={scores[building.id]?.taskPct ?? null}
+                      ohsTrend={trends.byBuilding[building.id]?.compliance}
+                      taskTrend={trends.byBuilding[building.id]?.tasks}
                     />
                   </div>
                   <div className="flex items-center justify-between">

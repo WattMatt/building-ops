@@ -24,6 +24,7 @@ import { BuildingAvatar } from '@/components/building/BuildingAvatar';
 import { BuildingAvatarDialog } from '@/components/building/BuildingAvatarDialog';
 import { BuildingScoreChips } from '@/components/building/BuildingScoreChips';
 import { useBuildingScore } from '@/hooks/useBuildingScore';
+import { useBuildingTrend } from '@/hooks/useBuildingTrend';
 
 interface Building {
   id: string;
@@ -46,7 +47,8 @@ export default function BuildingDetails() {
   const [building, setBuilding] = useState<Building | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') ?? 'overview');
-  const { ohsPct, taskPct } = useBuildingScore(id);
+  const { ohsPct, taskPct, asOf } = useBuildingScore(id);
+  const trend = useBuildingTrend(id, 90);
   const [avatarDialogOpen, setAvatarDialogOpen] = useState(false);
 
   // keep the active tab in the URL so report links / the editor back-button can deep-link here
@@ -181,7 +183,7 @@ export default function BuildingDetails() {
                 <span className="truncate">{building.address}, {building.city}</span>
               </p>
               <div className="mt-2">
-                <BuildingScoreChips ohsPct={ohsPct} taskPct={taskPct} />
+                <BuildingScoreChips ohsPct={ohsPct} taskPct={taskPct} ohsTrend={trend.series.compliance} taskTrend={trend.series.tasks} asOf={asOf} />
               </div>
             </div>
           </div>

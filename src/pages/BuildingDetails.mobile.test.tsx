@@ -9,6 +9,11 @@ vi.mock('@/contexts/AuthContext', () => ({
 vi.mock('@/hooks/useBuildingScore', () => ({
   useBuildingScore: () => ({ ohsPct: 80, taskPct: 90 }),
 }));
+// The header's sparklines read the snapshot table through a real useQuery; the page is rendered here
+// without a QueryClientProvider, so stub the hook like useBuildingScore above.
+vi.mock('@/hooks/useBuildingTrend', () => ({
+  useBuildingTrend: () => ({ rows: [], series: { compliance: [], tasks: [], issuesOpen: [], tasksOverdue: [], docsExpiring30: [] }, latest: null, isLoading: false }),
+}));
 
 // Each tab has its own tests; here we only care about the page shell on a phone.
 vi.mock('@/components/building/TenantsTab', () => ({ default: () => <div>TenantsTab</div> }));

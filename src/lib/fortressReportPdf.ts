@@ -16,6 +16,8 @@ import { doneMonthsFromGrid, fiscalWindow, gridHasData } from '@/lib/ppmGrid';
 import { fetchMergedPpmGrids } from '@/lib/ppmGridFetch';
 import { REPORT_SECTIONS, watermarkFor } from '@/lib/fortressReports';
 import { fetchReportElectricalCompliance } from '@/integrations/supabase/insight-linker';
+import { snapshots } from '@/lib/snapshotClient';
+import { monthEnd, monthShift, monthlyPoints } from '@/lib/trendSeries';
 
 pdfMake.vfs = pdfFonts.vfs;
 
@@ -172,6 +174,17 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
         correctiveAction: h.corrective_action ?? '',
         status: (h.status ?? '').replace(/_/g, ' '),
       }));
+    }
+
+    // Trend: the last twelve month-end snapshot rows for this building (R4a). Read errors fail the export
+    // like every other section; an empty table (before the first snapshot) just yields blank months.
+    {
+      const endPeriod = report.report_period.slice(0, 10);
+      const snapRes = await snapshots().eq('building_id', report.building_id)
+        .gte('day', `${monthShift(endPeriod, 11)}-01`).lte('day', monthEnd(endPeriod))
+        .order('day', { ascending: true }).range(0, 999);
+      if (snapRes.error) throw new Error(`Could not read the trend snapshots: ${snapRes.error.message}`);
+      data.trend = monthlyPoints(snapRes.data ?? [], endPeriod, 12);
     }
 
     // Monthly building inspection (template walk-through). Same honesty rule as the

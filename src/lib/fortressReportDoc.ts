@@ -7,6 +7,7 @@
 import type { Content, TDocumentDefinitions } from 'pdfmake/interfaces';
 import type { ReportType } from '@/integrations/supabase/fortress-db';
 import { formatPeriodLabel, formatZAR } from '@/lib/fortressReports';
+import type { MonthlyPoint } from '@/lib/trendSeries';
 
 /** A photo already resolved to an embeddable data URL. */
 export interface EmbeddedPhoto { dataUrl: string; caption?: string | null }
@@ -52,6 +53,8 @@ export interface ReportData {
   }[];
   /** Building-inspection and OHS-act answers, grouped by their sheet section. */
   checklist?: { section: string; items: { item: string; response: string | null; value: string | null; comment: string | null }[] }[];
+  /** Twelve month-end snapshot points ending with the report period (OPS only); months before the first snapshot are null. */
+  trend?: MonthlyPoint[];
   // cm
   /** Centre trading performance — one record per report, shown as label/value pairs. */
   buildingTurnover?: { label: string; value: string }[];
@@ -232,6 +235,26 @@ export function buildReportDoc(
       content.push(table(['Hazard', 'Corrective action', 'Status'],
         data.hazards.map((h) => [h.hazard, h.correctiveAction, h.status]),
         ['*', '*', 'auto']));
+    }
+
+    if (data.trend && data.trend.some((p) => p.compliancePct != null || p.taskPct != null || p.issuesOpen != null)) {
+      section('Trend (12 months)');
+      note('Month-end values from the nightly snapshot. A blank cell means no snapshot existed for that month.');
+      const cell = (v: number | null) => (v == null ? '—' : String(v));
+      const monthLabel = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString('en-ZA', { month: 'short', year: 'numeric' });
+      content.push(compactTable(['Month', 'Compliance %', 'Tasks done %', 'Open issues', 'Overdue tasks'],
+        data.trend.map((p) => [monthLabel(p.month), cell(p.compliancePct), cell(p.taskPct), cell(p.issuesOpen), cell(p.tasksOverdue)]),
+        ['*', 'auto', 'auto', 'auto', 'auto']));
+      // Bar strip: one bar per month, height ∝ compliance %, plain canvas rects (no chart library in pdfmake).
+      const BAR_W = 30, GAP = 12, BAR_H = 40;
+      content.push({
+        canvas: data.trend.map((p, i) => {
+          const h = p.compliancePct == null ? 0 : Math.max(1, Math.round((BAR_H * Math.min(100, Math.max(0, p.compliancePct))) / 100));
+          return { type: 'rect' as const, x: i * (BAR_W + GAP), y: BAR_H - h, w: BAR_W, h: h || 1, color: p.compliancePct == null ? '#e5e7eb' : color };
+        }),
+        margin: [0, 6, 0, 2],
+      });
+      content.push({ columns: data.trend.map((p) => ({ width: BAR_W + GAP, text: p.month.slice(5), fontSize: 7, color: '#6b7280' })), margin: [0, 0, 0, 6] });
     }
 
     if (data.buildingInspection && data.buildingInspection.length) {

@@ -38,6 +38,7 @@ const MapView = lazy(() => import("./pages/MapView"));
 const Reports = lazy(() => import("./pages/Reports"));
 const FortressReportEditor = lazy(() => import("./components/reports/fortress/FortressReportEditor"));
 const FortressReports = lazy(() => import("./pages/FortressReports"));
+const Trends = lazy(() => import("./pages/Trends"));
 const FormsLibrary = lazy(() => import("./pages/FormsLibrary"));
 const MySignoffs = lazy(() => import("./pages/MySignoffs"));
 const Inbox = lazy(() => import("./pages/Inbox"));
@@ -139,6 +140,11 @@ const App = () => (
             <Route path="/reports/fortress/:id" element={
               <ProtectedRoute>
                 <DashboardLayout><FortressReportEditor /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/trends" element={
+              <ProtectedRoute allowedRoles={['admin', 'manager']}>
+                <DashboardLayout><Trends /></DashboardLayout>
               </ProtectedRoute>
             } />
             <Route path="/forms" element={
