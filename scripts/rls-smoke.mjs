@@ -804,11 +804,21 @@ try {
     assert('empty draft is gone', (await (await fetch(`${URL_BASE}/rest/v1/reports?id=eq.${emptyDraft}&select=id`, { headers: SVC })).json()).length === 0, 'row still present');
     // media_attachments: admin only, every verb (0 rows on every project; the insert probe deletes its own row).
     await probeMatrix('media_attachments insert', adminOnly(), (jwt) => canInsert(jwt, 'media_attachments', { record_type: 'issue', record_id: A, storage_path: `zztest-rls-${RUN}` }));
-    // A second user_roles row (building-scoped manager) must not break the helpers (was 21000).
-    await svcInsert('user_roles', { user_id: personas.manager.id, role: 'manager', building_id: A });
-    cleanup.push(['user_roles', null, `user_id=eq.${personas.manager.id}&building_id=eq.${A}`]);   // teardown also removes it if the next line throws
-    assert('manager with two role rows still reads building B', await canSelect(personas.manager.jwt, 'buildings', B), 'two-role manager lost access (21000 regression)');
-    await fetch(`${URL_BASE}/rest/v1/user_roles?user_id=eq.${personas.manager.id}&building_id=eq.${A}`, { method: 'DELETE', headers: SVC });
+    // A second user_roles row (building-scoped manager) must not break the helpers (was 21000). On projects where
+    // user_roles is keyed by user_id alone (PRIMARY KEY (user_id)) a second row cannot exist, so the probe is skipped.
+    const secondRole = await fetch(`${URL_BASE}/rest/v1/user_roles`, {
+      method: 'POST', headers: { ...SVC, Prefer: 'return=representation' },
+      body: JSON.stringify({ user_id: personas.manager.id, role: 'manager', building_id: A }),
+    });
+    if (secondRole.ok) {
+      cleanup.push(['user_roles', null, `user_id=eq.${personas.manager.id}&building_id=eq.${A}`]);   // teardown also removes it if the next line throws
+      assert('manager with two role rows still reads building B', await canSelect(personas.manager.jwt, 'buildings', B), 'two-role manager lost access (21000 regression)');
+      await fetch(`${URL_BASE}/rest/v1/user_roles?user_id=eq.${personas.manager.id}&building_id=eq.${A}`, { method: 'DELETE', headers: SVC });
+    } else if (secondRole.status === 409) {
+      skip('manager with two role rows still reads building B', 'user_roles is keyed by user_id on this project; a second row cannot exist');
+    } else {
+      throw new Error(`fixture insert user_roles: HTTP ${secondRole.status} ${await secondRole.text()}`);
+    }
     console.log('  R4a (organizations, branding view, building_metrics_daily, SLA sweep, delete_empty_report, expiring_items, media_attachments, two-role user): done');
   }
 
