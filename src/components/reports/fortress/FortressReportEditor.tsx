@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, ClipboardCheck, FileDown, Loader2, Send, Undo2, XCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ClipboardCheck, FileDown, Loader2, Send, Trash2, Undo2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useOrganization } from '@/hooks/useOrganization';
@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
-import { useFortressReport, useReportLifecycle } from '@/hooks/useFortressReports';
+import { useDiscardDraft, useFortressReport, useReportLifecycle } from '@/hooks/useFortressReports';
 import { REPORT_SECTIONS, REPORT_STATUS_VARIANT, formatPeriodLabel, REQUIRED_SECTIONS, REQUIRED_SECTION_TABLE } from '@/lib/fortressReports';
 import { useReportSectionCounts } from '@/hooks/useReportSectionCounts';
 import { ReportSavedVersions } from '@/components/reports/fortress/ReportSavedVersions';
@@ -31,10 +31,11 @@ import { track } from '@/lib/analytics';
 export default function FortressReportEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user, isAdminOrManager } = useAuth();
+  const { user, isAdmin, isAdminOrManager } = useAuth();
   const { organization, loading: orgLoading } = useOrganization();
   const { data: report, isLoading } = useFortressReport(id);
   const lifecycle = useReportLifecycle(id!);
+  const discard = useDiscardDraft();
   const qc = useQueryClient();
 
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -294,6 +295,16 @@ export default function FortressReportEditor() {
         </div>
         <div className="flex items-center gap-2">
           <Badge variant={REPORT_STATUS_VARIANT[status] ?? 'outline'} className="capitalize">{status}</Badge>
+          {status === 'draft' && isAdmin && (
+            <Button variant="ghost" size="sm" disabled={discard.isPending}
+              onClick={() => {
+                if (!window.confirm('Discard this empty draft? Only a draft with no saved content can be discarded.')) return;
+                discard.mutate(report.id, { onSuccess: () => navigate(`/buildings/${report.building_id}?tab=reports`) });
+              }}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              Discard draft
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
             {exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileDown className="mr-2 h-4 w-4" />}
             Export PDF

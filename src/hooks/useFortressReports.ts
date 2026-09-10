@@ -12,7 +12,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { fdb, type Report, type ReportType, type ReportStatus, type FTableName } from '@/integrations/supabase/fortress-db';
+import { fdb, type Report, type ReportType, type ReportStatus, type FTableName, type FUpdate } from '@/integrations/supabase/fortress-db';
 import { useAuth } from '@/contexts/AuthContext';
 import { notify } from '@/lib/notify';
 import { describeSeed, seedPpmFromPlan } from '@/hooks/useReportPpm';
@@ -264,6 +264,53 @@ export function useReportLifecycle(reportId: string) {
     onError: (e: unknown) => {
       if (import.meta.env.DEV) console.error('Lifecycle transition failed:', e);
       toast.error('You do not have permission to change this report, or the change failed.');
+    },
+  });
+}
+
+/** Admin only: deletes a draft that holds no content (delete_empty_report, 2026-09-14_01). */
+export function useDiscardDraft() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (reportId: string): Promise<string> => {
+      // delete_empty_report is not yet in the generated types; regenerate after the migration ships.
+      const { error } = await (fdb as unknown as {
+        rpc(fn: string, args: Record<string, string>): Promise<{ error: { message: string } | null }>;
+      }).rpc('delete_empty_report', { p_report: reportId });
+      if (error) throw error;
+      return reportId;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: REPORTS_KEY });
+      toast.success('Draft discarded.');
+    },
+    onError: (e: unknown) => {
+      if (import.meta.env.DEV) console.error('Discard draft failed:', e);
+      const msg = (e as { message?: string })?.message ?? '';
+      toast.error(
+        msg.includes('saved row') ? 'This draft has saved content. Clear its sections before discarding it.'
+        : msg.includes('PDF versions') ? 'This draft has saved PDF versions and cannot be discarded.'
+        : msg.includes('admin only') ? 'Only an admin can discard a draft.'
+        : msg.includes('only a draft') ? 'Only a draft can be discarded.'
+        : 'Could not discard the draft.',
+      );
+    },
+  });
+}
+
+/** Which report types a building owes (buildings.report_types); drives "missing" on the coverage grid. */
+export function useSetBuildingReportTypes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ buildingId, reportTypes }: { buildingId: string; reportTypes: ReportType[] }): Promise<void> => {
+      // buildings.report_types is not yet in the generated types; regenerate after the migration ships.
+      const { error } = await fdb.from('buildings').update({ report_types: reportTypes } as unknown as FUpdate<'buildings'>).eq('id', buildingId);
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['buildings-for-reports'] }); },
+    onError: (e: unknown) => {
+      if (import.meta.env.DEV) console.error('Set report types failed:', e);
+      toast.error('Could not update the report types for that building.');
     },
   });
 }

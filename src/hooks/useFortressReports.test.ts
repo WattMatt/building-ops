@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   calls: [] as RecordedCall[],
   queries: [] as { table: string; calls: RecordedCall[] }[],
   result: (() => ({ data: [], error: null })) as (table: string, calls: RecordedCall[]) => QueryResult,
+  rpc: vi.fn<(...args: unknown[]) => Promise<{ error: { message: string } | null }>>(async () => ({ error: null })),
 }));
 
 vi.mock('@/integrations/supabase/client', () => {
@@ -34,7 +35,7 @@ vi.mock('@/integrations/supabase/client', () => {
     };
     return chain;
   };
-  return { supabase: { from } };
+  return { supabase: { from, rpc: (...a: unknown[]) => state.rpc(...a) } };
 });
 
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
@@ -48,7 +49,7 @@ vi.mock('@/hooks/useReportPpm', async () => {
   return { describeSeed: actual.describeSeed, seedPpmFromPlan: seedMock.seedPpmFromPlan };
 });
 
-import { useCreateReport, useCarryForwardReport, PPM_SEED_FAILED_MESSAGE } from './useFortressReports';
+import { useCreateReport, useCarryForwardReport, useDiscardDraft, PPM_SEED_FAILED_MESSAGE } from './useFortressReports';
 
 let qc: QueryClient;
 const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: qc }, children);
@@ -66,6 +67,8 @@ beforeEach(() => {
   toastMock.success.mockClear();
   toastMock.error.mockClear();
   toastMock.warning.mockClear();
+  state.rpc.mockClear();
+  state.rpc.mockImplementation(async () => ({ error: null }));
   seedMock.seedPpmFromPlan.mockClear();
   seedMock.seedPpmFromPlan.mockImplementation(async () => ({ added: 2, linked: 0, skipped: 0 }));
   state.result = (table, calls) => {
@@ -144,5 +147,20 @@ describe('useCarryForwardReport — PPM seeding', () => {
     const { result } = renderHook(() => useCarryForwardReport(), { wrapper });
     await act(async () => { await result.current.mutateAsync({ newReport: report({ report_type: 'cm_monthly' }) as never, fromReportId: 'rep0' }); });
     expect(seedMock.seedPpmFromPlan).not.toHaveBeenCalled();
+  });
+});
+
+describe('useDiscardDraft', () => {
+  it('calls delete_empty_report with the id and invalidates the list', async () => {
+    const { result } = renderHook(() => useDiscardDraft(), { wrapper });
+    await act(async () => { await result.current.mutateAsync('rep1'); });
+    expect(state.rpc).toHaveBeenCalledWith('delete_empty_report', { p_report: 'rep1' });
+    expect(toastMock.success).toHaveBeenCalledWith('Draft discarded.');
+  });
+  it('maps the "saved rows" refusal to plain copy', async () => {
+    state.rpc.mockResolvedValueOnce({ error: { message: 'delete_empty_report: this draft has 3 saved row(s); clear its sections before discarding it' } });
+    const { result } = renderHook(() => useDiscardDraft(), { wrapper });
+    await act(async () => { await result.current.mutateAsync('rep1').catch(() => {}); });
+    expect(toastMock.error).toHaveBeenCalledWith('This draft has saved content. Clear its sections before discarding it.');
   });
 });
