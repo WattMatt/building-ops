@@ -57,6 +57,7 @@ vi.mock('@/contexts/AuthContext', () => ({
 }));
 
 import { useMyWork } from './useMyWork';
+import { todayInOperatingTz } from '@/lib/myWork';
 
 const wrapper = ({ children }: { children: ReactNode }) =>
   createElement(QueryClientProvider, { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) }, children);
@@ -105,5 +106,31 @@ describe('useMyWork', () => {
     expect(result.current.returnedReports).toEqual([]);
     expect(result.current.unread).toBe(0);
     expect(result.current.isEmpty).toBe(true);
+  });
+
+  it('maps building_name from the joined buildings row and strips the buildings key', async () => {
+    const today = todayInOperatingTz();
+    state.tasks = [{
+      id: 't1', task_name: 'Check roof', task_description: null, due_date: today, building_id: 'b1',
+      requires_photo: false, requires_signature: false, status: 'pending', buildings: { name: 'Block A' },
+    }];
+    state.issues = [{
+      id: 'i1', title: 'Leak', priority: 'high', status: 'open', deadline: null, building_id: 'b2',
+      created_at: '2026-01-01', reported_by: 'u1', assigned_to: 'me', description: 'desc',
+      corrective_action: null, photo_urls: null, task_instance_id: null, buildings: { name: 'Block B' },
+    }];
+
+    const { result } = renderHook(() => useMyWork(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(result.current.buckets.today).toHaveLength(1);
+    expect(result.current.buckets.today[0].building_name).toBe('Block A');
+    expect(result.current.buckets.today[0]).not.toHaveProperty('buildings');
+
+    expect(result.current.issues).toHaveLength(1);
+    expect(result.current.issues[0].building_name).toBe('Block B');
+    expect(result.current.issues[0]).not.toHaveProperty('buildings');
+
+    expect(result.current.isEmpty).toBe(false);
   });
 });

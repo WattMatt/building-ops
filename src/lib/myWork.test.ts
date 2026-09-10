@@ -14,6 +14,12 @@ describe('bucketTasks', () => {
     const r = bucketTasks([t('a', '2026-09-08'), t('b', '2026-09-07')], '2026-09-10');
     expect(r.overdue.map((x) => x.id)).toEqual(['b', 'a']);
   });
+  it('includes the today+7 boundary in upcoming and excludes today+8', () => {
+    const r = bucketTasks([t('in', '2026-09-17'), t('out', '2026-09-18')], '2026-09-10');
+    expect(r.upcoming.map((x) => x.id)).toEqual(['in']);
+    expect(r.overdue).toEqual([]);
+    expect(r.today).toEqual([]);
+  });
 });
 
 describe('greetingFor', () => {
@@ -21,5 +27,9 @@ describe('greetingFor', () => {
     expect(greetingFor('Thabo Mokoena', 8)).toBe('Good morning, Thabo');
     expect(greetingFor(null, 14)).toBe('Good afternoon');
     expect(greetingFor('Ann', 20)).toBe('Good evening, Ann');
+  });
+  it('uses afternoon at hour 12 and evening at hour 18', () => {
+    expect(greetingFor('Ann', 12)).toBe('Good afternoon, Ann');
+    expect(greetingFor('Ann', 18)).toBe('Good evening, Ann');
   });
 });

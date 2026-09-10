@@ -31,7 +31,12 @@ export function greetingFor(fullName: string | null | undefined, hour: number): 
   return first ? `${part}, ${first}` : part;
 }
 
-/** Today as YYYY-MM-DD in the operating timezone (South Africa has no DST). */
+/** South Africa has no DST, so a fixed offset would also work, but this stays correct if that ever changes. */
+export const OPERATING_TZ = 'Africa/Johannesburg';
+
+const operatingTzFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: OPERATING_TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+
+/** Today as YYYY-MM-DD in the operating timezone. */
 export function todayInOperatingTz(now = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Johannesburg', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  return operatingTzFormatter.format(now);
 }
