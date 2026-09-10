@@ -35,14 +35,13 @@ import {
   addDays,
   addMonths,
   subMonths,
-  addQuarters,
-  addYears,
   eachDayOfInterval,
   isSameMonth,
   isToday,
   isWithinInterval,
   isAfter,
 } from 'date-fns';
+import { Hint } from '@/components/ui/hint';
 import ReportIssueDialog from '@/components/checklists/ReportIssueDialog';
 import CompleteTaskDialog from '@/components/checklists/CompleteTaskDialog';
 import { TasksList, type TaskInstance, type TaskFrequency, type TaskStatus } from '@/components/building/TasksList';
@@ -59,24 +58,6 @@ const frequencyLabels: Record<TaskFrequency, string> = {
   quarterly: 'Quarterly',
   annually: 'Annual',
 };
-
-function getDueDateForFrequency(frequency: TaskFrequency): string {
-  const now = new Date();
-  switch (frequency) {
-    case 'daily':
-      return format(startOfDay(now), 'yyyy-MM-dd');
-    case 'weekly':
-      return format(addDays(startOfWeek(now, { weekStartsOn: 1 }), 6), 'yyyy-MM-dd');
-    case 'monthly':
-      return format(addMonths(startOfMonth(now), 1), 'yyyy-MM-dd');
-    case 'quarterly':
-      return format(addQuarters(startOfQuarter(now), 1), 'yyyy-MM-dd');
-    case 'annually':
-      return format(addYears(startOfYear(now), 1), 'yyyy-MM-dd');
-    default:
-      return format(now, 'yyyy-MM-dd');
-  }
-}
 
 function getPeriodLabel(frequency: TaskFrequency): string {
   const now = new Date();
@@ -226,107 +207,35 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
     }
   };
 
-  const generateTasksForFrequency = async (frequency: TaskFrequency) => {
-    try {
-      const { data: templateItems, error: templateError } = await supabase
-        .from('template_items')
-        .select(`
-          id,
-          task_name,
-          task_description,
-          responsible_party,
-          requires_photo,
-          requires_signature,
-          checklist_templates!inner (frequency)
-        `)
-        .eq('checklist_templates.frequency', frequency);
-
-      if (templateError) throw templateError;
-      if (!templateItems || templateItems.length === 0) return 0;
-
-      const dueDate = getDueDateForFrequency(frequency);
-
-      const { data: existingTasks } = await supabase
-        .from('task_instances')
-        .select('template_item_id')
-        .eq('building_id', buildingId)
-        .eq('due_date', dueDate)
-        .eq('frequency', frequency);
-
-      const existingItemIds = new Set((existingTasks || []).map(t => t.template_item_id));
-
-      const newTasks = templateItems
-        .filter(item => !existingItemIds.has(item.id))
-        .map(item => ({
-          building_id: buildingId,
-          template_item_id: item.id,
-          task_name: item.task_name,
-          task_description: item.task_description,
-          frequency: frequency,
-          responsible_role: 'user' as const,
-          status: 'pending' as const,
-          due_date: dueDate,
-          requires_photo: item.requires_photo,
-          requires_signature: item.requires_signature,
-        }));
-
-      if (newTasks.length > 0) {
-        // .select() counts rows that actually landed — the DB scoping trigger
-        // may legitimately skip rows for non-applicable templates
-        const { data: inserted, error: insertError } = await supabase
-          .from('task_instances')
-          .insert(newTasks)
-          .select('id');
-
-        if (insertError) throw insertError;
-        return inserted?.length ?? 0;
-      }
-
-      return 0;
-    } catch (error) {
-      console.error('Error generating tasks:', error);
-      throw error;
-    }
+  const generate = async (frequency?: TaskFrequency) => {
+    // generate_scheduled_tasks is not yet in the generated types; regenerate after the migration ships.
+    const { data, error } = await supabase.rpc('generate_scheduled_tasks' as never, { p_building: buildingId, p_frequency: frequency ?? null } as never);
+    if (error) throw new Error(error.message);
+    return (data as unknown as number) ?? 0;
   };
 
   const handleGenerateTasks = async () => {
     setGenerating(true);
     try {
-      const count = await generateTasksForFrequency(selectedFrequency);
-      if (count && count > 0) {
-        toast.success(`Generated ${count} new ${frequencyLabels[selectedFrequency].toLowerCase()} tasks`);
-        fetchTasks();
-      } else {
-        toast.info('All tasks already exist for this period');
-      }
+      const count = await generate(selectedFrequency);
+      if (count > 0) { toast.success(`Generated ${count} new ${frequencyLabels[selectedFrequency].toLowerCase()} tasks`); fetchTasks(); }
+      else toast.info('All tasks already exist for this period');
     } catch (error) {
+      if (import.meta.env.DEV) console.error('generate tasks:', error);
       toast.error('Failed to generate tasks');
-    } finally {
-      setGenerating(false);
-    }
+    } finally { setGenerating(false); }
   };
 
   const handleGenerateAllFrequencies = async () => {
     setGenerating(true);
-    let totalGenerated = 0;
-
     try {
-      for (const freq of ['daily', 'weekly', 'monthly', 'quarterly', 'annually'] as TaskFrequency[]) {
-        const count = await generateTasksForFrequency(freq);
-        totalGenerated += count || 0;
-      }
-
-      if (totalGenerated > 0) {
-        toast.success(`Generated ${totalGenerated} new tasks`);
-        fetchTasks();
-      } else {
-        toast.info('All tasks already exist for current periods');
-      }
+      const count = await generate();
+      if (count > 0) { toast.success(`Generated ${count} new tasks`); fetchTasks(); }
+      else toast.info('All tasks already exist for current periods');
     } catch (error) {
+      if (import.meta.env.DEV) console.error('generate tasks:', error);
       toast.error('Failed to generate tasks');
-    } finally {
-      setGenerating(false);
-    }
+    } finally { setGenerating(false); }
   };
 
   const handleCompleteTask = (task: TaskInstance) => {
@@ -404,6 +313,9 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
           <p className="text-sm text-muted-foreground">
             Track and complete maintenance tasks for this building
           </p>
+          {isAdminOrManager && (
+            <Hint>Tasks are generated automatically every night; use these buttons to run it now.</Hint>
+          )}
         </div>
         {isAdminOrManager && (
           <Button
