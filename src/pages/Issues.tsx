@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { formatBuildingName } from '@/lib/buildingName';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIssues } from '@/hooks/useIssues';
@@ -23,8 +23,9 @@ import {
   Calendar,
   Loader2,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
+import { toast } from 'sonner';
 import type { IssuePriority, IssueStatus } from '@/lib/constants';
 
 const priorityColors: Record<IssuePriority, string> = {
@@ -57,6 +58,26 @@ export default function Issues() {
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   // Derive from the live list so the dialog reflects edits after refetch.
   const selectedIssue = issues.find((i) => i.id === selectedIssueId) ?? null;
+
+  // Deep link: /issues?open=<id> opens that issue once the list has loaded.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const openId = searchParams.get('open');
+  const missingToastedFor = useRef<string | null>(null);
+  const dropOpenParam = () => setSearchParams((prev) => { prev.delete('open'); return prev; }, { replace: true });
+
+  useEffect(() => {
+    if (!openId || loading) return;
+    if (issues.some((i) => i.id === openId)) {
+      setSelectedIssueId(openId);
+      return;
+    }
+    // Not in the list: either it does not exist or RLS hides it — same answer either way.
+    if (missingToastedFor.current !== openId) {
+      missingToastedFor.current = openId;
+      toast.error('That issue is not available to you.');
+    }
+    setSearchParams((prev) => { prev.delete('open'); return prev; }, { replace: true });
+  }, [openId, loading, issues, setSearchParams]);
 
   const filteredIssues = issues.filter((issue) => {
     const matchesSearch =
@@ -292,7 +313,7 @@ export default function Issues() {
         <IssueDetailDialog
           issue={selectedIssue}
           open={!!selectedIssue}
-          onOpenChange={(o) => { if (!o) setSelectedIssueId(null); }}
+          onOpenChange={(o) => { if (!o) { setSelectedIssueId(null); if (openId) dropOpenParam(); } }}
           canManage={isAdminOrManager}
           onUpdated={refetch}
         />

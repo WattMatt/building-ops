@@ -9,9 +9,9 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { PhotoCapture, type PhotoFile } from '@/components/ui/photo-capture';
-import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBuildingMembers, memberDisplayName } from '@/hooks/useBuildingMembers';
+import { postIssueComment } from '@/lib/issueActivity';
 import { uploadIssuePhotos } from '@/lib/issuePhotos';
 import { mentionQueryAt, insertMention, mentionPresent, type MentionRange } from '@/lib/mentions';
 import { notify } from '@/lib/notify';
@@ -87,16 +87,9 @@ export function IssueCommentComposer({ issueId, buildingId, issueTitle, reporter
     setPosting(true);
     try {
       const photoUrls = photos.length ? await uploadIssuePhotos(photos, user.id) : [];
-      const { data: me } = await supabase.from('profiles').select('full_name').eq('id', user.id).maybeSingle();
-      const authorName = (me as { full_name?: string | null } | null)?.full_name?.trim() || user.email || 'Someone';
       // Keep only mentions whose @Name still appears in the text (exact, boundary-aware match).
       const kept = mentions.filter((id) => { const m = byId.get(id); return m && mentionPresent(comment, memberDisplayName(m)); });
-      const { data, error } = await supabase.from('issue_activity').insert({
-        issue_id: issueId, activity_type: 'comment', comment, photo_urls: photoUrls, mentions: kept, user_id: user.id, author_name: authorName,
-        // mentions is not yet in the generated types; regenerate after the migration ships.
-      } as never).select('id').single();
-      if (error) throw error;
-      if (!data) throw new Error('The comment was not saved.');
+      const { authorName } = await postIssueComment({ issueId, userId: user.id, userEmail: user.email, comment, photoUrls, mentions: kept });
       const others = Array.from(new Set([assigneeId, reporterId].filter((id): id is string => !!id && id !== user.id && !kept.includes(id))));
       if (others.length) void notify({ kind: 'issue_comment', entityType: 'issue', entityId: issueId, buildingId, recipients: others, title: `${authorName} commented on: ${issueTitle}`, body: comment.slice(0, 200), url: `/issues?open=${issueId}` });
       const mentioned = kept.filter((id) => id !== user.id);

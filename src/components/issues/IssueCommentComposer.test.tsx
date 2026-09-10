@@ -1,15 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
-const inserted = vi.hoisted(() => ({ rows: [] as Record<string, unknown>[] }));
+const posted = vi.hoisted(() => ({ inputs: [] as Record<string, unknown>[] }));
 const notify = vi.hoisted(() => vi.fn(async () => {}));
-vi.mock('@/integrations/supabase/client', () => ({
-  supabase: {
-    from: () => ({
-      insert: (row: Record<string, unknown>) => { inserted.rows.push(row); return { select: () => ({ single: () => Promise.resolve({ data: { id: 'a1' }, error: null }) }) }; },
-      select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: { full_name: 'Me' }, error: null }) }) }),
-    }),
-  },
+vi.mock('@/lib/issueActivity', () => ({
+  postIssueComment: async (input: Record<string, unknown>) => { posted.inputs.push(input); return { id: 'a1', authorName: 'Me' }; },
 }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'me' } }) }));
 vi.mock('@/hooks/useBuildingMembers', () => ({
@@ -24,7 +19,7 @@ import { IssueCommentComposer } from './IssueCommentComposer';
 
 describe('IssueCommentComposer', () => {
   beforeEach(() => {
-    inserted.rows = [];
+    posted.inputs = [];
     notify.mockClear();
   });
 
@@ -37,7 +32,7 @@ describe('IssueCommentComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: /post/i }));
     await waitFor(() => expect(onPosted).toHaveBeenCalled());
     // The composer trims before writing, so the space insertMention leaves after the name is gone.
-    expect(inserted.rows[0]).toMatchObject({ issue_id: 'i1', activity_type: 'comment', comment: 'ping @Thabo M', mentions: ['u1'], user_id: 'me', author_name: 'Me' });
+    expect(posted.inputs[0]).toMatchObject({ issueId: 'i1', comment: 'ping @Thabo M', mentions: ['u1'], userId: 'me' });
     // reporterId 'r1' is neither the author nor mentioned, so it gets an issue_comment notification;
     // the mentioned member 'u1' gets an issue_mention notification instead.
     expect(notify).toHaveBeenCalledTimes(2);
@@ -60,7 +55,7 @@ describe('IssueCommentComposer', () => {
     fireEvent.change(box, { target: { value: 'never mind', selectionStart: 10 } });
     fireEvent.click(screen.getByRole('button', { name: /post/i }));
     await waitFor(() => expect(onPosted).toHaveBeenCalled());
-    expect(inserted.rows[0]).toMatchObject({ comment: 'never mind', mentions: [] });
+    expect(posted.inputs[0]).toMatchObject({ issueId: 'i1', comment: 'never mind', mentions: [], userId: 'me' });
     expect(notify).not.toHaveBeenCalledWith(expect.objectContaining({ kind: 'issue_mention' }));
   });
 
@@ -75,6 +70,6 @@ describe('IssueCommentComposer', () => {
     expect(box.value).toBe('@Thabo M ');
     fireEvent.click(screen.getByRole('button', { name: /post/i }));
     await waitFor(() => expect(onPosted).toHaveBeenCalled());
-    expect(inserted.rows[0]).toMatchObject({ comment: '@Thabo M', mentions: ['u1'] });
+    expect(posted.inputs[0]).toMatchObject({ issueId: 'i1', comment: '@Thabo M', mentions: ['u1'], userId: 'me' });
   });
 });

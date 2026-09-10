@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -86,6 +87,7 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
   const { byId: members } = useBuildingMembers(issue.building_id);
   const nameOf = (id: string | null | undefined) => (id && members.get(id) ? memberDisplayName(members.get(id)!) : null);
   const [activity, setActivity] = useState<Activity[]>([]);
+  const [activityError, setActivityError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
   const [savingAssignee, setSavingAssignee] = useState(false);
@@ -94,11 +96,18 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: acts } = await supabase
+      const { data: acts, error } = await supabase
         .from('issue_activity')
         .select('id, activity_type, old_value, new_value, comment, author_name, created_at, user_id, photo_urls, mentions')
         .eq('issue_id', issue.id)
         .order('created_at', { ascending: true });
+      if (error) {
+        if (import.meta.env.DEV) console.error('Load issue history failed:', error);
+        setActivityError(error.message || 'Could not load the history.');
+        return;
+      }
+      setActivityError(null);
+      // photo_urls/mentions are not yet in the generated types; regenerate after the migration ships.
       setActivity((acts as unknown as Activity[]) ?? []);
     } finally {
       setLoading(false);
@@ -228,11 +237,18 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
             <Label className="text-xs text-muted-foreground">History</Label>
             {loading ? (
               <div className="flex justify-center py-4"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /></div>
+            ) : activityError ? (
+              <div className="space-y-2 py-2">
+                <p className="text-xs text-destructive">Could not load the history.</p>
+                <Button size="sm" variant="outline" onClick={() => void load()}>Try again</Button>
+              </div>
             ) : activity.length === 0 ? (
               <p className="text-xs text-muted-foreground py-2">No history yet.</p>
             ) : (
               <ol className="mt-2 space-y-3">
-                {activity.map((a) => (
+                {activity.map((a) => {
+                  const mentionedNames = (a.mentions ?? []).map((id) => nameOf(id)).filter((n): n is string => !!n);
+                  return (
                   <li key={a.id} className="flex gap-2 text-sm">
                     <span className="mt-0.5 text-muted-foreground">
                       {a.activity_type === 'status_change' ? <ArrowRight className="h-4 w-4" />
@@ -253,15 +269,16 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
                           ))}
                         </div>
                       )}
-                      {a.mentions && a.mentions.length > 0 && (
+                      {mentionedNames.length > 0 && (
                         <p className="text-xs text-muted-foreground">
-                          Mentioned: {a.mentions.map((id) => nameOf(id)).filter((n): n is string => !!n).join(', ')}
+                          Mentioned: {mentionedNames.join(', ')}
                         </p>
                       )}
                       <p className="text-xs text-muted-foreground">{format(new Date(a.created_at), 'MMM d, yyyy • h:mm a')}</p>
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ol>
             )}
 
