@@ -55,3 +55,8 @@ verify_jwt = false
 # Cron-invoked (no user JWT): guarded by the x-signoff-secret header instead.
 [functions.signoff-reminders]
 verify_jwt = false
+
+# Public calendar subscription feed (no user JWT — Outlook/Google fetch it server-side):
+# scoped by a secret token looked up with the service role; unknown/revoked → 404.
+[functions.ics-feed]
+verify_jwt = false
