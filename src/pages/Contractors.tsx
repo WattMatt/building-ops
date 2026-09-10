@@ -3,8 +3,11 @@
  * App.tsx and the page fails closed too, the way UserManagement does. One list with search,
  * a trade filter and a "show inactive" toggle; New opens ContractorDialog, a row opens
  * ContractorSheet (details, documents, history), and Edit inside the sheet reuses the dialog.
+ * `/contractors?open=<id>` (expiry alerts, inbox rows) opens that contractor's sheet once the
+ * register has loaded, the way /issues?open=<id> works.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { HardHat, Loader2, Plus, Search, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
@@ -48,6 +51,28 @@ export default function Contractors() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Contractor | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Deep link: /contractors?open=<id> opens that contractor once the register has loaded. The
+  // param is dropped when the sheet closes (or when the id is not in the list) so a refresh does
+  // not reopen it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const openId = searchParams.get('open');
+  const missingToastedFor = useRef<string | null>(null);
+  const dropOpenParam = () => setSearchParams((prev) => { prev.delete('open'); return prev; }, { replace: true });
+
+  useEffect(() => {
+    if (!openId || isLoading || isError) return;
+    if (contractors.some((c) => c.id === openId)) {
+      setSelectedId(openId);
+      return;
+    }
+    // Not in the register: it does not exist, was deleted, or RLS hides it — same answer either way.
+    if (missingToastedFor.current !== openId) {
+      missingToastedFor.current = openId;
+      toast.error('That contractor is not available to you.');
+    }
+    setSearchParams((prev) => { prev.delete('open'); return prev; }, { replace: true });
+  }, [openId, isLoading, isError, contractors, setSearchParams]);
 
   const trades = useMemo(() => {
     const set = new Map<string, string>();
@@ -232,7 +257,7 @@ export default function Contractors() {
 
       <ContractorSheet
         open={!!selected}
-        onOpenChange={(o) => { if (!o) setSelectedId(null); }}
+        onOpenChange={(o) => { if (!o) { setSelectedId(null); if (openId) dropOpenParam(); } }}
         contractor={selected}
         canEdit={isAdminOrManager}
         onEdit={openEdit}

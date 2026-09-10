@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import type { Contractor } from '@/hooks/useContractors';
 
 // Radix Select drives itself with pointer capture and scrollIntoView, which jsdom lacks.
@@ -81,6 +82,23 @@ vi.mock('@/hooks/useContractors', () => ({
 
 import Contractors, { filterContractors } from './Contractors';
 
+/** Exposes the live search string so the deep-link tests can watch `?open=` come and go. */
+function LocationProbe() {
+  const { search } = useLocation();
+  return <output data-testid="location-search">{search}</output>;
+}
+
+/** The page under a router, the way App.tsx mounts it; `initialEntry` seeds the URL. */
+function mount(initialEntry = '/contractors') {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <Routes>
+        <Route path="/contractors" element={<><Contractors /><LocationProbe /></>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
 beforeEach(() => {
   state.isAdminOrManager = true;
   state.isLoading = false;
@@ -100,7 +118,7 @@ beforeEach(() => {
 describe('Contractors page gating', () => {
   it('shows nothing of the register to a site user', () => {
     state.isAdminOrManager = false;
-    render(<Contractors />);
+    mount();
     expect(screen.getByText('Access Restricted')).toBeInTheDocument();
     expect(screen.queryByText('Sparks Electrical')).toBeNull();
     expect(screen.queryByRole('button', { name: /New contractor/ })).toBeNull();
@@ -109,7 +127,7 @@ describe('Contractors page gating', () => {
 
 describe('Contractors list', () => {
   it('lists active contractors with trade, contact and rating; inactive only on request', () => {
-    render(<Contractors />);
+    mount();
     expect(screen.getByText('Sparks Electrical')).toBeInTheDocument();
     expect(screen.getByText('Flow Plumbing')).toBeInTheDocument();
     expect(screen.queryByText('Old Volts')).toBeNull();
@@ -122,7 +140,7 @@ describe('Contractors list', () => {
   });
 
   it('search narrows by company, trade or contact', () => {
-    render(<Contractors />);
+    mount();
     const search = screen.getByRole('textbox', { name: 'Search contractors' });
     fireEvent.change(search, { target: { value: 'lerato' } });
     expect(screen.queryByText('Sparks Electrical')).toBeNull();
@@ -132,7 +150,7 @@ describe('Contractors list', () => {
   });
 
   it('the trade filter lists each trade once', () => {
-    render(<Contractors />);
+    mount();
     const trigger = screen.getByRole('combobox', { name: 'Trade' });
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     fireEvent.click(trigger);
@@ -146,18 +164,18 @@ describe('Contractors list', () => {
 
   it('says so when the register is empty or failed to load', () => {
     state.contractors = [];
-    const { unmount } = render(<Contractors />);
+    const { unmount } = mount();
     expect(screen.getByText('No contractors yet. Add the first one.')).toBeInTheDocument();
     unmount();
     state.isError = true;
-    render(<Contractors />);
+    mount();
     expect(screen.getByText('Could not load the contractor register.')).toBeInTheDocument();
   });
 });
 
 describe('ContractorDialog through the page', () => {
   it('New → fill in → Add sends the trimmed payload with nulls for blanks and active on', async () => {
-    render(<Contractors />);
+    mount();
     fireEvent.click(screen.getByRole('button', { name: /New contractor/ }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByText('New contractor')).toBeInTheDocument();
@@ -186,7 +204,7 @@ describe('ContractorDialog through the page', () => {
 
   it('refuses to save without a company name and shows a write failure inline', async () => {
     create.mockRejectedValueOnce(new Error('Only admins and managers can change the contractor register.'));
-    render(<Contractors />);
+    mount();
     fireEvent.click(screen.getByRole('button', { name: /New contractor/ }));
     const dialog = await screen.findByRole('dialog');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Add contractor' }));
@@ -202,7 +220,7 @@ describe('ContractorDialog through the page', () => {
 
 describe('ContractorSheet through the page', () => {
   it('a row opens the sheet with details, documents (expiry chip) and history', async () => {
-    render(<Contractors />);
+    mount();
     fireEvent.click(screen.getByRole('button', { name: 'Open Sparks Electrical' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).getByRole('heading', { name: 'Sparks Electrical' })).toBeInTheDocument();
@@ -214,7 +232,7 @@ describe('ContractorSheet through the page', () => {
   });
 
   it('Edit inside the sheet reuses the dialog and updates by id', async () => {
-    render(<Contractors />);
+    mount();
     fireEvent.click(screen.getByRole('button', { name: 'Open Sparks Electrical' }));
     const sheet = await screen.findByRole('dialog');
     fireEvent.click(within(sheet).getByRole('button', { name: /Edit details/ }));
@@ -227,11 +245,50 @@ describe('ContractorSheet through the page', () => {
   });
 
   it('the active switch in the sheet calls setActive', async () => {
-    render(<Contractors />);
+    mount();
     fireEvent.click(screen.getByRole('button', { name: 'Open Sparks Electrical' }));
     const sheet = await screen.findByRole('dialog');
     fireEvent.click(within(sheet).getByRole('switch', { name: 'Active' }));
     await waitFor(() => expect(setActive).toHaveBeenCalledWith({ id: 'c1', is_active: false }));
+  });
+});
+
+describe('Deep link ?open=<id>', () => {
+  it('opens the sheet for that contractor once loaded and drops the param when it closes', async () => {
+    mount('/contractors?open=c2');
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Flow Plumbing' })).toBeInTheDocument();
+    expect(screen.getByTestId('location-search')).toHaveTextContent('?open=c2');
+
+    fireEvent.keyDown(dialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getByTestId('location-search')).toHaveTextContent('');
+  });
+
+  it('waits for the register to load before opening', async () => {
+    state.isLoading = true;
+    const { rerender } = mount('/contractors?open=c1');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(toast.error).not.toHaveBeenCalled();
+
+    state.isLoading = false;
+    rerender(
+      <MemoryRouter initialEntries={['/contractors?open=c1']}>
+        <Routes>
+          <Route path="/contractors" element={<><Contractors /><LocationProbe /></>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Sparks Electrical' })).toBeInTheDocument();
+  });
+
+  it('says so and clears the param when the contractor is not in the register', async () => {
+    mount('/contractors?open=nope');
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('That contractor is not available to you.'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByTestId('location-search')).toHaveTextContent('');
+    expect(toast.error).toHaveBeenCalledTimes(1);
   });
 });
 

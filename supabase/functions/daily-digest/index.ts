@@ -24,6 +24,7 @@ import {
   type DigestTask,
   type ExpiryBuckets,
 } from "../_shared/digest.ts";
+import { countBuckets } from "../_shared/expiry.ts";
 
 const DIGEST_SECRET = Deno.env.get("DAILY_DIGEST_SECRET");
 
@@ -110,17 +111,16 @@ serve(async (req: Request): Promise<Response> => {
 
     // Portfolio expiry counts for admins and managers (site users see only their buildings, and the
     // per-person RLS view is not worth a query each; they get the widget in the app).
-    const { data: adminRoleRows } = await supabase.from("user_roles").select("user_id").in("role", ["admin", "manager"]);
+    const { data: adminRoleRows, error: adminRoleErr } = await supabase.from("user_roles").select("user_id").in("role", ["admin", "manager"]);
+    // Not fatal: the digest still goes out, but nobody gets the expiry section this run — say so.
+    if (adminRoleErr) console.error("daily-digest: user_roles read failed; no expiry section this run", adminRoleErr);
     const adminIds = new Set((adminRoleRows ?? []).map((r: { user_id: string }) => r.user_id));
     let expiring: ExpiryBuckets | null = null;
     try {
       const { data: expRows, error: expErr } = await supabase.rpc("expiring_items", { p_days: 90 });
       if (expErr) throw expErr;
-      const b: ExpiryBuckets = { expired: 0, d30: 0, d60: 0, d90: 0 };
-      for (const r of (expRows ?? []) as { days_left: number }[]) {
-        if (r.days_left < 0) b.expired++; else if (r.days_left <= 30) b.d30++; else if (r.days_left <= 60) b.d60++; else if (r.days_left <= 90) b.d90++;
-      }
-      expiring = b;
+      // Same bucketing as the app's widget (bucketOf in ../_shared/expiry.ts).
+      expiring = countBuckets((expRows ?? []) as { days_left: number }[]);
     } catch (e) {
       // The digest still goes out without the expiry line; the widget and the alerts cron cover it.
       console.error("daily-digest: expiring_items failed", e);

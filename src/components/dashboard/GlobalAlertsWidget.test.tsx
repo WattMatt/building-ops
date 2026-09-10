@@ -98,8 +98,8 @@ describe('GlobalAlertsWidget', () => {
   it('shows a spinner while loading', () => {
     state.query.data = undefined;
     state.query.isLoading = true;
-    const { container } = mount();
-    expect(container.querySelector('.animate-spin')).not.toBeNull();
+    mount();
+    expect(screen.getByRole('status', { name: 'Loading alerts' })).toBeInTheDocument();
     expect(screen.queryByText('Global Alerts')).toBeNull();
   });
 });

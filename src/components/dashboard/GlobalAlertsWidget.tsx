@@ -73,7 +73,13 @@ export default function GlobalAlertsWidget() {
   const maintenance = visible.filter((i) => i.kind === 'asset_service');
 
   if (query.isLoading) {
-    return <Card><CardContent className="flex items-center justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></CardContent></Card>;
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center py-8">
+          <Loader2 role="status" aria-label="Loading alerts" className="h-6 w-6 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
   }
   if (query.isError) {
     return (

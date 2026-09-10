@@ -342,13 +342,19 @@ try {
   // inbox rows are written regardless; only `dryRun` skips them). Note the function scans the
   // whole project, so on a shared backend it also writes today's rows for any real expiring
   // documents / overdue assets to the real admins and managers — inbox only, no email.
+  // Inbox rows are raised only on milestone days (isNotifyMilestone in _shared/expiry.ts:
+  // 30/14/7/1/0 days left, then every 7th day past expiry), so the fixtures sit exactly on 7 and
+  // 14 days — measured on the Johannesburg date, which is what expiring_items() uses.
   await step('notify-expiring-alerts: inbox rows', async () => {
     const secret = process.env.EXPIRING_ALERTS_SECRET;
     if (!secret) {
       skip('expiring alerts inbox rows', 'EXPIRING_ALERTS_SECRET not set');
       return;
     }
-    const expiry = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+    const sastDatePlus = (days) => new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Johannesburg', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date(Date.now() + days * 86_400_000));
+    const expiry = sastDatePlus(7); // milestone: 7 days left
     const doc = await svcInsert('building_documents', {
       building_id: A, name: `ZZTEST-NOTIFY-DOC-${RUN}`, document_type: 'Fire certificate', expiry_date: expiry,
     });
@@ -356,8 +362,8 @@ try {
     const tenant = await svcInsert('building_tenants', { building_id: A, name: `ZZTEST-NOTIFY-TENANT-${RUN}`, shop_name: 'Shop 1' });
     cleanup.push(['building_tenants', tenant.id]);
     const tdoc = await svcInsert('tenant_documents', { tenant_id: tenant.id, document_name: `ZZTEST-NOTIFY-TDOC-${RUN}`, document_type: 'Lease', expiry_date: expiry });
-    cleanup.unshift(['tenant_documents', tdoc.id]);
-    const warrantyExpiry = new Date(Date.now() + 5 * 86_400_000).toISOString().slice(0, 10);
+    cleanup.push(['tenant_documents', tdoc.id]); // LIFO teardown: pushed after its tenant, so deleted before it
+    const warrantyExpiry = sastDatePlus(14); // milestone: 14 days left
     const asset = await svcInsert('building_assets', { building_id: A, name: `ZZTEST-NOTIFY-ASSET-${RUN}`, category: 'HVAC', warranty_expiry: warrantyExpiry });
     cleanup.push(['building_assets', asset.id]);
 
@@ -378,7 +384,7 @@ try {
     const first = await call();
     assert('expiring alerts: HTTP 200', first.status === 200, `HTTP ${first.status} ${JSON.stringify(first.body).slice(0, 160)}`);
     assert('expiring alerts: inboxRows >= 1', (first.body?.inboxRows ?? 0) >= 1, `inboxRows=${JSON.stringify(first.body?.inboxRows)}`);
-    console.log(`  info: expiring alerts inboxRows=${first.body?.inboxRows} alreadyToday=${first.body?.inboxAlreadyToday} failed=${first.body?.inboxFailed}`);
+    console.log(`  info: expiring alerts inboxRows=${first.body?.inboxRows} alreadyToday=${first.body?.inboxAlreadyToday} offMilestone=${first.body?.inboxOffMilestone} failed=${first.body?.inboxFailed}`);
     await registerCleanup(doc.id); // every recipient's row for this document, LIFO before the document
     const rows = await adminRows();
     assert('expiring alerts: exactly one document_expiring row for the admin', rows.length === 1, `found ${rows.length} row(s)`);

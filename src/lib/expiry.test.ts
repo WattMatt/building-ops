@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { safeInAppUrl } from './pushUrl';
 import {
-  BUCKETS, BUCKET_LABELS, KIND_LABELS, bucketOf, countBuckets, expiryPhrase, itemUrl,
+  BUCKETS, BUCKET_LABELS, KIND_LABELS, NOTIFY_MILESTONES, bucketOf, countBuckets, expiryPhrase, isNotifyMilestone, itemUrl,
   type ExpiringKind,
 } from './expiry';
 
@@ -75,5 +75,22 @@ describe('expiryPhrase', () => {
     expect(expiryPhrase({ kind: 'asset_service', days_left: 4 })).toBe('service due in 4 days');
     expect(expiryPhrase({ kind: 'asset_service', days_left: 0 })).toBe('service due today');
     expect(expiryPhrase({ kind: 'asset_service', days_left: -9 })).toBe('service overdue by 9 days');
+  });
+});
+
+describe('isNotifyMilestone', () => {
+  it.each([
+    [30, true], [29, false], [15, false], [14, true], [7, true], [2, false], [1, true], [0, true],
+    [-1, false], [-6, false], [-7, true], [-8, false], [-14, true], [-21, true],
+  ] as const)('%i days left -> %s', (days, expected) => {
+    expect(isNotifyMilestone(days)).toBe(expected);
+  });
+
+  it('never notifies beyond the 30-day window', () => {
+    for (let d = 31; d <= 120; d++) expect(isNotifyMilestone(d)).toBe(false);
+  });
+
+  it('lists exactly the pre-expiry milestones', () => {
+    expect([...NOTIFY_MILESTONES]).toEqual([30, 14, 7, 1, 0]);
   });
 });
