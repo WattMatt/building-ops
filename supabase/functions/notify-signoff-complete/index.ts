@@ -75,7 +75,7 @@ serve(async (req: Request): Promise<Response> => {
     allRequests.forEach((r) => r.assigned_by && recipientIds.add(r.assigned_by));
 
     if (recipientIds.size === 0) {
-      return json({ success: true, inserted: 0, emailed: 0, skipped: 0, failed: 0 });
+      return json({ success: true, inserted: 0, emailed: 0, pushed: 0, skipped: 0, failed: 0 });
     }
 
     const formName = submission.form_name ?? "a form";

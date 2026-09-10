@@ -94,12 +94,12 @@ serve(async (req: Request): Promise<Response> => {
     // Only send notifications for approve/reject, not for "reviewed"
     if (status !== "approved" && status !== "rejected") {
       console.log(`Status is '${status}', no notification needed`);
-      return json({ success: true, inserted: 0, emailed: 0, skipped: 0, failed: 0, message: "No notification for this status" });
+      return json({ success: true, inserted: 0, emailed: 0, pushed: 0, skipped: 0, failed: 0, message: "No notification for this status" });
     }
 
     if (!submission.submitted_by) {
       console.log("Submission has no submitter");
-      return json({ success: true, inserted: 0, emailed: 0, skipped: 0, failed: 0, message: "No submitter to notify" });
+      return json({ success: true, inserted: 0, emailed: 0, pushed: 0, skipped: 0, failed: 0, message: "No submitter to notify" });
     }
 
     // Never fall back to the reviewer's email address — this body goes to the

@@ -208,6 +208,54 @@ describe('push lib', () => {
 
       await expect(subscribePush('user-1')).rejects.toMatchObject({ message: 'RLS' });
     });
+
+    it('on a shared device, drops the other account\'s endpoint and records a fresh one', async () => {
+      const theirs = fakeSub('https://push.example/theirs');
+      const mine = fakeSub('https://push.example/mine');
+      const { subscribe } = stubServiceWorker({ existing: theirs, created: mine });
+      stubNotification('granted');
+      state.upsert
+        .mockResolvedValueOnce({ error: { code: '42501', message: 'new row violates row-level security policy' } })
+        .mockResolvedValueOnce({ error: null });
+      const { subscribePush } = await loadPush();
+
+      await expect(subscribePush('user-2')).resolves.toBe('subscribed');
+
+      expect(theirs.unsubscribe).toHaveBeenCalledTimes(1);
+      expect(subscribe).toHaveBeenCalledTimes(1);
+      expect(state.upsert).toHaveBeenCalledTimes(2);
+      expect(state.upsert.mock.calls[0][0]).toMatchObject({ user_id: 'user-2', endpoint: 'https://push.example/theirs' });
+      expect(state.upsert.mock.calls[1][0]).toMatchObject({ user_id: 'user-2', endpoint: 'https://push.example/mine' });
+    });
+
+    it('explains the shared-device conflict when the fresh endpoint is rejected too', async () => {
+      const theirs = fakeSub('https://push.example/theirs');
+      const mine = fakeSub('https://push.example/mine');
+      stubServiceWorker({ existing: theirs, created: mine });
+      stubNotification('granted');
+      state.upsert.mockResolvedValue({ error: { code: '42501', message: 'new row violates row-level security policy' } });
+      const { subscribePush } = await loadPush();
+
+      await expect(subscribePush('user-2')).rejects.toThrow(
+        'This device is registered to another account. Turn it off there first, then try again.',
+      );
+      expect(theirs.unsubscribe).toHaveBeenCalledTimes(1);
+      expect(mine.unsubscribe).not.toHaveBeenCalled();
+      expect(state.upsert).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not re-subscribe for a non-RLS upsert error', async () => {
+      const existing = fakeSub();
+      const { subscribe } = stubServiceWorker({ existing });
+      stubNotification('granted');
+      state.upsert.mockResolvedValue({ error: { code: '23505', message: 'duplicate' } });
+      const { subscribePush } = await loadPush();
+
+      await expect(subscribePush('user-1')).rejects.toMatchObject({ code: '23505' });
+      expect(existing.unsubscribe).not.toHaveBeenCalled();
+      expect(subscribe).not.toHaveBeenCalled();
+      expect(state.upsert).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('unsubscribePush', () => {
@@ -232,6 +280,15 @@ describe('push lib', () => {
 
       await unsubscribePush();
       expect(state.del).not.toHaveBeenCalled();
+    });
+
+    it('returns quietly in a browser without push support (sign-out calls it unconditionally)', async () => {
+      delete (navigator as unknown as { serviceWorker?: unknown }).serviceWorker;
+      delete (window as unknown as { PushManager?: unknown }).PushManager;
+      const { unsubscribePush } = await loadPush();
+
+      await expect(unsubscribePush()).resolves.toBeUndefined();
+      expect(state.from).not.toHaveBeenCalled();
     });
   });
 

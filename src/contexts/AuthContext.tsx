@@ -6,6 +6,7 @@ import { queryClient } from '@/lib/queryClient';
 import { clearPersistedCache, stopPersisting } from '@/lib/persist';
 import { clearQueue } from '@/lib/offline/queue';
 import { identify, resetAnalytics } from '@/lib/analytics';
+import { unsubscribePush } from '@/lib/push';
 
 export interface InviteUserPayload {
   email: string;
@@ -262,6 +263,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = async () => {
     // Captured before anything nulls it: the persisted store is keyed by this id.
     const outgoingUserId = user?.id;
+    // Push must go BEFORE auth.signOut(): deleting the push_subscriptions row needs the
+    // outgoing user's JWT (RLS). A shared phone must not keep receiving this user's pushes.
+    // No-op in browsers without push support; never blocks sign-out.
+    await unsubscribePush().catch(() => {});
     await supabase.auth.signOut();
     // E3: purge the query cache so the next user (or a signed-out window)
     // cannot see the outgoing user's cached data — in memory and on disk.

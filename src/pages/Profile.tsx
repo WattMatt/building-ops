@@ -559,7 +559,7 @@ export default function Profile() {
             Notifications
           </CardTitle>
           <CardDescription>
-            Alerts below also appear in your inbox in the app. These switches control email.
+            Alerts below also appear in your inbox in the app. These switches control email and push.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">

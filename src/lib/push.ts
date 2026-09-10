@@ -57,25 +57,14 @@ export async function currentSubscription(): Promise<PushSubscription | null> {
   }
 }
 
-/**
- * Ask permission, subscribe through the service worker, and record the endpoint for
- * `uid`. Re-running on a device that is already subscribed refreshes the row (the
- * endpoint is unique) and clears any `failed_at` a sender stamped earlier.
- */
-export async function subscribePush(uid: string): Promise<SubscribeResult> {
-  if (!KEY || pushSupport() !== 'ok') return 'unsupported';
+/** Postgres `insufficient_privilege`: what RLS returns when the endpoint row belongs to another user. */
+const RLS_DENIED = '42501';
 
-  const permission = await Notification.requestPermission();
-  if (permission !== 'granted') return 'denied';
+const SHARED_DEVICE_MESSAGE =
+  'This device is registered to another account. Turn it off there first, then try again.';
 
-  const reg = await navigator.serviceWorker.ready;
-  const sub =
-    (await reg.pushManager.getSubscription()) ??
-    (await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(KEY),
-    }));
-
+/** Upsert the row for `sub` under `uid`; returns the PostgREST error (null on success). */
+async function upsertRow(uid: string, sub: PushSubscription) {
   const keys = sub.toJSON().keys ?? {};
   const p256dh = keys.p256dh;
   const auth = keys.auth;
@@ -93,6 +82,42 @@ export async function subscribePush(uid: string): Promise<SubscribeResult> {
     },
     { onConflict: 'endpoint' },
   );
+  return error;
+}
+
+/**
+ * Ask permission, subscribe through the service worker, and record the endpoint for
+ * `uid`. Re-running on a device that is already subscribed refreshes the row (the
+ * endpoint is unique) and clears any `failed_at` a sender stamped earlier.
+ *
+ * Shared device: if the browser's existing endpoint is recorded against ANOTHER account,
+ * RLS rejects the upsert (42501). The browser subscription is dropped, a fresh one (new
+ * endpoint) is created and recorded instead, so the previous user's row is left alone and
+ * the browser is not stranded with a subscription nobody sends to.
+ */
+export async function subscribePush(uid: string): Promise<SubscribeResult> {
+  if (!KEY || pushSupport() !== 'ok') return 'unsupported';
+
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') return 'denied';
+
+  const reg = await navigator.serviceWorker.ready;
+  const subscribeFresh = () =>
+    reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(KEY),
+    });
+
+  let sub = (await reg.pushManager.getSubscription()) ?? (await subscribeFresh());
+  let error = await upsertRow(uid, sub);
+
+  if (error?.code === RLS_DENIED) {
+    await sub.unsubscribe().catch(() => {});
+    sub = await subscribeFresh();
+    error = await upsertRow(uid, sub);
+    if (error?.code === RLS_DENIED) throw new Error(SHARED_DEVICE_MESSAGE);
+  }
+
   if (error) throw error;
   return 'subscribed';
 }
@@ -100,6 +125,10 @@ export async function subscribePush(uid: string): Promise<SubscribeResult> {
 /**
  * Remove this device's row, then drop the browser subscription. Row first: if the
  * browser side fails the sender still stops targeting a device the user turned off.
+ *
+ * Quiet no-op without push support (`currentSubscription` returns null when the browser
+ * has no serviceWorker/PushManager, or when `ready`/`getSubscription` throw), so sign-out
+ * can call this unconditionally.
  */
 export async function unsubscribePush(): Promise<void> {
   const sub = await currentSubscription();

@@ -7,8 +7,17 @@ import type { PushPayload } from "./notifyRules.ts";
 const PUBLIC = Deno.env.get("VAPID_PUBLIC_KEY");
 const PRIVATE = Deno.env.get("VAPID_PRIVATE_KEY");
 const SUBJECT = Deno.env.get("VAPID_SUBJECT") ?? "mailto:notifications@buildingops.app";
-export const pushConfigured = !!(PUBLIC && PRIVATE);
-if (pushConfigured) webpush.setVapidDetails(SUBJECT, PUBLIC!, PRIVATE!);
+// `let`: a malformed key must degrade to "push off", not throw at module load — every sender
+// imports this through notify.ts, and a boot failure there would stop the inbox rows too.
+export let pushConfigured = !!(PUBLIC && PRIVATE);
+if (pushConfigured) {
+  try {
+    webpush.setVapidDetails(SUBJECT, PUBLIC!, PRIVATE!);
+  } catch (e) {
+    console.error("push: bad VAPID config; push disabled", e);
+    pushConfigured = false;
+  }
+}
 
 // deno-lint-ignore no-explicit-any
 type Admin = { from: (t: string) => any };
@@ -26,7 +35,11 @@ export async function sendPush(admin: Admin, recipientIds: string[], payload: Pu
   const body = JSON.stringify(payload);
   await Promise.all(((data ?? []) as SubRow[]).map(async (s) => {
     try {
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body, { TTL: 60 * 60, urgency: "high" });
+      await webpush.sendNotification(
+        { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
+        body,
+        { TTL: 60 * 60, urgency: "high", timeout: 10_000 },
+      );
       r.sent++;
       await admin.from("push_subscriptions").update({ last_seen_at: new Date().toISOString() }).eq("id", s.id);
     } catch (e) {
@@ -34,7 +47,13 @@ export async function sendPush(admin: Admin, recipientIds: string[], payload: Pu
       if (status === 404 || status === 410) {
         r.gone++;
         await admin.from("push_subscriptions").update({ failed_at: new Date().toISOString() }).eq("id", s.id);
-      } else { r.failed++; console.error("push: send failed", s.id, status, (e as Error).message); }
+      } else {
+        // 401/403 (VAPID key rotation) lands here: counted `failed`, never stamped, because the
+        // subscription itself is still valid for the old key. After a rotation users re-toggle
+        // push in Profile to subscribe against the new key.
+        r.failed++;
+        console.error("push: send failed", s.id, status, (e as Error).message);
+      }
     }
   }));
   return r;

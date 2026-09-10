@@ -62,11 +62,17 @@ self.addEventListener('notificationclick', (event) => {
       const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       const target = new URL(url, self.location.origin).href;
       // Reuse an open tab (focus, then navigate it) before opening another window.
+      // WindowClient.navigate() rejects on a client this worker does not control (matchAll
+      // includes uncontrolled ones), so a failure falls through to openWindow.
       for (const c of clients) {
         if ('focus' in c) {
-          await c.focus();
-          if ('navigate' in c) await (c as WindowClient).navigate(target);
-          return;
+          try {
+            await c.focus();
+            if ('navigate' in c) await (c as WindowClient).navigate(target);
+            return;
+          } catch {
+            break;
+          }
         }
       }
       await self.clients.openWindow(target);
