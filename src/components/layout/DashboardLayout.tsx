@@ -47,6 +47,7 @@ import {
   FileText,
   FileSpreadsheet,
   PenLine,
+  Sun,
   User,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -61,6 +62,12 @@ interface NavItem {
 }
 
 const mainNavItems: NavItem[] = [
+  {
+    // First, because for site roles it is the only page they need most days.
+    title: 'My Day',
+    href: '/my-day',
+    icon: <Sun className="w-4 h-4" />,
+  },
   {
     title: 'Dashboard',
     href: '/',

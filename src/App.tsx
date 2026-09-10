@@ -17,7 +17,8 @@ import Auth from "./pages/Auth";
 import SetPassword from "./pages/SetPassword";
 import ResetPassword from "./pages/ResetPassword";
 import Onboarding from "./pages/Onboarding";
-import Dashboard from "./pages/Dashboard";
+import RoleHome from "./pages/RoleHome";
+import MyDay from "./pages/MyDay";
 import Buildings from "./pages/Buildings";
 import BuildingForm from "./pages/BuildingForm";
 import BuildingDetails from "./pages/BuildingDetails";
@@ -57,9 +58,15 @@ const App = () => (
               <Route path="/onboarding" element={<Onboarding />} />
 
             {/* Protected Routes with Dashboard Layout */}
+            {/* `/` is role-shaped: site roles land on My Day, managers on the dashboard. */}
             <Route path="/" element={
               <ProtectedRoute>
-                <DashboardLayout><Dashboard /></DashboardLayout>
+                <DashboardLayout><RoleHome /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/my-day" element={
+              <ProtectedRoute>
+                <DashboardLayout><MyDay /></DashboardLayout>
               </ProtectedRoute>
             } />
             <Route path="/buildings" element={

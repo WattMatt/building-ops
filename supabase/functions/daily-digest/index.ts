@@ -147,8 +147,7 @@ serve(async (req: Request): Promise<Response> => {
           greeting: p.full_name ? `Hi ${p.full_name},` : undefined,
           bodyHtml: renderSections(sections),
           ctaText: "Open My Day",
-          // The dedicated /my-day route lands in R1c; until then the app root is the landing place.
-          ctaUrl: `${APP_URL}/`,
+          ctaUrl: `${APP_URL}/my-day`,
           footnote: "You can turn this digest off under My Profile → Notifications.",
         });
 

@@ -20,6 +20,7 @@ import {
   ArrowRight,
   Plus,
   Loader2,
+  Sun,
   UserCircle,
   X,
 } from 'lucide-react';
@@ -29,6 +30,8 @@ import GlobalAlertsWidget from '@/components/dashboard/GlobalAlertsWidget';
 import HsComplianceWidget from '@/components/dashboard/HsComplianceWidget';
 import PendingSubmissionsWidget from '@/components/dashboard/PendingSubmissionsWidget';
 import BuildingAlertsWidget from '@/components/dashboard/BuildingAlertsWidget';
+import WaitingOnYouWidget from '@/components/dashboard/WaitingOnYouWidget';
+import ActivityFeedCard from '@/components/dashboard/ActivityFeedCard';
 
 const priorityColors: Record<string, string> = {
   daily: 'bg-info text-info-foreground',
@@ -119,6 +122,12 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button asChild variant="outline">
+            <Link to="/my-day">
+              <Sun className="w-4 h-4 mr-2" />
+              My Day
+            </Link>
+          </Button>
           <Button asChild variant="outline">
             <Link to="/checklists">
               <ClipboardCheck className="w-4 h-4 mr-2" />
@@ -234,6 +243,9 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
+      {/* What happened this week, for everyone who can see the dashboard */}
+      <ActivityFeedCard />
+
       {/* H&S compliance score per building */}
       {isAdminOrManager && <HsComplianceWidget />}
 
@@ -245,6 +257,9 @@ export default function Dashboard() {
 
       {/* Pending Form Submissions for Managers */}
       {isAdminOrManager && <PendingSubmissionsWidget />}
+
+      {/* Reports and sign-offs waiting on this manager specifically */}
+      {isAdminOrManager && <WaitingOnYouWidget />}
 
       {/* Two Column Layout */}
       <div className="grid gap-6 lg:grid-cols-2">
