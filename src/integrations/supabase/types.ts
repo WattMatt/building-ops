@@ -65,6 +65,13 @@ export type Database = {
             referencedRelation: "building_assets"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "asset_service_history_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "contractors"
+            referencedColumns: ["id"]
+          },
         ]
       }
       audit_logs: {
@@ -332,6 +339,60 @@ export type Database = {
             columns: ["building_id"]
             isOneToOne: false
             referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      building_ppm_services: {
+        Row: {
+          building_id: string
+          contractor_id: string | null
+          created_at: string
+          id: string
+          is_active: boolean
+          notes: string | null
+          recurrence: Json
+          service_name: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          building_id: string
+          contractor_id?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          recurrence: Json
+          service_name: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          building_id?: string
+          contractor_id?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          recurrence?: Json
+          service_name?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "building_ppm_services_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "building_ppm_services_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "contractors"
             referencedColumns: ["id"]
           },
         ]
@@ -1040,6 +1101,7 @@ export type Database = {
           file_url: string | null
           id: string
           is_verified: boolean | null
+          notes: string | null
           uploaded_at: string | null
         }
         Insert: {
@@ -1050,6 +1112,7 @@ export type Database = {
           file_url?: string | null
           id?: string
           is_verified?: boolean | null
+          notes?: string | null
           uploaded_at?: string | null
         }
         Update: {
@@ -1060,6 +1123,7 @@ export type Database = {
           file_url?: string | null
           id?: string
           is_verified?: boolean | null
+          notes?: string | null
           uploaded_at?: string | null
         }
         Relationships: [
@@ -1072,13 +1136,67 @@ export type Database = {
           },
         ]
       }
+      contractor_ratings: {
+        Row: {
+          comment: string | null
+          contractor_id: string
+          created_at: string
+          id: string
+          issue_id: string | null
+          rated_by: string | null
+          rating: number
+        }
+        Insert: {
+          comment?: string | null
+          contractor_id: string
+          created_at?: string
+          id?: string
+          issue_id?: string | null
+          rated_by?: string | null
+          rating: number
+        }
+        Update: {
+          comment?: string | null
+          contractor_id?: string
+          created_at?: string
+          id?: string
+          issue_id?: string | null
+          rated_by?: string | null
+          rating?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contractor_ratings_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "contractors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_ratings_issue_id_fkey"
+            columns: ["issue_id"]
+            isOneToOne: true
+            referencedRelation: "issues"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_ratings_rated_by_fkey"
+            columns: ["rated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contractors: {
         Row: {
+          address: string | null
           company_name: string
           contact_email: string | null
           contact_name: string | null
           contact_phone: string | null
           created_at: string | null
+          default_trade_role: string | null
           id: string
           is_active: boolean | null
           notes: string | null
@@ -1086,13 +1204,16 @@ export type Database = {
           rating: number | null
           trade: string | null
           updated_at: string | null
+          vat_number: string | null
         }
         Insert: {
+          address?: string | null
           company_name: string
           contact_email?: string | null
           contact_name?: string | null
           contact_phone?: string | null
           created_at?: string | null
+          default_trade_role?: string | null
           id?: string
           is_active?: boolean | null
           notes?: string | null
@@ -1100,13 +1221,16 @@ export type Database = {
           rating?: number | null
           trade?: string | null
           updated_at?: string | null
+          vat_number?: string | null
         }
         Update: {
+          address?: string | null
           company_name?: string
           contact_email?: string | null
           contact_name?: string | null
           contact_phone?: string | null
           created_at?: string | null
+          default_trade_role?: string | null
           id?: string
           is_active?: boolean | null
           notes?: string | null
@@ -1114,6 +1238,7 @@ export type Database = {
           rating?: number | null
           trade?: string | null
           updated_at?: string | null
+          vat_number?: string | null
         }
         Relationships: [
           {
@@ -1878,6 +2003,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "issues_contractor_id_fkey"
+            columns: ["contractor_id"]
+            isOneToOne: false
+            referencedRelation: "contractors"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "issues_task_instance_id_fkey"
             columns: ["task_instance_id"]
             isOneToOne: false
@@ -2286,6 +2418,8 @@ export type Database = {
           frequency: string | null
           id: string
           months: Json
+          overrides: Json
+          plan_service_id: string | null
           report_id: string | null
           service_name: string
           sort_order: number | null
@@ -2298,6 +2432,8 @@ export type Database = {
           frequency?: string | null
           id?: string
           months?: Json
+          overrides?: Json
+          plan_service_id?: string | null
           report_id?: string | null
           service_name: string
           sort_order?: number | null
@@ -2310,6 +2446,8 @@ export type Database = {
           frequency?: string | null
           id?: string
           months?: Json
+          overrides?: Json
+          plan_service_id?: string | null
           report_id?: string | null
           service_name?: string
           sort_order?: number | null
@@ -2321,6 +2459,13 @@ export type Database = {
             columns: ["building_id"]
             isOneToOne: false
             referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ppm_services_plan_service_id_fkey"
+            columns: ["plan_service_id"]
+            isOneToOne: false
+            referencedRelation: "building_ppm_services"
             referencedColumns: ["id"]
           },
           {
@@ -2905,6 +3050,7 @@ export type Database = {
           responsible_role: string | null
           signature_url: string | null
           source_document_id: string | null
+          source_ppm_id: string | null
           status: string
           task_description: string | null
           task_name: string
@@ -2927,6 +3073,7 @@ export type Database = {
           responsible_role?: string | null
           signature_url?: string | null
           source_document_id?: string | null
+          source_ppm_id?: string | null
           status?: string
           task_description?: string | null
           task_name: string
@@ -2949,6 +3096,7 @@ export type Database = {
           responsible_role?: string | null
           signature_url?: string | null
           source_document_id?: string | null
+          source_ppm_id?: string | null
           status?: string
           task_description?: string | null
           task_name?: string
@@ -2974,6 +3122,13 @@ export type Database = {
             columns: ["source_document_id"]
             isOneToOne: false
             referencedRelation: "building_documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_instances_source_ppm_id_fkey"
+            columns: ["source_ppm_id"]
+            isOneToOne: false
+            referencedRelation: "building_ppm_services"
             referencedColumns: ["id"]
           },
           {
@@ -3864,6 +4019,16 @@ export type Database = {
       }
     }
     Views: {
+      building_month_costs: {
+        Row: {
+          building_id: string | null
+          issues_actual: number | null
+          month: string | null
+          services_cost: number | null
+          total: number | null
+        }
+        Relationships: []
+      }
       compliance_critical_scores: {
         Row: {
           assessment_id: string | null
@@ -3925,7 +4090,9 @@ export type Database = {
       ppm_monthly_status: {
         Row: {
           building_id: string | null
+          done_on: string | null
           period_month: string | null
+          ppm_service_id: string | null
           service_name: string | null
           status: string | null
         }
@@ -3935,6 +4102,13 @@ export type Database = {
             columns: ["building_id"]
             isOneToOne: false
             referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_instances_source_ppm_id_fkey"
+            columns: ["ppm_service_id"]
+            isOneToOne: false
+            referencedRelation: "building_ppm_services"
             referencedColumns: ["id"]
           },
         ]
@@ -4028,6 +4202,10 @@ export type Database = {
       }
       delete_own_account: { Args: never; Returns: undefined }
       generate_certificate_renewal_tasks: { Args: never; Returns: number }
+      generate_ppm_tasks: {
+        Args: { p_building?: string; p_horizon_days?: number }
+        Returns: number
+      }
       generate_scheduled_tasks: {
         Args: {
           p_building?: string
@@ -4058,6 +4236,7 @@ export type Database = {
         Args: { p_building_id: string }
         Returns: Json
       }
+      reschedule_ppm_line: { Args: { p_line: string }; Returns: number }
       reschedule_template: {
         Args: { p_template: string }
         Returns: {

@@ -232,3 +232,47 @@ string, identical 404 for missing/revoked/out-of-scope/garbage, `Cache-Control: 
   the old). Task events in the feed cover −14/+60 days (pending/overdue only); the rest −90/+180. A truncated task
   source adds a single "Calendar truncated" marker event.
 - The Building Details "Maintenance" tab is now "Calendar" (same `?tab=maintenance` deep link).
+
+## R3c "Contractors, PPM, Costs" (2026-09-10)
+
+Spec `docs/superpowers/specs/2026-09-10-r3-plan-design.md` §8; plan `docs/superpowers/plans/2026-09-10-r3c-contractors-ppm-costs.md`.
+
+### Migrations (apply in order; all idempotent)
+
+- `2026-09-13_03_r3_contractors_ppm.sql` (GMI `41afd3b`) — `building_ppm_services` (plan per building, RLS: read
+  with building access, write admin/manager), `task_instances.source_ppm_id` (+ partial unique index),
+  `generate_ppm_tasks(p_building, p_horizon_days)` + cron `ppm-generation-daily 10 2 * * *` (04:10 SAST, 365 days),
+  `ppm_monthly_status` view (derived grid), `ppm_services.plan_service_id/overrides`, contractors
+  address/vat_number/default_trade_role, `contractor_documents.notes`, `contractor_ratings` + average trigger,
+  `building_month_costs` view, one-shot seed of plan lines from the 698 `ppm_services` rows (all linked by name).
+- `2026-09-13_04_ppm_cadence_fix.sql` (GMI `c44fc13`) — re-derives cadences the seed could not read: older rows'
+  frequency strings (Trimonthly, Montlhy, Bi-Monthly, 6-monthly, annually…) and report grids with repeated
+  evidence (≥ 10/12 months → monthly; ≥ 3 cells at a constant step → every 3/6; same month in ≥ 2 years → yearly).
+  Single-cell evidence is NOT inferred. Self-heals an earlier looser run (step 0). Re-runnable.
+- `2026-09-13_05_r3c_review_fixes.sql` (GMI `c98f0b2`) — review fixes: `cr_insert` requires the issue's own
+  contractor and `status = 'resolved'`; `cr_delete` admin only; FKs `issues.contractor_id` and
+  `asset_service_history.contractor_id` → contractors (orphans nulled first); SAST month buckets in both views and
+  resolved-only issue costs; `updated_at` touch trigger on plan lines; PPM tasks no longer copy plan notes into the
+  description; `reschedule_ppm_line(uuid)` + trigger on `is_active`/`recurrence` change (deletes untouched future
+  pending occurrences, regenerates when active); `ppm_services.overrides` writable by admin/manager only (42501).
+
+### Staging — DONE 2026-09-10
+
+- [x] `_03` applied (201); `_04` applied twice (loose, then tightened; second run idempotent); `_05` applied twice.
+- [x] Plan lines after the seed + fix: 145 active / 519 inactive (272 blank cadence, 247 single report month,
+      10 two-month evidence, and Weekly/Adhoc/N-A strings) — each inactive line carries a "Migrated 2026-09-13: …"
+      note saying why.
+- [x] `smoke:ppm` 33/0 (generation dates, idempotency, inactive line, assigned_to from the contractor role rule,
+      missed cell, reschedule/deactivate/reactivate, ratings, cost view, invoker scoping); `rls-smoke` 518/0.
+
+### Production — DONE 2026-09-10
+
+- [x] `_03`, `_04`, `_05` applied (201 each), PostgREST reloaded; plan lines 145 active / 519 inactive (same
+      distribution as staging); 0 unlinked `ppm_services` rows; crons `ppm-generation-daily`,
+      `task-generation-daily`, `task-overdue-sweep` active. `rls-smoke` 518/0. Types regenerated from prod.
+
+### Owner items
+
+- Review the 519 inactive plan lines per building (Building → PPM tab): set the rule and switch each line on. The
+  note on each line says what the migration saw. Active lines start generating occurrences at the next 04:10 run.
+- Rating a contractor is offered on resolve when the issue has a contractor; one rating per issue, admin can delete.
