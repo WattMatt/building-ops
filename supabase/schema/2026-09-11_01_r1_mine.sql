@@ -70,6 +70,8 @@ language sql security definer set search_path = public stable as $$
   order by p.full_name nulls last;
 $$;
 revoke all on function public.building_members(uuid) from public;
+-- Supabase default privileges also grant EXECUTE to anon explicitly; "from public" alone leaves it.
+revoke execute on function public.building_members(uuid) from anon;
 grant execute on function public.building_members(uuid) to authenticated;
 
 -- 5) The inbox. No client insert policy: rows are written by the notify edge function.

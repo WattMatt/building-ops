@@ -357,7 +357,7 @@ try {
   await probeMatrix('storage documents/<A> read', byAccess('A'), (jwt) => storageGet(jwt, TD, `documents/${A}/zztest-rls-${RUN}.txt`));
   await probeMatrix('storage documents/<B> read', byAccess('B'), (jwt) => storageGet(jwt, TD, `documents/${B}/zztest-rls-${RUN}.txt`));
   await probeMatrix('storage tenant-docs/<tenantA> read', byAccess('A'), (jwt) => storageGet(jwt, TD, `tenant-docs/${tenantA}/zztest-rls-${RUN}.txt`));
-  await probeMatrix('storage contractor-docs read', anyAuth(), (jwt) => storageGet(jwt, TD, `contractor-docs/zztest-rls-${RUN}.txt`));
+  await probeMatrix('storage contractor-docs read (admin/mgr-only since 2026-08-04_07)', adminMgr(), (jwt) => storageGet(jwt, TD, `contractor-docs/zztest-rls-${RUN}.txt`));
 
   for (const who of ALL) {
     const expA = byAccess('A')[who];

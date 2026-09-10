@@ -111,26 +111,30 @@ try {
   const prof = await (await fetch(`${URL_BASE}/rest/v1/profiles?id=eq.${personas.target.id}&select=deactivated`, { headers: SVC })).json();
   assert('profiles.deactivated flag set', prof[0]?.deactivated === true, JSON.stringify(prof[0]));
   const ub = await (await fetch(`${URL_BASE}/rest/v1/user_buildings?user_id=eq.${personas.target.id}&select=id`, { headers: SVC })).json();
-  assert('building assignments revoked on deactivate (user_buildings wiped)', (ub.length ?? 0) === 0, `${ub.length} assignments remain`);
+  // Since e5978b6 (2026-08-05) deactivation is reversible: assignments are kept, sessions are revoked.
+  assert('building assignments preserved on deactivate (reversible deactivation)', (ub.length ?? 0) === 1, `${ub.length} assignments (expected the original 1)`);
   const audit = await (await fetch(`${URL_BASE}/rest/v1/audit_logs?entity_id=eq.${personas.target.id}&action=eq.deactivate_user&select=id`, { headers: SVC })).json();
   assert('deactivation written to audit_logs', (audit.length ?? 0) >= 1, 'no audit row');
 
   // ── what the deactivated user experiences immediately ──
-  assert('deactivated user: existing token loses building A data at once (RLS, user_buildings gone)', !(await canRead(personas.target.jwt, 'buildings', bldgA)), 'deactivated user still saw their building');
+  assert('deactivated user: existing token loses building A data at once (RLS gates on profiles.deactivated)', !(await canRead(personas.target.jwt, 'buildings', bldgA)), 'deactivated user still saw their building');
   res = await login(personas.target.email);
   assert('deactivated user: a NEW login is refused (banned)', !res.ok, `login HTTP ${res.status} (expected failure)`);
 
-  // ── reactivate restores login, but NOT buildings (F-35) ──
+  // ── reactivate restores login AND the kept assignments ──
   res = await setStatus(personas.admin.jwt, personas.target.id, 'reactivate');
   assert('admin reactivates target (set-user-status 200)', res.ok, `HTTP ${res.status}`);
   res = await login(personas.target.email);
   const reJwt = res.ok ? (await res.json()).access_token : null;
   assert('reactivated user can log in again', !!reJwt, `login HTTP ${res.status}`);
   const ub2 = await (await fetch(`${URL_BASE}/rest/v1/user_buildings?user_id=eq.${personas.target.id}&select=id`, { headers: SVC })).json();
-  assert('reactivate does NOT auto-restore assignments (admin re-assigns explicitly — by design)', (ub2.length ?? 0) === 0, `unexpectedly restored ${ub2.length}`);
-  if (reJwt) assert('reactivated user cannot see their old building until re-assigned', !(await canRead(reJwt, 'buildings', bldgA)), 'saw building without reassignment');
+  assert('reactivate keeps the preserved assignment (no re-assign needed)', (ub2.length ?? 0) === 1, `expected 1 assignment, found ${ub2.length}`);
+  if (reJwt) assert('reactivated user sees their building again at once', await canRead(reJwt, 'buildings', bldgA), 'reactivated user lost building access');
 
   // ── F-35 fix: admin re-assigns via the same insert EditAssignmentsDialog uses ──
+  // Drop the kept assignment first (service role) so the admin's insert exercises the real UI path.
+  await fetch(`${URL_BASE}/rest/v1/user_buildings?user_id=eq.${personas.target.id}&building_id=eq.${bldgA}`, { method: 'DELETE', headers: SVC });
+  if (reJwt) assert('with the assignment removed the user loses building access', !(await canRead(reJwt, 'buildings', bldgA)), 'still saw building after assignment removal');
   const reassign = await fetch(`${URL_BASE}/rest/v1/user_buildings`, {
     method: 'POST', headers: { ...authed(personas.admin.jwt), Prefer: 'return=representation' },
     body: JSON.stringify({ user_id: personas.target.id, building_id: bldgA }),
