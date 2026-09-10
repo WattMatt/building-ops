@@ -18,6 +18,9 @@ alter table public.checklist_templates
 --     monthDay?: 1..31 | 'last', month?: 1..12 (year: required), lead?: 0..60 }
 -- The whole predicate is wrapped in coalesce(..., false): a missing key makes its clause NULL,
 -- and a NULL CHECK result would otherwise let e.g. {"unit":"day"} (no `every`) through.
+-- Postgres does not promise AND short-circuits, so every array-only call (jsonb_array_length,
+-- jsonb_array_elements_text) is itself guarded by jsonb_typeof(...) = 'array': a non-array
+-- `weekdays` must yield false (23514 at the CHECK), never raise 22023.
 create or replace function public.recurrence_is_valid(r jsonb)
 returns boolean
 language sql immutable
@@ -28,12 +31,15 @@ as $$
     and (r->>'unit') in ('day','week','month','year')
     and (r->>'every') ~ '^[0-9]+$' and (r->>'every')::int between 1 and 52
     and (r->'weekdays' is null or (jsonb_typeof(r->'weekdays') = 'array'
-         and not exists (select 1 from jsonb_array_elements_text(r->'weekdays') d where d !~ '^[1-7]$')))
+         and not exists (select 1
+                           from jsonb_array_elements_text(case when jsonb_typeof(r->'weekdays') = 'array'
+                                                                then r->'weekdays' else '[]'::jsonb end) d
+                          where d !~ '^[1-7]$')))
     and (r->'monthDay' is null or (r->>'monthDay') = 'last'
          or ((r->>'monthDay') ~ '^[0-9]+$' and (r->>'monthDay')::int between 1 and 31))
     and (r->'month' is null or ((r->>'month') ~ '^[0-9]+$' and (r->>'month')::int between 1 and 12))
     and (r->'lead' is null or ((r->>'lead') ~ '^[0-9]+$' and (r->>'lead')::int between 0 and 60))
-    and ((r->>'unit') <> 'week' or (r->'weekdays' is not null and jsonb_array_length(r->'weekdays') > 0))
+    and ((r->>'unit') <> 'week' or (jsonb_typeof(r->'weekdays') = 'array' and jsonb_array_length(r->'weekdays') > 0))
     and ((r->>'unit') <> 'year' or r->'month' is not null)
   ), false)
 $$;
@@ -64,7 +70,9 @@ language plpgsql
 set search_path = ''
 as $$
 begin
-  if new.recurrence is not null then
+  -- legacy_frequency casts `every`; only derive from a rule the CHECK will accept, so a
+  -- malformed rule fails at the constraint (23514) rather than here (22P02).
+  if new.recurrence is not null and public.recurrence_is_valid(new.recurrence) then
     new.frequency := public.legacy_frequency(new.recurrence);
   end if;
   new.updated_at := now();
@@ -202,7 +210,10 @@ create policy bra_write on public.building_role_assignments
   with check (public.is_admin_or_manager() and public.can_access_building(building_id));
 
 -- ============================================================
--- 4) Generation v2: horizon + assignment. Templates with a recurrence rule get every
+-- 4) Generation v2: horizon + assignment. The role label is derived in one way everywhere in
+--    this file: item responsible_party, else template responsible_role, else 'user' — with an
+--    empty string treated as absent, so a blank form field never yields a '' label that no
+--    building_role_assignments row can match. Templates with a recurrence rule get every
 --    occurrence in [today, today + horizon]; per-unit caps keep the row count sane
 --    (dailies 14 days ahead, weeklies 90, monthly and yearly 365) whatever p_horizon_days
 --    says. Legacy templates (recurrence null) keep the single scheduled_due_date row.
@@ -238,12 +249,12 @@ begin
     (building_id, template_item_id, task_name, task_description, frequency, responsible_role,
      status, due_date, requires_photo, requires_signature, assigned_to)
   select b.id, ti.id, ti.task_name, ti.task_description, ct.frequency,
-         coalesce(ti.responsible_party, ct.responsible_role, 'user'), 'pending', occ.due,
+         coalesce(nullif(ti.responsible_party, ''), nullif(ct.responsible_role, ''), 'user'), 'pending', occ.due,
          ti.requires_photo, ti.requires_signature,
          (select bra.user_id
             from public.building_role_assignments bra
            where bra.building_id = b.id
-             and bra.role = coalesce(ti.responsible_party, ct.responsible_role, 'user')
+             and bra.role = coalesce(nullif(ti.responsible_party, ''), nullif(ct.responsible_role, ''), 'user')
            limit 1)
     from public.checklist_templates ct
     join public.template_items ti on ti.template_id = ct.id
@@ -299,6 +310,7 @@ begin
   end if;
   delete from public.task_instances t
    using public.template_items ti
+   join public.checklist_templates ct on ct.id = ti.template_id
    where ti.id = t.template_item_id
      and ti.template_id = p_template
      and t.status = 'pending'
@@ -308,7 +320,8 @@ begin
           or t.assigned_to = (select bra.user_id
                                 from public.building_role_assignments bra
                                where bra.building_id = t.building_id
-                                 and bra.role = t.responsible_role
+                                 -- the same label generate_scheduled_tasks derives (empty = absent)
+                                 and bra.role = coalesce(nullif(ti.responsible_party, ''), nullif(ct.responsible_role, ''), 'user')
                                limit 1));
   get diagnostics v_del = row_count;
   for b in select id from public.buildings where public.can_access_building(id) loop

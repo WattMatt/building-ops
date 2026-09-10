@@ -19,11 +19,14 @@
  * assigned_to resolved through building_role_assignments, then rescheduled after a
  * rule change. Expected date sets are computed from today's SAST date.
  *
- * The final overdue-sweep assertions call `mark_overdue_tasks` as the service
- * role, which flips EVERY genuinely back-dated pending task on the target
- * project, not just the fixture. Against production (SUPABASE_URL containing
- * the prod ref qdzgkttiosahdfqresvz) those assertions are SKIPped unless
- * SMOKE_ALLOW_PROD=1; the rest of the journey still runs.
+ * Two steps have project-wide side effects and are SKIPped against production
+ * (SUPABASE_URL containing the prod ref qdzgkttiosahdfqresvz) unless SMOKE_ALLOW_PROD=1;
+ * the rest of the journey still runs:
+ *   - the overdue sweep calls `mark_overdue_tasks` as the service role, which flips EVERY
+ *     genuinely back-dated pending task on the target project, not just the fixture;
+ *   - `reschedule_template` regenerates into every building the template applies to. The
+ *     fixture template is scoped to a building type only the fixture building carries
+ *     (asserted first, service role), so on staging the fan-out stays inside the fixture.
  */
 
 const URL_BASE = process.env.SUPABASE_URL;
@@ -249,27 +252,43 @@ try {
   }
 
   // ── R3a: recurrence rule -> horizon generation with per-role assignment -> reschedule ──
-  // A weekly Mon/Wed template scoped to `mixed_use` buildings (the fixture building becomes one, so
-  // reschedule_template's fan-out across every accessible building stays countable), one item whose
-  // responsible_party is 'Maintenance', and a building_role_assignments row mapping that label to
-  // the site user. Expected dates are computed from today's SAST date, never hard-coded.
+  // A weekly Mon/Wed template, one item whose responsible_party is 'Maintenance', and a
+  // building_role_assignments row mapping that label to the site user. Expected dates are
+  // computed from today's SAST date, never hard-coded.
+  //
+  // Scope: reschedule_template fans out into EVERY building the template applies to, and
+  // src/lib/compliance.ts has no spare BUILDING_TYPES value, so the fixture building is made
+  // 'industrial' and the template scoped to ['industrial'] — after asserting (service role)
+  // that no other building in the project has that type. If one does, the fan-out cannot be
+  // isolated: the step still runs where SWEEP_ALLOWED permits, the expected count includes
+  // those buildings, and a note says so. Teardown deletes every row by template_item_id.
   {
     const { jwt: adminJwt } = await adminUser('admin');
-    await svcPatch('buildings', `id=eq.${building}`, { building_type: 'mixed_use' });
+    const SCOPE_TYPE = 'industrial';
+    const otherScoped = await svcSelect('buildings', `building_type=eq.${SCOPE_TYPE}&id=neq.${building}&select=id,name`);
+    const isolated = otherScoped.length === 0;
+    if (isolated) {
+      ok(`fixture scope: no other building is '${SCOPE_TYPE}', so the reschedule fan-out stays inside the fixture`);
+    } else {
+      console.log(`  NOTE  ${otherScoped.length} other building(s) already carry building_type '${SCOPE_TYPE}' (${otherScoped.map((b) => b.name).join(', ')}); `
+        + `the reschedule fan-out cannot be isolated to the fixture — falling back to the prod guard only, and counting those buildings in the expected total.`);
+    }
+    await svcPatch('buildings', `id=eq.${building}`, { building_type: SCOPE_TYPE });
     const rule = { every: 1, unit: 'week', weekdays: [1, 3] };
     const tpl = await svcInsert('checklist_templates', {
-      name: `ZZTEST-CHK-R3-${RUN}`, frequency: 'daily', is_active: true, recurrence: rule, applies_to_building_types: ['mixed_use'],
+      name: `ZZTEST-CHK-R3-${RUN}`, frequency: 'daily', is_active: true, recurrence: rule, applies_to_building_types: [SCOPE_TYPE],
     });
     cleanup.push(['checklist_templates', `id=eq.${tpl.id}`]);
     const item = (await svcInsert('template_items', { template_id: tpl.id, task_name: `ZZTEST-CHK-R3 item ${RUN}`, responsible_party: 'Maintenance' })).id;
     cleanup.push(['template_items', `id=eq.${item}`]);
-    // Generated rows land in every mixed_use building the reschedule fan-out reaches, not just ours.
+    // Generated rows land in every building of SCOPE_TYPE the reschedule fan-out reaches, not just ours.
     cleanup.unshift(['task_instances', `template_item_id=eq.${item}`]);
     await svcInsert('building_role_assignments', { building_id: building, role: 'Maintenance', user_id: userId });
     cleanup.unshift(['building_role_assignments', `building_id=eq.${building}`]);
     assert('template trigger derives frequency weekly from the rule (daily was passed) and starts at version 1',
       tpl.frequency === 'weekly' && tpl.version === 1 && tpl.recurrence?.unit === 'week', JSON.stringify({ frequency: tpl.frequency, version: tpl.version }));
 
+    // Generation is per building (p_building), so it is safe on any project.
     const today = sastToday();
     const expectMonWed = weekdayDates(today, 28, [1, 3]);
     r = await rpc(adminJwt, 'generate_scheduled_tasks', { p_building: building, p_template: tpl.id, p_horizon_days: 28 });
@@ -286,25 +305,38 @@ try {
     r = await rpc(jwt, 'generate_scheduled_tasks', { p_building: building, p_template: tpl.id, p_horizon_days: 28 });
     assert('generate_scheduled_tasks refused for the site user', r.status === 403, `expected HTTP 403, got ${r.status}`);
 
-    // Rule change -> reschedule: untouched future rows go, Mondays come back over the 90-day weekly cap.
+    // Rule change (fixture template only — safe anywhere): version bumps, frequency stays weekly.
     const tpl2 = await svcPatch('checklist_templates', `id=eq.${tpl.id}`, { recurrence: { every: 1, unit: 'week', weekdays: [1] } });
     assert('rule change bumps version to 2 and keeps frequency weekly', tpl2.version === 2 && tpl2.frequency === 'weekly', JSON.stringify({ version: tpl2.version, frequency: tpl2.frequency }));
-    const surviving = gen.filter((t) => t.due_date <= today).map((t) => t.due_date);   // due today is not "future"
-    const expectDeleted = gen.length - surviving.length;
-    const mondays90 = weekdayDates(today, 90, [1]);
-    const mixedUse = await svcSelect('buildings', 'building_type=eq.mixed_use&select=id');
-    const expectGenerated = mondays90.filter((d) => !surviving.includes(d)).length + (mixedUse.length - 1) * mondays90.length;
-    r = await rpc(adminJwt, 'reschedule_template', { p_template: tpl.id });
-    body = await r.json();
-    assert(`reschedule_template deletes the ${expectDeleted} untouched future rows`, r.ok && body[0]?.deleted === expectDeleted, `HTTP ${r.status} ${JSON.stringify(body)}`);
-    assert(`reschedule_template regenerates ${expectGenerated} rows (Mondays over 90 days x ${mixedUse.length} mixed_use building(s))`,
-      r.ok && body[0]?.generated === expectGenerated, `HTTP ${r.status} ${JSON.stringify(body)}`);
-    gen = await svcSelect('task_instances', `template_item_id=eq.${item}&building_id=eq.${building}&select=due_date,assigned_to`);
-    assert('after reschedule: fixture building holds exactly Mondays (90 days) plus any row already due today',
-      sameSet(gen.map((t) => t.due_date), [...new Set([...mondays90, ...surviving])]), JSON.stringify(gen.map((t) => t.due_date)));
-    assert('after reschedule: regenerated rows are assigned through the role assignment', gen.every((t) => t.assigned_to === userId), JSON.stringify(gen[0]));
-    r = await rpc(jwt, 'reschedule_template', { p_template: tpl.id });
-    assert('reschedule_template refused for the site user', r.status === 403, `expected HTTP 403, got ${r.status}`);
+
+    // Reschedule: untouched future rows go, Mondays come back over the 90-day weekly cap — in
+    // every SCOPE_TYPE building, which on prod may be real ones. Same guard as the overdue sweep.
+    if (!SWEEP_ALLOWED) {
+      console.log(`  SKIP  reschedule_template — SUPABASE_URL contains the prod ref ${PROD_REF}; reschedule regenerates ZZTEST rows into every '${SCOPE_TYPE}' building until teardown. Set SMOKE_ALLOW_PROD=1 to run it.`);
+    } else {
+      const surviving = gen.filter((t) => t.due_date <= today).map((t) => t.due_date);   // due today is not "future"
+      const expectDeleted = gen.length - surviving.length;
+      const mondays90 = weekdayDates(today, 90, [1]);
+      // Re-read the scope at this point: it is the fixture building plus whatever else carries SCOPE_TYPE.
+      const scoped = await svcSelect('buildings', `building_type=eq.${SCOPE_TYPE}&select=id`);
+      assert(`reschedule scope: the fixture building is one of the ${scoped.length} '${SCOPE_TYPE}' building(s)`, scoped.some((b) => b.id === building), JSON.stringify(scoped));
+      const expectGenerated = mondays90.filter((d) => !surviving.includes(d)).length + (scoped.length - 1) * mondays90.length;
+      r = await rpc(adminJwt, 'reschedule_template', { p_template: tpl.id });
+      body = await r.json();
+      assert(`reschedule_template deletes the ${expectDeleted} untouched future rows`, r.ok && body[0]?.deleted === expectDeleted, `HTTP ${r.status} ${JSON.stringify(body)}`);
+      assert(`reschedule_template regenerates ${expectGenerated} rows (Mondays over 90 days x ${scoped.length} '${SCOPE_TYPE}' building(s))`,
+        r.ok && body[0]?.generated === expectGenerated, `HTTP ${r.status} ${JSON.stringify(body)}`);
+      gen = await svcSelect('task_instances', `template_item_id=eq.${item}&building_id=eq.${building}&select=due_date,assigned_to`);
+      assert('after reschedule: fixture building holds exactly Mondays (90 days) plus any row already due today',
+        sameSet(gen.map((t) => t.due_date), [...new Set([...mondays90, ...surviving])]), JSON.stringify(gen.map((t) => t.due_date)));
+      assert('after reschedule: regenerated rows are assigned through the role assignment', gen.every((t) => t.assigned_to === userId), JSON.stringify(gen[0]));
+      if (isolated) {
+        const elsewhere = await svcSelect('task_instances', `template_item_id=eq.${item}&building_id=neq.${building}&select=id`);
+        assert('after reschedule: no ZZTEST rows landed in any other building', elsewhere.length === 0, `${elsewhere.length} row(s) outside the fixture building`);
+      }
+      r = await rpc(jwt, 'reschedule_template', { p_template: tpl.id });
+      assert('reschedule_template refused for the site user', r.status === 403, `expected HTTP 403, got ${r.status}`);
+    }
   }
 } catch (e) {
   fail('smoke run', e.message);
