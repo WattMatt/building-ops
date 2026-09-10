@@ -25,6 +25,7 @@ import type { IssuePriority, IssueStatus } from '@/lib/constants';
 import { useBuildingMembers, memberDisplayName } from '@/hooks/useBuildingMembers';
 import { AssigneePicker } from '@/components/people/AssigneePicker';
 import { IssueCommentComposer } from '@/components/issues/IssueCommentComposer';
+import { ResolveIssueDialog } from '@/components/issues/ResolveIssueDialog';
 import { notify } from '@/lib/notify';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -88,6 +89,7 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
   const [loading, setLoading] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
   const [savingAssignee, setSavingAssignee] = useState(false);
+  const [resolveOpen, setResolveOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -110,10 +112,15 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
   // The issues trigger logs the change to issue_activity automatically.
   const changeStatus = async (status: IssueStatus) => {
     if (status === issue.status) return;
+    if (status === 'resolved') {
+      setResolveOpen(true);
+      return;
+    }
     setSavingStatus(true);
     try {
-      const { error } = await supabase.from('issues').update({ status }).eq('id', issue.id);
+      const { data, error } = await supabase.from('issues').update({ status }).eq('id', issue.id).select('id');
       if (error) throw error;
+      if (!data?.length) throw new Error('You do not have permission to change this issue.');
       toast.success(`Status changed to ${statusLabels[status]}`);
       onUpdated();
       await load();
@@ -268,6 +275,13 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
             />
           </div>
         </div>
+
+        <ResolveIssueDialog
+          issueId={issue.id}
+          open={resolveOpen}
+          onOpenChange={setResolveOpen}
+          onResolved={() => { onUpdated(); void load(); }}
+        />
       </DialogContent>
     </Dialog>
   );
