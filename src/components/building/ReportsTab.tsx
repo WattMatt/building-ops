@@ -123,33 +123,31 @@ export default function ReportsTab({ buildingId, buildingName }: { buildingId: s
       </Card>
 
       {hasApproved ? (
-        <>
-          <p className="mb-2 text-xs text-muted-foreground">
-            From {kpiData?.ops ? `Monthly OPS Report — ${formatPeriodLabel(kpiData.ops.report_period)} · approved` : ''}
-            {kpiData?.ops && kpiData?.cm ? ' · ' : ''}
-            {kpiData?.cm ? `Monthly CM Report — ${formatPeriodLabel(kpiData.cm.report_period)} · approved` : ''}
-          </p>
-          <Tabs defaultValue="kpis">
-            <TabsList>
-              <TabsTrigger value="kpis">KPIs</TabsTrigger>
-              <TabsTrigger value="ohs">OHS Compliance</TabsTrigger>
-            </TabsList>
-            <TabsContent value="ohs" className="mt-4">
-              <OhsComplianceTab
-                buildingId={buildingId}
-                kpis={kpiData?.kpis ?? []}
-                sectionScores={kpiData?.sectionScores ?? []}
-                actions={kpiData?.actions ?? []}
-                trend={kpiData?.trend ?? []}
-              />
-            </TabsContent>
-            <TabsContent value="kpis" className="mt-4">
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-                {(kpiData?.kpis ?? []).map((k) => <KpiCard key={k.id} kpi={k} />)}
-              </div>
-            </TabsContent>
-          </Tabs>
-        </>
+        <Tabs defaultValue="kpis">
+          <TabsList>
+            <TabsTrigger value="kpis">KPIs</TabsTrigger>
+            <TabsTrigger value="ohs">OHS Compliance</TabsTrigger>
+          </TabsList>
+          <TabsContent value="ohs" className="mt-4">
+            <OhsComplianceTab
+              buildingId={buildingId}
+              kpis={kpiData?.kpis ?? []}
+              sectionScores={kpiData?.sectionScores ?? []}
+              actions={kpiData?.actions ?? []}
+              trend={kpiData?.trend ?? []}
+            />
+          </TabsContent>
+          <TabsContent value="kpis" className="mt-4">
+            <p className="mb-2 text-xs text-muted-foreground">
+              From {kpiData?.ops ? `Monthly OPS Report — ${formatPeriodLabel(kpiData.ops.report_period)} · approved` : ''}
+              {kpiData?.ops && kpiData?.cm ? ' · ' : ''}
+              {kpiData?.cm ? `Monthly CM Report — ${formatPeriodLabel(kpiData.cm.report_period)} · approved` : ''}
+            </p>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+              {(kpiData?.kpis ?? []).map((k) => <KpiCard key={k.id} kpi={k} />)}
+            </div>
+          </TabsContent>
+        </Tabs>
       ) : (
         <p className="text-sm text-muted-foreground">KPIs appear once a monthly report is approved.</p>
       )}
