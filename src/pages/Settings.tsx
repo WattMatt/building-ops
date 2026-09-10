@@ -12,10 +12,14 @@ import { Separator } from '@/components/ui/separator';
 import {
   Building2,
   Palette,
+  SlidersHorizontal,
   Upload,
   Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { SlaSettingsCard } from '@/components/settings/SlaSettingsCard';
+import { ReportDueDayCard } from '@/components/settings/ReportDueDayCard';
+import { FeatureFlagsCard } from '@/components/settings/FeatureFlagsCard';
 
 export default function Settings() {
   const { isAdmin, isAdminOrManager } = useAuth();
@@ -178,6 +182,12 @@ export default function Settings() {
               Branding
             </TabsTrigger>
           )}
+          {isAdminOrManager && (
+            <TabsTrigger value="operations">
+              <SlidersHorizontal className="h-4 w-4 mr-2" />
+              Operations
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="organization">
@@ -326,6 +336,14 @@ export default function Settings() {
                 </Button>
               </CardContent>
             </Card>
+          </TabsContent>
+        )}
+
+        {isAdminOrManager && (
+          <TabsContent value="operations" className="space-y-6">
+            <SlaSettingsCard canEdit={isAdmin} />
+            <ReportDueDayCard canEdit={isAdmin} />
+            <FeatureFlagsCard canEdit={isAdmin} />
           </TabsContent>
         )}
       </Tabs>
