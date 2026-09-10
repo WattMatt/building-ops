@@ -66,21 +66,31 @@ export function occurrences(rule: RecurrenceRule, fromIsoDate: string, toIsoDate
       break;
     }
     case 'month': {
+      // Anchor: scanning month by month from `from`'s month, the first candidate whose
+      // clamped monthDay is >= `from`; then every N months from that anchor.
       const md = rule.monthDay ?? 1;
       let y = from.getUTCFullYear();
       let m = from.getUTCMonth() + 1;
+      const step = (n: number) => { m += n; while (m > 12) { m -= 12; y += 1; } };
       while (ymd(y, m, 1) <= to && !full()) {
-        push(resolveMonthDay(y, m, md));
-        m += every;
-        while (m > 12) { m -= 12; y += 1; }
+        const occ = resolveMonthDay(y, m, md);
+        if (occ < from) { step(1); continue; } // not anchored yet: next month
+        push(occ);
+        step(every);
       }
       break;
     }
     case 'year': {
+      // Anchor: scanning year by year from `from`'s year, the first candidate whose
+      // month + clamped monthDay is >= `from`; then every N years from that anchor.
       const md = rule.monthDay ?? 1;
       const m = rule.month ?? 1;
-      for (let y = from.getUTCFullYear(); ymd(y, 1, 1) <= to && !full(); y += every) {
-        push(resolveMonthDay(y, m, md));
+      let y = from.getUTCFullYear();
+      while (ymd(y, m, 1) <= to && !full()) {
+        const occ = resolveMonthDay(y, m, md);
+        if (occ < from) { y += 1; continue; } // not anchored yet: next year
+        push(occ);
+        y += every;
       }
       break;
     }

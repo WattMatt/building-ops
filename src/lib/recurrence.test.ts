@@ -26,9 +26,23 @@ describe('occurrences — pinned to docs/fixtures/recurrence-occurrences.json', 
     });
   }
 
-  it('every 6 months from 2026-09-10 follows the SQL: first candidate is from\'s month', () => {
+  it('month: anchors on the first occurrence on or after from, then steps every N months', () => {
+    // 2026-09-01 < from, so the anchor is 2026-10-01; then +6 months from there.
     expect(occurrences({ every: 6, unit: 'month', monthDay: 1 }, '2026-09-10', '2027-12-31')).toEqual([
-      '2027-03-01', '2027-09-01',
+      '2026-10-01', '2027-04-01', '2027-10-01',
+    ]);
+  });
+
+  it('year: anchors on the first occurrence on or after from, then steps every N years', () => {
+    // 2026-01-01 < from, so the anchor is 2027-01-01; then +2 years from there.
+    expect(occurrences({ every: 2, unit: 'year', month: 1, monthDay: 1 }, '2026-09-10', '2029-12-31')).toEqual([
+      '2027-01-01', '2029-01-01',
+    ]);
+  });
+
+  it('month: clamps monthDay per occurrence month after anchoring', () => {
+    expect(occurrences({ every: 2, unit: 'month', monthDay: 31 }, '2026-01-15', '2026-06-30')).toEqual([
+      '2026-01-31', '2026-03-31', '2026-05-31',
     ]);
   });
 
@@ -206,8 +220,9 @@ describe('nextOccurrences', () => {
   });
 
   it('returns fewer than n when 3 years do not hold enough', () => {
+    // Anchor 2027-01-01 (2026-01-01 < from), then every 2 years; 2031 is past the 3-year scan.
     expect(nextOccurrences({ every: 2, unit: 'year', month: 1, monthDay: 1 }, 5, '2026-09-10')).toEqual([
-      '2028-01-01',
+      '2027-01-01', '2029-01-01',
     ]);
   });
 

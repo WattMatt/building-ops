@@ -40,7 +40,7 @@
 ]
 ```
 
-Semantics: `from`/`to` inclusive. `day`: from `from`, every N days. `week`: weeks are Monday-start; week 0 is the week containing `from`; every N weeks the listed ISO weekdays (1 = Mon … 7 = Sun), dates < `from` dropped. `month`: the first candidate month is `from`'s month; every N months on `monthDay` (clamped to the month's last day; `"last"` = last day); dates < `from` dropped. `year`: every N years on `month`/`monthDay`, first candidate is `from`'s year. `lead` (default 0) is NOT applied by `occurrences` (it shifts visibility, not the due date) — ignore in this task.
+Semantics: `from`/`to` inclusive. `day`: from `from`, every N days. `week`: weeks are Monday-start; week 0 is the week containing `from`; every N weeks the listed ISO weekdays (1 = Mon … 7 = Sun), dates < `from` dropped. `month`: starting from `from`'s month and scanning month by month, the anchor is the first candidate whose `monthDay` (clamped to the month's last day; `"last"` = last day) is ≥ `from`; then every N months from that anchor, `monthDay` clamped per occurrence month (so every 6 months on the 1st from 2026-09-10 → 2026-10-01, 2027-04-01, 2027-10-01). `year`: starting from `from`'s year and scanning year by year, the anchor is the first candidate whose `month`/`monthDay` (clamped) is ≥ `from`; then every N years from that anchor. `lead` (default 0) is NOT applied by `occurrences` (it shifts visibility, not the due date) — ignore in this task.
 
 - [ ] **Step 2: Migration**
 
