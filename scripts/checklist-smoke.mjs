@@ -135,7 +135,7 @@ try {
     // what the client SHOULD store: a resolvable reference (path), not a public URL of a private bucket
     photoUrls = [clientPath];
   }
-  res = await fetch(`${URL_BASE}/rest/v1/task_completions`, {
+  let res = await fetch(`${URL_BASE}/rest/v1/task_completions`, {
     method: 'POST', headers: { ...authed(jwt), Prefer: 'return=representation' },
     body: JSON.stringify({ task_instance_id: task.id, completed_by: userId, notes: `ZZTEST-CHK ${RUN}`, signature_confirmed: false, photo_urls: photoUrls }),
   });
