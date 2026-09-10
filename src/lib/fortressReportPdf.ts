@@ -12,7 +12,7 @@ import { resolveStorageUrl } from '@/integrations/supabase/storage';
 import { buildReportDoc, MARK, type ReportData, type EmbeddedPhoto, type AnnualItem } from '@/lib/fortressReportDoc';
 import { ANNUAL_FIELD_SETS } from '@/lib/annualFieldSets';
 import { doneMonths, type PpmCell } from '@/lib/ppmStatus';
-import { REPORT_SECTIONS } from '@/lib/fortressReports';
+import { REPORT_SECTIONS, watermarkFor } from '@/lib/fortressReports';
 import { fetchReportElectricalCompliance } from '@/integrations/supabase/insight-linker';
 
 pdfMake.vfs = pdfFonts.vfs;
@@ -726,8 +726,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     data,
     {
       color, orgName: branding.name, logoDataUrl,
-      // Anything not yet approved is visibly a draft in the client's hands (E2).
-      watermark: report.status === 'approved' ? null : 'DRAFT',
+      watermark: watermarkFor(report.status),
     },
   );
   const fileName = `${(report.title ?? 'report').replace(/[^\w]+/g, '_')}.pdf`;

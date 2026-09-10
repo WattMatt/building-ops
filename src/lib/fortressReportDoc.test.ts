@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { buildReportDoc, type ReportData } from './fortressReportDoc';
+import { watermarkFor } from './fortressReports';
+
+/** `watermark` on TDocumentDefinitions may be a plain string or a { text, ... } object. */
+function watermarkText(doc: { watermark?: string | { text: string } }): string | undefined {
+  return typeof doc.watermark === 'object' ? doc.watermark.text : doc.watermark;
+}
 
 // Walk a pdfmake doc-definition tree collecting every image data-URL and text string.
 function walk(node: any, images: string[], texts: string[]): void {
@@ -515,7 +521,7 @@ describe('buildReportDoc — provenance', () => {
       {},
       { color: '#2563eb', orgName: 'Org', watermark: 'DRAFT' },
     );
-    expect((doc as { watermark?: { text: string } }).watermark?.text).toBe('DRAFT');
+    expect(watermarkText(doc)).toBe('DRAFT');
   });
 
   it('has no watermark by default', () => {
@@ -524,6 +530,18 @@ describe('buildReportDoc — provenance', () => {
       {},
       { color: '#2563eb', orgName: 'Org' },
     );
-    expect((doc as { watermark?: unknown }).watermark).toBeUndefined();
+    expect(doc.watermark).toBeUndefined();
+  });
+});
+
+describe('watermarkFor', () => {
+  it('is null once a report is approved', () => {
+    expect(watermarkFor('approved')).toBeNull();
+  });
+
+  it('is DRAFT for every other status, including missing', () => {
+    for (const status of ['draft', 'submitted', 'reviewed', 'rejected', undefined, null]) {
+      expect(watermarkFor(status)).toBe('DRAFT');
+    }
   });
 });

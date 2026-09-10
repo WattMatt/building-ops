@@ -22,7 +22,7 @@ import { useFortressReport, useReportLifecycle } from '@/hooks/useFortressReport
 import { REPORT_SECTIONS, REPORT_STATUS_VARIANT, formatPeriodLabel, REQUIRED_SECTIONS, REQUIRED_SECTION_TABLE } from '@/lib/fortressReports';
 import { useReportSectionCounts } from '@/hooks/useReportSectionCounts';
 import { ReportSavedVersions } from '@/components/reports/fortress/ReportSavedVersions';
-import { fdb, REPORT_TYPE_LABELS, type ReportStatus } from '@/integrations/supabase/fortress-db';
+import { fdb, REPORT_TYPE_LABELS, type ReportStatus, type ReportType } from '@/integrations/supabase/fortress-db';
 import { getSectionComponent } from './sections/registry';
 import { dirtySections, useDirtyCount } from './dirtySections';
 import { Hint } from '@/components/ui/hint';
@@ -42,7 +42,7 @@ export default function FortressReportEditor() {
   const [reviewOpen, setReviewOpen] = useState<null | ReportStatus>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [exporting, setExporting] = useState(false);
-  const [exportConfirm, setExportConfirm] = useState(false);
+  const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Unsaved section edits (D1). Only the active section is mounted, so any dirty grid
@@ -77,10 +77,11 @@ export default function FortressReportEditor() {
 
   // Hoisted above the early returns: the export confirm (E1) needs the section list and
   // the lifecycle status, and it is defined before them.
-  const sections = report ? (REPORT_SECTIONS[report.report_type as keyof typeof REPORT_SECTIONS] ?? []) : [];
+  const sections = report ? (REPORT_SECTIONS[report.report_type as ReportType] ?? []) : [];
   const status = (report?.status ?? 'draft') as ReportStatus;
   // Built sections only — an unbuilt one has no form to fill, so naming it as "empty"
   // would ask the user for something they cannot give.
+  const builtSectionCount = sections.filter((s) => getSectionComponent(s.key)).length;
   const emptySections = counts
     ? sections.filter((s) => getSectionComponent(s.key) && counts[s.key] === 0).map((s) => s.label)
     : [];
@@ -100,7 +101,7 @@ export default function FortressReportEditor() {
   };
 
   const runExport = async () => {
-    if (!id) return;
+    if (!id || exporting) return;
     setExporting(true);
     try {
       // Report header uses the organisation's configured name + logo (Settings).
@@ -155,7 +156,7 @@ export default function FortressReportEditor() {
     // The PDF is generated from saved rows — exporting while dirty would quietly ship a
     // document missing what is on screen.
     if (anyDirty) { toast.error('Save your changes in this section before exporting.'); return; }
-    if (emptySections.length || status !== 'approved') { setExportConfirm(true); return; }
+    if (emptySections.length || status !== 'approved') { setExportConfirmOpen(true); return; }
     void runExport();
   };
 
@@ -401,19 +402,19 @@ export default function FortressReportEditor() {
       <ReportSavedVersions reportId={report.id} />
 
       {/* Guardrail, not coaching — never routed through <Hint>. */}
-      <Dialog open={exportConfirm} onOpenChange={setExportConfirm}>
+      <Dialog open={exportConfirmOpen} onOpenChange={setExportConfirmOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Export this report as a PDF?</DialogTitle>
             <DialogDescription>
               {status !== 'approved' && <>This report is <b>{status}</b>, not approved — the PDF will carry a DRAFT watermark. </>}
-              {emptySections.length > 0 && <>{emptySections.length} of {sections.length} sections are empty: {emptySections.join(', ')}. </>}
+              {emptySections.length > 0 && <>{emptySections.length} of {builtSectionCount} sections are empty: {emptySections.join(', ')}. </>}
               Every export is kept as the next issued version.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setExportConfirm(false)}>Cancel</Button>
-            <Button onClick={() => { setExportConfirm(false); void runExport(); }}>Export anyway</Button>
+            <Button variant="outline" onClick={() => setExportConfirmOpen(false)}>Cancel</Button>
+            <Button disabled={exporting} onClick={() => { setExportConfirmOpen(false); void runExport(); }}>Export anyway</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -608,9 +608,10 @@ export function buildReportDoc(
   const headerTitle = (report.title ?? 'Report').toUpperCase();
   return {
     pageMargins: [40, 40, 40, 50],
-    // Faint enough to read the report through, dark enough to survive printing.
+    // Faint enough to read the report through, dark enough to still be visible on white
+    // and over photo pages (the original #9ca3af @ 0.08 was effectively invisible).
     ...(opts.watermark
-      ? { watermark: { text: opts.watermark, color: '#9ca3af', opacity: 0.08, bold: true, italics: false } }
+      ? { watermark: { text: opts.watermark, color: '#6b7280', opacity: 0.18, bold: true, italics: false } }
       : {}),
     content,
     defaultStyle: { font: 'Roboto', fontSize: 9 },
