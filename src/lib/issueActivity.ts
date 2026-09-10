@@ -1,6 +1,8 @@
 import { supabase } from '@/integrations/supabase/client';
 
 interface PostIssueCommentInput {
+  /** Client-generated row id so an offline replay of the same comment is idempotent. */
+  id?: string;
   issueId: string;
   userId: string;
   userEmail?: string | null;
@@ -17,7 +19,7 @@ interface PostIssueCommentInput {
 export async function postIssueComment(
   input: PostIssueCommentInput,
 ): Promise<{ id: string; authorName: string }> {
-  const { issueId, userId, userEmail, comment, photoUrls, mentions } = input;
+  const { id, issueId, userId, userEmail, comment, photoUrls, mentions } = input;
 
   const { data: me } = await supabase.from('profiles').select('full_name').eq('id', userId).maybeSingle();
   const authorName = (me as { full_name?: string | null } | null)?.full_name?.trim() || userEmail || 'Someone';
@@ -25,6 +27,7 @@ export async function postIssueComment(
   const { data, error } = await supabase
     .from('issue_activity')
     .insert({
+      ...(id ? { id } : {}),
       issue_id: issueId,
       activity_type: 'comment',
       comment,
