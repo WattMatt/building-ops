@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar,
+  CalendarDays,
   AlertTriangle,
   Loader2,
   RefreshCw,
@@ -45,7 +46,18 @@ import { Hint } from '@/components/ui/hint';
 import ReportIssueDialog from '@/components/checklists/ReportIssueDialog';
 import CompleteTaskDialog from '@/components/checklists/CompleteTaskDialog';
 import { TasksList, type TaskInstance, type TaskFrequency, type TaskStatus } from '@/components/building/TasksList';
+import { RoleAssignmentsPanel } from '@/components/building/RoleAssignmentsPanel';
+import { UpcomingTasks, HORIZON_DAYS, groupUpcoming } from '@/components/building/UpcomingTasks';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { todayInOperatingTz } from '@/lib/myWork';
 import { ALL_FREQUENCIES } from '@/lib/taskSchedule';
+import type { Database } from '@/integrations/supabase/types';
+
+/** Days ahead the on-demand generate buttons fill (the nightly job uses its own horizon). */
+const GENERATE_HORIZON_DAYS = 90;
+
+/** The tab strip: the rolling horizon view, then one tab per legacy frequency bucket. */
+type ChecklistView = 'upcoming' | TaskFrequency;
 
 interface ChecklistsTabProps {
   buildingId: string;
@@ -106,10 +118,15 @@ function getCurrentPeriodRange(frequency: TaskFrequency): { start: Date; end: Da
 export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTabProps) {
   const { user, isAdminOrManager } = useAuth();
   const { byId: members } = useBuildingMembers(buildingId);
+  const isMobile = useIsMobile();
   const [tasks, setTasks] = useState<TaskInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [selectedFrequency, setSelectedFrequency] = useState<TaskFrequency>('daily');
+  // Desktop opens on the horizon view (first tab). On mobile that view sits above the strip
+  // instead of in it, so the strip itself falls back to the first frequency.
+  const [selectedView, setSelectedView] = useState<ChecklistView>('upcoming');
+  const activeView: ChecklistView = isMobile && selectedView === 'upcoming' ? 'daily' : selectedView;
+  const selectedFrequency: TaskFrequency = activeView === 'upcoming' ? 'daily' : activeView;
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
   // Dialog states
@@ -210,7 +227,9 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
 
   const generate = async (frequency?: TaskFrequency) => {
     // An omitted p_frequency is dropped from the JSON body, so the function sees its `default null`.
-    const { data, error } = await supabase.rpc('generate_scheduled_tasks', { p_building: buildingId, p_frequency: frequency });
+    // p_horizon_days is not yet in the generated types; regenerate after the migration ships.
+    const args = { p_building: buildingId, p_frequency: frequency, p_horizon_days: GENERATE_HORIZON_DAYS } as Database['public']['Functions']['generate_scheduled_tasks']['Args'];
+    const { data, error } = await supabase.rpc('generate_scheduled_tasks', args);
     if (error) throw new Error(error.message);
     return data ?? 0;
   };
@@ -289,6 +308,9 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
     return isAfter(day, currentPeriodRange.end);
   };
 
+  // Badge on the horizon tab: open tasks due within the window (plus anything already overdue).
+  const upcomingCount = useMemo(() => groupUpcoming(tasks, todayInOperatingTz()).reduce((n, w) => n + w.tasks.length, 0), [tasks]);
+
   // Calculate progress
   const pendingTasks = filteredTasks.filter(t => t.status === 'pending');
   const completedTasksList = filteredTasks.filter(t => t.status === 'completed');
@@ -335,9 +357,39 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
         )}
       </div>
 
-      {/* Frequency Tabs */}
-      <Tabs value={selectedFrequency} onValueChange={v => setSelectedFrequency(v as TaskFrequency)}>
-        <TabsList className="grid w-full grid-cols-5">
+      {/* Who does what here — the panel renders nothing for non-managers; the guard here only skips its queries. */}
+      {isAdminOrManager && (
+        <RoleAssignmentsPanel buildingId={buildingId} buildingName={buildingName} onApplied={fetchTasks} />
+      )}
+
+      {/* Mobile: the horizon view sits above the strip, one column, no tab to find it under. */}
+      {isMobile && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <CalendarDays className="h-4 w-4" aria-hidden="true" />
+              Next {HORIZON_DAYS} days
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <UpcomingTasks tasks={tasks} onComplete={handleCompleteTask} onAssign={onAssignTask} canAssign={canAssignTask} members={members} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Frequency Tabs (desktop adds the horizon view as the first tab) */}
+      <Tabs value={activeView} onValueChange={v => setSelectedView(v as ChecklistView)}>
+        <TabsList className={`grid w-full ${isMobile ? 'grid-cols-5' : 'grid-cols-6'}`}>
+          {!isMobile && (
+            <TabsTrigger value="upcoming" className="relative">
+              Next {HORIZON_DAYS} days
+              {upcomingCount > 0 && (
+                <Badge variant="secondary" className="ml-1 h-5 min-w-[20px] text-xs">
+                  {upcomingCount}
+                </Badge>
+              )}
+            </TabsTrigger>
+          )}
           {ALL_FREQUENCIES.map(freq => {
             const count = tasks.filter(t => t.frequency === freq).length;
             return (
@@ -352,6 +404,16 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
             );
           })}
         </TabsList>
+
+        {!isMobile && (
+          <TabsContent value="upcoming" className="mt-6">
+            <Card>
+              <CardContent className="pt-6">
+                <UpcomingTasks tasks={tasks} onComplete={handleCompleteTask} onAssign={onAssignTask} canAssign={canAssignTask} members={members} />
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
 
         <TabsContent value={selectedFrequency} className="mt-6 space-y-6">
           {/* Period Label & Progress */}
