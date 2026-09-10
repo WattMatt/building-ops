@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrganization } from '@/hooks/useOrganization';
@@ -9,6 +9,10 @@ import { HintsToggle } from '@/components/HintsToggle';
 import { NotificationBell } from '@/components/notifications/NotificationBell';
 import { OfflineBanner } from '@/components/pwa/OfflineBanner';
 import { UpdateToast } from '@/components/pwa/UpdateToast';
+import { CommandPalette } from '@/components/shell/CommandPalette';
+import { QuickCreateMenu } from '@/components/shell/QuickCreateMenu';
+import { useHotkey } from '@/components/shell/useHotkey';
+import { track } from '@/lib/analytics';
 import { useNotifications, useNotificationsRealtime } from '@/hooks/useNotifications';
 import type { NotificationKind } from '@/lib/notify';
 import {
@@ -51,6 +55,7 @@ import {
   PenLine,
   Sun,
   User,
+  Search,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -173,6 +178,8 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   // inbox page breaks live updates for everyone (see useNotificationsRealtime).
   useNotificationsRealtime();
   const navigate = useNavigate();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useHotkey('k', { meta: true }, () => { track('palette_open', { via: 'hotkey' }); setPaletteOpen(true); });
   const location = useLocation();
 
   const appName = organization?.name || 'Building Ops';
@@ -354,11 +361,22 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           <header className="h-12 sm:h-14 border-b bg-card flex items-center justify-between px-3 sm:px-4 shrink-0">
             <SidebarTrigger />
             <div className="flex items-center gap-1">
+              <QuickCreateMenu />
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Search (⌘K)"
+                className="h-11 w-11 sm:h-9 sm:w-9"
+                onClick={() => { track('palette_open', { via: 'button' }); setPaletteOpen(true); }}
+              >
+                <Search className="h-5 w-5" />
+              </Button>
               <NotificationBell />
               <HintsToggle />
               <ThemeToggle />
             </div>
           </header>
+          <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
           <div className="flex-1 p-3 sm:p-4 lg:p-6 overflow-auto">
             {children}
           </div>
