@@ -4,12 +4,18 @@
  * cost rollup chain, end to end against the live backend with disposable fixtures it cleans up:
  *
  *   building + admin + assigned site user  →  one building_ppm_services line (monthly on the 1st)
+ *   + a 'contractor' building_role_assignments rule → the site user + a second, inactive line
  *   →  generate_ppm_tasks(p_building, 120) as admin  →  one task_instance per first-of-month in
- *   the horizon (source_ppm_id set, responsible_role 'contractor')  →  complete the first via
- *   complete_task  →  ppm_monthly_status (as the admin JWT) reads 'done' for that month and
- *   'due' / 'missed' for the rest  →  re-run generation is a no-op  →  a contractor + an issue
- *   with contractor_id + a contractor_ratings row  →  contractors.rating equals the rating  →
- *   building_month_costs sums the issue's actual_cost and a service-history cost for the month.
+ *   the horizon (source_ppm_id set, responsible_role 'contractor', assigned_to the site user,
+ *   no task_description), none for the inactive line  →  complete the first via complete_task
+ *   →  ppm_monthly_status (as the admin JWT) reads 'done' for that month and 'due' / 'missed'
+ *   for the rest  →  re-run generation is a no-op  →  a pending occurrence due yesterday reads
+ *   'missed'  →  flipping the line's recurrence (as admin) drops its future untouched
+ *   occurrences and regenerates over 365 days, keeping the completed and the missed rows;
+ *   deactivating drops the future rows, reactivating brings them back; reschedule_ppm_line is
+ *   refused for the site user  →  a contractor + an issue with contractor_id + a
+ *   contractor_ratings row  →  contractors.rating equals the rating  →  building_month_costs
+ *   sums the issue's actual_cost and a service-history cost for the month.
  *
  *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... SUPABASE_ANON_KEY=... \
  *   node scripts/ppm-smoke.mjs
@@ -56,8 +62,10 @@ async function svcInsert(table, row) {
   if (!res.ok) throw new Error(`fixture ${table}: HTTP ${res.status} ${await res.text()}`);
   return (await res.json())[0];
 }
+/** Service-role delete by filter. Throws on a non-2xx so a teardown that silently leaves rows behind cannot pass. */
 async function svcDelete(table, filter) {
-  await fetch(`${URL_BASE}/rest/v1/${table}?${filter}`, { method: 'DELETE', headers: SVC });
+  const res = await fetch(`${URL_BASE}/rest/v1/${table}?${filter}`, { method: 'DELETE', headers: SVC });
+  if (!res.ok) throw new Error(`fixture delete ${table}?${filter}: HTTP ${res.status} ${await res.text()}`);
 }
 async function svcSelect(table, filter) {
   const res = await fetch(`${URL_BASE}/rest/v1/${table}?${filter}`, { headers: SVC });
@@ -119,6 +127,19 @@ const sameSet = (a, b) => a.length === b.length && [...a].sort().every((x, i) =>
 try {
   console.log(`ppm-smoke vs ${URL_BASE} (run ${RUN})`);
 
+  // Sweep stray personas from earlier aborted runs first (rls-smoke does the same for zztest-rls-*).
+  {
+    const list = await (await fetch(`${URL_BASE}/auth/v1/admin/users?page=1&per_page=200`, { headers: SVC })).json();
+    let swept = 0;
+    for (const u of list?.users ?? []) {
+      if (u.email?.startsWith('zztest-ppm-')) {
+        await fetch(`${URL_BASE}/auth/v1/admin/users/${u.id}`, { method: 'DELETE', headers: SVC });
+        swept++;
+      }
+    }
+    if (swept) console.log(`  swept ${swept} stray zztest-ppm-* auth user(s) from earlier runs`);
+  }
+
   // ── setup: building + admin + assigned site user ──
   building = (await svcInsert('buildings', { name: `ZZTEST-PPM-${RUN}` })).id;
   cleanup.push(['buildings', `id=eq.${building}`]);
@@ -129,12 +150,22 @@ try {
   // ── step 1: the plan line (service role, as an admin form would write it) ──
   const line = await svcInsert('building_ppm_services', {
     building_id: building, service_name: `ZZTEST-PPM Aircon ${RUN}`, recurrence: { every: 1, unit: 'month', monthDay: 1 }, sort_order: 1,
+    notes: 'ZZTEST-PPM plan note — must not become the task description',
   });
   cleanup.push(['building_ppm_services', `id=eq.${line.id}`]);
   // Generated occurrences reference the line (on delete set null): remove them before it.
   // Their completions are registered per instance once the instances exist (step 2).
   cleanup.unshift(['task_instances', `source_ppm_id=eq.${line.id}`]);
   ok('building_ppm_services line inserted (monthly on the 1st)');
+  // Who does the contractor's work here: the building's 'contractor' role rule → the site user.
+  await svcInsert('building_role_assignments', { building_id: building, role: 'contractor', user_id: site.id });
+  cleanup.push(['building_role_assignments', `building_id=eq.${building}&role=eq.contractor`]);
+  // A second, inactive line: the generator must skip it entirely.
+  const inactive = await svcInsert('building_ppm_services', {
+    building_id: building, service_name: `ZZTEST-PPM Lifts ${RUN}`, recurrence: { every: 3, unit: 'month', monthDay: 1 }, sort_order: 2, is_active: false,
+  });
+  cleanup.push(['building_ppm_services', `id=eq.${inactive.id}`]);
+  cleanup.unshift(['task_instances', `source_ppm_id=eq.${inactive.id}`]);
 
   // ── step 2: generation as admin over a 120-day horizon ──
   const today = sastToday();
@@ -143,13 +174,19 @@ try {
   let body = await r.json();
   assert(`generate_ppm_tasks(120) as admin inserts one row per first-of-month in [today, today+120] (${expected.length})`,
     r.ok && body === expected.length, `HTTP ${r.status} ${JSON.stringify(body)}`);
-  const gen = await svcSelect('task_instances', `source_ppm_id=eq.${line.id}&select=id,due_date,task_name,frequency,responsible_role,status,template_item_id&order=due_date`);
+  const gen = await svcSelect('task_instances', `source_ppm_id=eq.${line.id}&select=id,due_date,task_name,task_description,frequency,responsible_role,status,template_item_id,assigned_to&order=due_date`);
   for (const t of gen) cleanup.unshift(['task_completions', `task_instance_id=eq.${t.id}`]);
   assert('generated rows: due dates are exactly the expected first-of-month set',
     sameSet(gen.map((t) => t.due_date), expected), JSON.stringify(gen.map((t) => t.due_date)));
   assert("generated rows: task_name = service_name, frequency 'monthly', responsible_role 'contractor', pending, no template_item_id",
     gen.length > 0 && gen.every((t) => t.task_name === line.service_name && t.frequency === 'monthly' && t.responsible_role === 'contractor' && t.status === 'pending' && t.template_item_id === null),
     JSON.stringify(gen[0]));
+  assert("generated rows: assigned_to = the site user via the building's 'contractor' role assignment",
+    gen.length > 0 && gen.every((t) => t.assigned_to === site.id), JSON.stringify(gen.map((t) => t.assigned_to)));
+  assert('generated rows: task_description is null (plan-line notes are not copied onto the task)',
+    gen.every((t) => t.task_description === null), JSON.stringify(gen.map((t) => t.task_description)));
+  const genInactive = await svcSelect('task_instances', `source_ppm_id=eq.${inactive.id}&select=id`);
+  assert('inactive plan line produced 0 occurrences', genInactive.length === 0, `${genInactive.length} rows`);
 
   r = await rpc(site.jwt, 'generate_ppm_tasks', { p_building: building, p_horizon_days: 120 });
   assert('generate_ppm_tasks refused for the site user', r.status === 403, `expected HTTP 403 (raised 42501), got ${r.status}`);
@@ -181,6 +218,50 @@ try {
   const after = await svcSelect('task_instances', `source_ppm_id=eq.${line.id}&select=id,status`);
   assert('re-run kept the completed occurrence completed and added no rows',
     after.length === gen.length && after.find((t) => t.id === first.id)?.status === 'completed', JSON.stringify(after));
+
+  // ── step 4b: an explicit 'missed' cell — a pending occurrence due yesterday (service role) ──
+  // Every generated row is a first-of-month on/after today, so yesterday's month has no other row.
+  const yesterday = addDays(today, -1);
+  const missed = await svcInsert('task_instances', {
+    building_id: building, source_ppm_id: line.id, task_name: line.service_name, frequency: 'monthly', responsible_role: 'contractor', status: 'pending', due_date: yesterday,
+  });
+  const missedMonth = yesterday.slice(0, 7);
+  const gridMissed = await selectAs(admin.jwt, 'ppm_monthly_status', `building_id=eq.${building}&ppm_service_id=eq.${line.id}&period_month=eq.${missedMonth}&select=period_month,status`);
+  assert(`ppm_monthly_status shows 'missed' for the overdue pending occurrence (${missedMonth})`,
+    Array.isArray(gridMissed) && gridMissed.length === 1 && gridMissed[0].status === 'missed', JSON.stringify(gridMissed));
+
+  // ── step 4c: reschedule on a plan-line change (trigger + reschedule_ppm_line, 2026-09-13_05 §8) ──
+  // Untouched future rows go, the completed and the overdue rows stay, and the line is regenerated
+  // over the cron's 365-day horizon with the new rule: quarterly = every third first-of-month,
+  // anchored on the first one on/after today (which is the completed occurrence).
+  const pendingBefore = (await svcSelect('task_instances', `source_ppm_id=eq.${line.id}&status=eq.pending&due_date=gt.${today}&select=id`)).map((t) => t.id);
+  const quarterly = firstOfMonths(today, 365).filter((_, i) => i % 3 === 0);
+  const futurePending = (rows) => rows.filter((t) => t.status === 'pending' && t.due_date > today).map((t) => t.due_date);
+  const patchLine = (jwt, patch) => fetch(`${URL_BASE}/rest/v1/building_ppm_services?id=eq.${line.id}`, {
+    method: 'PATCH', headers: { ...authed(jwt), Prefer: 'return=representation' }, body: JSON.stringify(patch),
+  });
+  let pr = await patchLine(admin.jwt, { recurrence: { every: 3, unit: 'month', monthDay: 1 } });
+  assert('plan line recurrence flipped to quarterly as admin', pr.ok && (await pr.json()).length === 1, `HTTP ${pr.status}`);
+  const afterFlip = await svcSelect('task_instances', `source_ppm_id=eq.${line.id}&select=id,due_date,status`);
+  assert('reschedule: the old future pending occurrences are gone', pendingBefore.length > 0 && !afterFlip.some((t) => pendingBefore.includes(t.id)), JSON.stringify(afterFlip));
+  assert(`reschedule: the completed (${first.due_date}) and the overdue (${yesterday}) occurrences survive`,
+    afterFlip.some((t) => t.id === first.id && t.status === 'completed') && afterFlip.some((t) => t.id === missed.id), JSON.stringify(afterFlip));
+  assert('reschedule: future pending rows are exactly the quarterly set over 365 days (the completed anchor excluded)',
+    sameSet(futurePending(afterFlip), quarterly.filter((d) => d !== first.due_date)), `${JSON.stringify(futurePending(afterFlip))} vs ${JSON.stringify(quarterly)}`);
+  pr = await patchLine(admin.jwt, { is_active: false });
+  assert('plan line deactivated as admin', pr.ok && (await pr.json()).length === 1, `HTTP ${pr.status}`);
+  const afterOff = await svcSelect('task_instances', `source_ppm_id=eq.${line.id}&select=id,due_date,status`);
+  assert('deactivate: no future pending occurrence remains; the completed and the overdue rows stay',
+    futurePending(afterOff).length === 0 && afterOff.length === 2, JSON.stringify(afterOff));
+  r = await rpc(site.jwt, 'reschedule_ppm_line', { p_line: line.id });
+  assert('reschedule_ppm_line refused for the site user', r.status === 403, `expected HTTP 403 (raised 42501), got ${r.status}`);
+  r = await rpc(admin.jwt, 'reschedule_ppm_line', { p_line: line.id });
+  assert('reschedule_ppm_line on an inactive line returns 0 as admin', r.ok && (await r.json()) === 0, `HTTP ${r.status}`);
+  pr = await patchLine(admin.jwt, { is_active: true });
+  assert('plan line reactivated as admin', pr.ok && (await pr.json()).length === 1, `HTTP ${pr.status}`);
+  const afterOn = await svcSelect('task_instances', `source_ppm_id=eq.${line.id}&select=id,due_date,status`);
+  assert('reactivate: the quarterly future occurrences are regenerated',
+    sameSet(futurePending(afterOn), quarterly.filter((d) => d !== first.due_date)), JSON.stringify(futurePending(afterOn)));
 
   // ── step 5: contractor + issue with contractor_id + rating → contractors.rating ──
   const month = today.slice(0, 7);
@@ -217,10 +298,12 @@ try {
 } finally {
   // Teardown (service role): children first — completions, generated instances, ratings,
   // service history — then the rows they hang off, then the building, then the users.
-  for (const [table, filter] of cleanup) await svcDelete(table, filter);
+  // A failed delete is reported and the teardown carries on, so the orphan check below still runs.
+  const tryDelete = async (table, filter) => { try { await svcDelete(table, filter); } catch (e) { console.error(`  WARN  teardown: ${e.message}`); } };
+  for (const [table, filter] of cleanup) await tryDelete(table, filter);
   for (const id of userIds) {
-    await svcDelete('user_buildings', `user_id=eq.${id}`);
-    await svcDelete('user_roles', `user_id=eq.${id}`);
+    await tryDelete('user_buildings', `user_id=eq.${id}`);
+    await tryDelete('user_roles', `user_id=eq.${id}`);
     await fetch(`${URL_BASE}/auth/v1/admin/users/${id}`, { method: 'DELETE', headers: SVC });
   }
   const left = await (await fetch(`${URL_BASE}/rest/v1/buildings?name=like.ZZTEST-PPM-*&select=id`, { headers: SVC })).json();

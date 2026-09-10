@@ -25,8 +25,10 @@
  *                    only — never anon, never authenticated
  *   R3c "PPM"      → building_ppm_services select by access, write admin/manager, month/year
  *                    rules only; contractor_ratings: insert own (rated_by = caller) on an
- *                    accessible issue, select any authenticated, no update/delete;
- *                    generate_ppm_tasks never anon, admin/manager only, building required
+ *                    accessible, resolved issue that names that contractor, select any
+ *                    authenticated, no update, delete admin only; generate_ppm_tasks never
+ *                    anon, admin/manager only, building required; ppm_monthly_status and
+ *                    building_month_costs never anon; ppm_services.overrides admin/manager only
  *
  * Personas: admin, manager, userA (user role, assigned building A only),
  * userB (user role, assigned building B only). userA probing building B
@@ -622,21 +624,43 @@ try {
   assert(`${BPS} insert with a weekly rule rejected (admin)`,
     (await canInsert(personas.admin.jwt, BPS, { building_id: A, service_name: `ZZTEST-RLS-week-${RUN}`, recurrence: { every: 1, unit: 'week', weekdays: [1] } })) === false, 'CHECK let a week rule through');
 
-  // contractor_ratings: rated_by must be the caller and the issue's building accessible;
-  // select any authenticated; no update or delete policy at all.
+  // contractor_ratings (2026-09-13_05 §1–2): rated_by must be the caller, and the issue must be
+  // resolved, name that contractor and sit in an accessible building; select any authenticated;
+  // no update policy; delete admin only.
   const CR = 'contractor_ratings';
-  // issueA (Phase 3) is the building-A issue; the admin delete probe took only the B row.
-  assert(`${CR} insert own on issue A as userA`, (await canInsert(personas.userA.jwt, CR, { contractor_id: contractor, issue_id: issueA, rating: 4, rated_by: personas.userA.id })) === true, 'member could not rate a contractor on an issue in their building');
+  // issueA (Phase 3) is the building-A issue; the admin delete probe took only the B row. The
+  // fixture is open with no contractor, so first make it what the offline handler leaves behind
+  // before its rating write: a resolved issue attributed to the contractor.
+  {
+    const res = await fetch(`${URL_BASE}/rest/v1/issues?id=eq.${issueA}`, {
+      method: 'PATCH', headers: { ...SVC, Prefer: 'return=representation' },
+      body: JSON.stringify({ contractor_id: contractor, status: 'resolved' }),
+    });
+    if (!res.ok) throw new Error(`fixture issues[A] resolve: HTTP ${res.status} ${await res.text()}`);
+  }
+  const otherContractor = (await svcInsert('contractors', { company_name: `ZZTEST-RLS-other-${RUN}` })).id;
+  cleanup.push(['contractors', otherContractor]);
+  const openIssueA = (await svcInsert('issues', { building_id: A, title: `ZZTEST-RLS-open-${RUN}`, description: 'rls smoke', reported_by: personas.admin.id, contractor_id: contractor })).id;
+  cleanup.push(['issues', openIssueA]);
+  assert(`${CR} insert own on resolved issue A as userA`, (await canInsert(personas.userA.jwt, CR, { contractor_id: contractor, issue_id: issueA, rating: 4, rated_by: personas.userA.id })) === true, 'member could not rate a contractor on a resolved issue in their building');
   assert(`${CR} insert with a foreign rated_by as userA`, (await canInsert(personas.userA.jwt, CR, { contractor_id: contractor, issue_id: issueA, rating: 4, rated_by: personas.admin.id })) === false, 'user recorded a rating as someone else');
   assert(`${CR} insert on issue A as userB (no access)`, (await canInsert(personas.userB.jwt, CR, { contractor_id: contractor, issue_id: issueA, rating: 4, rated_by: personas.userB.id })) === false, 'LEAK: user rated a contractor on an issue in a building they cannot access');
+  assert(`${CR} insert naming a contractor the issue does not (userA)`, (await canInsert(personas.userA.jwt, CR, { contractor_id: otherContractor, issue_id: issueA, rating: 4, rated_by: personas.userA.id })) === false, 'rated a contractor the issue was not attributed to');
+  assert(`${CR} insert on an unresolved issue (userA)`, (await canInsert(personas.userA.jwt, CR, { contractor_id: contractor, issue_id: openIssueA, rating: 4, rated_by: personas.userA.id })) === false, 'rated a contractor on an issue that is not resolved');
   const crA = (await svcInsert(CR, { contractor_id: contractor, issue_id: issueA, rating: 3, rated_by: personas.admin.id })).id;
   cleanup.push([CR, crA]);
   await probeMatrix(`${CR} select`, anyAuth(), (jwt) => canSelect(jwt, CR, crA));
   assert(`${CR} update as admin (no update policy)`, (await canUpdate(personas.admin.jwt, CR, crA, { rating: 1 })) === false, 'admin edited a rating row');
-  assert(`${CR} delete as admin (no delete policy)`, (await canDelete(personas.admin.jwt, CR, crA)) === false, 'admin deleted a rating row');
+  assert(`${CR} delete as userA (admin only)`, (await canDelete(personas.userA.jwt, CR, crA)) === false, 'site user deleted a rating row');
+  assert(`${CR} delete as manager (admin only)`, (await canDelete(personas.manager.jwt, CR, crA)) === false, 'manager deleted a rating row');
   {
     const c = await (await fetch(`${URL_BASE}/rest/v1/contractors?id=eq.${contractor}&select=rating`, { headers: SVC })).json();
     assert('contractors.rating refreshed by the ratings trigger (3 after the probe rows came and went)', Number(c[0]?.rating) === 3, JSON.stringify(c[0]));
+  }
+  assert(`${CR} delete as admin`, (await canDelete(personas.admin.jwt, CR, crA)) === true, 'admin could not delete a rating row');
+  {
+    const c = await (await fetch(`${URL_BASE}/rest/v1/contractors?id=eq.${contractor}&select=rating`, { headers: SVC })).json();
+    assert('contractors.rating cleared by the ratings trigger once the last rating is deleted', c[0]?.rating === null, JSON.stringify(c[0]));
   }
 
   // generate_ppm_tasks: same gate as generate_scheduled_tasks. An empty 200 never proves a revoked
@@ -653,7 +677,24 @@ try {
     const adminR = await rpcCall(personas.admin.jwt, 'generate_ppm_tasks', { p_building: A, p_horizon_days: 30 });
     assert('generate_ppm_tasks runs for admin', adminR.status === 200, `HTTP ${adminR.status}`);
   }
-  console.log('  R3c ppm (building_ppm_services, contractor_ratings, generate_ppm_tasks): done');
+
+  // Derived views: never anon. A replaced or re-created view would pick SELECT back up from the
+  // default privileges unless the migration restates the revoke — only a real HTTP denial proves it.
+  for (const view of ['ppm_monthly_status', 'building_month_costs']) {
+    const res = await fetch(`${URL_BASE}/rest/v1/${view}?limit=1`, { headers: { apikey: ANON } });
+    assert(`${view} not readable by anon`, !res.ok, `expected a non-2xx, got HTTP ${res.status}`);
+  }
+
+  // ppm_services.overrides (2026-09-13_05 §9): the row's own update policy admits any member of
+  // the building; the before-update guard raises 42501 (→ HTTP 403) unless an admin/manager is
+  // the one changing the noted-override layer. Other columns stay editable by the member.
+  const ppmRowA = (await svcInsert('ppm_services', { building_id: A, service_name: `ZZTEST-RLS-${RUN}`, months: {} })).id;
+  cleanup.push(['ppm_services', ppmRowA]);
+  const override = { '2026-09': { status: 'done', note: 'ZZTEST-RLS' } };
+  assert('ppm_services.overrides change as userA (member of A) refused', (await canUpdate(personas.userA.jwt, 'ppm_services', ppmRowA, { overrides: override })) === false, 'site user changed the noted-override layer');
+  assert('ppm_services non-overrides update as userA still allowed', (await canUpdate(personas.userA.jwt, 'ppm_services', ppmRowA, { comment: 'ZZTEST-RLS-upd' })) === true, 'member could not edit the report row itself');
+  assert('ppm_services.overrides change as manager allowed', (await canUpdate(personas.manager.jwt, 'ppm_services', ppmRowA, { overrides: override })) === true, 'manager could not set an override');
+  console.log('  R3c ppm (building_ppm_services, contractor_ratings, generate_ppm_tasks, derived views, ppm_services.overrides): done');
 } catch (e) {
   fail('smoke run', e.message);
 } finally {
