@@ -14,6 +14,9 @@
  *   user/reviewer  → restricted to user_buildings assignments
  *   storage        → prefix-scoped paths in tenant-documents; deletes
  *                    admin/manager only; avatars self-scoped
+ *   R1 "Mine"      → task_instances.assigned_to writes follow building access;
+ *                    building_members() only answers callers who can access the
+ *                    building; notifications recipient-only, never client-inserted
  *
  * Personas: admin, manager, userA (user role, assigned building A only),
  * reviewerB (reviewer role, assigned building B only). userA probing
@@ -86,6 +89,19 @@ async function canDelete(jwt, table, id) {
   if (!res.ok) return false;
   return (await res.json()).length > 0;
 }
+// SECURITY DEFINER RPCs: a denied caller is either an HTTP error (no EXECUTE
+// grant) or an empty row set (the function's own access test failed), so report
+// both rather than collapsing them into a boolean.
+async function rpcCall(jwt, fn, args) {
+  const headers = jwt ? authed(jwt) : { apikey: ANON, 'Content-Type': 'application/json' };
+  const res = await fetch(`${URL_BASE}/rest/v1/rpc/${fn}`, {
+    method: 'POST', headers, body: JSON.stringify(args),
+  });
+  if (!res.ok) return { ok: false, status: res.status, rows: [] };
+  const body = await res.json();
+  return { ok: true, status: res.status, rows: Array.isArray(body) ? body : [body] };
+}
+
 async function storagePut(jwt, bucket, path) {
   const res = await fetch(`${URL_BASE}/storage/v1/object/${bucket}/${path}`, {
     method: 'POST', headers: { apikey: ANON, Authorization: `Bearer ${jwt}`, 'Content-Type': 'text/plain' },
@@ -373,6 +389,49 @@ try {
   assert('storage avatars self-delete as userA', (await storageDel(personas.userA.jwt, 'avatars', avatar)) === true, 'own avatar delete failed');
   assert('storage building-logos write as userA (admin/mgr-only)', (await storagePut(personas.userA.jwt, 'building-logos', `zztest-rls-${RUN}.txt`)) === false, 'site user wrote building logo');
   console.log('  storage: done');
+
+  // ════ Phase 7: R1 "Mine" — assignee, member directory, inbox ════
+  // Phase 2 deleted the building-B row of every scoped table (admin delete probe),
+  // so the cross-building assign probe needs a fresh task in B.
+  const taskB = (await svcInsert('task_instances', { building_id: B, task_name: `ZZTEST-RLS-r1-${RUN}`, due_date: '2030-01-03' })).id;
+  cleanup.push(['task_instances', taskB]);
+  await probeMatrix('task_instances[A] assign', byAccess('A'), (jwt, who) => canUpdate(jwt, 'task_instances', rows.task_instances.A, { assigned_to: personas[who].id }));
+  await probeMatrix('task_instances[B] assign', byAccess('B'), (jwt, who) => canUpdate(jwt, 'task_instances', taskB, { assigned_to: personas[who].id }));
+
+  // building_members(b): SECURITY DEFINER, so its own can_access_building(b) gate
+  // is the whole boundary — a non-member must get an empty list, not a roster.
+  const membersA = await rpcCall(personas.userA.jwt, 'building_members', { b: A });
+  assert('building_members(A) callable by member userA', membersA.ok, `HTTP ${membersA.status}`);
+  assert('building_members(A) lists the caller', membersA.rows.some((m) => m.id === personas.userA.id), 'member missing from own building roster');
+  assert('building_members(A) lists admin and manager', membersA.rows.some((m) => m.id === personas.admin.id) && membersA.rows.some((m) => m.id === personas.manager.id), 'admin/manager missing from roster');
+  assert('building_members(A) excludes reviewerB (building B only)', !membersA.rows.some((m) => m.id === personas.reviewerB.id), 'LEAK: unassigned user listed as a building A member');
+  assert('building_members(A) excludes the role-less persona', !membersA.rows.some((m) => m.id === personas.norole.id), 'user with no role row listed as a member');
+  assert('building_members(A) returns one row per person', new Set(membersA.rows.map((m) => m.id)).size === membersA.rows.length, 'duplicate people (multi-row user_roles joined, not EXISTS-tested)');
+  assert('building_members(A) resolves a role for everyone', membersA.rows.every((m) => typeof m.role === 'string' && m.role.length > 0), 'null role returned');
+  const membersB = await rpcCall(personas.userA.jwt, 'building_members', { b: B });
+  assert('building_members(B) empty for non-member userA', (membersB.rows ?? []).length === 0, 'LEAK: non-member read a foreign building roster');
+  const membersRev = await rpcCall(personas.reviewerB.jwt, 'building_members', { b: B });
+  assert('building_members(B) callable by reviewerB', membersRev.ok && membersRev.rows.some((m) => m.id === personas.reviewerB.id), 'reviewer missing from own building roster');
+  const membersAnon = await rpcCall(null, 'building_members', { b: A });
+  assert('building_members not executable by anon', membersAnon.ok === false || membersAnon.rows.length === 0, 'anon read a building roster');
+
+  // notifications: recipient-only select/update, no client insert policy at all.
+  await probeMatrix('notifications insert (no client policy)', nobody(), (jwt, who) => canInsert(jwt, 'notifications', {
+    recipient_id: personas[who].id, kind: 'task_assigned', entity_type: 'task', title: `ZZTEST-RLS-${RUN}`, url: '/tasks',
+  }));
+  const notifA = (await svcInsert('notifications', {
+    recipient_id: personas.userA.id, kind: 'task_assigned', entity_type: 'task',
+    entity_id: rows.task_instances.A, building_id: A, title: `ZZTEST-RLS-${RUN}`, url: '/tasks',
+  })).id;
+  cleanup.push(['notifications', notifA]);
+  // Recipient-only, so admin/manager see nothing here — deliberately unlike every other table.
+  await probeMatrix('notifications(userA row) select', { admin: false, manager: false, userA: true, reviewerB: false }, (jwt) => canSelect(jwt, 'notifications', notifA));
+  assert('notifications own update (mark read) as userA', (await canUpdate(personas.userA.jwt, 'notifications', notifA, { read_at: new Date().toISOString() })) === true, 'recipient could not mark own notification read');
+  assert('notifications foreign update as admin', (await canUpdate(personas.admin.jwt, 'notifications', notifA, { read_at: null })) === false, "admin updated another recipient's notification");
+  assert('notifications recipient reassign as userA', (await canUpdate(personas.userA.jwt, 'notifications', notifA, { recipient_id: personas.admin.id })) === false, 'recipient handed their notification to someone else');
+  assert('notifications delete as userA (no delete policy)', (await canDelete(personas.userA.jwt, 'notifications', notifA)) === false, 'recipient deleted a notification row');
+  assert('notifications delete as admin (no delete policy)', (await canDelete(personas.admin.jwt, 'notifications', notifA)) === false, 'admin deleted a notification row');
+  console.log('  R1 mine (assignee, building_members, notifications): done');
 } catch (e) {
   fail('smoke run', e.message);
 } finally {
