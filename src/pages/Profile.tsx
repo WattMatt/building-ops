@@ -168,7 +168,7 @@ export default function Profile() {
         toast.error('Failed to save notification preferences');
         return;
       }
-      toast.success('Notification preferences saved');
+      toast.success('Preferences saved');
       // PhotoCapture reads this flag through a cached query, not a realtime channel.
       queryClient.invalidateQueries({ queryKey: ['profile', 'geotag'] });
     } catch (error) {
