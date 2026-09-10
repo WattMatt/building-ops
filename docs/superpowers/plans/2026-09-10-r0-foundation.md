@@ -823,6 +823,28 @@ git commit -m "Lower the typecheck baseline and run the Fortress smokes in the s
 
 ---
 
+## Status (2026-09-10)
+
+Tasks 1–8 implemented on `feat/reports-access-hardening` (commits 541ff89..e878c3e plus a
+snapshot re-vendor), each through a spec review and a code-quality review; 204 tests pass,
+typecheck baseline 65, build green. Task 9 remains with the owner.
+
+Follow-ups raised by the final review, deliberately NOT done in R0:
+
+- **D1 gap — SPA navigation.** The unsaved-edits guard covers Back, section switch, and
+  page refresh/close, but sidebar links and browser back/forward are router navigations
+  that bypass it. The app uses `BrowserRouter`, so `useBlocker` is unavailable; closing this
+  needs a data-router migration or a `history.pushState` sentinel. Scheduled for R1 (the
+  My Day work touches routing anyway).
+- **`.gitignore` line 18 ignores `supabase/migrations/`.** Every migration there has had to
+  be force-added. Un-ignore the directory (keep `supabase/.temp/` ignored) or move web-owned
+  migrations. Do this before the next migration is written.
+- `SectionCard` keys dirty state by `title`; switch to `useId()` if two cards in one
+  section ever share a title.
+- `ReportsTab.hasApproved` gates on OPS/CM only while the caption can include annual.
+- Regenerate `types.ts` after the migrations ship, then drop the `as never` casts in
+  `useHints.tsx` and the structural re-typing note in `reportArtifacts.ts`.
+
 ## Self-review
 
 - Spec coverage (R0 list in the design doc): merge branch → Task 9; staging secrets → Task 9; K1 → Task 1; D1 → Task 5; R1 → Task 2; E1/E2 → Task 6; E3 → Task 3; M-1/M-8 → Task 4; expiring-alerts deploy → Task 9; show_hints → Task 7; building_type → Task 9; baseline + smokes → Task 8. All covered.
