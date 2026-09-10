@@ -3,6 +3,7 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { ROLE_PRECEDENCE, type AppRole } from '@/lib/constants';
 import { queryClient } from '@/lib/queryClient';
+import { identify, resetAnalytics } from '@/lib/analytics';
 
 export interface InviteUserPayload {
   email: string;
@@ -153,6 +154,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setRoles(derived);
         setRole(derived[0] ?? null); // null (no role rows) => role-gated routes deny
         setAuthError(false);
+        // Product analytics identity: id + role only, never email or name.
+        identify(userId, { role: derived[0] ?? null });
       }
 
       // First-login + onboarding gates: read must_set_password and
@@ -241,6 +244,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // E3: purge the query cache so the next user (or a signed-out window)
     // cannot see the outgoing user's cached data.
     queryClient.clear();
+    resetAnalytics();
     setUser(null);
     setSession(null);
     setRole(null);

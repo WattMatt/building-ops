@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { useNotifications } from '@/hooks/useNotifications';
+import { track } from '@/lib/analytics';
 
 export default function Inbox() {
   const { items, unread, markRead, markAllRead, isLoading, isError, refetch } = useNotifications();
@@ -81,7 +82,7 @@ export default function Inbox() {
                 key={n.id}
                 type="button"
                 className={`block w-full p-4 text-left hover:bg-muted ${n.read_at ? '' : 'bg-primary/5'}`}
-                onClick={() => { void markRead(n.id); navigate(n.url); }}
+                onClick={() => { void markRead(n.id); track('notification_opened', { kind: n.kind }); navigate(n.url); }}
               >
                 {!n.read_at && <span className="sr-only">Unread</span>}
                 <p className="font-medium truncate">{n.title}</p>

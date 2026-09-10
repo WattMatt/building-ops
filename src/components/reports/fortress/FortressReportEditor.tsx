@@ -26,6 +26,7 @@ import { fdb, REPORT_TYPE_LABELS, type ReportStatus, type ReportType } from '@/i
 import { getSectionComponent } from './sections/registry';
 import { dirtySections, useDirtyCount } from './dirtySections';
 import { Hint } from '@/components/ui/hint';
+import { track } from '@/lib/analytics';
 
 export default function FortressReportEditor() {
   const { id } = useParams<{ id: string }>();
@@ -106,6 +107,7 @@ export default function FortressReportEditor() {
     try {
       // Report header uses the organisation's configured name + logo (Settings).
       const generated = await generateReportPdf(id, { name: organization?.name ?? '', primaryColor: organization?.primary_color ?? '#2563eb', logoUrl: organization?.logo_url ?? null });
+      track('report_exported', { reportType: generated.reportType, reportStatus: generated.reportStatus });
       // Download always succeeds by this point — persistence is best-effort on
       // top (standard D2/D4), and the toast reports both outcomes.
       if (organization?.id && user) {

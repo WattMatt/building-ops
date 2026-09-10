@@ -15,6 +15,7 @@ import { postIssueComment } from '@/lib/issueActivity';
 import { uploadIssuePhotos } from '@/lib/issuePhotos';
 import { mentionQueryAt, insertMention, mentionPresent, type MentionRange } from '@/lib/mentions';
 import { notify } from '@/lib/notify';
+import { track } from '@/lib/analytics';
 
 /** Keys the mention picker itself handles in onKeyDown; onKeyUp must not re-derive the range from them. */
 const PICKER_KEYS = new Set(['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape']);
@@ -90,6 +91,7 @@ export function IssueCommentComposer({ issueId, buildingId, issueTitle, reporter
       // Keep only mentions whose @Name still appears in the text (exact, boundary-aware match).
       const kept = mentions.filter((id) => { const m = byId.get(id); return m && mentionPresent(comment, memberDisplayName(m)); });
       const { authorName } = await postIssueComment({ issueId, userId: user.id, userEmail: user.email, comment, photoUrls, mentions: kept });
+      track('issue_commented', { issueId, mentions: kept.length, photos: photoUrls.length });
       const others = Array.from(new Set([assigneeId, reporterId].filter((id): id is string => !!id && id !== user.id && !kept.includes(id))));
       if (others.length) void notify({ kind: 'issue_comment', entityType: 'issue', entityId: issueId, buildingId, recipients: others, title: `${authorName} commented on: ${issueTitle}`, body: comment.slice(0, 200), url: `/issues?open=${issueId}` });
       const mentioned = kept.filter((id) => id !== user.id);

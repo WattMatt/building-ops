@@ -6,6 +6,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useNotifications } from '@/hooks/useNotifications';
+import { track } from '@/lib/analytics';
 
 export function NotificationBell() {
   const { items, unread, markRead, markAllRead } = useNotifications();
@@ -40,7 +41,7 @@ export function NotificationBell() {
                 <button
                   type="button"
                   className={`w-full px-3 py-2 text-left hover:bg-muted ${n.read_at ? '' : 'bg-primary/5'}`}
-                  onClick={() => { setOpen(false); void markRead(n.id); navigate(n.url); }}
+                  onClick={() => { setOpen(false); void markRead(n.id); track('notification_opened', { kind: n.kind }); navigate(n.url); }}
                 >
                   {!n.read_at && <span className="sr-only">Unread</span>}
                   <p className="truncate text-sm">{n.title}</p>
