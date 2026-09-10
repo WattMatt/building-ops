@@ -247,7 +247,7 @@ Spec `docs/superpowers/specs/2026-09-10-r3-plan-design.md` §8; plan `docs/super
   `building_month_costs` view, one-shot seed of plan lines from the 698 `ppm_services` rows (all linked by name).
 - `2026-09-13_04_ppm_cadence_fix.sql` (GMI `c44fc13`) — re-derives cadences the seed could not read: older rows'
   frequency strings (Trimonthly, Montlhy, Bi-Monthly, 6-monthly, annually…) and report grids with repeated
-  evidence (≥ 10/12 months → monthly; ≥ 3 cells at a constant step → every 3/6; same month in ≥ 2 years → yearly).
+  evidence (≥ 10/12 months → monthly; ≥ 3 cells with every gap a multiple of 3 or 6 → every 3/6; same month in ≥ 2 years → yearly).
   Single-cell evidence is NOT inferred. Self-heals an earlier looser run (step 0). Re-runnable.
 - `2026-09-13_05_r3c_review_fixes.sql` (GMI `c98f0b2`) — review fixes: `cr_insert` requires the issue's own
   contractor and `status = 'resolved'`; `cr_delete` admin only; FKs `issues.contractor_id` and

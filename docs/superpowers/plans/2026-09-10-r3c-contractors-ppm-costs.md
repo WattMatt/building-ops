@@ -214,3 +214,35 @@ Smokes: `rls-smoke` — `building_ppm_services` matrix (select by access, write 
 ### Task 6 (controller): apply, verify, regenerate, record
 
 - [ ] Staging apply + migrated-row review + `npm run smoke` (incl. `smoke:ppm`) + notifications/offline/calendar; prod apply (print the flagged cadence rows for the owner), `rls-smoke`; regenerate types; drop casts; whole-slice review; Status; `APPLY_CHECKLIST.md` R3c; push; PR body; memory.
+
+---
+
+## Status — shipped 2026-09-10 (range 4ed70ac..HEAD)
+
+**Shipped.** `2026-09-13_03` (plan table, PPM generator + cron 04:10 SAST, derived `ppm_monthly_status`, overrides
+column, contractor columns + ratings + average trigger, `building_month_costs`, one-shot seed of 698 report rows →
+664 plan lines), `_04` (cadence re-derivation: 145 active / 519 inactive on staging and prod, each inactive line
+carrying a note saying why), `_05` (review fixes: rating policy tied to the issue's contractor and resolved status,
+admin delete, FKs on `issues.contractor_id` / `asset_service_history.contractor_id`, SAST month buckets,
+resolved-only costs, touch trigger, `reschedule_ppm_line` + trigger on `is_active`/`recurrence`, overrides guard).
+Client: `/contractors` module (register, documents with expiry chips, history, picker), contractor on issues /
+service records / PPM lines / professional team, rating on resolve through the offline queue, Building → PPM tab
+(plan CRUD, derived grid, Generate now, CSV), report PPM section reading derived + overrides (legacy rows keep
+click-cycling; plan-backed rows seeded on create and carry-forward, "Sync with the PPM plan" for later lines),
+cost fields on issue/asset forms, `MonthCostsCard`, one `exportCsv`, `money.ts`, `pgErrors.ts`, `ppmGridFetch.ts`,
+`network.ts`. Types regenerated from prod; casts dropped. Smokes on staging: ppm 33/0, rls 518/0, calendar 21/0,
+notifications 34/0, offline 21/0, checklist 34/0, fortress all pass; prod rls 518/0. Vitest 1193, tsc 51 = baseline.
+
+**Decisions taken.** Plan lines are never hard-deleted (deactivate; the DB trigger removes untouched future
+occurrences and history is kept). Overrides live in `ppm_services.overrides` (not inside `months`, as spec §5.6
+first said) and are admin/manager-only via a guard trigger (42501). The calendar shows plan occurrences as task
+events only; plan-backed report rows contribute override cells alone (in-app and ICS). The merged grid ranks
+missed > done > due when a month has several occurrences. The cadence migration never infers from a single
+captured month; explicit non-month strings (Weekly, Adhoc, N/A) stay inactive for a human. Rating is best-effort
+after the status flip: a server rejection completes the op and the dialog says so; a transport failure re-queues
+the whole op. Ratings survive as one per issue (duplicate → "earlier rating kept").
+
+**Follow-ups.** Owner: review the 519 inactive plan lines per building (Building → PPM) and switch them on.
+`reschedule_ppm_line` is trigger-driven only; the client never calls it. Report PPM "Delete" is hidden for
+plan-backed rows. `RecurrenceEditor` still offers day/week; PpmTab rejects them after the fact. Five
+`TaskFrequency` unions and the `CalendarView` page split remain from R3a/R3b.
