@@ -416,7 +416,7 @@ try {
     // The trigger gave it the org default (24 h for high); push the target and the clock so it is past due.
     const patched = await fetch(`${URL_BASE}/rest/v1/issues?id=eq.${issue.id}`, {
       method: 'PATCH', headers: { ...SVC, Prefer: 'return=representation' },
-      body: JSON.stringify({ sla_target_hours: 0.01, created_at: new Date(Date.now() - 3_600_000).toISOString() }),
+      body: JSON.stringify({ sla_target_hours: 1, created_at: new Date(Date.now() - 2 * 3_600_000).toISOString() }),
     });
     assert('sla fixture: default target was 24 h before the patch', Number(issue.sla_target_hours) === 24, `sla_target_hours=${issue.sla_target_hours}`);
     assert('sla fixture: patched', patched.ok, `HTTP ${patched.status}`);
