@@ -9,6 +9,10 @@
  * status flip) must NOT: the network may have died between write 1 and write 2, so a duplicate
  * on write 1 only proves write 1 landed. They swallow the 23505 and always run write 2, which is
  * an idempotent update. Throws on anything else; replay.ts classifies.
+ *
+ * `issue_resolve` may carry a third, best-effort write (the contractor rating). It runs only
+ * after the status flip succeeded and never throws: the issue is resolved by then, and a rating
+ * hiccup must not re-queue a completed op.
  */
 import { supabase } from '@/integrations/supabase/client';
 import { uploadPhotos, photoPrefix } from '@/lib/photos';
@@ -17,6 +21,35 @@ import { notify } from '@/lib/notify';
 import type { QueuedOp } from './types';
 
 const isDuplicate = (e: unknown) => (e as { code?: string } | null)?.code === '23505';
+
+/** Outcome of the optional rating write that follows an issue_resolve status flip. */
+export type RatingWriteOutcome = 'saved' | 'duplicate' | 'failed';
+
+async function insertContractorRating(
+  uid: string,
+  issueId: string,
+  rating: NonNullable<Extract<QueuedOp['payload'], { kind: 'issue_resolve' }>['rating']>,
+): Promise<RatingWriteOutcome> {
+  try {
+    const { error } = await supabase
+      // contractor_ratings is not yet in the generated types; regenerate after the migration ships.
+      .from('contractor_ratings' as never)
+      .insert({
+        contractor_id: rating.contractorId,
+        issue_id: issueId,
+        rating: rating.rating,
+        comment: rating.comment,
+        rated_by: uid,
+      } as never);
+    if (!error) return 'saved';
+    if (isDuplicate(error)) return 'duplicate';
+    if (import.meta.env.DEV) console.warn('contractor_ratings insert failed after resolve:', error);
+    return 'failed';
+  } catch (e) {
+    if (import.meta.env.DEV) console.warn('contractor_ratings insert threw after resolve:', e);
+    return 'failed';
+  }
+}
 
 /** Runs one op against the backend. Throws on failure; the caller classifies the error. */
 export async function runOp(op: QueuedOp): Promise<unknown> {
@@ -103,7 +136,13 @@ export async function runOp(op: QueuedOp): Promise<unknown> {
           { code: 'RESOLVE_DENIED' },
         );
       }
-      return { issueId: p.issueId };
+      if (!p.rating) return { issueId: p.issueId };
+      // Write 3, best effort: the issue IS resolved by now, so a rating problem must never fail
+      // (and so re-queue) the op. `issue_id` is unique, so a replay after a half-failed attempt
+      // collides with 23505 — that is "already rated", not an error. Anything else is logged and
+      // reported in the result for the dialog to mention; the op still completes.
+      const rating = await insertContractorRating(op.uid, p.issueId, p.rating);
+      return { issueId: p.issueId, rating };
     }
   }
 }

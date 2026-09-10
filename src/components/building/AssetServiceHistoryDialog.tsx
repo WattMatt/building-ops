@@ -29,6 +29,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { ContractorPicker } from '@/components/contractors/ContractorPicker';
+import { useContractors } from '@/hooks/useContractors';
 import { Plus, Wrench, Trash2, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -46,6 +48,9 @@ interface ServiceRecord {
   service_type: string;
   description: string | null;
   performed_by: string | null;
+  contractor_id: string | null;
+  /** Joined `contractors(company_name)`; null when no contractor is linked. */
+  contractors: { company_name: string } | null;
   cost: number | null;
   next_service_date: string | null;
   notes: string | null;
@@ -78,6 +83,7 @@ export default function AssetServiceHistoryDialog({
   onServiceAdded,
 }: AssetServiceHistoryDialogProps) {
   const { isAdminOrManager, user } = useAuth();
+  const { contractors } = useContractors();
   const [records, setRecords] = useState<ServiceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -88,6 +94,7 @@ export default function AssetServiceHistoryDialog({
   const [serviceType, setServiceType] = useState('');
   const [description, setDescription] = useState('');
   const [performedBy, setPerformedBy] = useState('');
+  const [contractorId, setContractorId] = useState<string | null>(null);
   const [cost, setCost] = useState('');
   const [nextServiceDate, setNextServiceDate] = useState('');
   const [notes, setNotes] = useState('');
@@ -102,12 +109,12 @@ export default function AssetServiceHistoryDialog({
     try {
       const { data, error } = await supabase
         .from('asset_service_history')
-        .select('*')
+        .select('*, contractors(company_name)')
         .eq('asset_id', asset.id)
         .order('service_date', { ascending: false });
 
       if (error) throw error;
-      setRecords(data || []);
+      setRecords((data || []) as unknown as ServiceRecord[]);
     } catch (error) {
       console.error('Error fetching service history:', error);
       toast.error('Failed to load service history');
@@ -121,6 +128,7 @@ export default function AssetServiceHistoryDialog({
     setServiceType('');
     setDescription('');
     setPerformedBy('');
+    setContractorId(null);
     setCost('');
     setNextServiceDate('');
     setNotes('');
@@ -144,6 +152,7 @@ export default function AssetServiceHistoryDialog({
         service_type: serviceType,
         description: description.trim() || null,
         performed_by: performedBy.trim() || null,
+        contractor_id: contractorId,
         cost: cost ? parseFloat(cost) : null,
         next_service_date: nextServiceDate || null,
         notes: notes.trim() || null,
@@ -179,6 +188,14 @@ export default function AssetServiceHistoryDialog({
     } finally {
       setSaving(false);
     }
+  };
+
+  // Picking a contractor fills an empty "Performed by" with the company name; typed text is left alone.
+  const chooseContractor = (id: string | null) => {
+    setContractorId(id);
+    if (!id || performedBy.trim()) return;
+    const company = contractors.find((c) => c.id === id)?.company_name;
+    if (company) setPerformedBy(company);
   };
 
   const handleDelete = async (record: ServiceRecord) => {
@@ -256,7 +273,7 @@ export default function AssetServiceHistoryDialog({
                     <div className="space-y-2">
                       <Label htmlFor="service-type">Service Type *</Label>
                       <Select value={serviceType} onValueChange={setServiceType} required>
-                        <SelectTrigger>
+                        <SelectTrigger id="service-type">
                           <SelectValue placeholder="Select type" />
                         </SelectTrigger>
                         <SelectContent>
@@ -281,7 +298,11 @@ export default function AssetServiceHistoryDialog({
                     />
                   </div>
 
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="service-contractor">Contractor</Label>
+                      <ContractorPicker id="service-contractor" value={contractorId} onChange={chooseContractor} aria-label="Contractor" />
+                    </div>
                     <div className="space-y-2">
                       <Label htmlFor="performed-by">Performed By</Label>
                       <Input
@@ -291,6 +312,9 @@ export default function AssetServiceHistoryDialog({
                         onChange={(e) => setPerformedBy(e.target.value)}
                       />
                     </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="cost">Cost (R)</Label>
                       <Input
@@ -381,7 +405,12 @@ export default function AssetServiceHistoryDialog({
                           <p className="text-xs text-muted-foreground truncate">{record.notes}</p>
                         )}
                       </TableCell>
-                      <TableCell>{record.performed_by || '-'}</TableCell>
+                      <TableCell>
+                        {record.performed_by || record.contractors?.company_name || '-'}
+                        {record.contractors && record.performed_by && record.performed_by !== record.contractors.company_name && (
+                          <p className="text-xs text-muted-foreground">{record.contractors.company_name}</p>
+                        )}
+                      </TableCell>
                       <TableCell>
                         {record.cost ? `R ${record.cost.toLocaleString()}` : '-'}
                       </TableCell>

@@ -27,6 +27,7 @@ import { toast } from 'sonner';
 import type { IssuePriority, IssueStatus } from '@/lib/constants';
 import { useBuildingMembers, memberDisplayName } from '@/hooks/useBuildingMembers';
 import { AssigneePicker } from '@/components/people/AssigneePicker';
+import { ContractorPicker } from '@/components/contractors/ContractorPicker';
 import { IssueCommentComposer } from '@/components/issues/IssueCommentComposer';
 import { ResolveIssueDialog } from '@/components/issues/ResolveIssueDialog';
 import { notify } from '@/lib/notify';
@@ -47,6 +48,8 @@ interface Issue {
   corrective_action: string | null;
   photo_urls: string[] | null;
   task_instance_id: string | null;
+  /** The list queries do not select this; the dialog loads it itself when absent. */
+  contractor_id?: string | null;
 }
 
 interface Activity {
@@ -105,6 +108,10 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
   const [loading, setLoading] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
   const [savingAssignee, setSavingAssignee] = useState(false);
+  // Contractor (spec §8, admin/manager): loaded with the cost columns below when the issue
+  // prop does not carry it; the resolve dialog needs it to offer a rating.
+  const [contractorId, setContractorId] = useState<string | null>(issue.contractor_id ?? null);
+  const [savingContractor, setSavingContractor] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
   // Costs (spec §8, admin/manager): the list queries don't select these columns, so the
   // dialog reads them itself; `costs` is the saved state, `costDraft` what's being typed.
@@ -141,12 +148,13 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
     if (!open || !canManage) return;
     let cancelled = false;
     (async () => {
-      const { data, error } = await supabase.from('issues').select('estimated_cost, actual_cost').eq('id', issue.id);
+      const { data, error } = await supabase.from('issues').select('estimated_cost, actual_cost, contractor_id').eq('id', issue.id);
       if (cancelled || error) return;
       const row = data?.[0];
       const next = { estimated_cost: row?.estimated_cost ?? null, actual_cost: row?.actual_cost ?? null };
       setCosts(next);
       setCostDraft({ estimated_cost: costText(next.estimated_cost), actual_cost: costText(next.actual_cost) });
+      setContractorId(row?.contractor_id ?? null);
     })();
     return () => { cancelled = true; };
   }, [open, canManage, issue.id]);
@@ -218,6 +226,27 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
     }
   };
 
+  // Same shape as changeAssignee: a zero-row update is RLS saying no, not a success.
+  const changeContractor = async (contractor_id: string | null) => {
+    if (contractor_id === contractorId) return;
+    const previous = contractorId;
+    setSavingContractor(true);
+    setContractorId(contractor_id);
+    try {
+      const { data, error } = await supabase.from('issues').update({ contractor_id }).eq('id', issue.id).select('id');
+      if (error) throw error;
+      if (!data?.length) throw new Error("You do not have permission to change this issue's contractor.");
+      toast.success(contractor_id ? 'Contractor assigned' : 'Contractor removed');
+      onUpdated();
+      await load();
+    } catch (e) {
+      setContractorId(previous);
+      toast.error(e instanceof Error ? e.message : 'Failed to change the contractor');
+    } finally {
+      setSavingContractor(false);
+    }
+  };
+
   const activityText = (a: Activity): string => {
     switch (a.activity_type) {
       case 'created':
@@ -286,6 +315,17 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
               <div className="space-y-1.5">
                 <Label className="text-xs">Assignee</Label>
                 <AssigneePicker buildingId={issue.building_id} value={issue.assigned_to} onChange={changeAssignee} disabled={savingAssignee} />
+              </div>
+              <div className="col-span-2 space-y-1.5">
+                <Label htmlFor="issue-contractor" className="text-xs">Contractor</Label>
+                <ContractorPicker
+                  id="issue-contractor"
+                  value={contractorId}
+                  onChange={(id) => void changeContractor(id)}
+                  disabled={savingContractor}
+                  aria-label="Contractor"
+                />
+                <Hint>Assign the contractor doing the work — you can rate them when the issue is resolved</Hint>
               </div>
             </div>
           )}
@@ -396,6 +436,7 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
         <ResolveIssueDialog
           nested
           issueId={issue.id}
+          contractorId={contractorId}
           open={resolveOpen}
           onOpenChange={setResolveOpen}
           onResolved={() => { onUpdated(); void load(); }}

@@ -80,6 +80,8 @@ const comment: IssueCommentPayload = {
   notifyOthers: ['r1', 'm1', UID, 'r1', '', 'r2'], userEmail: 'me@x.test',
 };
 const resolve: IssueResolvePayload = { kind: 'issue_resolve', activityId: 'act2', issueId: 'i1', note: 'Fixed', userEmail: 'me@x.test' };
+const resolveRated: IssueResolvePayload = { ...resolve, rating: { contractorId: 'con1', rating: 4, comment: 'Tidy work' } };
+const ratingRow = { contractor_id: 'con1', issue_id: 'i1', rating: 4, comment: 'Tidy work', rated_by: UID };
 
 const photo = () => ({ file: new File(['x'], 'a.jpg', { type: 'image/jpeg' }) });
 const ok = (completionId = 'c1', already_completed = false) => ({ data: [{ completion_id: completionId, already_completed }], error: null });
@@ -260,6 +262,47 @@ describe('offline replay', () => {
     const denied = await enqueue(UID, resolve, []);
     expect(await runOne(denied)).toEqual({ status: 'failed', error: 'permission denied', code: '42501' });
     expect(state.from).toHaveLength(0);
+  });
+
+  it('5b. issue_resolve with a rating inserts contractor_ratings only after the status flip landed', async () => {
+    const op = await enqueue(UID, resolveRated, []);
+    expect(await runOne(op)).toEqual({ status: 'synced', result: { issueId: 'i1', rating: 'saved' } });
+    expect(state.from.map((c) => c.table)).toEqual(['issues', 'contractor_ratings']);
+    expect(state.from[0]).toMatchObject({ update: { status: 'resolved' }, eq: [['id', 'i1']], select: 'id' });
+    expect(state.from[1].insert).toEqual(ratingRow);
+    expect(await listOps(UID)).toEqual([]);
+
+    // Without a rating on the payload nothing touches contractor_ratings and the result is unchanged.
+    state.from.length = 0;
+    const plain = await enqueue(UID, resolve, []);
+    expect(await runOne(plain)).toEqual({ status: 'synced', result: { issueId: 'i1' } });
+    expect(state.from.map((c) => c.table)).toEqual(['issues']);
+  });
+
+  it('5c. a duplicate rating (issue already rated by an earlier attempt) is tolerated: op synced, not failed', async () => {
+    state.results.contractor_ratings = { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } };
+    const op = await enqueue(UID, resolveRated, []);
+    expect(await runOne(op)).toEqual({ status: 'synced', result: { issueId: 'i1', rating: 'duplicate' } });
+    expect(state.from.map((c) => c.table)).toEqual(['issues', 'contractor_ratings']);
+    expect(await listOps(UID)).toEqual([]);
+  });
+
+  it('5d. any other rating error never fails the op: the issue is resolved, the result says the rating failed', async () => {
+    state.results.contractor_ratings = { data: null, error: { code: '42501', message: 'new row violates row-level security policy' } };
+    const op = await enqueue(UID, resolveRated, []);
+    expect(await runOne(op)).toEqual({ status: 'synced', result: { issueId: 'i1', rating: 'failed' } });
+    expect(state.from.map((c) => c.table)).toEqual(['issues', 'contractor_ratings']);
+    expect(await listOps(UID)).toEqual([]);
+  });
+
+  it('5e. the rating is skipped when the status flip is refused (RESOLVE_DENIED)', async () => {
+    state.results.issues = { data: [], error: null };
+    const op = await enqueue(UID, resolveRated, []);
+    expect(await runOne(op)).toEqual({
+      status: 'failed', error: 'Your note was saved, but you do not have permission to resolve this issue.', code: 'RESOLVE_DENIED',
+    });
+    expect(state.from.map((c) => c.table)).toEqual(['issues']);
+    expect(state.from.some((c) => c.table === 'contractor_ratings')).toBe(false);
   });
 
   it('7c. issue_create whose insert already landed still flips the task to issue_logged', async () => {

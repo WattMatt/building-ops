@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { mockViewport } from '@/test/mobile';
 
 const enqueueAndRun = vi.hoisted(() => vi.fn());
@@ -22,8 +22,10 @@ const renderDialog = (props: Partial<React.ComponentProps<typeof ResolveIssueDia
   return { onOpenChange, onResolved };
 };
 
+const noteBox = () => screen.getByRole('textbox', { name: /what was done/i });
+
 const submit = async (note = '  Replaced the breaker.  ') => {
-  fireEvent.change(screen.getByRole('textbox'), { target: { value: note } });
+  fireEvent.change(noteBox(), { target: { value: note } });
   fireEvent.click(screen.getByRole('button', { name: /resolve/i }));
   await waitFor(() => expect(enqueueAndRun).toHaveBeenCalledTimes(1));
 };
@@ -47,9 +49,9 @@ describe('ResolveIssueDialog', () => {
     renderDialog();
     const button = screen.getByRole('button', { name: /resolve/i });
     expect(button).toBeDisabled();
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: '   ' } });
+    fireEvent.change(noteBox(), { target: { value: '   ' } });
     expect(button).toBeDisabled();
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Replaced the breaker.' } });
+    fireEvent.change(noteBox(), { target: { value: 'Replaced the breaker.' } });
     expect(button).toBeEnabled();
   });
 
@@ -83,6 +85,75 @@ describe('ResolveIssueDialog', () => {
     expect(removeOp).not.toHaveBeenCalled();
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
     expect(onResolved).not.toHaveBeenCalled();
+  });
+
+  describe('contractor rating', () => {
+    const stars = () => screen.getAllByRole('button', { name: /^\d stars? — / });
+
+    it('is absent when the issue has no contractor, and the payload carries no rating', async () => {
+      renderDialog();
+      expect(screen.queryByText(/how did the contractor do/i)).toBeNull();
+      await submit();
+      expect(enqueueAndRun.mock.calls[0][1]).not.toHaveProperty('rating');
+    });
+
+    it('shows five 44px toggle stars that are real buttons (keyboard operable) with aria-pressed', () => {
+      renderDialog({ contractorId: 'con1' });
+      expect(screen.getByText(/how did the contractor do/i)).toBeInTheDocument();
+      const buttons = stars();
+      expect(buttons).toHaveLength(5);
+      for (const b of buttons) {
+        expect(b.tagName).toBe('BUTTON');
+        expect(b).toHaveAttribute('type', 'button');
+        expect(b).toHaveAttribute('aria-pressed', 'false');
+        expect(b.className).toMatch(/\bh-11\b/);
+        expect(b.className).toMatch(/\bw-11\b/);
+      }
+      buttons[3].focus();
+      expect(document.activeElement).toBe(buttons[3]);
+      fireEvent.click(buttons[3]);
+      expect(buttons[3]).toHaveAttribute('aria-pressed', 'true');
+      expect(buttons[2]).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByText('Very good')).toBeInTheDocument();
+      // Tapping the lit star again clears the rating.
+      fireEvent.click(buttons[3]);
+      expect(buttons[3]).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByText('Not rated')).toBeInTheDocument();
+    });
+
+    it('lands the chosen star and trimmed comment in the issue_resolve payload', async () => {
+      renderDialog({ contractorId: 'con1' });
+      fireEvent.click(stars()[3]);
+      fireEvent.change(screen.getByLabelText(/comment about the contractor/i), { target: { value: '  Tidy work.  ' } });
+      await submit();
+      expect(enqueueAndRun.mock.calls[0][1]).toMatchObject({
+        kind: 'issue_resolve', issueId: 'i1', rating: { contractorId: 'con1', rating: 4, comment: 'Tidy work.' },
+      });
+    });
+
+    it('sends no rating when no star was chosen, and a null comment when the box is empty', async () => {
+      renderDialog({ contractorId: 'con1' });
+      await submit();
+      expect(enqueueAndRun.mock.calls[0][1]).not.toHaveProperty('rating');
+      cleanup();
+
+      enqueueAndRun.mockClear();
+      renderDialog({ contractorId: 'con1' });
+      fireEvent.click(stars()[0]);
+      await submit();
+      expect(enqueueAndRun.mock.calls[0][1].rating).toEqual({ contractorId: 'con1', rating: 1, comment: null });
+    });
+
+    it('still closes as resolved, but says so, when the handler could not save the rating', async () => {
+      enqueueAndRun.mockResolvedValueOnce({ status: 'synced', result: { issueId: 'i1', rating: 'failed' }, opId: 'op-1' });
+      const { onOpenChange, onResolved } = renderDialog({ contractorId: 'con1' });
+      fireEvent.click(stars()[4]);
+      await submit();
+      expect(toast.success).toHaveBeenCalledWith('Issue resolved');
+      expect(toast.error).toHaveBeenCalledWith('The issue is resolved, but the contractor rating could not be saved.');
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+      expect(onResolved).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('treats a refused status flip as terminal: the note is saved, so it discards the op, closes and refreshes', async () => {

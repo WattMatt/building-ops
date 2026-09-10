@@ -38,6 +38,20 @@ vi.mock('@/hooks/useBuildingMembers', () => ({
 vi.mock('@/lib/offline/enqueueAndRun', () => ({ enqueueAndRun: vi.fn().mockResolvedValue({ status: 'synced', result: {} }) }));
 vi.mock('@/lib/notify', () => ({ notify: async () => {} }));
 vi.mock('@/components/ui/photo-capture', () => ({ PhotoCapture: () => null }));
+// The picker has its own tests; a native select keeps Radix out of jsdom here.
+vi.mock('@/components/contractors/ContractorPicker', () => ({
+  ContractorPicker: ({ value, onChange, id, disabled }: { value: string | null; onChange: (id: string | null) => void; id?: string; disabled?: boolean }) => (
+    <select id={id} aria-label="Contractor" value={value ?? ''} disabled={disabled} onChange={(e) => onChange(e.target.value || null)}>
+      <option value="">None</option>
+      <option value="c1">Sparks</option>
+      <option value="c2">Flow Plumbing</option>
+    </select>
+  ),
+}));
+// The resolve dialog is tested on its own; here it only needs to expose which contractor it was given.
+vi.mock('@/components/issues/ResolveIssueDialog', () => ({
+  ResolveIssueDialog: ({ contractorId }: { contractorId?: string | null }) => <div data-testid="resolve-dialog">contractor={contractorId ?? 'none'}</div>,
+}));
 
 import IssueDetailDialog from './IssueDetailDialog';
 
@@ -74,6 +88,64 @@ describe('IssueDetailDialog', () => {
     render(<IssueDetailDialog issue={issue} open onOpenChange={() => {}} canManage onUpdated={() => {}} />);
     expect(await screen.findByRole('heading', { name: /leaking tap in kitchen/i })).toBeInTheDocument();
     expect(document.querySelector('[data-vaul-drawer]')).not.toBeNull();
+  });
+
+  describe('contractor (admin/manager)', () => {
+    const row = { estimated_cost: null, actual_cost: null, contractor_id: 'c2' };
+
+    it('loads contractor_id with the cost columns, shows it, and hands it to the resolve dialog', async () => {
+      state.result = (table) => (table === 'issues' ? { data: [row], error: null } : { data: [], error: null });
+      render(<IssueDetailDialog issue={issue} open onOpenChange={() => {}} canManage onUpdated={() => {}} />);
+      const picker = await screen.findByLabelText('Contractor');
+      await waitFor(() => expect(picker).toHaveValue('c2'));
+      const select = state.calls.find((c) => c.table === 'issues' && c.method === 'select');
+      expect(String(select?.args[0])).toContain('contractor_id');
+      expect(screen.getByTestId('resolve-dialog')).toHaveTextContent('contractor=c2');
+      // Coaching copy goes through <Hint>.
+      expect(screen.getByText(/assign the contractor doing the work/i)).toBeInTheDocument();
+    });
+
+    it('writes contractor_id with a row-returning update when a contractor is chosen', async () => {
+      state.result = (table, calls) => {
+        if (table !== 'issues') return { data: [], error: null };
+        return isUpdate(calls) ? { data: [{ id: 'i1' }], error: null } : { data: [{ ...row, contractor_id: null }], error: null };
+      };
+      render(<IssueDetailDialog issue={issue} open onOpenChange={() => {}} canManage onUpdated={() => {}} />);
+      const picker = await screen.findByLabelText('Contractor');
+      await waitFor(() => expect(picker).not.toBeDisabled());
+
+      fireEvent.change(picker, { target: { value: 'c1' } });
+
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Contractor assigned'));
+      const update = state.calls.find((c) => c.table === 'issues' && c.method === 'update');
+      expect(update?.args[0]).toEqual({ contractor_id: 'c1' });
+      const after = state.calls.slice(state.calls.indexOf(update!));
+      expect(after.some((c) => c.method === 'eq' && c.args[0] === 'id' && c.args[1] === 'i1')).toBe(true);
+      expect(after.some((c) => c.method === 'select' && c.args[0] === 'id')).toBe(true);
+      expect(picker).toHaveValue('c1');
+      expect(screen.getByTestId('resolve-dialog')).toHaveTextContent('contractor=c1');
+    });
+
+    it('treats a zero-row update as a permission refusal and reverts the picker', async () => {
+      state.result = (table, calls) => {
+        if (table !== 'issues') return { data: [], error: null };
+        return isUpdate(calls) ? { data: [], error: null } : { data: [row], error: null };
+      };
+      render(<IssueDetailDialog issue={issue} open onOpenChange={() => {}} canManage onUpdated={() => {}} />);
+      const picker = await screen.findByLabelText('Contractor');
+      await waitFor(() => expect(picker).toHaveValue('c2'));
+
+      fireEvent.change(picker, { target: { value: 'c1' } });
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("You do not have permission to change this issue's contractor."));
+      expect(picker).toHaveValue('c2');
+    });
+
+    it('is hidden when the viewer cannot manage the issue', async () => {
+      render(<IssueDetailDialog issue={issue} open onOpenChange={() => {}} canManage={false} onUpdated={() => {}} />);
+      await screen.findByRole('heading', { name: /leaking tap in kitchen/i });
+      expect(screen.queryByLabelText('Contractor')).toBeNull();
+    });
   });
 
   describe('costs (admin/manager)', () => {

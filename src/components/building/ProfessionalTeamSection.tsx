@@ -1,8 +1,12 @@
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Phone, Mail, HardHat, Ruler, Zap, Droplets, Building } from 'lucide-react';
-import { ReactNode } from 'react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ContractorPicker } from '@/components/contractors/ContractorPicker';
+import { useContractors, type Contractor } from '@/hooks/useContractors';
+import { Phone, Mail, HardHat, Ruler, Zap, Droplets, Building, BookUser } from 'lucide-react';
+import { ReactNode, useState } from 'react';
 
 export interface ProfessionalContact {
   name: string;
@@ -21,6 +25,16 @@ export interface ProfessionalTeam {
   wetServicesEngineer: ProfessionalContact;
 }
 
+/** The four free-text fields a register entry fills. The keys are the persisted jsonb keys — do not rename. */
+function contactFromContractor(c: Pick<Contractor, 'company_name' | 'contact_name' | 'contact_phone' | 'contact_email'>): ProfessionalContact {
+  return {
+    name: c.contact_name ?? '',
+    company: c.company_name,
+    phone: c.contact_phone ?? '',
+    email: c.contact_email ?? '',
+  };
+}
+
 interface ProfessionalFieldProps {
   title: string;
   icon: ReactNode;
@@ -30,11 +44,42 @@ interface ProfessionalFieldProps {
 }
 
 function ProfessionalField({ title, icon, contact, onChange, idPrefix }: ProfessionalFieldProps) {
+  const { contractors } = useContractors();
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  // Filling from the register is a starting point: the four inputs below stay editable.
+  const pick = (id: string | null) => {
+    if (!id) return;
+    const c = contractors.find((x) => x.id === id);
+    if (c) onChange(contactFromContractor(c));
+    setPickerOpen(false);
+  };
+
   return (
     <div className="p-4 rounded-lg bg-muted/30 space-y-3">
-      <div className="flex items-center gap-2 text-sm font-medium">
-        {icon}
-        {title}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          {icon}
+          {title}
+        </div>
+        <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+          <PopoverTrigger asChild>
+            <Button type="button" variant="outline" size="sm" className="min-h-11">
+              <BookUser className="mr-1.5 h-4 w-4" aria-hidden="true" />
+              Pick from register
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-80 space-y-2">
+            <Label htmlFor={`${idPrefix}-register`} className="text-xs">Contractor register</Label>
+            <ContractorPicker
+              id={`${idPrefix}-register`}
+              value={null}
+              onChange={pick}
+              placeholder="Choose a contractor"
+              aria-label={`Pick ${title.toLowerCase()} from the contractor register`}
+            />
+          </PopoverContent>
+        </Popover>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1">

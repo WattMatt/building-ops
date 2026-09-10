@@ -42,6 +42,11 @@ export interface IssueResolvePayload {
   issueId: string;
   note: string;
   userEmail: string | null;
+  /**
+   * Present when the issue had a contractor and the resolver rated it. Written to
+   * `contractor_ratings` only after the status flip lands; never fails the op on its own.
+   */
+  rating?: { contractorId: string; rating: number; comment: string | null };
 }
 export type OpPayload = TaskCompletePayload | IssueCreatePayload | IssueCommentPayload | IssueResolvePayload;
 export type OpKind = OpPayload['kind'];
