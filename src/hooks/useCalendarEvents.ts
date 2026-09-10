@@ -68,8 +68,8 @@ export interface UseCalendarEventsResult {
   reschedule: (taskId: string, newDate: string) => Promise<void>;
 }
 
-export const CALENDAR_SOURCES = ['tasks', 'issues', 'documents', 'assets', 'ppm', 'signoffs', 'reports'] as const;
-export type CalendarSource = (typeof CALENDAR_SOURCES)[number];
+/** The seven source queries, as the third segment of their query keys. */
+export type CalendarSource = 'tasks' | 'issues' | 'documents' | 'assets' | 'ppm' | 'signoffs' | 'reports';
 
 interface BuildingRow { id: string; name: string }
 /** The mappers' row shapes plus the id the join needs. */

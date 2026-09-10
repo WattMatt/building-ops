@@ -6,9 +6,12 @@
  *
  * The summary has its own window (a year back to 30 days ahead) so it answers "what is
  * overdue" regardless of which month the grid is showing; the grid's own query is the
- * visible range, owned by `CalendarView`.
+ * visible range, owned by `CalendarView`. The summary is one small, network-only read of
+ * `building_assets` — not a second `useCalendarEvents` over a year, which would fan out all
+ * seven sources and persist a year of rows for every building visited.
  */
 import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { addDays, format } from 'date-fns';
 import { AlertTriangle, CalendarPlus, Clock, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -23,10 +26,11 @@ import {
 import { SubscribeCard } from '@/components/calendar/SubscribeCard';
 import { localDate, toIso } from '@/components/calendar/CalendarGrid';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCalendarEvents, type CalendarScope } from '@/hooks/useCalendarEvents';
+import type { CalendarScope } from '@/hooks/useCalendarEvents';
+import { supabase } from '@/integrations/supabase/client';
 import { todayInOperatingTz } from '@/lib/myWork';
 import { cn } from '@/lib/utils';
-import type { CalendarEvent } from '@/lib/calendar/events';
+import { assetEvent, type CalendarEvent } from '@/lib/calendar/events';
 import { CalendarView, defaultViewMode, type CalendarViewMode } from '@/pages/CalendarPage';
 
 export interface BuildingCalendarTabProps {
@@ -67,8 +71,26 @@ export default function BuildingCalendarTab({ buildingId, buildingName }: Buildi
     from: toIso(addDays(localDate(today), -SUMMARY_LOOKBACK_DAYS)),
     to: toIso(addDays(localDate(today), SUMMARY_LOOKAHEAD_DAYS)),
   }), [today]);
-  const summaryEvents = useCalendarEvents({ scope, ...summaryRange });
-  const summary = useMemo(() => summariseAssets(summaryEvents.events, today), [summaryEvents.events, today]);
+  // Under the `['calendar']` family so a reschedule or any calendar invalidation refreshes
+  // it too; deliberately NOT persisted (no PERSIST_DEFAULTS) — it is three numbers.
+  const summaryQuery = useQuery({
+    queryKey: ['calendar', `building:${buildingId}`, 'asset-summary', summaryRange.from, summaryRange.to],
+    queryFn: async (): Promise<CalendarEvent[]> => {
+      const { data, error } = await supabase
+        .from('building_assets')
+        .select('id, name, next_service_date')
+        .eq('building_id', buildingId)
+        .gte('next_service_date', summaryRange.from)
+        .lte('next_service_date', summaryRange.to)
+        .order('next_service_date');
+      if (error) throw new Error(error.message);
+      return (data ?? []).flatMap((row) => {
+        const e = assetEvent({ ...row, building_id: buildingId }, buildingName, today);
+        return e ? [e] : [];
+      });
+    },
+  });
+  const summary = useMemo(() => summariseAssets(summaryQuery.data ?? [], today), [summaryQuery.data, today]);
 
   return (
     <div className="space-y-6">

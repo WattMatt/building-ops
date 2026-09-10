@@ -47,11 +47,6 @@ export function useSourceFilters(uid: string | null | undefined) {
     setHiddenState(readHidden(uid));
   }, [uid]);
 
-  const setHidden = useCallback((next: Set<CalendarKind>) => {
-    setHiddenState(next);
-    writeHidden(uid, next);
-  }, [uid]);
-
   const toggle = useCallback((kind: CalendarKind) => {
     setHiddenState((prev) => {
       const next = new Set(prev);
@@ -61,7 +56,7 @@ export function useSourceFilters(uid: string | null | undefined) {
     });
   }, [uid]);
 
-  return { hidden, setHidden, toggle };
+  return { hidden, toggle };
 }
 
 /** Drops events whose kind is hidden; a no-op copy when nothing is hidden. */

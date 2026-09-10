@@ -146,7 +146,8 @@ export function CalendarGrid({ month, events, today = todayInOperatingTz(), onSe
                     aria-label={`Open ${format(date, 'EEEE d MMMM')}`}
                     aria-current={isToday ? 'date' : undefined}
                     className={cn(
-                      'flex h-7 w-7 items-center justify-center self-start rounded-full text-xs font-medium sm:min-h-11 sm:min-w-11',
+                      // 44 px on phones; from `sm` up the cell has room for a compact 28 px circle.
+                      'flex min-h-11 min-w-11 items-center justify-center self-start rounded-full text-xs font-medium sm:h-7 sm:w-7 sm:min-h-0 sm:min-w-0',
                       isToday && 'ring-2 ring-primary text-primary',
                       onSelectDate && 'hover:bg-muted',
                     )}
@@ -169,7 +170,7 @@ export function CalendarGrid({ month, events, today = todayInOperatingTz(), onSe
                       <button
                         type="button"
                         onClick={() => onSelectDate?.(dateIso)}
-                        className="min-h-6 rounded px-1.5 text-left text-xs text-muted-foreground hover:bg-muted"
+                        className="min-h-11 min-w-11 rounded px-1.5 text-left text-xs text-muted-foreground hover:bg-muted sm:min-h-6 sm:min-w-0"
                         aria-label={`${overflow} more on ${format(date, 'd MMMM')}`}
                       >
                         +{overflow} more

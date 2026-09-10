@@ -60,6 +60,27 @@ function shiftDate(ymd: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Every `YYYY-MM` key from the month of `from` to the month of `to`, inclusive (both YYYY-MM-DD). */
+function monthKeysBetween(from: string, to: string): string[] {
+  const [fy, fm] = from.split("-").map(Number);
+  const [ty, tm] = to.split("-").map(Number);
+  const keys: string[] = [];
+  for (let y = fy, m = fm; y < ty || (y === ty && m <= tm); m === 12 ? ((y += 1), (m = 1)) : (m += 1)) {
+    keys.push(`${y}-${String(m).padStart(2, "0")}`);
+  }
+  return keys;
+}
+
+/**
+ * The body of a PostgREST `or=(...)` that keeps only `ppm_services` rows whose `months` grid
+ * has a cell for at least one month in `[from, to]` — the same filter the web app's
+ * `useCalendarEvents` sends (`months->2026-09.not.is.null`, verified against the live REST
+ * endpoint). The day-level window is still applied after the mapper expands the cells.
+ */
+function ppmMonthsFilter(from: string, to: string): string {
+  return monthKeysBetween(from, to).map((k) => `months->${k}.not.is.null`).join(",");
+}
+
 function textResponse(status: number, body: string, headers: Record<string, string>): Response {
   return new Response(body, {
     status,
@@ -223,12 +244,16 @@ serve(async (req: Request): Promise<Response> => {
           .lte("next_service_date", to)
           .order("next_service_date")
           .limit(ROW_CAP),
-        // PPM rows hold a jsonb of month cells; the mapper expands them and the window is
-        // applied afterwards, so no date filter or date order is possible at the query.
+        // PPM rows hold a jsonb of month cells. Rows are limited to those with a cell in one
+        // of the window's months; the mapper expands them and the day-level window is applied
+        // afterwards. There is no date column to order by, so the cap cuts by id instead —
+        // deterministic, but not "the far end of the window" like the other sources.
         supabase
           .from("ppm_services")
           .select("id, building_id, service_name, months, report_id")
           .in("building_id", buildingIds)
+          .or(ppmMonthsFilter(from, to))
+          .order("id")
           .limit(ROW_CAP),
         // Fortress reports live in the same database, so the same client reads them.
         supabase

@@ -239,7 +239,13 @@ export function CalendarView({ scope, view, date, onViewChange, onDateChange, to
             onReschedule={isAdminOrManager ? handleReschedule : undefined}
           />
         ) : (
-          <CalendarWeek week={date} today={today} events={visible} onSelectEvent={openEvent} />
+          <CalendarWeek
+            week={date}
+            today={today}
+            events={visible}
+            onSelectEvent={openEvent}
+            onReschedule={isAdminOrManager ? handleReschedule : undefined}
+          />
         )}
         {showSidePanel && (
           <aside aria-label="Selected day" className="space-y-2 rounded-md border p-3">

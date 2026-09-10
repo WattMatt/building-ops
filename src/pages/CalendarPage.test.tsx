@@ -239,6 +239,27 @@ describe('CalendarPage', () => {
     expect(track).not.toHaveBeenCalledWith('task_rescheduled', expect.anything());
   });
 
+  it('lets an admin/manager move a task from the week view on a phone via the Move button', async () => {
+    mockViewport(375);
+    renderAt('/calendar');
+    expect(screen.getByTestId('calendar-week')).toBeInTheDocument();
+    expect(screen.getByText(/Tap Move on a task/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Move Check roof' }));
+    fireEvent.change(screen.getByLabelText('Move Check roof to'), { target: { value: '2026-09-12' } });
+    await waitFor(() => expect(state.reschedule).toHaveBeenCalledWith('t1', '2026-09-12'));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Task moved to Sat 12 Sep'));
+    expect(track).toHaveBeenCalledWith('task_rescheduled', { scope: 'portfolio' });
+  });
+
+  it('keeps the week view read-only for site roles on a phone: no Move button, no hint', () => {
+    state.isAdminOrManager = false;
+    mockViewport(375);
+    renderAt('/calendar');
+    expect(screen.getByTestId('calendar-week')).toBeInTheDocument();
+    expect(screen.queryByText(/Tap Move on a task/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Move / })).toBeNull();
+  });
+
   it('keeps the grid read-only for site roles: no drag hint, a drop does nothing', () => {
     state.isAdminOrManager = false;
     renderAt('/calendar');

@@ -3,7 +3,8 @@
  * Calendar feed smoke — the `ics-feed` edge function end to end against the live backend,
  * with disposable fixtures it cleans up:
  *
- *   buildings A and B  →  site user assigned to A  →  two pending tasks in A, one in B  →
+ *   buildings A and B  →  site user assigned to A  →  two pending tasks in A, one in B, a
+ *   PPM service in A with one month cell in the feed's window and one years away  →
  *   user token (minted with the service role, exactly as the app's `calendar_tokens` insert
  *   would)  →  GET /functions/v1/ics-feed?t=<token> with NO other credential, the way
  *   Outlook / Google / Apple Calendar fetch it.
@@ -14,6 +15,8 @@
  * What it proves:
  *   - a USER token serves the owner's buildings only: A's task UIDs present, B's absent
  *     (no cross-building leakage), `text/calendar`, an `X-WR-CALNAME` line;
+ *   - a PPM month cell inside the window is served (UID `ppm-<id>-<YYYY-MM>`) and a cell
+ *     years out is not — the month filter and the day-level window both hold;
  *   - a BUILDING token for A serves both A tasks and nothing from B;
  *   - a building token for B — a building the owner cannot access — is a 404, even though
  *     the token row exists (the feed applies the OWNER's access, not the token's);
@@ -124,6 +127,8 @@ async function feed(token) {
   return { status: res.status, type: res.headers.get('content-type') ?? '', body: await res.text() };
 }
 const uidLine = (taskId) => `UID:task-${taskId}@buildingops.app`;
+/** The feed's UID for one PPM month cell — `ppmEvents` in `_shared/calendar.ts`: `ppm-<row id>-<YYYY-MM>`. */
+const ppmUidLine = (ppmId, month) => `UID:ppm-${ppmId}-${month}@buildingops.app`;
 /** Unfold RFC 5545 continuation lines so a UID or header line can be matched whole. */
 const unfold = (ics) => ics.replace(/\r\n[ \t]/g, '');
 
@@ -149,7 +154,18 @@ try {
   const taskA1 = await mkTask(buildingA, 'A1');
   const taskA2 = await mkTask(buildingA, 'A2');
   const taskB1 = await mkTask(buildingB, 'B1');
-  ok('fixtures: buildings A + B, site user assigned to A, two pending tasks in A and one in B');
+
+  // One PPM service in A: a `due` cell this month (dated today, inside the feed's ±window)
+  // and a `due` cell three years out, well past DAYS_FORWARD — served / not served.
+  const ppmMonthIn = today.slice(0, 7);
+  const ppmMonthOut = `${Number(today.slice(0, 4)) + 3}-01`;
+  const ppm = await svcInsert('ppm_services', {
+    building_id: buildingA,
+    service_name: `ZZTEST-CAL PPM ${RUN}`,
+    months: { [ppmMonthIn]: { status: 'due', date: today }, [ppmMonthOut]: { status: 'due' } },
+  });
+  cleanup.unshift(['ppm_services', `id=eq.${ppm.id}`]);
+  ok('fixtures: buildings A + B, site user assigned to A, two pending tasks in A and one in B, a PPM service in A');
 
   // ── 1. user token: the owner's buildings only ──
   const userTok = await issueToken(userId, null, `ZZTEST user ${RUN}`);
@@ -162,6 +178,8 @@ try {
   assert('user token: task A2 UID present', ics.includes(uidLine(taskA2)), `missing ${uidLine(taskA2)}`);
   assert('user token: task B1 UID absent (no cross-building leakage)', !ics.includes(uidLine(taskB1)), `found ${uidLine(taskB1)} — a site user\'s feed served another building`);
   assert('user token: document is a VCALENDAR with CRLF endings', ics.startsWith('BEGIN:VCALENDAR\r\n') && r.body.endsWith('END:VCALENDAR\r\n'), r.body.slice(0, 60));
+  assert('user token: in-window PPM month cell UID present', ics.includes(ppmUidLine(ppm.id, ppmMonthIn)), `missing ${ppmUidLine(ppm.id, ppmMonthIn)}`);
+  assert('user token: PPM month cell three years out is absent', !ics.includes(ppmUidLine(ppm.id, ppmMonthOut)), `found ${ppmUidLine(ppm.id, ppmMonthOut)} — the feed window is not applied to PPM cells`);
 
   // ── 2. building token for A: both A tasks, nothing from B ──
   const bldTokA = await issueToken(userId, buildingA, `ZZTEST building A ${RUN}`);

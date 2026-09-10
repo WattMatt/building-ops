@@ -23,6 +23,19 @@ function stubPermission(permission: NotificationPermission) {
   });
 }
 
+/**
+ * The error a hook action rejects with, caught inside `act`. `await expect(act(...)).rejects`
+ * does not work: React's `act` returns a thenable whose `then` returns undefined, so vitest's
+ * `.rejects` resolves at once and the assertion never runs.
+ */
+async function rejectionOf(run: () => Promise<unknown>): Promise<unknown> {
+  let rejection: unknown;
+  await act(async () => {
+    await run().catch((e: unknown) => { rejection = e; });
+  });
+  return rejection;
+}
+
 describe('usePushSubscription', () => {
   beforeEach(() => {
     lib.pushSupport.mockReset().mockReturnValue('ok');
@@ -101,9 +114,7 @@ describe('usePushSubscription', () => {
     const { result } = renderHook(() => usePushSubscription('u1'));
     await waitFor(() => expect(result.current.status).toBe('off'));
 
-    await expect(act(async () => {
-      await result.current.enable();
-    })).rejects.toThrow('boom');
+    expect(await rejectionOf(() => result.current.enable())).toMatchObject({ message: 'boom' });
 
     expect(result.current.status).toBe('off');
     expect(analytics.track).not.toHaveBeenCalled();
@@ -141,9 +152,7 @@ describe('usePushSubscription', () => {
     const { result } = renderHook(() => usePushSubscription('u1'));
     await waitFor(() => expect(result.current.status).toBe('on'));
 
-    await expect(act(async () => {
-      await result.current.disable();
-    })).rejects.toThrow('offline');
+    expect(await rejectionOf(() => result.current.disable())).toMatchObject({ message: 'offline' });
 
     expect(result.current.status).toBe('on');
   });
