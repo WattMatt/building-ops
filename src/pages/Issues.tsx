@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { formatBuildingName } from '@/lib/buildingName';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIssues } from '@/hooks/useIssues';
+import { useNow } from '@/hooks/useNow';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { queuedIssues, type QueuedIssueRow } from '@/lib/offline/pendingOverlay';
 import { subscribeQueue } from '@/lib/offline/queue';
@@ -59,6 +60,8 @@ const statusLabels: Record<IssueStatus, string> = {
 export default function Issues() {
   const { isAdminOrManager, user } = useAuth();
   const { issues, stats, loading, error, refetch } = useIssues();
+  // One ticking clock for every SLA chip on the page (a minute is the chips' finest unit).
+  const now = useNow();
   // The live list is not react-query backed, so a background replay (OfflineQueueRunner) would
   // otherwise leave a just-synced issue as a stale queued row: every queue mutation refetches.
   // Not while offline, though: the fetch would only fail (and flash the spinner over the queued
@@ -414,7 +417,7 @@ export default function Issues() {
                     <Badge variant="secondary" className={statusColors[issue.status]}>
                       {statusLabels[issue.status]}
                     </Badge>
-                    <SlaChip issue={issue} />
+                    <SlaChip issue={issue} now={now} />
                   </div>
                 </div>
               </CardContent>

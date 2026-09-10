@@ -54,6 +54,7 @@ vi.mock('@/components/issues/ResolveIssueDialog', () => ({
 }));
 
 import IssueDetailDialog from './IssueDetailDialog';
+import { formatSlaInstant } from '@/lib/slaState';
 
 const issue = {
   id: 'i1',
@@ -88,6 +89,32 @@ describe('IssueDetailDialog', () => {
     render(<IssueDetailDialog issue={issue} open onOpenChange={() => {}} canManage onUpdated={() => {}} />);
     expect(await screen.findByRole('heading', { name: /leaking tap in kitchen/i })).toBeInTheDocument();
     expect(document.querySelector('[data-vaul-drawer]')).not.toBeNull();
+  });
+
+  describe('SLA', () => {
+    it('shows the live chip and the due and first-response instants in SAST', async () => {
+      // Reported half an hour ago with a 24 h target: 23.5 h left, floored to whole hours.
+      const created = new Date(Date.now() - 30 * 60_000);
+      const firstResponse = new Date(created.getTime() + 10 * 60_000);
+      const due = new Date(created.getTime() + 24 * 3_600_000);
+      render(
+        <IssueDetailDialog
+          issue={{ ...issue, created_at: created.toISOString(), sla_target_hours: 24, first_response_at: firstResponse.toISOString() }}
+          open onOpenChange={() => {}} canManage onUpdated={() => {}}
+        />,
+      );
+      expect(await screen.findByText('Due in 23h')).toHaveAttribute('data-sla', 'ok');
+      const line = screen.getByText(/SLA target 24 h/);
+      expect(line.textContent).toContain(`due ${formatSlaInstant(due)}`);
+      expect(line.textContent).toContain(`first response ${formatSlaInstant(firstResponse)}`);
+    });
+
+    it('shows no SLA line or chip without a target', async () => {
+      render(<IssueDetailDialog issue={issue} open onOpenChange={() => {}} canManage onUpdated={() => {}} />);
+      await screen.findByRole('heading', { name: /leaking tap in kitchen/i });
+      expect(screen.queryByText(/SLA target/)).not.toBeInTheDocument();
+      expect(document.querySelector('[data-sla]')).toBeNull();
+    });
   });
 
   describe('contractor (admin/manager)', () => {

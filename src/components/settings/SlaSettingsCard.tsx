@@ -16,21 +16,32 @@ import { PRIORITY_LABELS } from '@/lib/constants';
 type Draft = Record<SlaPriority, string>;
 const toDraft = (h: SlaHours): Draft => ({ critical: String(h.critical), high: String(h.high), medium: String(h.medium), low: String(h.low) });
 
+/** A whole number of hours inside the allowed range; "" and "4.5" are both rejected. */
+function parseHours(value: string): number | null {
+  const n = Number(value);
+  return value.trim() !== '' && Number.isInteger(n) && n >= SLA_HOURS_MIN && n <= SLA_HOURS_MAX ? n : null;
+}
+
 function parse(draft: Draft): SlaHours | null {
   const out = {} as SlaHours;
   for (const p of SLA_PRIORITIES) {
-    const n = Number(draft[p]);
-    if (!Number.isInteger(n) || n < SLA_HOURS_MIN || n > SLA_HOURS_MAX) return null;
+    const n = parseHours(draft[p]);
+    if (n === null) return null;
     out[p] = n;
   }
   return out;
 }
 
+const ERROR_ID = 'sla-hours-error';
+
 export function SlaSettingsCard({ canEdit }: { canEdit: boolean }) {
-  const { settings, isLoading, save, isSaving } = useOrgSettings();
+  const { settings, isLoading, isError, save, isSaving } = useOrgSettings();
   const [draft, setDraft] = useState<Draft>(toDraft(settings.sla_hours));
   useEffect(() => { setDraft(toDraft(settings.sla_hours)); }, [settings.sla_hours]);
   const parsed = parse(draft);
+  // Nothing to edit until the real values are in: the defaults shown while loading or after a failed
+  // load are not the org's, and saving them would silently overwrite whatever is stored.
+  const locked = !canEdit || isLoading || isError;
 
   const onSave = async () => {
     if (!parsed) return;
@@ -51,32 +62,41 @@ export function SlaSettingsCard({ canEdit }: { canEdit: boolean }) {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
-          {SLA_PRIORITIES.map((p) => (
-            <div key={p} className="space-y-2">
-              <Label htmlFor={`sla-${p}`}>{PRIORITY_LABELS[p]} (hours)</Label>
-              <Input
-                id={`sla-${p}`}
-                type="number"
-                inputMode="numeric"
-                min={SLA_HOURS_MIN}
-                max={SLA_HOURS_MAX}
-                className="h-11"
-                value={draft[p]}
-                onChange={(e) => setDraft({ ...draft, [p]: e.target.value })}
-                disabled={!canEdit || isLoading}
-              />
-            </div>
-          ))}
+          {SLA_PRIORITIES.map((p) => {
+            const invalid = parseHours(draft[p]) === null;
+            return (
+              <div key={p} className="space-y-2">
+                <Label htmlFor={`sla-${p}`}>{PRIORITY_LABELS[p]} (hours)</Label>
+                <Input
+                  id={`sla-${p}`}
+                  type="number"
+                  inputMode="numeric"
+                  min={SLA_HOURS_MIN}
+                  max={SLA_HOURS_MAX}
+                  step={1}
+                  className="h-11"
+                  value={draft[p]}
+                  onChange={(e) => setDraft({ ...draft, [p]: e.target.value })}
+                  disabled={locked}
+                  aria-invalid={invalid || undefined}
+                  aria-describedby={invalid ? ERROR_ID : undefined}
+                />
+              </div>
+            );
+          })}
         </div>
+        {isError && <p className="text-sm text-destructive">Settings could not be loaded</p>}
         {!parsed && (
-          <p className="text-xs text-destructive">Every value must be a whole number of hours from {SLA_HOURS_MIN} to {SLA_HOURS_MAX}.</p>
+          <p id={ERROR_ID} className="text-xs text-destructive">
+            Every value must be a whole number of hours from {SLA_HOURS_MIN} to {SLA_HOURS_MAX}.
+          </p>
         )}
         <Hint>
           Existing issues keep the target they were created with. A breached issue is flagged on its card and in the inbox of its
           assignee and every admin and manager, checked every 15 minutes.
         </Hint>
         {canEdit && (
-          <Button className="min-h-11" onClick={onSave} disabled={!parsed || isSaving || isLoading}>
+          <Button className="min-h-11" onClick={onSave} disabled={!parsed || isSaving || locked}>
             {isSaving ? 'Saving…' : 'Save'}
           </Button>
         )}

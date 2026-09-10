@@ -1,13 +1,14 @@
 /**
  * The SLA state of an issue as a chip. A guardrail, not coaching: it stays visible with hints off.
- * `none` renders nothing — an issue without a target has no clock to show.
+ * `none` renders nothing — an issue without a target has no clock to show. Pass `now` from `useNow`
+ * so the wording keeps up with the clock; without it the chip is frozen at render time.
  */
 import { Timer } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { slaState, type SlaIssueFields, type SlaKind } from '@/lib/slaState';
+import { formatSlaInstant, slaState, type SlaIssueFields, type SlaKind } from '@/lib/slaState';
 
-const CLASS: Record<Exclude<SlaKind, 'none'>, string> = {
+const KIND_CLASS: Record<Exclude<SlaKind, 'none'>, string> = {
   ok: 'border-border text-muted-foreground',
   due_soon: 'bg-warning text-warning-foreground border-transparent',
   breached: 'bg-destructive text-destructive-foreground border-transparent',
@@ -22,8 +23,8 @@ export function SlaChip({ issue, now, className }: { issue: SlaIssueFields; now?
     <Badge
       variant="outline"
       data-sla={s.kind}
-      title={s.due ? `SLA due ${s.due.toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg' })}` : undefined}
-      className={cn('gap-1 whitespace-nowrap', CLASS[s.kind], className)}
+      title={s.due ? `SLA due ${formatSlaInstant(s.due)}` : undefined}
+      className={cn('gap-1 whitespace-nowrap', KIND_CLASS[s.kind], className)}
     >
       <Timer className="h-3 w-3" aria-hidden="true" />
       {s.label}

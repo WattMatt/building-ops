@@ -31,7 +31,8 @@ import { ContractorPicker } from '@/components/contractors/ContractorPicker';
 import { IssueCommentComposer } from '@/components/issues/IssueCommentComposer';
 import { ResolveIssueDialog } from '@/components/issues/ResolveIssueDialog';
 import { SlaChip } from '@/components/issues/SlaChip';
-import { slaState } from '@/lib/slaState';
+import { formatSlaInstant, slaState } from '@/lib/slaState';
+import { useNow } from '@/hooks/useNow';
 import { notify } from '@/lib/notify';
 import { parseCost } from '@/lib/money';
 import { throwIfRefused } from '@/lib/pgErrors';
@@ -103,6 +104,9 @@ interface Props {
 export default function IssueDetailDialog({ issue, open, onOpenChange, canManage, onUpdated }: Props) {
   const { user } = useAuth();
   const { byId: members } = useBuildingMembers(issue.building_id);
+  // One ticking clock for the chip and the due line, so neither freezes at open time.
+  const now = useNow();
+  const sla = slaState(issue, now);
   const nameOf = (id: string | null | undefined) => (id && members.get(id) ? memberDisplayName(members.get(id)!) : null);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [activityError, setActivityError] = useState<string | null>(null);
@@ -282,7 +286,7 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
             {issue.deadline && (
               <span className="flex items-center gap-1 text-xs"><Clock className="h-3 w-3" />Due {format(new Date(issue.deadline), 'MMM d')}</span>
             )}
-            <SlaChip issue={issue} />
+            <SlaChip issue={issue} now={now} />
           </ResponsiveDialogDescription>
         </ResponsiveDialogHeader>
 
@@ -291,8 +295,8 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
           {issue.sla_target_hours != null && (
             <p className="text-xs text-muted-foreground">
               SLA target {issue.sla_target_hours} h
-              {issue.first_response_at ? ` · first response ${format(new Date(issue.first_response_at), 'MMM d, h:mm a')}` : ' · no response yet'}
-              {slaState(issue).due ? ` · due ${format(slaState(issue).due!, 'MMM d, h:mm a')}` : ''}
+              {issue.first_response_at ? ` · first response ${formatSlaInstant(new Date(issue.first_response_at))}` : ' · no response yet'}
+              {sla.due ? ` · due ${formatSlaInstant(sla.due)}` : ''}
             </p>
           )}
 

@@ -55,7 +55,8 @@ interface UseIssuesReturn {
   refetch: () => Promise<void>;
   /** The DB fills the SLA columns (trigger) and resolved_at, so they are not part of a new issue. */
   createIssue: (issue: NewIssueInput) => Promise<string | null>;
-  updateIssue: (id: string, updates: Partial<Issue>) => Promise<boolean>;
+  /** Same column set as create: the DB-stamped columns and the joined building_name are not writable. */
+  updateIssue: (id: string, updates: Partial<NewIssueInput>) => Promise<boolean>;
 }
 
 export function useIssues(
@@ -177,7 +178,7 @@ export function useIssues(
   );
 
   const updateIssue = useCallback(
-    async (id: string, updates: Partial<Issue>): Promise<boolean> => {
+    async (id: string, updates: Partial<NewIssueInput>): Promise<boolean> => {
       try {
         const { error: updateError } = await supabase
           .from('issues')

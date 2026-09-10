@@ -128,6 +128,14 @@ describe('Issues', () => {
     expect(screen.getByText('IssueDetailDialog open=true issue=Leaking pipe')).toBeInTheDocument();
   });
 
+  it('shows the SLA clock on an issue that has a target', () => {
+    // Reported half an hour ago with a 72 h target: 71.5 h left, floored to whole days.
+    const created = new Date(Date.now() - 30 * 60_000).toISOString();
+    state.data = baseData({ issues: [{ ...liveIssue, id: 'i2', title: 'Slow lift', sla_target_hours: 72, created_at: created }] });
+    renderPage();
+    expect(screen.getByText('Due in 2d')).toHaveAttribute('data-sla', 'ok');
+  });
+
   it('prepends a queued issue with a Queued chip before the live rows', () => {
     state.queuedOps = [queuedIssueOp()];
     renderPage();
