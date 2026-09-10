@@ -10,6 +10,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { Resend } from "https://esm.sh/resend@2.0.0";
 import { Branding, loadBranding, renderEmail } from "../_shared/email.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { adminAndManagerIds, createNotifications } from "../_shared/notify.ts";
 
 const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
 const APP_URL = (Deno.env.get("APP_URL") ?? "https://buildingops.app").replace(/\/+$/, "");
@@ -38,6 +39,37 @@ function escapeHtml(s: unknown): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/** Today in the operating timezone as `YYYY-MM-DD` ('en-CA' formats exactly that way). */
+function todayInJohannesburg(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Johannesburg",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+/**
+ * Midnight at the start of `today` (a `YYYY-MM-DD` from todayInJohannesburg) as an ISO instant,
+ * for the "already in the inbox today" check. South Africa has no daylight saving, so the
+ * offset is a constant +02:00 rather than a timezone lookup. Same helper as daily-digest.
+ */
+function startOfDayJohannesburgIso(today: string): string {
+  return new Date(`${today}T00:00:00+02:00`).toISOString();
+}
+
+function days(n: number): string {
+  return `${n} day${n === 1 ? "" : "s"}`;
+}
+
+/** Inbox title for a document: "expires in N days", "expires today" or "expired N days ago". */
+function documentTitle(doc: ExpiringDocument): string {
+  const n = doc.days_until_expiry;
+  if (n > 0) return `${doc.name} expires in ${days(n)}`;
+  if (n === 0) return `${doc.name} expires today`;
+  return `${doc.name} expired ${days(Math.abs(n))} ago`;
 }
 
 interface ExpiringDocument {
@@ -238,9 +270,98 @@ const handler = async (req: Request): Promise<Response> => {
     // caller — it is portfolio-wide confidential data.
     if (totalAlerts === 0) {
       console.log("No alerts to send");
-      return json({ success: true, totalAlerts: 0, recipientCount: 0 });
+      return json({ success: true, dryRun, totalAlerts: 0, recipientCount: 0, inboxRows: 0 });
     }
 
+    // ---- Inbox pass ---------------------------------------------------------------------
+    // One `document_expiring` / `asset_service_due` row per admin and manager per item per day,
+    // so the same alerts the summary email lists are also in the in-app inbox (R3a Task 6).
+    // Both kinds are DIGEST_ONLY in notifyRules.ts, so createNotifications writes the row and
+    // sends no per-item email — the summary email below stays the only email this function
+    // sends. `notifyAdmins` governs that email only; inbox rows are written regardless of it,
+    // because the inbox is the ledger. Only `dryRun` skips this pass.
+    // Idempotent per entity per day: a cron re-run (or a manual retry from the app) must not
+    // duplicate rows, so an item is skipped when a row of that kind for that entity already
+    // exists since midnight in Johannesburg. Per-item failures are logged and counted, never
+    // thrown, so one bad row cannot cost anyone the summary email.
+    let inboxRows = 0;
+    let inboxAlreadyToday = 0;
+    let inboxFailed = 0;
+
+    if (!dryRun) {
+      const inboxRecipients = await adminAndManagerIds(supabase);
+      if (inboxRecipients.length === 0) {
+        console.warn("No admin/manager recipients for inbox rows");
+      } else {
+        const sinceMidnight = startOfDayJohannesburgIso(todayInJohannesburg());
+        // Branding is only used for the (never sent) email `from` line here, but loading it
+        // once keeps createNotifications from re-reading it for every item.
+        const inboxBranding = await loadBranding(supabase);
+
+        type InboxItem = {
+          kind: "document_expiring" | "asset_service_due";
+          entityType: "document" | "asset";
+          entityId: string;
+          buildingId: string;
+          title: string;
+          body: string | null;
+          url: string;
+        };
+        const items: InboxItem[] = [
+          ...[...expiredDocuments, ...expiringDocuments].map((doc): InboxItem => ({
+            kind: "document_expiring",
+            entityType: "document",
+            entityId: doc.id,
+            buildingId: doc.building_id,
+            title: documentTitle(doc),
+            body: doc.document_type ?? null,
+            url: `/buildings/${doc.building_id}?tab=documents`,
+          })),
+          ...overdueMaintenance.map((asset): InboxItem => ({
+            kind: "asset_service_due",
+            entityType: "asset",
+            entityId: asset.id,
+            buildingId: asset.building_id,
+            title: `${asset.name} service overdue by ${days(asset.days_overdue)}`,
+            body: asset.category ?? null,
+            url: `/buildings/${asset.building_id}?tab=assets`,
+          })),
+        ];
+
+        for (const item of items) {
+          try {
+            const { count: alreadyToday, error: dupErr } = await supabase
+              .from("notifications")
+              .select("id", { count: "exact", head: true })
+              .eq("kind", item.kind)
+              .eq("entity_id", item.entityId)
+              .gte("created_at", sinceMidnight);
+            if (dupErr) throw new Error(`Could not check today's notifications: ${dupErr.message}`);
+            if ((alreadyToday ?? 0) > 0) { inboxAlreadyToday++; continue; }
+
+            const result = await createNotifications(supabase, {
+              recipients: inboxRecipients,
+              actorId: null,
+              actorName: null,
+              kind: item.kind,
+              entityType: item.entityType,
+              entityId: item.entityId,
+              buildingId: item.buildingId,
+              title: item.title,
+              body: item.body,
+              url: item.url,
+            }, inboxBranding);
+            inboxRows += result.inserted;
+          } catch (e) {
+            console.error("notify-expiring-alerts: inbox row failed", item.kind, item.entityId, e);
+            inboxFailed++;
+          }
+        }
+      }
+      console.log(`Inbox rows: ${inboxRows} written, ${inboxAlreadyToday} already today, ${inboxFailed} failed`);
+    }
+
+    // ---- Email pass ---------------------------------------------------------------------
     let recipientCount = 0;
 
     if (notifyAdmins) {
@@ -314,6 +435,9 @@ const handler = async (req: Request): Promise<Response> => {
       dryRun,
       totalAlerts,
       recipientCount,
+      inboxRows,
+      inboxAlreadyToday,
+      inboxFailed,
     });
   } catch (error) {
     console.error("Error in notify-expiring-alerts:", error);

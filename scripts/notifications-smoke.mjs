@@ -11,7 +11,7 @@
  * report_submitted, which notifies and EMAILS every real admin/manager.
  *
  *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... SUPABASE_ANON_KEY=... \
- *   node scripts/notifications-smoke.mjs
+ *   [EXPIRING_ALERTS_SECRET=...] node scripts/notifications-smoke.mjs
  *
  * Checks POST /functions/v1/notify (supabase/functions/notify/index.ts):
  *   task_assigned, recipients=[self]              → 200, inserted 0, no inbox row (actor excluded)
@@ -24,6 +24,13 @@
  *   report_submitted, recipients=[] (org-wide)     → 200, inserted ≥1, resolves admins/managers
  * …and the notifications table's own RLS: recipient can mark their row read,
  * a non-recipient's update touches zero rows.
+ *
+ * With EXPIRING_ALERTS_SECRET set (the same value as the edge function's secret), it also
+ * checks POST /functions/v1/notify-expiring-alerts (supabase/functions/notify-expiring-alerts):
+ *   building document expiring in 3 days, notifyAdmins:false → 200, inboxRows ≥ 1, exactly one
+ *                                                    document_expiring row for the admin persona
+ *   same call again                                → still exactly one (idempotent per day)
+ * Without the secret that step is SKIPped, not failed.
  */
 
 const URL_BASE = process.env.SUPABASE_URL;
@@ -314,6 +321,54 @@ try {
     );
   });
 
+  // ════ 8: notify-expiring-alerts writes document_expiring inbox rows, once per entity per day ════
+  // Cron-shaped function: authorised by `x-alerts-secret`, not a persona JWT. `notifyAdmins:false`
+  // keeps its summary email off (the function documents that the flag governs the email only —
+  // inbox rows are written regardless; only `dryRun` skips them). Note the function scans the
+  // whole project, so on a shared backend it also writes today's rows for any real expiring
+  // documents / overdue assets to the real admins and managers — inbox only, no email.
+  await step('notify-expiring-alerts: inbox rows', async () => {
+    const secret = process.env.EXPIRING_ALERTS_SECRET;
+    if (!secret) {
+      skip('expiring alerts inbox rows', 'EXPIRING_ALERTS_SECRET not set');
+      return;
+    }
+    const expiry = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+    const doc = await svcInsert('building_documents', {
+      building_id: A, name: `ZZTEST-NOTIFY-DOC-${RUN}`, document_type: 'Fire certificate', expiry_date: expiry,
+    });
+    cleanup.push(['building_documents', doc.id]);
+
+    const call = async () => {
+      const res = await fetch(`${URL_BASE}/functions/v1/notify-expiring-alerts`, {
+        method: 'POST',
+        headers: { 'x-alerts-secret': secret, apikey: ANON, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notifyAdmins: false }),
+      });
+      const json = await res.json().catch(() => ({}));
+      return { status: res.status, body: json };
+    };
+    const adminRows = () => svcSelectF(
+      'notifications',
+      `kind=eq.document_expiring&entity_id=eq.${doc.id}&recipient_id=eq.${personas.admin.id}`,
+    );
+
+    const first = await call();
+    assert('expiring alerts: HTTP 200', first.status === 200, `HTTP ${first.status} ${JSON.stringify(first.body).slice(0, 160)}`);
+    assert('expiring alerts: inboxRows >= 1', (first.body?.inboxRows ?? 0) >= 1, `inboxRows=${JSON.stringify(first.body?.inboxRows)}`);
+    console.log(`  info: expiring alerts inboxRows=${first.body?.inboxRows} alreadyToday=${first.body?.inboxAlreadyToday} failed=${first.body?.inboxFailed}`);
+    await registerCleanup(doc.id); // every recipient's row for this document, LIFO before the document
+    const rows = await adminRows();
+    assert('expiring alerts: exactly one document_expiring row for the admin', rows.length === 1, `found ${rows.length} row(s)`);
+    assert('expiring alerts: row deep-links to the building documents tab', rows[0]?.url === `/buildings/${A}?tab=documents`, `url=${rows[0]?.url}`);
+    assert('expiring alerts: row title names the document', typeof rows[0]?.title === 'string' && rows[0].title.startsWith(`ZZTEST-NOTIFY-DOC-${RUN}`), `title=${rows[0]?.title}`);
+
+    const second = await call();
+    assert('expiring alerts re-run: HTTP 200', second.status === 200, `HTTP ${second.status} ${JSON.stringify(second.body).slice(0, 160)}`);
+    const rowsAfter = await adminRows();
+    assert('expiring alerts re-run: still exactly one row (idempotent per day)', rowsAfter.length === 1, `found ${rowsAfter.length} row(s)`);
+  });
+
   console.log('  notify function + inbox RLS: done');
 } catch (e) {
   fail('smoke run', e.message);
@@ -330,6 +385,9 @@ try {
       await fetch(`${URL_BASE}/auth/v1/admin/users/${u.id}`, { method: 'DELETE', headers: SVC });
     }
   }
+  // sweep stray ZZTEST-NOTIFY-* building documents first (step 8 fixture); they may
+  // not cascade with their building.
+  await fetch(`${URL_BASE}/rest/v1/building_documents?name=like.ZZTEST-NOTIFY-*`, { method: 'DELETE', headers: SVC });
   // sweep stray ZZTEST-NOTIFY-* buildings from earlier aborted runs — their
   // notification rows cascade-delete with the building, so a killed run
   // self-heals here rather than accumulating.
