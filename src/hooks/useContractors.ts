@@ -12,10 +12,6 @@
  *   that `openStorageFile` re-signs, so older rows saved as URLs keep working too.
  * - `useContractorHistory(contractorId)` — everything the register has done: issues assigned
  *   to it, asset services it performed, and the ratings it received on resolve.
- *
- * `contractors.address/vat_number/default_trade_role`, `contractor_documents.notes` and the
- * `contractor_ratings` table are not yet in the generated types; regenerate after the migration
- * ships and drop the casts marked below.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
@@ -33,12 +29,7 @@ export const CONTRACTOR_DOCS_PREFIX = 'contractor-docs';
 /** Plain guardrail copy for a write that RLS filtered to nothing. */
 export const CONTRACTOR_PERMISSION_MESSAGE = 'Only admins and managers can change the contractor register.';
 
-// address, vat_number and default_trade_role are not yet in the generated types; regenerate after the migration ships.
-export type Contractor = Tables<'contractors'> & {
-  address: string | null;
-  vat_number: string | null;
-  default_trade_role: string | null;
-};
+export type Contractor = Tables<'contractors'>;
 
 /** What the dialog collects. Everything but the company name is optional. */
 export interface ContractorInput {
@@ -54,8 +45,7 @@ export interface ContractorInput {
   is_active: boolean;
 }
 
-// notes is not yet in the generated types; regenerate after the migration ships.
-export type ContractorDocument = Tables<'contractor_documents'> & { notes: string | null };
+export type ContractorDocument = Tables<'contractor_documents'>;
 
 export interface ContractorDocumentMeta {
   document_name: string;
@@ -64,16 +54,7 @@ export interface ContractorDocumentMeta {
   notes?: string | null;
 }
 
-// contractor_ratings is not yet in the generated types; regenerate after the migration ships.
-export interface ContractorRating {
-  id: string;
-  contractor_id: string;
-  issue_id: string | null;
-  rating: number;
-  comment: string | null;
-  rated_by: string | null;
-  created_at: string;
-}
+export type ContractorRating = Tables<'contractor_ratings'>;
 
 export interface ContractorIssue {
   id: string;
@@ -99,12 +80,6 @@ export interface ContractorService {
   building_id: string | null;
 }
 
-/** A joined `buildings(name)` comes back as an object, or null when the row has no building. */
-type JoinedBuilding = { name: string | null } | null;
-type RawIssue = Omit<ContractorIssue, 'building_name'> & { buildings: JoinedBuilding };
-type JoinedAsset = { name: string | null; building_id: string } | null;
-type RawService = Omit<ContractorService, 'asset_name' | 'building_id'> & { building_assets: JoinedAsset };
-
 /** `.select('id')` after a write: zero rows means RLS filtered the row away, not that it worked. */
 function assertWrote(rows: { id: string }[] | null, error: { message: string } | null): string {
   if (error) throw new Error(error.message);
@@ -123,7 +98,7 @@ export function useContractors() {
         .select('*')
         .order('company_name', { ascending: true });
       if (error) throw new Error(error.message);
-      return (data ?? []) as Contractor[];
+      return data ?? [];
     },
     staleTime: 5 * 60_000,
   });
@@ -205,7 +180,7 @@ export function useContractorDocuments(contractorId: string | null | undefined) 
         .eq('contractor_id', contractorId!)
         .order('uploaded_at', { ascending: false });
       if (error) throw new Error(error.message);
-      return (data ?? []) as ContractorDocument[];
+      return data ?? [];
     },
     enabled: !!contractorId,
     staleTime: 60_000,
@@ -291,7 +266,7 @@ export function useContractorHistory(contractorId: string | null | undefined) {
         .eq('contractor_id', contractorId!)
         .order('created_at', { ascending: false });
       if (error) throw new Error(error.message);
-      return ((data ?? []) as unknown as RawIssue[]).map(({ buildings, ...row }) => ({
+      return (data ?? []).map(({ buildings, ...row }) => ({
         ...row,
         building_name: buildings?.name ?? null,
       }));
@@ -309,7 +284,7 @@ export function useContractorHistory(contractorId: string | null | undefined) {
         .eq('contractor_id', contractorId!)
         .order('service_date', { ascending: false });
       if (error) throw new Error(error.message);
-      return ((data ?? []) as unknown as RawService[]).map(({ building_assets, ...row }) => ({
+      return (data ?? []).map(({ building_assets, ...row }) => ({
         ...row,
         asset_name: building_assets?.name ?? null,
         building_id: building_assets?.building_id ?? null,
@@ -323,13 +298,12 @@ export function useContractorHistory(contractorId: string | null | undefined) {
     queryKey: [...key, 'ratings'],
     queryFn: async (): Promise<ContractorRating[]> => {
       const { data, error } = await supabase
-        // contractor_ratings is not yet in the generated types; regenerate after the migration ships.
-        .from('contractor_ratings' as never)
+        .from('contractor_ratings')
         .select('id, contractor_id, issue_id, rating, comment, rated_by, created_at')
         .eq('contractor_id', contractorId!)
         .order('created_at', { ascending: false });
       if (error) throw new Error(error.message);
-      return (data ?? []) as unknown as ContractorRating[];
+      return data ?? [];
     },
     enabled,
     staleTime: 60_000,

@@ -47,15 +47,14 @@ async function insertContractorRating(
 ): Promise<RatingWriteOutcome> {
   try {
     const { error } = await supabase
-      // contractor_ratings is not yet in the generated types; regenerate after the migration ships.
-      .from('contractor_ratings' as never)
+      .from('contractor_ratings')
       .insert({
         contractor_id: rating.contractorId,
         issue_id: issueId,
         rating: rating.rating,
         comment: rating.comment,
         rated_by: uid,
-      } as never);
+      });
     if (!error) return 'saved';
     if (isDuplicate(error)) return 'duplicate';
     // supabase-js wraps a dead connection into a plain error object rather than throwing it.

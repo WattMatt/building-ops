@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, Download, Wallet } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -55,27 +56,31 @@ export function monthLabel(month: string): string {
   return MONTH_LABEL.format(new Date(Date.UTC(y, m - 1, 1)));
 }
 
-// building_month_costs is not yet in the generated types; regenerate after the migration ships.
-type ViewResult = PromiseLike<{ data: MonthCostRow[] | null; error: { message: string } | null }>;
-interface ViewQuery {
-  eq: (column: string, value: string) => ViewQuery & ViewResult;
-  in: (column: string, values: string[]) => ViewQuery & ViewResult;
-}
 const monthCostsView = () =>
-  (supabase as unknown as { from: (table: string) => { select: (columns: string) => ViewQuery } })
-    .from('building_month_costs')
-    .select('building_id, month, issues_actual, services_cost, total');
+  supabase.from('building_month_costs').select('building_id, month, issues_actual, services_cost, total');
+
+/**
+ * The view groups by building and month, so neither is ever null in practice; the generated
+ * types make every view column nullable, so a row without them is dropped here rather than
+ * carried around as a maybe.
+ */
+function toMonthCostRow(r: Tables<'building_month_costs'>): MonthCostRow | null {
+  if (!r.building_id || !r.month) return null;
+  return { building_id: r.building_id, month: r.month, issues_actual: r.issues_actual, services_cost: r.services_cost, total: r.total };
+}
 
 async function fetchMonth(buildingId: string, month: string): Promise<MonthCostRow | null> {
   const { data, error } = await monthCostsView().eq('building_id', buildingId).eq('month', month);
   if (error) throw new Error(error.message);
-  return data?.[0] ?? null;
+  const row = data?.[0];
+  return row ? toMonthCostRow(row) : null;
 }
 
 async function fetchMonths(buildingId: string, months: string[]): Promise<MonthCostRow[]> {
   const { data, error } = await monthCostsView().eq('building_id', buildingId).in('month', months);
   if (error) throw new Error(error.message);
-  const byMonth = new Map((data ?? []).map((r) => [r.month, r]));
+  const rows = (data ?? []).flatMap((r) => toMonthCostRow(r) ?? []);
+  const byMonth = new Map(rows.map((r) => [r.month, r]));
   // Every requested month appears, zero-filled, so the list and the CSV are always six rows.
   return months.map(
     (month) => byMonth.get(month) ?? { building_id: buildingId, month, issues_actual: 0, services_cost: 0, total: 0 },

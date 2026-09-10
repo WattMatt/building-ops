@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -41,31 +42,12 @@ import { Plus, MoreVertical, Edit, Trash2, Search, Wrench, AlertTriangle, CheckC
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
+import { parseCost } from '@/lib/money';
 import { format } from 'date-fns';
 import AssetServiceHistoryDialog from './AssetServiceHistoryDialog';
 import { AssetImportDialog } from '@/components/import';
 
-interface Asset {
-  id: string;
-  name: string;
-  category: string;
-  location: string | null;
-  manufacturer: string | null;
-  model: string | null;
-  serial_number: string | null;
-  installation_date: string | null;
-  last_service_date: string | null;
-  next_service_date: string | null;
-  status: string;
-  notes: string | null;
-  created_at: string;
-  purchase_date: string | null;
-  purchase_price: number | null;
-  replacement_cost: number | null;
-  warranty_expiry: string | null;
-  warranty_provider: string | null;
-  expected_lifespan_years: number | null;
-}
+type Asset = Tables<'building_assets'>;
 
 interface AssetsTabProps {
   buildingId: string;
@@ -88,14 +70,6 @@ const ASSET_STATUSES = [
   { value: 'under_repair', label: 'Under Repair', color: 'secondary' },
   { value: 'out_of_service', label: 'Out of Service', color: 'destructive' },
 ];
-
-/** '' → null; a non-negative amount → number; anything else → undefined (rejected). */
-function parseMoney(text: string): number | null | undefined {
-  const t = text.trim();
-  if (!t) return null;
-  const n = Number(t.replace(/\s/g, '').replace(',', '.'));
-  return Number.isFinite(n) && n >= 0 ? n : undefined;
-}
 
 /** '' → null; a non-negative whole number → number; anything else → undefined (rejected). */
 function parseYears(text: string): number | null | undefined {
@@ -183,7 +157,7 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
   const openEditDialog = (asset: Asset) => {
     setEditingAsset(asset);
     setName(asset.name);
-    setCategory(asset.category);
+    setCategory(asset.category ?? '');
     setLocation(asset.location || '');
     setManufacturer(asset.manufacturer || '');
     setModel(asset.model || '');
@@ -191,7 +165,7 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
     setInstallationDate(asset.installation_date || '');
     setLastServiceDate(asset.last_service_date || '');
     setNextServiceDate(asset.next_service_date || '');
-    setStatus(asset.status);
+    setStatus(asset.status ?? 'operational');
     setNotes(asset.notes || '');
     setPurchaseDate(asset.purchase_date || '');
     setPurchasePrice(asset.purchase_price == null ? '' : String(asset.purchase_price));
@@ -210,8 +184,8 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
       return;
     }
 
-    const price = parseMoney(purchasePrice);
-    const replacement = parseMoney(replacementCost);
+    const price = parseCost(purchasePrice);
+    const replacement = parseCost(replacementCost);
     const lifespan = parseYears(expectedLifespanYears);
     if (price === undefined || replacement === undefined) {
       toast.error('Purchase price and replacement cost must be amounts of R 0 or more');
@@ -266,9 +240,9 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
       setIsDialogOpen(false);
       resetForm();
       fetchAssets();
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error saving asset:', error);
-      toast.error(error.message || 'Failed to save asset');
+      toast.error((error instanceof Error && error.message) || 'Failed to save asset');
     } finally {
       setSaving(false);
     }
@@ -330,21 +304,21 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
   const filteredAssets = assets.filter((asset) => {
     const matchesSearch =
       asset.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      asset.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (asset.category?.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (asset.location?.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesCategory = categoryFilter === 'all' || asset.category === categoryFilter;
     return matchesSearch && matchesCategory;
   });
 
-  const getCategoryLabel = (value: string) => {
-    return ASSET_CATEGORIES.find((c) => c.value === value)?.label || value;
+  const getCategoryLabel = (value: string | null) => {
+    return ASSET_CATEGORIES.find((c) => c.value === value)?.label || value || '-';
   };
 
-  const getStatusInfo = (statusValue: string) => {
+  const getStatusInfo = (statusValue: string | null) => {
     return ASSET_STATUSES.find((s) => s.value === statusValue) || ASSET_STATUSES[0];
   };
 
-  const getStatusIcon = (statusValue: string) => {
+  const getStatusIcon = (statusValue: string | null) => {
     switch (statusValue) {
       case 'operational':
         return <CheckCircle className="h-3 w-3" />;

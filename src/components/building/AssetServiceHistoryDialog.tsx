@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -35,27 +36,12 @@ import { Plus, Wrench, Trash2, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 
-interface Asset {
-  id: string;
-  name: string;
-  category: string;
-}
+type Asset = Pick<Tables<'building_assets'>, 'id' | 'name' | 'category'>;
 
-interface ServiceRecord {
-  id: string;
-  asset_id: string;
-  service_date: string;
-  service_type: string;
-  description: string | null;
-  performed_by: string | null;
-  contractor_id: string | null;
+type ServiceRecord = Tables<'asset_service_history'> & {
   /** Joined `contractors(company_name)`; null when no contractor is linked. */
-  contractors: { company_name: string } | null;
-  cost: number | null;
-  next_service_date: string | null;
-  notes: string | null;
-  created_at: string;
-}
+  contractors: Pick<Tables<'contractors'>, 'company_name'> | null;
+};
 
 interface AssetServiceHistoryDialogProps {
   asset: Asset;
@@ -110,8 +96,7 @@ export default function AssetServiceHistoryDialog({
         .order('service_date', { ascending: false });
 
       if (error) throw error;
-      // The contractors(company_name) embed is untyped until types are regenerated after 2026-09-13_05.
-      setRecords((data || []) as unknown as ServiceRecord[]);
+      setRecords(data || []);
     } catch (error) {
       console.error('Error fetching service history:', error);
       toast.error('Failed to load service history');
@@ -224,11 +209,11 @@ export default function AssetServiceHistoryDialog({
     }
   };
 
-  const getServiceTypeLabel = (value: string) => {
-    return SERVICE_TYPES.find((t) => t.value === value)?.label || value;
+  const getServiceTypeLabel = (value: string | null) => {
+    return SERVICE_TYPES.find((t) => t.value === value)?.label || value || '-';
   };
 
-  const getServiceTypeBadgeVariant = (value: string): BadgeProps['variant'] => {
+  const getServiceTypeBadgeVariant = (value: string | null): BadgeProps['variant'] => {
     switch (value) {
       case 'emergency_repair':
         return 'destructive';
