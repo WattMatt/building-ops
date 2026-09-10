@@ -15,7 +15,7 @@ import { toast } from 'sonner';
 import { fdb, type Report, type ReportType, type ReportStatus, type FTableName } from '@/integrations/supabase/fortress-db';
 import { useAuth } from '@/contexts/AuthContext';
 import { notify } from '@/lib/notify';
-import { seedPpmFromPlan } from '@/hooks/useReportPpm';
+import { describeSeed, seedPpmFromPlan } from '@/hooks/useReportPpm';
 
 const REPORTS_KEY = ['fortress-reports'];
 
@@ -30,12 +30,15 @@ export const PPM_SEED_FAILED_MESSAGE =
  * Seed the report's PPM rows from the plan without failing the surrounding write: the
  * report row already exists, so a refused seed is reported and the user is pointed at the
  * section's sync button rather than left with a create that "failed" after it succeeded.
+ * A plan line the seed had to skip (its name is taken by a row linked to another line) is
+ * said out loud too — silently missing a service from a compliance grid is the worse outcome.
  */
 async function seedPpmOrWarn(report: Pick<Report, 'id' | 'building_id' | 'report_type'>): Promise<number> {
   if (!PPM_REPORT_TYPES.has(report.report_type)) return 0;
   try {
-    const { added, linked } = await seedPpmFromPlan(report.id, report.building_id);
-    return added + linked;
+    const result = await seedPpmFromPlan(report.id, report.building_id);
+    if (result.skipped > 0) toast.warning(describeSeed(result));
+    return result.added + result.linked;
   } catch (e) {
     if (import.meta.env.DEV) console.error('Seed PPM from plan failed:', e);
     toast.error(PPM_SEED_FAILED_MESSAGE);

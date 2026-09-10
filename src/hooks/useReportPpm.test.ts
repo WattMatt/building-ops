@@ -15,6 +15,8 @@ type Chain = Record<string, (...args: unknown[]) => Chain> & {
 const state = vi.hoisted(() => ({
   calls: [] as RecordedCall[],
   queries: [] as { table: string; calls: RecordedCall[] }[],
+  /** Overrides the database holds per row id at write time, when different from the cached row. */
+  dbOverrides: {} as Record<string, unknown>,
   result: (() => ({ data: [], error: null })) as (table: string, calls: RecordedCall[]) => QueryResult,
 }));
 
@@ -40,11 +42,11 @@ vi.mock('@/integrations/supabase/client', () => {
   return { supabase: { from } };
 });
 
-const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
 vi.mock('sonner', () => ({ toast: toastMock }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u1' }, isAdminOrManager: true }) }));
 
-import { useReportPpm, seedPpmFromPlan, REPORT_PPM_PERMISSION_MESSAGE } from './useReportPpm';
+import { useReportPpm, seedPpmFromPlan, describeSeed, REPORT_PPM_PERMISSION_MESSAGE, REPORT_PPM_ROW_GONE_MESSAGE } from './useReportPpm';
 
 let qc: QueryClient;
 const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: qc }, children);
@@ -66,15 +68,25 @@ const planLine = (id: string, service_name: string, sort_order = 0) => ({
   sort_order, is_active: true, notes: null, created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z',
 });
 
+/** What the database holds for a row at write time (setOverride re-reads it); defaults to the cached rows. */
+const freshOverrides = (calls: RecordedCall[]) => {
+  const id = calls.find((c) => c.method === 'eq' && c.args[0] === 'id')?.args[1];
+  const row = [r1, r2].find((r) => r.id === id);
+  return row ? { data: { overrides: state.dbOverrides[row.id] ?? row.overrides }, error: null } : { data: null, error: null };
+};
+
 beforeEach(() => {
   qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   state.calls = [];
   state.queries = [];
+  state.dbOverrides = {};
   toastMock.success.mockClear();
   toastMock.error.mockClear();
+  toastMock.warning.mockClear();
   state.result = (table, calls) => {
     if (table === 'ppm_services' && has(calls, 'update')) return { data: [{ id: 'r1' }], error: null };
     if (table === 'ppm_services' && has(calls, 'upsert')) return { data: null, error: null };
+    if (table === 'ppm_services' && has(calls, 'maybeSingle')) return freshOverrides(calls);
     if (table === 'ppm_services') return { data: [r1, r2], error: null };
     return { data: [], error: null };
   };
@@ -100,6 +112,41 @@ describe('useReportPpm — setOverride writes overrides only', () => {
     const q = state.queries.find((x) => x.table === 'ppm_services' && has(x.calls, 'update'))!;
     expect(has(q.calls, 'eq', 'id', 'r1')).toBe(true);
     expect(has(q.calls, 'select', 'id')).toBe(true);
+    // the merge base was read fresh inside the mutation, before the update
+    const read = state.queries.find((x) => x.table === 'ppm_services' && has(x.calls, 'maybeSingle'))!;
+    expect(has(read.calls, 'select', 'overrides')).toBe(true);
+    expect(has(read.calls, 'eq', 'id', 'r1')).toBe(true);
+    expect(state.queries.indexOf(read)).toBeLessThan(state.queries.indexOf(q));
+  });
+
+  it('merges into the overrides the database holds NOW, not the cached row (two managers, two months)', async () => {
+    const { result } = await loaded();
+    // Another manager pinned July after this tab loaded r2 (whose cache still says only August).
+    const theirs = { status: 'done' as const, note: 'Serviced ad hoc', by: 'u7', at: '2026-09-02T00:00:00Z' };
+    state.dbOverrides.r2 = { '2026-08': EXISTING_OVERRIDE, '2026-07': theirs };
+    await act(async () => { await result.current.setOverride('r2', '2026-09', { status: 'missed', note: 'No contractor' }); });
+    const body = callsOf('update')[0].args[0] as { overrides: Record<string, unknown> };
+    expect(Object.keys(body.overrides).sort()).toEqual(['2026-07', '2026-08', '2026-09']);
+    expect(body.overrides['2026-07']).toEqual(theirs);
+    expect(body.overrides['2026-08']).toEqual(EXISTING_OVERRIDE);
+    // and the cached copy was not used as the base: a key the database dropped meanwhile stays dropped
+    state.calls = [];
+    state.dbOverrides.r2 = { '2026-07': theirs };
+    await act(async () => { await result.current.setOverride('r2', '2026-09', { status: 'na', note: 'x' }); });
+    const body2 = callsOf('update')[0].args[0] as { overrides: Record<string, unknown> };
+    expect(Object.keys(body2.overrides).sort()).toEqual(['2026-07', '2026-09']);
+  });
+
+  it('a row that is gone by write time is reported plainly, with no update attempted', async () => {
+    state.result = (table, calls) => {
+      if (table === 'ppm_services' && has(calls, 'maybeSingle')) return { data: null, error: null };
+      if (table === 'ppm_services') return { data: [r1, r2], error: null };
+      return { data: [], error: null };
+    };
+    const { result } = await loaded();
+    await expect(result.current.setOverride('r1', '2026-08', { status: 'done', note: 'x' })).rejects.toThrow(REPORT_PPM_ROW_GONE_MESSAGE);
+    expect(callsOf('update')).toHaveLength(0);
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith(REPORT_PPM_ROW_GONE_MESSAGE));
   });
 
   it('keeps the other months\' overrides when adding one', async () => {
@@ -121,6 +168,7 @@ describe('useReportPpm — setOverride writes overrides only', () => {
   it('an update RLS filtered to zero rows is the plain permission message', async () => {
     state.result = (table, calls) => {
       if (table === 'ppm_services' && has(calls, 'update')) return { data: [], error: null };
+      if (table === 'ppm_services' && has(calls, 'maybeSingle')) return freshOverrides(calls);
       if (table === 'ppm_services') return { data: [r1, r2], error: null };
       return { data: [], error: null };
     };
@@ -159,7 +207,7 @@ describe('seedPpmFromPlan', () => {
       return { data: [], error: null };
     };
     const out = await seedPpmFromPlan('rep1', 'b1');
-    expect(out).toEqual({ added: 1, linked: 1 });
+    expect(out).toEqual({ added: 1, linked: 1, skipped: 0 });
 
     const plan = state.queries.find((x) => x.table === 'building_ppm_services')!;
     expect(has(plan.calls, 'eq', 'building_id', 'b1')).toBe(true);
@@ -184,14 +232,45 @@ describe('seedPpmFromPlan', () => {
       if (table === 'ppm_services') return { data: [r1, r2], error: null };
       return { data: [], error: null };
     };
-    expect(await seedPpmFromPlan('rep1', 'b1')).toEqual({ added: 0, linked: 0 });
+    expect(await seedPpmFromPlan('rep1', 'b1')).toEqual({ added: 0, linked: 0, skipped: 0 });
     expect(callsOf('insert')).toHaveLength(0);
     expect(callsOf('update')).toHaveLength(0);
   });
 
   it('a building with no active plan lines costs one read and changes nothing', async () => {
-    expect(await seedPpmFromPlan('rep1', 'b1')).toEqual({ added: 0, linked: 0 });
+    expect(await seedPpmFromPlan('rep1', 'b1')).toEqual({ added: 0, linked: 0, skipped: 0 });
     expect(state.queries.map((q) => q.table)).toEqual(['building_ppm_services']);
+  });
+
+  it('a plan line whose name is taken by a row linked to ANOTHER line is counted as skipped, not silently dropped', async () => {
+    // r1 "Lift service" is linked to p1; plan line p5 is also called "Lift service" (a renamed/duplicated line).
+    state.result = (table, calls) => {
+      if (table === 'building_ppm_services') return { data: [planLine('p1', 'Lift service'), planLine('p5', 'lift service'), planLine('p6', 'Borehole pump')], error: null };
+      if (table === 'ppm_services' && has(calls, 'insert')) return { data: [{ id: 'new' }], error: null };
+      if (table === 'ppm_services') return { data: [r1, r2], error: null };
+      return { data: [], error: null };
+    };
+    expect(await seedPpmFromPlan('rep1', 'b1')).toEqual({ added: 1, linked: 0, skipped: 1 });
+    expect(callsOf('update')).toHaveLength(0);
+    expect((callsOf('insert')[0].args[0] as { service_name: string }[]).map((r) => r.service_name)).toEqual(['Borehole pump']);
+  });
+
+  it('describeSeed spells out every outcome, skipped included', () => {
+    expect(describeSeed({ added: 0, linked: 0, skipped: 0 })).toBe('Every active plan line is already on this report.');
+    expect(describeSeed({ added: 1, linked: 0, skipped: 0 })).toBe('Added 1 service from the building plan.');
+    expect(describeSeed({ added: 2, linked: 1, skipped: 0 })).toBe('Added 2 services from the building plan and linked 1 existing.');
+    expect(describeSeed({ added: 0, linked: 0, skipped: 2 })).toBe('2 plan lines were skipped: a service with the same name is already linked to another plan line.');
+    expect(describeSeed({ added: 1, linked: 0, skipped: 1 })).toContain('1 plan line was skipped');
+  });
+
+  it('a 23505 while seeding is the plain "already on this report" message', async () => {
+    state.result = (table, calls) => {
+      if (table === 'building_ppm_services') return { data: [planLine('p3', 'Borehole pump')], error: null };
+      if (table === 'ppm_services' && has(calls, 'insert')) return { data: null, error: { message: 'duplicate key', code: '23505' } };
+      if (table === 'ppm_services') return { data: [r1, r2], error: null };
+      return { data: [], error: null };
+    };
+    await expect(seedPpmFromPlan('rep1', 'b1')).rejects.toThrow('That service is already on this report.');
   });
 
   it('an insert RLS refused (42501) is the plain permission message', async () => {
@@ -217,5 +296,19 @@ describe('seedPpmFromPlan', () => {
     expect(callsOf('insert')).toHaveLength(1);
     expect(spy).toHaveBeenCalledWith({ queryKey: ['fortress-ppm-services', 'rep1'] });
     expect(toastMock.success).toHaveBeenCalledWith('Added 1 service from the building plan.');
+  });
+
+  it('the Sync toast mentions skipped lines (as a warning, since something was left off)', async () => {
+    state.result = (table, calls) => {
+      if (table === 'building_ppm_services') return { data: [planLine('p1', 'Lift service'), planLine('p5', 'Lift service'), planLine('p3', 'Borehole pump')], error: null };
+      if (table === 'ppm_services' && has(calls, 'insert')) return { data: [{ id: 'new' }], error: null };
+      if (table === 'ppm_services') return { data: [r1, r2], error: null };
+      return { data: [], error: null };
+    };
+    const { result } = await loaded();
+    await act(async () => { await result.current.seedFromPlan(); });
+    expect(toastMock.success).not.toHaveBeenCalled();
+    expect(toastMock.warning).toHaveBeenCalledTimes(1);
+    expect(toastMock.warning.mock.calls[0][0]).toBe('Added 1 service from the building plan. 1 plan line was skipped: a service with the same name is already linked to another plan line.');
   });
 });

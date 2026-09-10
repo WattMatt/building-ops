@@ -67,7 +67,7 @@ const line = (over: Partial<BuildingPpmLine> = {}): BuildingPpmLine => ({
 
 function renderTab() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={qc}><PpmTab buildingId="b1" /></QueryClientProvider>);
+  return { ...render(<QueryClientProvider client={qc}><PpmTab buildingId="b1" /></QueryClientProvider>), qc };
 }
 
 beforeEach(() => {
@@ -106,15 +106,15 @@ describe('PpmTab — plan lines', () => {
   });
 
   it('Export CSV hands the plan lines to the shared exporter with cadence and contractor columns', async () => {
-    renderTab();
+    const { qc } = renderTab();
     type Col = { key: string; header: string; format?: (v: unknown) => string };
-    // The contractor column resolves names through a query; keep clicking until it has loaded.
-    await waitFor(() => {
-      fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
-      const [, columns] = state.exportCsv.mock.calls.at(-1) as unknown as [BuildingPpmLine[], Col[]];
-      expect(columns[2].format!('c1')).toBe('Otis');
-    });
-    const [rows, columns, filename] = state.exportCsv.mock.calls.at(-1) as unknown as [BuildingPpmLine[], Col[], string];
+    // The contractor column resolves names through a query (the picker's own "Otis" option is
+    // there from the first render, so wait on the query, not the text); then click once.
+    await waitFor(() => expect(qc.getQueryData(['ppm-contractor-names', ['c1']])).toEqual({ c1: 'Otis' }));
+    fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
+    expect(state.exportCsv).toHaveBeenCalledTimes(1);
+    const [rows, columns, filename] = state.exportCsv.mock.calls[0] as unknown as [BuildingPpmLine[], Col[], string];
+    expect(columns[2].format!('c1')).toBe('Otis');
     expect(rows).toHaveLength(2);
     expect(columns.map((c) => c.header)).toEqual(['Service', 'Cadence', 'Contractor', 'Active', 'Notes']);
     expect(columns[1].format!(rows[0].recurrence)).toBe('Monthly on the 1st');
@@ -178,10 +178,13 @@ describe('PpmTab — add service sheet', () => {
     expect(within(dialog).getByRole('button', { name: 'Add service' })).toBeDisabled();
   });
 
-  it('editing a line saves through updateLine with the existing values seeded', async () => {
+  it('editing a line saves through updateLine with the existing values seeded, and says the reschedule is immediate', async () => {
     renderTab();
     fireEvent.click(screen.getByRole('button', { name: 'Edit Lift service' }));
     const dialog = await screen.findByRole('dialog');
+    // The _05 trigger reschedules synchronously; the sheet must not promise "from tonight".
+    expect(within(dialog).getByText('Future untouched occurrences are rescheduled now.')).toBeInTheDocument();
+    expect(within(dialog).queryByText(/from tonight/)).toBeNull();
     expect(within(dialog).getByLabelText('Service')).toHaveValue('Lift service');
     expect(within(dialog).getByTestId('rule')).toHaveTextContent('"unit":"month"');
     fireEvent.change(within(dialog).getByLabelText('Service'), { target: { value: 'Lift service (Otis)' } });
@@ -203,6 +206,24 @@ describe('PpmTab — derived grid', () => {
     expect(within(grid).getByRole('img', { name: 'Lift service 2026-09: Due' }).className).toContain('bg-amber-400');
     expect(within(grid).getByRole('img', { name: 'Lift service 2026-10: No occurrence' })).toBeInTheDocument();
     expect(within(grid).queryAllByRole('button')).toHaveLength(0);
+    // a11y: column headers and the service-name row header are real headers
+    expect(within(grid).getByRole('columnheader', { name: 'Service' })).toHaveAttribute('scope', 'col');
+    expect(within(grid).getByRole('rowheader', { name: 'Lift service' })).toHaveAttribute('scope', 'row');
+    // the shared legend explains a blank as "No occurrence" and offers no override entry
+    const legend = screen.getByTestId('ppm-legend');
+    expect(legend).toHaveTextContent('No occurrence');
+    expect(legend).not.toHaveTextContent('Override');
+  });
+
+  it('a month with several occurrences reads Missed when one was missed, and the title says how many', () => {
+    state.derived = [
+      { ppm_service_id: 'p1', period_month: '2026-08', status: 'done', done_on: '2026-08-12' },
+      { ppm_service_id: 'p1', period_month: '2026-08', status: 'missed' },
+    ];
+    renderTab();
+    const grid = screen.getByRole('table', { name: 'PPM month grid' });
+    const cell = within(grid).getByRole('img', { name: 'Lift service 2026-08: Missed (2 occurrences: 1 done, 1 missed)' });
+    expect(cell.className).toContain('bg-destructive');
   });
 
   it('shows the empty state without a grid when the plan is empty', () => {

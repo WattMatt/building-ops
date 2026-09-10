@@ -38,6 +38,14 @@ export interface PpmOverride {
 
 export type MergedSource = 'override' | 'derived' | 'legacy' | 'none';
 
+/** How many occurrences execution holds for one month, by status. Present only when > 1. */
+export interface PpmOccurrences {
+  done: number;
+  missed: number;
+  due: number;
+  total: number;
+}
+
 export interface MergedCell {
   status: PpmCellStatus | null;
   source: MergedSource;
@@ -47,6 +55,8 @@ export interface MergedCell {
   doneOn?: string | null;
   /** What execution says, kept alongside an override so the UI can offer "keep derived". */
   derivedStatus: PpmCellStatus | null;
+  /** Per-status counts when the month held more than one occurrence (the title shows them). */
+  occurrences?: PpmOccurrences;
 }
 
 /** Status classes shared by every PPM grid (tab and report section). */
@@ -59,16 +69,32 @@ export const PPM_STATUS_STYLE: Record<PpmCellStatus, { cls: string; label: strin
 export const PPM_STATUS_SHORT: Record<PpmCellStatus, string> = { done: '✓', due: '•', missed: '✕', na: '—' };
 export const PPM_STATUSES: readonly PpmCellStatus[] = ['due', 'done', 'missed', 'na'];
 
+/**
+ * Every status a cell may carry. Overrides and legacy `months` come straight out of jsonb,
+ * so anything not in this set is treated as absent rather than handed to a style lookup.
+ */
+const VALID = new Set<string>(PPM_STATUSES);
 const DERIVED_STATUSES = new Set<string>(['done', 'missed', 'due']);
-/** When a month holds several occurrences, the strongest signal wins. */
-const DERIVED_RANK: Record<string, number> = { done: 3, missed: 2, due: 1 };
+
+/** The status if it is one the grid knows, else null. */
+export function asPpmStatus(v: unknown): PpmCellStatus | null {
+  return typeof v === 'string' && VALID.has(v) ? (v as PpmCellStatus) : null;
+}
+
+/** Month/year column header parts for a "YYYY-MM" key, as every PPM grid prints them. */
+export function colHeader(monthKey: string): { mon: string; yr: string } {
+  const d = new Date(`${monthKey}-01T00:00:00`);
+  return { mon: d.toLocaleDateString('en-ZA', { month: 'short' }), yr: `'${String(d.getFullYear()).slice(2)}` };
+}
 
 /**
  * "YYYY-MM" keys for a 12-month window anchored on the SA fiscal year (July). `anchor` is a
- * YYYY-MM-DD (a report's `report_period`) or a Date; defaults to today.
+ * YYYY-MM-DD (a report's `report_period`) or a Date; defaults to today, as does an anchor
+ * that does not parse (a malformed `report_period` must not yield twelve "NaN-NaN" keys).
  */
 export function fiscalWindow(anchor?: string | Date | null): string[] {
-  const base = anchor instanceof Date ? anchor : anchor ? new Date(`${anchor.slice(0, 10)}T00:00:00`) : new Date();
+  let base = anchor instanceof Date ? anchor : anchor ? new Date(`${anchor.slice(0, 10)}T00:00:00`) : new Date();
+  if (Number.isNaN(base.getTime())) base = new Date();
   const y = base.getFullYear();
   const m = base.getMonth(); // 0-based
   const startYear = m >= 6 ? y : y - 1; // July = month index 6
@@ -91,19 +117,41 @@ export function derivedByService(rows: readonly DerivedRow[]): Map<string, Deriv
   return out;
 }
 
-function derivedFor(rows: readonly DerivedRow[]): Map<string, { status: PpmCellStatus; doneOn: string | null }> {
-  const out = new Map<string, { status: PpmCellStatus; doneOn: string | null }>();
+interface DerivedMonth { status: PpmCellStatus; doneOn: string | null; occurrences?: PpmOccurrences }
+
+/**
+ * One status per month from its occurrences. This is a compliance grid, so a month with one
+ * completed and one missed occurrence reads MISSED: missed > done > due. `doneOn` is the
+ * first completion date and is only kept when the month reads done. Counts ride along when
+ * the month held more than one occurrence so the cell title can say so.
+ */
+function derivedFor(rows: readonly DerivedRow[]): Map<string, DerivedMonth> {
+  const tally = new Map<string, PpmOccurrences & { doneOn: string | null }>();
   for (const r of rows) {
     if (!r.status || !DERIVED_STATUSES.has(r.status)) continue;
-    const status = r.status as PpmCellStatus;
-    const cur = out.get(r.period_month);
-    if (!cur || DERIVED_RANK[status] > DERIVED_RANK[cur.status]) {
-      out.set(r.period_month, { status, doneOn: status === 'done' ? (r.done_on ?? null) : null });
-    } else if (cur.status === 'done' && status === 'done' && !cur.doneOn && r.done_on) {
-      cur.doneOn = r.done_on;
-    }
+    const status = r.status as 'done' | 'missed' | 'due';
+    let t = tally.get(r.period_month);
+    if (!t) { t = { done: 0, missed: 0, due: 0, total: 0, doneOn: null }; tally.set(r.period_month, t); }
+    t[status] += 1;
+    t.total += 1;
+    if (status === 'done' && !t.doneOn && r.done_on) t.doneOn = r.done_on;
+  }
+  const out = new Map<string, DerivedMonth>();
+  for (const [month, t] of tally) {
+    const status: PpmCellStatus = t.missed > 0 ? 'missed' : t.done > 0 ? 'done' : 'due';
+    const cell: DerivedMonth = { status, doneOn: status === 'done' ? t.doneOn : null };
+    if (t.total > 1) cell.occurrences = { done: t.done, missed: t.missed, due: t.due, total: t.total };
+    out.set(month, cell);
   }
   return out;
+}
+
+/** "2 occurrences: 1 done, 1 missed" for a cell that holds several, else null. */
+export function occurrenceSummary(cell: Pick<MergedCell, 'occurrences'>): string | null {
+  const o = cell.occurrences;
+  if (!o || o.total < 2) return null;
+  const parts = (['done', 'missed', 'due'] as const).filter((k) => o[k] > 0).map((k) => `${o[k]} ${k}`);
+  return `${o.total} occurrences: ${parts.join(', ')}`;
 }
 
 /**
@@ -122,15 +170,18 @@ export function mergePpmGrid(
     const d = byMonth.get(mk);
     const derivedStatus = d?.status ?? null;
     const o = overrides[mk];
-    if (o && o.status) {
-      grid[mk] = { status: o.status, source: 'override', note: o.note ?? '', doneOn: d?.doneOn ?? null, derivedStatus };
+    const overrideStatus = o ? asPpmStatus(o.status) : null;
+    if (o && overrideStatus) {
+      grid[mk] = { status: overrideStatus, source: 'override', note: typeof o.note === 'string' ? o.note : '', doneOn: d?.doneOn ?? null, derivedStatus };
+      if (d?.occurrences) grid[mk].occurrences = d.occurrences;
       continue;
     }
     if (d) {
       grid[mk] = { status: d.status, source: 'derived', doneOn: d.doneOn, derivedStatus };
+      if (d.occurrences) grid[mk].occurrences = d.occurrences;
       continue;
     }
-    const l = legacy?.[mk]?.status ?? null;
+    const l = asPpmStatus(legacy?.[mk]?.status);
     if (l) {
       grid[mk] = { status: l, source: 'legacy', derivedStatus: null };
       continue;
@@ -140,16 +191,29 @@ export function mergePpmGrid(
   return grid;
 }
 
-/** The slice of a `ppm_services` row the merge needs (plan link, overrides, legacy months). */
-// plan_service_id and overrides are not yet in the generated types; consumers read them off `select('*')`.
+/**
+ * The slice of a `ppm_services` row the merge needs (plan link, overrides, legacy months).
+ * `overrides` and `months` are jsonb and arrive untyped; `overridesOf` / `legacyMonthsOf`
+ * narrow them at the client boundary and `mergePpmGrid` validates each status.
+ */
 export interface PpmGridRow {
   id: string;
   plan_service_id?: string | null;
-  overrides?: Record<string, PpmOverride> | null;
+  overrides?: unknown;
   months?: unknown;
 }
 
-const isCellMap = (v: unknown): v is Record<string, PpmCell> => !!v && typeof v === 'object' && !Array.isArray(v);
+const isPlainObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/** `ppm_services.overrides` as a map, or {} for anything that is not a plain object. */
+export function overridesOf(v: unknown): Record<string, PpmOverride> {
+  return isPlainObject(v) ? (v as Record<string, PpmOverride>) : {};
+}
+
+/** `ppm_services.months` as a cell map, or {} for anything that is not a plain object. */
+export function legacyMonthsOf(v: unknown): Record<string, PpmCell> {
+  return isPlainObject(v) ? (v as Record<string, PpmCell>) : {};
+}
 
 /**
  * Merge every report row into its grid: plan-backed rows get override > derived > legacy
@@ -157,7 +221,7 @@ const isCellMap = (v: unknown): v is Record<string, PpmCell> => !!v && typeof v 
  * window is widened per row by any legacy month key outside it, so a cell captured by hand
  * before the plan existed is never dropped by a consumer that only looks at the window.
  *
- * Pure: hand it the view rows already fetched (see `fetchMergedPpmGrids` in useBuildingPpm.ts).
+ * Pure: hand it the view rows already fetched (see `fetchMergedPpmGrids` in ppmGridFetch.ts).
  */
 export function mergePpmGrids(
   rows: readonly PpmGridRow[],
@@ -167,10 +231,10 @@ export function mergePpmGrids(
   const byService = derivedByService(derived);
   const out = new Map<string, Record<string, MergedCell>>();
   for (const row of rows) {
-    const legacy = isCellMap(row.months) ? row.months : {};
+    const legacy = legacyMonthsOf(row.months);
     const months = [...new Set([...window, ...Object.keys(legacy)])].sort();
     const derivedRows = row.plan_service_id ? byService.get(row.plan_service_id) ?? [] : [];
-    const overrides = row.plan_service_id ? row.overrides ?? {} : {};
+    const overrides = row.plan_service_id ? overridesOf(row.overrides) : {};
     out.set(row.id, mergePpmGrid(months, derivedRows, overrides, legacy));
   }
   return out;

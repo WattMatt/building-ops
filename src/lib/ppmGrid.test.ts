@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  derivedByService, doneMonthsFromGrid, fiscalWindow, gridHasData, mergePpmGrid, mergePpmGrids, ppmCompletionFromGrid,
+  asPpmStatus, colHeader, derivedByService, doneMonthsFromGrid, fiscalWindow, gridHasData, legacyMonthsOf, mergePpmGrid,
+  mergePpmGrids, occurrenceSummary, overridesOf, ppmCompletionFromGrid,
   type DerivedRow, type PpmGridRow,
 } from './ppmGrid';
 
@@ -22,6 +23,24 @@ describe('fiscalWindow', () => {
   it('accepts a Date and defaults to today', () => {
     expect(fiscalWindow(new Date(2026, 6, 15))[0]).toBe('2026-07');
     expect(fiscalWindow()).toHaveLength(12);
+  });
+  it('turns over on 1 July: 30 June belongs to the previous fiscal year', () => {
+    expect(fiscalWindow('2026-06-30')[0]).toBe('2025-07');
+    expect(fiscalWindow('2026-06-30')[11]).toBe('2026-06');
+    expect(fiscalWindow('2026-07-01')[0]).toBe('2026-07');
+    expect(fiscalWindow('2026-07-01')[11]).toBe('2027-06');
+  });
+  it('an anchor that does not parse falls back to today instead of twelve NaN keys', () => {
+    expect(fiscalWindow('not-a-date')).toEqual(fiscalWindow());
+    expect(fiscalWindow(new Date('garbage'))).toEqual(fiscalWindow());
+    expect(fiscalWindow('not-a-date').every((k) => /^\d{4}-\d{2}$/.test(k))).toBe(true);
+  });
+});
+
+describe('colHeader', () => {
+  it('splits a month key into a short month and a two-digit year', () => {
+    expect(colHeader('2026-07')).toEqual({ mon: new Date(2026, 6, 1).toLocaleDateString('en-ZA', { month: 'short' }), yr: "'26" });
+    expect(colHeader('2027-01').yr).toBe("'27");
   });
 });
 
@@ -50,17 +69,49 @@ describe('mergePpmGrid', () => {
     expect(grid['2026-10']).toMatchObject({ status: 'done', source: 'override', derivedStatus: null });
   });
 
-  it('the strongest signal wins when a month holds several occurrences (done > missed > due)', () => {
+  it('a month with several occurrences reads as a compliance grid: missed > done > due', () => {
+    // one completed, one missed → the month is Missed, and the completion date is not shown against it
     const grid = mergePpmGrid(WINDOW, [row('2026-08', 'due'), row('2026-08', 'missed'), row('2026-08', 'done', { done_on: '2026-08-20' })], {});
-    expect(grid['2026-08']).toMatchObject({ status: 'done', doneOn: '2026-08-20' });
-    const grid2 = mergePpmGrid(WINDOW, [row('2026-08', 'due'), row('2026-08', 'missed')], {});
-    expect(grid2['2026-08'].status).toBe('missed');
+    expect(grid['2026-08']).toMatchObject({ status: 'missed', doneOn: null, occurrences: { done: 1, missed: 1, due: 1, total: 3 } });
+    expect(mergePpmGrid(WINDOW, [row('2026-08', 'due'), row('2026-08', 'missed')], {})['2026-08'].status).toBe('missed');
+    // done beats due, and keeps the first completion date
+    expect(mergePpmGrid(WINDOW, [row('2026-08', 'due'), row('2026-08', 'done', { done_on: '2026-08-20' })], {})['2026-08'])
+      .toMatchObject({ status: 'done', doneOn: '2026-08-20', occurrences: { done: 1, missed: 0, due: 1, total: 2 } });
+    expect(mergePpmGrid(WINDOW, [row('2026-08', 'done'), row('2026-08', 'done', { done_on: '2026-08-21' })], {})['2026-08'].doneOn).toBe('2026-08-21');
+  });
+
+  it('a single occurrence carries no counts; the summary reads them out when there are several', () => {
+    const single = mergePpmGrid(WINDOW, [row('2026-08', 'done', { done_on: '2026-08-20' })], {})['2026-08'];
+    expect(single.occurrences).toBeUndefined();
+    expect(occurrenceSummary(single)).toBeNull();
+    const several = mergePpmGrid(WINDOW, [row('2026-08', 'done'), row('2026-08', 'missed')], {})['2026-08'];
+    expect(occurrenceSummary(several)).toBe('2 occurrences: 1 done, 1 missed');
+    // the counts survive an override so the title can still explain what execution held
+    const overridden = mergePpmGrid(WINDOW, [row('2026-08', 'done'), row('2026-08', 'missed')], { '2026-08': { status: 'na', note: 'n' } })['2026-08'];
+    expect(overridden).toMatchObject({ status: 'na', source: 'override', derivedStatus: 'missed' });
+    expect(occurrenceSummary(overridden)).toBe('2 occurrences: 1 done, 1 missed');
   });
 
   it('ignores derived rows outside the window and statuses it does not know', () => {
     const grid = mergePpmGrid(WINDOW, [row('2025-01', 'done'), row('2026-08', 'weird')], {});
     expect(grid['2026-08'].source).toBe('none');
     expect(Object.keys(grid)).not.toContain('2025-01');
+  });
+
+  it('an override with a status the grid does not know is treated as absent (derived shows through)', () => {
+    const overrides = { '2026-08': { status: 'cancelled', note: 'typo from an import' }, '2026-09': { status: 'done', note: 'ok' } } as unknown as Record<string, { status: 'done'; note: string }>;
+    const grid = mergePpmGrid(WINDOW, [row('2026-08', 'due')], overrides);
+    expect(grid['2026-08']).toMatchObject({ status: 'due', source: 'derived' });
+    expect(grid['2026-09']).toMatchObject({ status: 'done', source: 'override' });
+    // and with nothing underneath, the cell is simply blank rather than a crash
+    expect(mergePpmGrid(WINDOW, [], overrides)['2026-08']).toEqual({ status: null, source: 'none', derivedStatus: null });
+  });
+
+  it('a legacy months cell with a status the grid does not know is treated as absent', () => {
+    const legacy = { '2026-07': { status: 'yes' }, '2026-08': { status: 'done' } } as unknown as Record<string, { status: 'done' }>;
+    const grid = mergePpmGrid(WINDOW, [], {}, legacy);
+    expect(grid['2026-07']).toEqual({ status: null, source: 'none', derivedStatus: null });
+    expect(grid['2026-08']).toMatchObject({ status: 'done', source: 'legacy' });
   });
 
   it('falls back to a legacy months cell only when neither override nor derived exists', () => {
@@ -92,6 +143,24 @@ describe('ppmCompletionFromGrid (K11)', () => {
   });
   it('is null for no rows', () => {
     expect(ppmCompletionFromGrid([]).pct).toBeNull();
+  });
+});
+
+describe('jsonb narrowing helpers', () => {
+  it('asPpmStatus admits only the four statuses', () => {
+    expect(asPpmStatus('done')).toBe('done');
+    expect(asPpmStatus('na')).toBe('na');
+    expect(asPpmStatus('weird')).toBeNull();
+    expect(asPpmStatus(null)).toBeNull();
+    expect(asPpmStatus(3)).toBeNull();
+  });
+  it('overridesOf / legacyMonthsOf give {} for anything but a plain object', () => {
+    expect(overridesOf(null)).toEqual({});
+    expect(overridesOf([])).toEqual({});
+    expect(overridesOf('oops')).toEqual({});
+    expect(overridesOf({ '2026-08': { status: 'na', note: 'n' } })).toEqual({ '2026-08': { status: 'na', note: 'n' } });
+    expect(legacyMonthsOf(undefined)).toEqual({});
+    expect(legacyMonthsOf({ '2026-07': { status: 'done' } })).toEqual({ '2026-07': { status: 'done' } });
   });
 });
 

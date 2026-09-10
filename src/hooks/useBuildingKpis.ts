@@ -7,9 +7,10 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { fdb } from '@/integrations/supabase/fortress-db';
+import { supabase } from '@/integrations/supabase/client';
 import { classify, ratioPct, waterDeltaPct, THRESHOLDS, type KpiStatus } from '@/lib/fortressKpis';
 import { fiscalWindow, gridHasData, ppmCompletionFromGrid } from '@/lib/ppmGrid';
-import { fetchMergedPpmGrids, type PpmGridSourceRow } from '@/hooks/useBuildingPpm';
+import { fetchMergedPpmGrids } from '@/lib/ppmGridFetch';
 
 export type KpiFormat = 'pct' | 'zar' | 'count' | 'number';
 export interface Kpi {
@@ -94,9 +95,7 @@ export function useBuildingKpis(buildingId: string | undefined) {
         const o2 = critRows.data?.[0]?.critical_pct ?? null;
         kpis.push({ id: 'O2', label: 'Critical Equipment', value: num(o2), format: 'pct', status: classify(num(o2), THRESHOLDS.critical) });
 
-        // The embedded compliance_template_items join has no generated row type.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const resp = (respRows.data ?? []) as any[];
+        const resp = respRows.data ?? [];
         const noCount = resp.filter((r) => r.response === 'no').length;
         const naCount = resp.filter((r) => r.response === 'na').length;
         kpis.push({ id: 'O3', label: 'Open Non-Compliances', value: noCount, format: 'count', status: classify(noCount, THRESHOLDS.openNonCompliance) });
@@ -313,9 +312,8 @@ export function useBuildingKpis(buildingId: string | undefined) {
 export async function ppmServicedKpi(
   ops: { id: string; report_period: string | null },
 ): Promise<{ value: number | null; sub: string | undefined }> {
-  // plan_service_id / overrides are not yet in the generated types — read the whole row and narrow.
-  const ppm = await fdb.from('ppm_services').select('*').eq('report_id', ops.id);
-  const rows = (ppm.data ?? []) as unknown as PpmGridSourceRow[];
+  const ppm = await supabase.from('ppm_services').select('id, building_id, plan_service_id, overrides, months').eq('report_id', ops.id);
+  const rows = ppm.data ?? [];
   if (rows.length === 0) return { value: null, sub: undefined };
   const grids = await fetchMergedPpmGrids(rows, fiscalWindow(ops.report_period));
   const gridList = rows.map((r) => grids.get(r.id) ?? {});

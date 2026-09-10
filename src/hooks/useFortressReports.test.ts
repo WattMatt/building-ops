@@ -37,13 +37,16 @@ vi.mock('@/integrations/supabase/client', () => {
   return { supabase: { from } };
 });
 
-const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
 vi.mock('sonner', () => ({ toast: toastMock }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u1', email: 'a@b.c' }, isAdminOrManager: true }) }));
 vi.mock('@/lib/notify', () => ({ notify: vi.fn(async () => {}) }));
 
-const seedMock = vi.hoisted(() => ({ seedPpmFromPlan: vi.fn(async () => ({ added: 2, linked: 0 })) }));
-vi.mock('@/hooks/useReportPpm', () => ({ seedPpmFromPlan: seedMock.seedPpmFromPlan }));
+const seedMock = vi.hoisted(() => ({ seedPpmFromPlan: vi.fn(async () => ({ added: 2, linked: 0, skipped: 0 })) }));
+vi.mock('@/hooks/useReportPpm', async () => {
+  const actual = await vi.importActual<typeof import('@/hooks/useReportPpm')>('@/hooks/useReportPpm');
+  return { describeSeed: actual.describeSeed, seedPpmFromPlan: seedMock.seedPpmFromPlan };
+});
 
 import { useCreateReport, useCarryForwardReport, PPM_SEED_FAILED_MESSAGE } from './useFortressReports';
 
@@ -62,8 +65,9 @@ beforeEach(() => {
   state.queries = [];
   toastMock.success.mockClear();
   toastMock.error.mockClear();
+  toastMock.warning.mockClear();
   seedMock.seedPpmFromPlan.mockClear();
-  seedMock.seedPpmFromPlan.mockImplementation(async () => ({ added: 2, linked: 0 }));
+  seedMock.seedPpmFromPlan.mockImplementation(async () => ({ added: 2, linked: 0, skipped: 0 }));
   state.result = (table, calls) => {
     if (table === 'buildings') return { data: { organization_id: 'o1' }, error: null };
     if (table === 'profiles') return { data: { full_name: 'A' }, error: null };
@@ -103,6 +107,15 @@ describe('useCreateReport — PPM seeding', () => {
     expect(toastMock.error).toHaveBeenCalledWith(PPM_SEED_FAILED_MESSAGE);
   });
 
+  it('a seed that had to skip a plan line says so instead of silently leaving it off the grid', async () => {
+    seedMock.seedPpmFromPlan.mockImplementation(async () => ({ added: 1, linked: 0, skipped: 1 }));
+    const { result } = renderHook(() => useCreateReport(), { wrapper });
+    await act(async () => { await result.current.mutateAsync(input); });
+    expect(toastMock.warning).toHaveBeenCalledTimes(1);
+    expect(toastMock.warning.mock.calls[0][0]).toContain('1 plan line was skipped');
+    expect(toastMock.error).not.toHaveBeenCalled();
+  });
+
   it('never seeds when the report insert itself failed', async () => {
     state.result = (table, calls) => {
       if (table === 'reports' && has(calls, 'insert')) return { data: null, error: { message: 'dup', code: '23505' } };
@@ -116,7 +129,7 @@ describe('useCreateReport — PPM seeding', () => {
 
 describe('useCarryForwardReport — PPM seeding', () => {
   it('seeds from the plan (idempotently) instead of cloning the prior report\'s ppm_services', async () => {
-    seedMock.seedPpmFromPlan.mockImplementation(async () => ({ added: 1, linked: 0 }));
+    seedMock.seedPpmFromPlan.mockImplementation(async () => ({ added: 1, linked: 0, skipped: 0 }));
     const { result } = renderHook(() => useCarryForwardReport(), { wrapper });
     let n = 0;
     await act(async () => { n = await result.current.mutateAsync({ newReport: report() as never, fromReportId: 'rep0' }); });

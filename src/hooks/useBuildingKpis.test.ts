@@ -12,8 +12,8 @@ const calls = vi.hoisted(() => ({
   queries: [] as { table: string; calls: RecordedCall[] }[],
   result: (() => ({ data: [], error: null })) as (table: string, calls: RecordedCall[]) => QueryResult,
 }));
-vi.mock('@/integrations/supabase/fortress-db', () => {
-  const from = (table: string) => {
+const client = vi.hoisted(() => ({
+  from: (table: string) => {
     calls.from.push(table);
     const own: RecordedCall[] = [];
     const record = (method: string, args: unknown[]) => { own.push({ table, method, args }); return builder; };
@@ -30,11 +30,12 @@ vi.mock('@/integrations/supabase/fortress-db', () => {
       },
     };
     return builder;
-  };
-  return { fdb: { from } };
-});
-// fetchMergedPpmGrids lives in useBuildingPpm, which talks to the same client through fdb.
-vi.mock('@/integrations/supabase/client', () => ({ supabase: {} }));
+  },
+}));
+// One Postgres behind both handles: `fdb` is the Fortress-typed view of `supabase`. K11's
+// ppm_services read and the ppm_monthly_status read (ppmGridFetch) go through `supabase`.
+vi.mock('@/integrations/supabase/fortress-db', () => ({ fdb: { from: client.from } }));
+vi.mock('@/integrations/supabase/client', () => ({ supabase: { from: client.from } }));
 
 import { latestApprovedReport, ppmServicedKpi } from './useBuildingKpis';
 import { fiscalWindow } from '@/lib/ppmGrid';

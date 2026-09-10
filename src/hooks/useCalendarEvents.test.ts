@@ -77,7 +77,7 @@ vi.mock('@/contexts/AuthContext', () => ({
   useAuth: () => ({ user: { id: 'me' }, isAdminOrManager: state.isAdminOrManager }),
 }));
 
-import { monthKeysBetween, ppmMonthsFilter, ppmRowsFilter, useCalendarEvents } from './useCalendarEvents';
+import { monthKeysBetween, ppmMonthsFilter, ppmRowsFilter, PPM_CALENDAR_COLUMNS, useCalendarEvents } from './useCalendarEvents';
 import { todayInOperatingTz } from '@/lib/myWork';
 
 const callsFor = (table: string) => state.calls.filter((c) => c.table === table && !c.update);
@@ -112,7 +112,7 @@ describe('monthKeysBetween / ppmMonthsFilter', () => {
     expect(ppmMonthsFilter('2026-08-25', '2026-10-07'))
       .toBe('months->2026-08.not.is.null,months->2026-09.not.is.null,months->2026-10.not.is.null');
     expect(ppmMonthsFilter('2026-10-01', '2026-09-01')).toBe('');
-    expect(ppmRowsFilter('2026-10-01', '2026-09-01')).toBe('plan_service_id.not.is.null');
+    expect(ppmRowsFilter('2026-10-01', '2026-09-01')).toBe('overrides.neq.{}');
   });
 });
 
@@ -124,9 +124,13 @@ describe('useCalendarEvents', () => {
     const ppm = callsFor('ppm_services')[0];
     expect(ppm.or).toHaveLength(1);
     for (const key of ['2026-08', '2026-09', '2026-10']) expect(ppm.or[0]).toContain(`months->${key}.not.is.null`);
-    // Plan-backed rows carry no months; they are always fetched and merged with the view.
-    expect(ppm.or[0]).toBe(`plan_service_id.not.is.null,${ppmMonthsFilter('2026-08-25', '2026-10-07')}`);
+    // Plan-backed rows are fetched only when a manager pinned a month (non-empty overrides);
+    // their derived months are already on the calendar as tasks.
+    expect(ppm.or[0]).toBe(`overrides.neq.{},${ppmMonthsFilter('2026-08-25', '2026-10-07')}`);
     expect(ppm.or[0]).toBe(ppmRowsFilter('2026-08-25', '2026-10-07'));
+    // A narrow select, with the report's period embedded for ranking rows of the same plan line.
+    expect(ppm.select).toBe(PPM_CALENDAR_COLUMNS);
+    expect(ppm.select).toContain('reports(report_period)');
     // No other source uses an or-tree.
     for (const table of ['task_instances', 'issues', 'building_documents', 'building_assets', 'reports']) {
       expect(callsFor(table)[0].or, table).toEqual([]);
@@ -144,7 +148,7 @@ describe('useCalendarEvents', () => {
     // cells fall outside 7–13 Sep, so the day-level guard must drop them.
     const { result } = renderHook(() => useCalendarEvents({ scope: { kind: 'building', id: 'b1' }, from: '2026-09-07', to: '2026-09-13' }), { wrapper: wrapperFor(client) });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(callsFor('ppm_services')[0].or[0]).toBe('plan_service_id.not.is.null,months->2026-09.not.is.null');
+    expect(callsFor('ppm_services')[0].or[0]).toBe('overrides.neq.{},months->2026-09.not.is.null');
     expect(result.current.events.filter((e) => e.kind === 'ppm')).toEqual([]);
 
     const wide = makeClient();
@@ -280,68 +284,78 @@ describe('useCalendarEvents', () => {
   });
 });
 
-describe('useCalendarEvents — plan-backed PPM rows read the merged grid', () => {
-  const planRow = (id: string, plan: string, created_at: string, extra: Row = {}) => ({
-    id, building_id: 'b1', service_name: 'Lift service', report_id: `rep-${id}`, plan_service_id: plan, overrides: {}, months: {}, created_at, ...extra,
+describe('useCalendarEvents — plan-backed PPM rows: overrides only, tasks carry the rest', () => {
+  const planRow = (id: string, plan: string, period: string | null, extra: Row = {}) => ({
+    id, building_id: 'b1', service_name: 'Lift service', report_id: `rep-${id}`, plan_service_id: plan, overrides: {}, months: {},
+    reports: period ? { report_period: period } : null, ...extra,
   });
 
-  it('a plan-backed row with empty months gets its events from ppm_monthly_status (due/missed cells)', async () => {
+  it('derived due/missed cells produce NO month event: each is already a task on its real due date, and the view is never read', async () => {
     state.data.buildings = [{ id: 'b1', name: 'Block A' }];
-    state.data.ppm_services = [planRow('r1', 'p1', '2026-09-01T00:00:00Z')];
-    // A derived cell has no day, so it lands on the 1st: last month's missed is overdue,
-    // next month's due is still open (today is inside September).
+    state.data.ppm_services = [planRow('r1', 'p1', '2026-09-01')];
+    // Even if the view had rows for this line, the calendar must not turn them into month events.
     state.data.ppm_monthly_status = [
       { ppm_service_id: 'p1', period_month: '2026-10', status: 'due', done_on: null },
       { ppm_service_id: 'p1', period_month: '2026-08', status: 'missed', done_on: null },
     ];
+    // The occurrence itself is a task_instances row generated from the plan line.
+    state.data.task_instances = [{ id: 't1', task_name: 'Lift service', due_date: '2026-10-05', status: 'pending', building_id: 'b1', source_ppm_id: 'p1' }];
     const client = makeClient();
     const { result } = renderHook(() => useCalendarEvents({ scope: { kind: 'building', id: 'b1' }, from: '2026-08-01', to: '2026-10-31' }), { wrapper: wrapperFor(client) });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    const ppm = result.current.events.filter((e) => e.kind === 'ppm');
-    expect(ppm.map((e) => [e.date, e.status, e.href])).toEqual([
-      ['2026-08-01', 'overdue', '/reports/fortress/rep-r1'],
-      ['2026-10-01', 'open', '/reports/fortress/rep-r1'],
-    ]);
-    const view = callsFor('ppm_monthly_status')[0];
-    expect(view.in).toContainEqual(['building_id', ['b1']]);
-    expect(view.in).toContainEqual(['period_month', ['2026-08', '2026-09', '2026-10']]);
+    expect(result.current.events.filter((e) => e.kind === 'ppm')).toEqual([]);
+    expect(result.current.events.filter((e) => e.kind === 'task').map((e) => [e.date, e.title])).toEqual([['2026-10-05', 'Lift service']]);
+    expect(callsFor('ppm_monthly_status')).toHaveLength(0);
   });
 
-  it('a derived done cell is not an event, and an override wins over execution', async () => {
+  it('an override reading due/missed IS a month event (no task stands behind a pinned month); done/na overrides are not', async () => {
     state.data.buildings = [{ id: 'b1', name: 'Block A' }];
     state.data.ppm_services = [
-      planRow('r1', 'p1', '2026-09-01T00:00:00Z'),
-      planRow('r2', 'p2', '2026-09-01T00:00:00Z', { service_name: 'Generator', overrides: { '2026-09': { status: 'missed', note: 'No contractor' } } }),
-    ];
-    state.data.ppm_monthly_status = [
-      { ppm_service_id: 'p1', period_month: '2026-09', status: 'done', done_on: '2026-09-03' },
-      { ppm_service_id: 'p2', period_month: '2026-09', status: 'due', done_on: null },
+      planRow('r2', 'p2', '2026-09-01', { service_name: 'Generator', overrides: { '2026-09': { status: 'missed', note: 'No contractor' } } }),
+      planRow('r3', 'p3', '2026-09-01', { service_name: 'Fire equipment', overrides: { '2026-09': { status: 'na', note: 'Replaced' } } }),
+      planRow('r4', 'p4', '2026-09-01', { service_name: 'Borehole', overrides: { '2026-09': { status: 'done', note: 'Ad hoc' } } }),
+      planRow('r5', 'p5', '2026-09-01', { service_name: 'Gutters', overrides: { '2026-09': { status: 'due', note: 'Booked' } } }),
     ];
     const client = makeClient();
     const { result } = renderHook(() => useCalendarEvents({ scope: { kind: 'building', id: 'b1' }, from: FROM, to: TO }), { wrapper: wrapperFor(client) });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     const ppm = result.current.events.filter((e) => e.kind === 'ppm');
-    expect(ppm.map((e) => [e.title, e.status])).toEqual([['Generator', 'overdue']]);
+    expect(ppm.map((e) => [e.title, e.date, e.href]).sort()).toEqual([
+      ['Generator', '2026-09-01', '/reports/fortress/rep-r2'],
+      ['Gutters', '2026-09-01', '/reports/fortress/rep-r5'],
+    ]);
+    expect(ppm.find((e) => e.title === 'Generator')?.status).toBe('overdue');
   });
 
-  it('one event per plan line when several reports carry a row for it (the newest row speaks)', async () => {
+  it('a plan-backed row\'s legacy months produce no month events either (only its overrides can)', async () => {
     state.data.buildings = [{ id: 'b1', name: 'Block A' }];
+    state.data.ppm_services = [planRow('r1', 'p1', '2026-09-01', { months: { '2026-09': { status: 'due', date: '2026-09-15' } } })];
+    const client = makeClient();
+    const { result } = renderHook(() => useCalendarEvents({ scope: { kind: 'building', id: 'b1' }, from: FROM, to: TO }), { wrapper: wrapperFor(client) });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.events.filter((e) => e.kind === 'ppm')).toEqual([]);
+  });
+
+  it('one event per plan line when several reports carry a row for it: the row on the latest report PERIOD speaks, whatever was created last', async () => {
+    state.data.buildings = [{ id: 'b1', name: 'Block A' }];
+    const pinned = { '2026-09': { status: 'missed', note: 'No contractor' } };
     state.data.ppm_services = [
-      planRow('old', 'p1', '2026-08-01T00:00:00Z'),
-      planRow('new', 'p1', '2026-09-01T00:00:00Z'),
+      // The August report's row was (re)created later — created_at must not decide.
+      planRow('aug', 'p1', '2026-08-01', { overrides: pinned, created_at: '2026-09-20T00:00:00Z' }),
+      planRow('sep', 'p1', '2026-09-01', { overrides: pinned, created_at: '2026-09-01T00:00:00Z' }),
+      planRow('none', 'p1', null, { overrides: pinned, created_at: '2026-09-25T00:00:00Z' }),
     ];
-    state.data.ppm_monthly_status = [{ ppm_service_id: 'p1', period_month: '2026-09', status: 'due', done_on: null }];
     const client = makeClient();
     const { result } = renderHook(() => useCalendarEvents({ scope: { kind: 'building', id: 'b1' }, from: FROM, to: TO }), { wrapper: wrapperFor(client) });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     const ppm = result.current.events.filter((e) => e.kind === 'ppm');
     expect(ppm).toHaveLength(1);
-    expect(ppm[0].href).toBe('/reports/fortress/rep-new');
+    expect(ppm[0].href).toBe('/reports/fortress/rep-sep');
   });
 
   it('legacy rows still expand their own months and cost no view query', async () => {
     state.data.buildings = [{ id: 'b1', name: 'Block A' }];
-    state.data.ppm_services = [{ id: 'l1', building_id: 'b1', service_name: 'Pest control', report_id: null, plan_service_id: null, months: { '2026-09': { status: 'due', date: '2026-09-15' } } }];
+    state.data.ppm_services = [{ id: 'l1', building_id: 'b1', service_name: 'Pest control', report_id: null, plan_service_id: null, overrides: {}, months: { '2026-09': { status: 'due', date: '2026-09-15' } }, reports: null }];
     const client = makeClient();
     const { result } = renderHook(() => useCalendarEvents({ scope: { kind: 'building', id: 'b1' }, from: FROM, to: TO }), { wrapper: wrapperFor(client) });
     await waitFor(() => expect(result.current.isLoading).toBe(false));

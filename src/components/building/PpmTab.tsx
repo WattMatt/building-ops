@@ -28,8 +28,9 @@ import { fdb } from '@/integrations/supabase/fortress-db';
 import { exportCsv } from '@/lib/exportCsv';
 import { describeRule, type RecurrenceRule } from '@/lib/recurrence';
 import { todayInOperatingTz } from '@/lib/myWork';
+import { PpmLegend } from '@/components/ppm/PpmLegend';
 import {
-  derivedByService, fiscalWindow, mergePpmGrid, PPM_STATUS_SHORT, PPM_STATUS_STYLE, type PpmCellStatus,
+  colHeader, derivedByService, fiscalWindow, mergePpmGrid, occurrenceSummary, PPM_STATUS_SHORT, PPM_STATUS_STYLE,
 } from '@/lib/ppmGrid';
 import { cn } from '@/lib/utils';
 
@@ -47,11 +48,6 @@ function ppmLineProblem(
   }
   if (rule.unit !== 'month' && rule.unit !== 'year') return 'PPM services repeat monthly or yearly. Choose months or years.';
   return recurrenceProblem(rule);
-}
-
-function colHeader(monthKey: string): { mon: string; yr: string } {
-  const d = new Date(`${monthKey}-01T00:00:00`);
-  return { mon: d.toLocaleDateString('en-ZA', { month: 'short' }), yr: `'${String(d.getFullYear()).slice(2)}` };
 }
 
 interface Props { buildingId: string }
@@ -132,21 +128,6 @@ export default function PpmTab({ buildingId }: Props) {
   );
   const fy = `${months[0].slice(0, 4)}/${months[11].slice(2, 4)}`;
 
-  const legend = (
-    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-      {(Object.keys(PPM_STATUS_STYLE) as PpmCellStatus[]).map((s) => (
-        <span key={s} className="flex items-center gap-1.5">
-          <span className={`inline-block h-3 w-3 rounded-sm ${PPM_STATUS_STYLE[s].cls}`} />
-          {PPM_STATUS_STYLE[s].label}
-        </span>
-      ))}
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block h-3 w-3 rounded-sm border border-border bg-background" />
-        No occurrence
-      </span>
-    </div>
-  );
-
   return (
     <div className="space-y-6">
       <section className="space-y-3">
@@ -196,11 +177,11 @@ export default function PpmTab({ buildingId }: Props) {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/40 text-left">
-                  <th className="px-3 py-2 font-medium">Service</th>
-                  <th className="px-3 py-2 font-medium">Cadence</th>
-                  <th className="px-3 py-2 font-medium min-w-48">Contractor</th>
-                  <th className="px-3 py-2 font-medium">Active</th>
-                  {isAdminOrManager && <th className="w-12" />}
+                  <th scope="col" className="px-3 py-2 font-medium">Service</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Cadence</th>
+                  <th scope="col" className="px-3 py-2 font-medium min-w-48">Contractor</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Active</th>
+                  {isAdminOrManager && <th scope="col" className="w-12"><span className="sr-only">Edit</span></th>}
                 </tr>
               </thead>
               <tbody>
@@ -253,7 +234,7 @@ export default function PpmTab({ buildingId }: Props) {
         <section className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-lg font-semibold">Fiscal year {fy}</h3>
-            {legend}
+            <PpmLegend blankLabel="No occurrence" />
           </div>
           {derivedLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
@@ -262,11 +243,11 @@ export default function PpmTab({ buildingId }: Props) {
               <table className="w-full border-collapse text-sm" aria-label="PPM month grid">
                 <thead>
                   <tr className="border-b">
-                    <th className="sticky left-0 z-10 bg-background px-3 py-2 text-left font-medium min-w-44">Service</th>
+                    <th scope="col" className="sticky left-0 z-10 bg-background px-3 py-2 text-left font-medium min-w-44">Service</th>
                     {months.map((mk) => {
                       const { mon, yr } = colHeader(mk);
                       return (
-                        <th key={mk} className="px-1 py-2 text-center font-medium whitespace-nowrap">
+                        <th key={mk} scope="col" className="px-1 py-2 text-center font-medium whitespace-nowrap">
                           <div>{mon}</div><div className="text-[10px] text-muted-foreground">{yr}</div>
                         </th>
                       );
@@ -278,12 +259,13 @@ export default function PpmTab({ buildingId }: Props) {
                     const grid = grids.get(line.id)!;
                     return (
                       <tr key={line.id} className={cn('border-b last:border-0', !line.is_active && 'opacity-60')}>
-                        <td className="sticky left-0 z-10 bg-background px-3 py-1.5 font-medium min-w-44">{line.service_name}</td>
+                        <th scope="row" className="sticky left-0 z-10 bg-background px-3 py-1.5 text-left font-medium min-w-44">{line.service_name}</th>
                         {months.map((mk) => {
                           const cell = grid[mk];
                           const style = cell.status ? PPM_STATUS_STYLE[cell.status] : null;
+                          const several = occurrenceSummary(cell);
                           const title = cell.status
-                            ? `${PPM_STATUS_STYLE[cell.status].label}${cell.doneOn ? ` on ${cell.doneOn}` : ''}`
+                            ? `${PPM_STATUS_STYLE[cell.status].label}${cell.doneOn ? ` on ${cell.doneOn}` : ''}${several ? ` (${several})` : ''}`
                             : 'No occurrence';
                           return (
                             <td key={mk} className="px-0.5 py-1.5 text-center">
@@ -316,7 +298,7 @@ export default function PpmTab({ buildingId }: Props) {
           <ResponsiveDialogHeader>
             <ResponsiveDialogTitle>{editing ? 'Edit service' : 'Add service'}</ResponsiveDialogTitle>
             <ResponsiveDialogDescription>
-              {editing ? 'Changes apply to occurrences generated from tonight.' : 'A planned maintenance service for this building.'}
+              {editing ? 'Future untouched occurrences are rescheduled now.' : 'A planned maintenance service for this building.'}
             </ResponsiveDialogDescription>
           </ResponsiveDialogHeader>
           <div className="space-y-4">

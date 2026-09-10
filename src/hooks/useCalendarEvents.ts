@@ -20,7 +20,7 @@ import { fdb } from '@/integrations/supabase/fortress-db';
 import { useAuth } from '@/contexts/AuthContext';
 import { todayInOperatingTz } from '@/lib/myWork';
 import { PERSIST_DEFAULTS } from '@/lib/persist';
-import { fetchMergedPpmGrids, type PpmGridSourceRow } from '@/hooks/useBuildingPpm';
+import { mergePpmGrids } from '@/lib/ppmGrid';
 import {
   assetEvent,
   documentEvent,
@@ -109,41 +109,67 @@ export function ppmMonthsFilter(from: string, to: string): string {
 }
 
 /**
- * The full PPM row filter: every PLAN-BACKED row (its grid is derived server-side from
- * execution, so `months` says nothing about it) plus the legacy rows `ppmMonthsFilter`
- * admits. Plan-backed rows are narrowed to the range after the merge, by month key.
+ * The full PPM row filter: rows with a non-empty `overrides` (a plan-backed row whose
+ * manager pinned a month — the only plan-backed cells that become month events, see
+ * `calendarPpmRows`) plus the legacy rows `ppmMonthsFilter` admits. `overrides.neq.{}` is
+ * a jsonb inequality against the empty object; checked against the project's REST
+ * endpoint inside an or-tree (200, and a malformed tree is a 400). Both halves are
+ * narrowed to the range after the fetch, by month key.
  */
 export function ppmRowsFilter(from: string, to: string): string {
-  return ['plan_service_id.not.is.null', ppmMonthsFilter(from, to)].filter(Boolean).join(',');
+  return ['overrides.neq.{}', ppmMonthsFilter(from, to)].filter(Boolean).join(',');
 }
 
-/** A `ppm_services` row as the calendar reads it (`select('*')`, narrowed). */
-type CalendarPpmRow = PpmRow & PpmGridSourceRow & { created_at?: string | null };
+/** The columns the calendar reads off `ppm_services`, with the report's period for ranking. */
+export const PPM_CALENDAR_COLUMNS = 'id, building_id, service_name, report_id, plan_service_id, overrides, months, reports(report_period)';
+
+/** A `ppm_services` row as `PPM_CALENDAR_COLUMNS` returns it. */
+export interface CalendarPpmRow {
+  id: string;
+  building_id: string;
+  service_name: string;
+  report_id: string | null;
+  plan_service_id: string | null;
+  overrides: unknown;
+  months: unknown;
+  /** Left-joined: a row with no report (or one the caller cannot see) ranks lowest. */
+  reports: { report_period: string | null } | null;
+}
+
+const periodOf = (r: CalendarPpmRow) => r.reports?.report_period ?? '';
 
 /**
- * Turn the fetched rows into the `PpmRow`s `ppmEvents` expands: legacy rows pass through
- * with their `months`; plan-backed rows get their MERGED grid (override > derived > legacy)
- * over the range's months, and one row per plan line — every report month carries a row for
- * the same line, so the newest report's row (its overrides) speaks for it.
+ * Turn the fetched rows into the `PpmRow`s `ppmEvents` expands.
+ *
+ * LEGACY rows (no plan line) pass through with their hand-captured `months`, as before.
+ *
+ * PLAN-BACKED rows do NOT emit month events for derived cells: every derived due/missed
+ * month IS a `task_instances` row (`source_ppm_id`) that `taskEvent` already puts on the
+ * calendar on its real due date, so a month event would be the same job twice, on the 1st.
+ * Only OVERRIDE cells reading due/missed become month events — a pinned month has no task
+ * behind it — and one row per plan line speaks: the one on the report with the latest
+ * `report_period` (every report month carries a row for the same line).
  */
-export async function mergedPpmRows(rows: readonly CalendarPpmRow[], from: string, to: string): Promise<PpmRow[]> {
+export function calendarPpmRows(rows: readonly CalendarPpmRow[], from: string, to: string): PpmRow[] {
   const monthKeys = monthKeysBetween(from, to);
   const planBacked = rows.filter((r) => r.plan_service_id);
-  const grids = await fetchMergedPpmGrids(planBacked, monthKeys);
+  // Overrides only: no derived rows are handed in, so nothing but 'override' cells can carry a status.
+  const grids = mergePpmGrids(planBacked, [], monthKeys);
   const newestPerLine = new Map<string, CalendarPpmRow>();
   for (const r of planBacked) {
     const cur = newestPerLine.get(r.plan_service_id!);
-    if (!cur || (r.created_at ?? '') > (cur.created_at ?? '')) newestPerLine.set(r.plan_service_id!, r);
+    if (!cur || periodOf(r) > periodOf(cur)) newestPerLine.set(r.plan_service_id!, r);
   }
   const out: PpmRow[] = [];
   for (const r of rows) {
-    if (!r.plan_service_id) { out.push(r); continue; }
+    const base = { id: r.id, service_name: r.service_name, building_id: r.building_id, report_id: r.report_id };
+    if (!r.plan_service_id) { out.push({ ...base, months: r.months }); continue; }
     if (newestPerLine.get(r.plan_service_id) !== r) continue;
     const months: Record<string, PpmMonthCell> = {};
     for (const [mk, cell] of Object.entries(grids.get(r.id) ?? {})) {
-      if (cell.status) months[mk] = { status: cell.status, date: cell.doneOn ?? null };
+      if (cell.source === 'override' && cell.status) months[mk] = { status: cell.status, date: null };
     }
-    out.push({ id: r.id, service_name: r.service_name, building_id: r.building_id, report_id: r.report_id, months });
+    if (Object.keys(months).length > 0) out.push({ ...base, months });
   }
   return out;
 }
@@ -237,19 +263,19 @@ export function useCalendarEvents({ scope, from, to }: UseCalendarEventsArgs): U
       {
         // Legacy rows keep their months in a jsonb map and are limited server-side to those
         // with a cell in one of the range's months (so a month step does not re-download the
-        // whole table). Plan-backed rows are all fetched and merged with `ppm_monthly_status`
-        // for the range's months (`mergedPpmRows`); the day-level range is then applied after
-        // expansion (see `events`).
+        // whole table). Plan-backed rows are fetched only when they carry an override, since
+        // their derived months are already on the calendar as tasks (`calendarPpmRows`); the
+        // day-level range is then applied after expansion (see `events`).
         queryKey: keyFor('ppm'),
         ...persistMeta,
         enabled: !!uid,
         queryFn: async (): Promise<PpmRow[]> => {
-          // plan_service_id / overrides are not yet in the generated types — read the whole row and narrow.
-          let q = supabase.from('ppm_services').select('*').or(ppmRowsFilter(from, to));
+          let q = supabase.from('ppm_services').select(PPM_CALENDAR_COLUMNS).or(ppmRowsFilter(from, to));
           if (buildingId) q = q.eq('building_id', buildingId);
           const { data, error } = await q.order('service_name');
           if (error) throw new Error(error.message);
-          return mergedPpmRows((data ?? []) as unknown as CalendarPpmRow[], from, to);
+          const rows: CalendarPpmRow[] = data ?? [];
+          return calendarPpmRows(rows, from, to);
         },
       },
       {

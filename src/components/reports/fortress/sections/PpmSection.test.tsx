@@ -6,6 +6,9 @@ import type { DerivedRow } from '@/lib/ppmGrid';
 
 const state = vi.hoisted(() => ({
   isAdminOrManager: true,
+  reportPeriod: '2026-09-01' as string | null,
+  /** Every `months` window the section handed useReportPpm, in render order. */
+  monthsSeen: [] as (readonly string[])[],
   services: [] as PpmServiceRow[],
   derived: [] as DerivedRow[],
   upsertService: vi.fn(async () => {}),
@@ -21,7 +24,8 @@ vi.mock('@/hooks/useReportPpm', async () => {
   const actual = await vi.importActual<typeof import('@/hooks/useReportPpm')>('@/hooks/useReportPpm');
   return {
     ...actual,
-    useReportPpm: () => ({
+    useReportPpm: (_reportId: string | undefined, _buildingId: string | undefined, months: readonly string[] = []) => ({
+      ...(state.monthsSeen.push(months), {}),
       services: state.services, isLoading: false, derived: state.derived, derivedLoading: false,
       upsertService: state.upsertService, isSaving: false, removeService: state.removeService,
       setOverride: state.setOverride, seedFromPlan: state.seedFromPlan, isSeeding: false,
@@ -32,7 +36,7 @@ vi.mock('@/hooks/useReportPpm', async () => {
 vi.mock('@/integrations/supabase/client', () => {
   const chain: Record<string, unknown> = {};
   for (const m of ['select', 'eq', 'order', 'in']) chain[m] = () => chain;
-  chain.maybeSingle = async () => ({ data: { report_period: '2026-09-01' }, error: null });
+  chain.maybeSingle = async () => ({ data: { report_period: state.reportPeriod }, error: null });
   return { supabase: { from: () => chain } };
 });
 
@@ -55,6 +59,8 @@ function renderSection(readOnly = false) {
 
 beforeEach(() => {
   state.isAdminOrManager = true;
+  state.reportPeriod = '2026-09-01';
+  state.monthsSeen = [];
   state.services = [
     row(),
     row({ id: 'r2', service_name: 'Fire equipment', plan_service_id: 'p2', overrides: { '2026-08': { status: 'na', note: 'Extinguishers replaced, no service due', by: 'u9', at: '2026-09-01T00:00:00Z' } } }),
@@ -123,6 +129,40 @@ describe('PpmSection — plan-backed rows', () => {
     expect(await screen.findByText('3 services · 2/3 serviced')).toBeInTheDocument();
   });
 
+  it('a month with several occurrences reads Missed when one was missed, and the title carries the counts', async () => {
+    state.derived = [
+      { ppm_service_id: 'p1', period_month: '2026-08', status: 'done', done_on: '2026-08-12' },
+      { ppm_service_id: 'p1', period_month: '2026-08', status: 'missed' },
+    ];
+    renderSection();
+    const cell = await screen.findByRole('button', { name: 'Lift service 2026-08: Missed (2 occurrences: 1 done, 1 missed)' });
+    expect(cell.className).toContain('bg-destructive');
+  });
+
+  it('an override whose status is not one the grid knows is treated as absent instead of crashing the section', async () => {
+    state.services[1] = row({ id: 'r2', service_name: 'Fire equipment', plan_service_id: 'p2', overrides: { '2026-08': { status: 'cancelled' as never, note: 'bad import' } } });
+    renderSection();
+    // execution says missed for p2 in August; the unknown override does not hide it
+    expect(await screen.findByRole('button', { name: 'Fire equipment 2026-08: Missed' })).toBeInTheDocument();
+  });
+
+  it('waits for the report before computing the fiscal window (no derived fetch for a window anchored on today)', async () => {
+    state.reportPeriod = '2026-03-01'; // FY 2025/26 — not the window today (2026-09) would give
+    renderSection();
+    await screen.findByRole('button', { name: /Lift service 2025-07/ });
+    const nonEmpty = state.monthsSeen.filter((m) => m.length > 0);
+    expect(nonEmpty.length).toBeGreaterThan(0);
+    for (const m of nonEmpty) expect(m[0]).toBe('2025-07');
+    for (const m of state.monthsSeen) expect(m.length === 0 || m[0] === '2025-07').toBe(true);
+  });
+
+  it('marks the service column and each service name as table headers', async () => {
+    renderSection();
+    await screen.findByRole('button', { name: 'Lift service 2026-09: Due' });
+    expect(screen.getByRole('columnheader', { name: 'Service' })).toHaveAttribute('scope', 'col');
+    expect(screen.getByRole('rowheader', { name: /Lift service/ })).toHaveAttribute('scope', 'row');
+  });
+
   it('read-only renders the cells as images, no popover, note still in the title', async () => {
     renderSection(true);
     const cell = await screen.findByRole('img', { name: /Fire equipment 2026-08: N\/A \(override/ });
@@ -132,7 +172,37 @@ describe('PpmSection — plan-backed rows', () => {
   });
 });
 
+describe('PpmSection — removing rows', () => {
+  it('offers Delete only for ad-hoc rows; plan-backed rows point at the building plan instead', async () => {
+    renderSection();
+    await screen.findByRole('button', { name: 'Lift service 2026-09: Due' });
+    expect(screen.queryByRole('button', { name: 'Remove Lift service' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remove Fire equipment' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Remove Old pest control' })).toBeInTheDocument();
+    expect(screen.getByText(/deactivate its line on the building's PPM tab/)).toBeInTheDocument();
+  });
+
+  it('shows no plan-row hint when every row is ad-hoc', async () => {
+    state.services = [row({ id: 'r3', service_name: 'Old pest control', plan_service_id: null, months: { '2026-07': { status: 'due' } } })];
+    renderSection();
+    await screen.findByRole('button', { name: 'Old pest control 2026-07: Due' });
+    expect(screen.queryByText(/deactivate its line/)).toBeNull();
+  });
+
+  it('labels the add input as an ad-hoc service, apart from the plan', async () => {
+    renderSection();
+    await screen.findByRole('button', { name: 'Lift service 2026-09: Due' });
+    expect(screen.getByRole('textbox', { name: 'Ad-hoc service (not on the plan)' })).toBeInTheDocument();
+  });
+});
+
 describe('PpmSection — legacy rows', () => {
+  it('a legacy months cell with a status the grid does not know renders blank instead of crashing', async () => {
+    state.services[2] = row({ id: 'r3', service_name: 'Old pest control', plan_service_id: null, months: { '2026-07': { status: 'yes' as never } } });
+    renderSection();
+    expect(await screen.findByRole('button', { name: 'Old pest control 2026-07: Blank' })).toBeInTheDocument();
+  });
+
   it('keeps the click-cycling on months for rows without a plan line', async () => {
     renderSection();
     fireEvent.click(await screen.findByRole('button', { name: 'Old pest control 2026-07: Due' }));

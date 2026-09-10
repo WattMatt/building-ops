@@ -49,7 +49,8 @@ vi.mock('@/integrations/supabase/client', () => {
 const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock('sonner', () => ({ toast: toastMock }));
 
-import { useBuildingPpm, useDerivedPpm, fetchMergedPpmGrids, PPM_PERMISSION_MESSAGE } from './useBuildingPpm';
+import { useBuildingPpm, useDerivedPpm, fetchMergedPpmGrids, fetchDerivedPpm, PPM_PERMISSION_MESSAGE, PPM_EXISTS_MESSAGE, patchReschedules } from './useBuildingPpm';
+import * as gridFetch from '@/lib/ppmGridFetch';
 
 let qc: QueryClient;
 const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: qc }, children);
@@ -142,6 +143,63 @@ describe('useBuildingPpm — plan lines', () => {
     await expect(result.current.createLine({ service_name: 'X', recurrence: { every: 1, unit: 'year', month: 1, monthDay: 1 } }))
       .rejects.toThrow(PPM_PERMISSION_MESSAGE);
   });
+
+  it('a 23505 on insert is the plain "already exists" message', async () => {
+    state.result = (table, calls) => {
+      if (table === 'building_ppm_services' && has(calls, 'insert')) return { data: null, error: { message: 'duplicate key', code: '23505' } };
+      return { data: [line], error: null };
+    };
+    const { result } = renderHook(() => useBuildingPpm('b1'), { wrapper });
+    await waitFor(() => expect(result.current.lines).toHaveLength(1));
+    await expect(result.current.createLine({ service_name: 'Lift service', recurrence: { every: 1, unit: 'month', monthDay: 1 } }))
+      .rejects.toThrow(PPM_EXISTS_MESSAGE);
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith(PPM_EXISTS_MESSAGE));
+  });
+
+  it('an update sends only the patched columns — never updated_at (the touch trigger owns it)', async () => {
+    const { result } = renderHook(() => useBuildingPpm('b1'), { wrapper });
+    await waitFor(() => expect(result.current.lines).toHaveLength(1));
+    await act(async () => { await result.current.updateLine('p1', { service_name: ' Lift ', notes: ' x ', contractor_id: null }); });
+    const upd = state.calls.find((c) => c.method === 'update')!;
+    expect(upd.args[0]).toEqual({ service_name: 'Lift', notes: 'x', contractor_id: null });
+  });
+});
+
+describe('useBuildingPpm — a reschedule-triggering patch refreshes the occurrence consumers', () => {
+  const OCCURRENCE_KEYS = [['building-ppm'], ['ppm-derived'], ['my-work'], ['calendar']].map((k) => JSON.stringify(k));
+  const keysOf = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.map((c) => JSON.stringify((c[0] as { queryKey: unknown }).queryKey));
+
+  it('patchReschedules names exactly is_active and recurrence', () => {
+    expect(patchReschedules({ is_active: false })).toBe(true);
+    expect(patchReschedules({ recurrence: { every: 2, unit: 'month', monthDay: 1 } })).toBe(true);
+    expect(patchReschedules({ service_name: 'x', contractor_id: 'c1', notes: null, sort_order: 2 })).toBe(false);
+  });
+
+  it('setActive invalidates ppm-derived, my-work and calendar as well as the plan (the trigger already rescheduled the tasks)', async () => {
+    const spy = vi.spyOn(qc, 'invalidateQueries');
+    const { result } = renderHook(() => useBuildingPpm('b1'), { wrapper });
+    await waitFor(() => expect(result.current.lines).toHaveLength(1));
+    await act(async () => { await result.current.setActive('p1', false); });
+    expect(keysOf(spy)).toEqual(expect.arrayContaining(OCCURRENCE_KEYS));
+  });
+
+  it('a recurrence change does the same', async () => {
+    const spy = vi.spyOn(qc, 'invalidateQueries');
+    const { result } = renderHook(() => useBuildingPpm('b1'), { wrapper });
+    await waitFor(() => expect(result.current.lines).toHaveLength(1));
+    await act(async () => { await result.current.updateLine('p1', { recurrence: { every: 3, unit: 'month', monthDay: 'last' } }); });
+    expect(keysOf(spy)).toEqual(expect.arrayContaining(OCCURRENCE_KEYS));
+  });
+
+  it('a name / contractor / notes edit only refreshes the plan (no occurrence changed)', async () => {
+    const spy = vi.spyOn(qc, 'invalidateQueries');
+    const { result } = renderHook(() => useBuildingPpm('b1'), { wrapper });
+    await waitFor(() => expect(result.current.lines).toHaveLength(1));
+    await act(async () => { await result.current.updateLine('p1', { service_name: 'Lift (Otis)', contractor_id: 'c1', notes: 'n' }); });
+    const keys = keysOf(spy);
+    expect(keys).toContain(JSON.stringify(['building-ppm', 'b1']));
+    for (const k of [['ppm-derived'], ['my-work'], ['calendar']]) expect(keys).not.toContain(JSON.stringify(k));
+  });
 });
 
 describe('useBuildingPpm — generateNow', () => {
@@ -194,38 +252,9 @@ describe('derived grid', () => {
   });
 });
 
-describe('fetchMergedPpmGrids (shared by K11, the PDF and the calendar)', () => {
-  const months = ['2026-07', '2026-08', '2026-09'];
-
-  it('reads the view once for the plan-backed rows\' buildings and merges every row', async () => {
-    state.result = (table) => {
-      if (table === 'ppm_monthly_status') {
-        return { data: [{ ppm_service_id: 'p1', period_month: '2026-08', status: 'done', done_on: '2026-08-12' }], error: null };
-      }
-      return { data: [], error: null };
-    };
-    const grids = await fetchMergedPpmGrids([
-      { id: 'r1', building_id: 'b1', plan_service_id: 'p1', overrides: {}, months: {} },
-      { id: 'r2', building_id: 'b2', plan_service_id: 'p9', overrides: {}, months: {} },
-      { id: 'r3', building_id: 'b1', plan_service_id: null, months: { '2026-07': { status: 'done' } } },
-    ], months);
-    const views = state.queries.filter((x) => x.table === 'ppm_monthly_status');
-    expect(views).toHaveLength(1);
-    expect(has(views[0].calls, 'in', 'building_id', ['b1', 'b2'])).toBe(true);
-    expect(has(views[0].calls, 'in', 'period_month', months)).toBe(true);
-    expect(grids.get('r1')!['2026-08']).toMatchObject({ status: 'done', source: 'derived' });
-    expect(grids.get('r2')!['2026-08']).toMatchObject({ status: null, source: 'none' });
-    expect(grids.get('r3')!['2026-07']).toMatchObject({ status: 'done', source: 'legacy' });
-  });
-
-  it('costs no view query when no row is plan-backed', async () => {
-    const grids = await fetchMergedPpmGrids([{ id: 'r3', building_id: 'b1', plan_service_id: null, months: {} }], months);
-    expect(state.queries.filter((x) => x.table === 'ppm_monthly_status')).toHaveLength(0);
-    expect(Object.keys(grids.get('r3')!)).toEqual(months);
-  });
-
-  it('surfaces a view error instead of an empty grid', async () => {
-    state.result = (table) => (table === 'ppm_monthly_status' ? { data: null, error: { message: 'boom' } } : { data: [], error: null });
-    await expect(fetchMergedPpmGrids([{ id: 'r1', building_id: 'b1', plan_service_id: 'p1', months: {} }], months)).rejects.toMatchObject({ message: 'boom' });
+describe('re-exports', () => {
+  it('the grid fetchers are the ppmGridFetch ones (K11, the PDF and the calendar import from either)', () => {
+    expect(fetchMergedPpmGrids).toBe(gridFetch.fetchMergedPpmGrids);
+    expect(fetchDerivedPpm).toBe(gridFetch.fetchDerivedPpm);
   });
 });

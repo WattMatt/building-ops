@@ -8,11 +8,12 @@
 import pdfMake from 'pdfmake/build/pdfmake';
 import pdfFonts from 'pdfmake/build/vfs_fonts';
 import { fdb, type ReportType } from '@/integrations/supabase/fortress-db';
+import { supabase } from '@/integrations/supabase/client';
 import { resolveStorageUrl } from '@/integrations/supabase/storage';
 import { buildReportDoc, MARK, type ReportData, type EmbeddedPhoto, type AnnualItem } from '@/lib/fortressReportDoc';
 import { ANNUAL_FIELD_SETS } from '@/lib/annualFieldSets';
 import { doneMonthsFromGrid, fiscalWindow, gridHasData } from '@/lib/ppmGrid';
-import { fetchMergedPpmGrids, type PpmGridSourceRow } from '@/hooks/useBuildingPpm';
+import { fetchMergedPpmGrids } from '@/lib/ppmGridFetch';
 import { REPORT_SECTIONS, watermarkFor } from '@/lib/fortressReports';
 import { fetchReportElectricalCompliance } from '@/integrations/supabase/insight-linker';
 
@@ -107,10 +108,8 @@ export async function fetchPpmForPdf(
   reportId: string,
   reportPeriod: string | null,
 ): Promise<{ ppm: NonNullable<ReportData['ppm']>; ppmStatusNote: string | null }> {
-  // plan_service_id / overrides are not yet in the generated types — read the whole row and narrow.
-  const rows = (unwrap(await fdb.from('ppm_services').select('*')
-    .eq('report_id', reportId).order('sort_order', { ascending: true, nullsFirst: false }), 'the PPM schedule') ?? []) as unknown as
-    (PpmGridSourceRow & { service_name: string | null; frequency: string | null })[];
+  const rows = unwrap(await supabase.from('ppm_services').select('id, building_id, service_name, frequency, plan_service_id, overrides, months')
+    .eq('report_id', reportId).order('sort_order', { ascending: true, nullsFirst: false }), 'the PPM schedule') ?? [];
   const grids = await fetchMergedPpmGrids(rows, fiscalWindow(reportPeriod));
   const ppm = rows.map((p) => ({
     service: p.service_name ?? '',
@@ -154,15 +153,13 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
       .eq('report_id', reportId).maybeSingle();
     const asmt = unwrap(asmtRes, 'the OHS assessment');
     if (asmt) {
-      // The embedded compliance_template_items join has no generated row type.
-      const resp = (unwrap(await fdb.from('compliance_responses')
+      const resp = unwrap(await fdb.from('compliance_responses')
         .select('response,comment,compliance_template_items(item_no,prompt)')
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .eq('assessment_id', asmt.id), 'the OHS responses') ?? []) as any[];
+        .eq('assessment_id', asmt.id), 'the OHS responses') ?? [];
       data.compliance = resp.map((r) => ({
         itemNo: r.compliance_template_items?.item_no ?? '',
         prompt: r.compliance_template_items?.prompt ?? '',
-        mark: MARK[r.response] ?? '',
+        mark: MARK[r.response ?? ''] ?? '',
         comment: r.comment ?? '',
       }));
       // Hazard log rows hang off the assessment, not the report.
@@ -604,8 +601,7 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
     // table is empty. `motivation` is the item's justification and prints beside it.
     const capex = unwrap(await fdb.from('capex_items')
       .select('item,motivation,estimate,year,priority,status').eq('report_id', reportId), 'the capex register') ?? [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    data.capex = capex.map((c: any) => ({
+    data.capex = capex.map((c) => ({
       description: [c.item, c.motivation].filter(Boolean).join(' — ') || '',
       estimate: c.estimate ?? null,
       year: c.year == null ? '' : String(c.year),

@@ -27,12 +27,15 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Plus, Trash2, ListPlus } from 'lucide-react';
 import { SectionCard } from '../SectionCard';
+import { Hint } from '@/components/ui/hint';
+import { PpmLegend } from '@/components/ppm/PpmLegend';
 import { fdb } from '@/integrations/supabase/fortress-db';
 import { useAuth } from '@/contexts/AuthContext';
 import { useReportPpm, isPlanBacked, type PpmServiceRow } from '@/hooks/useReportPpm';
 import { ppmCompletion, type PpmCellStatus, type PpmCell } from '@/lib/ppmStatus';
 import {
-  derivedByService, fiscalWindow, mergePpmGrid, PPM_STATUSES, PPM_STATUS_SHORT, PPM_STATUS_STYLE, type MergedCell,
+  asPpmStatus, colHeader, derivedByService, fiscalWindow, mergePpmGrid, occurrenceSummary,
+  PPM_STATUSES, PPM_STATUS_SHORT, PPM_STATUS_STYLE, type MergedCell,
 } from '@/lib/ppmGrid';
 import { cn } from '@/lib/utils';
 import type { SectionProps } from './types';
@@ -43,14 +46,8 @@ const STATUS_STYLE = PPM_STATUS_STYLE;
 const SHORT = PPM_STATUS_SHORT;
 /** 44 px on phones, compact with a mouse. */
 const CELL = 'h-11 w-11 sm:h-7 sm:w-7 rounded-sm text-xs font-semibold transition-colors';
-
-function colHeader(monthKey: string): { mon: string; yr: string } {
-  const d = new Date(`${monthKey}-01T00:00:00`);
-  return {
-    mon: d.toLocaleDateString('en-ZA', { month: 'short' }),
-    yr: `'${String(d.getFullYear()).slice(2)}`,
-  };
-}
+/** Plan-backed rows are removed by deactivating the line, never from a report (coaching copy, so a Hint). */
+const PLAN_ROW_HINT = "Rows from the building's PPM plan can't be deleted here — to take a service off future reports, deactivate its line on the building's PPM tab.";
 
 function nextStatus(current: PpmCellStatus | null | undefined): PpmCellStatus | null {
   const idx = CYCLE.indexOf(current ?? null);
@@ -59,12 +56,14 @@ function nextStatus(current: PpmCellStatus | null | undefined): PpmCellStatus | 
 
 function cellTitle(cell: MergedCell): string {
   const label = cell.status ? STATUS_STYLE[cell.status].label : 'No occurrence';
+  const several = occurrenceSummary(cell);
   if (cell.source === 'override') {
     const derived = cell.derivedStatus ? STATUS_STYLE[cell.derivedStatus].label : 'no occurrence';
-    return `${label} (override — execution says ${derived}): ${cell.note ?? ''}`;
+    return `${label} (override — execution says ${derived}${several ? `; ${several}` : ''}): ${cell.note ?? ''}`;
   }
   if (cell.source === 'legacy') return `${label} (captured by hand)`;
-  return cell.doneOn ? `${label} on ${cell.doneOn}` : label;
+  const base = cell.doneOn ? `${label} on ${cell.doneOn}` : label;
+  return several ? `${base} (${several})` : base;
 }
 
 /** One plan-backed cell: derived colour, override chip, and the override popover when editable. */
@@ -170,7 +169,9 @@ export default function PpmSection({ reportId, buildingId, readOnly }: SectionPr
     },
   });
 
-  const months = useMemo(() => fiscalWindow(report?.report_period), [report?.report_period]);
+  // The window waits for the report: computing it from `undefined` would anchor on today,
+  // fetch the derived grid once for that window and again for the real one, and flash.
+  const months = useMemo(() => (report ? fiscalWindow(report.report_period) : []), [report]);
 
   const {
     services, isLoading, derived, upsertService, isSaving, removeService, setOverride, seedFromPlan, isSeeding,
@@ -266,26 +267,7 @@ export default function PpmSection({ reportId, buildingId, readOnly }: SectionPr
     </Button>
   );
 
-  const legend = (
-    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-      {(Object.keys(STATUS_STYLE) as PpmCellStatus[]).map((s) => (
-        <span key={s} className="flex items-center gap-1.5">
-          <span className={`inline-block h-3 w-3 rounded-sm ${STATUS_STYLE[s].cls}`} />
-          {STATUS_STYLE[s].label}
-        </span>
-      ))}
-      <span className="flex items-center gap-1.5">
-        <span className="inline-block h-3 w-3 rounded-sm border border-border bg-background" />
-        Blank
-      </span>
-      <span className="flex items-center gap-1.5">
-        <span className="relative inline-block h-3 w-3 rounded-sm border border-border bg-background">
-          <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-primary" />
-        </span>
-        Override (note on hover)
-      </span>
-    </div>
-  );
+  const hasPlanRows = services.some(isPlanBacked);
 
   return (
     <SectionCard
@@ -299,11 +281,12 @@ export default function PpmSection({ reportId, buildingId, readOnly }: SectionPr
         </span>
       }
     >
-      {isLoading ? (
+      {isLoading || !report ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : (
         <div className="space-y-3">
-          {legend}
+          <PpmLegend blankLabel="Blank" showOverride />
+          {!readOnly && hasPlanRows && <Hint>{PLAN_ROW_HINT}</Hint>}
           {services.length === 0 ? (
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">No services on this report yet.</p>
@@ -314,17 +297,17 @@ export default function PpmSection({ reportId, buildingId, readOnly }: SectionPr
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="border-b">
-                    <th className="sticky left-0 z-10 bg-background px-2 py-2 text-left font-medium min-w-44">Service</th>
-                    {!readOnly && <th className="px-2 py-2 text-left font-medium min-w-28">Frequency</th>}
+                    <th scope="col" className="sticky left-0 z-10 bg-background px-2 py-2 text-left font-medium min-w-44">Service</th>
+                    {!readOnly && <th scope="col" className="px-2 py-2 text-left font-medium min-w-28">Frequency</th>}
                     {months.map((mk) => {
                       const { mon, yr } = colHeader(mk);
                       return (
-                        <th key={mk} className="px-1 py-2 text-center font-medium whitespace-nowrap">
+                        <th key={mk} scope="col" className="px-1 py-2 text-center font-medium whitespace-nowrap">
                           <div>{mon}</div><div className="text-[10px] text-muted-foreground">{yr}</div>
                         </th>
                       );
                     })}
-                    {!readOnly && <th className="w-8" />}
+                    {!readOnly && <th scope="col" className="w-8"><span className="sr-only">Remove</span></th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -334,7 +317,7 @@ export default function PpmSection({ reportId, buildingId, readOnly }: SectionPr
                     const d = drafts[svc.id] ?? { service_name: svc.service_name ?? '', frequency: svc.frequency ?? '', comment: svc.comment ?? '' };
                     return (
                       <tr key={svc.id} className="border-b align-top" data-plan-backed={planBacked ? 'true' : undefined}>
-                        <td className="sticky left-0 z-10 bg-background px-2 py-1.5 min-w-44">
+                        <th scope="row" className="sticky left-0 z-10 bg-background px-2 py-1.5 min-w-44 text-left font-normal">
                           {readOnly ? (
                             <>
                               <div className="font-medium">{svc.service_name}</div>
@@ -355,7 +338,7 @@ export default function PpmSection({ reportId, buildingId, readOnly }: SectionPr
                                 onBlur={() => persistText(svc.id)} />
                             </div>
                           )}
-                        </td>
+                        </th>
                         {!readOnly && (
                           <td className="px-2 py-1.5 min-w-28">
                             {planBacked ? (
@@ -376,7 +359,8 @@ export default function PpmSection({ reportId, buildingId, readOnly }: SectionPr
                               </td>
                             );
                           }
-                          const status = svc.months[mk]?.status ?? null;
+                          // Straight off jsonb: a status the grid does not know renders as blank, not a crash.
+                          const status = asPpmStatus(svc.months[mk]?.status);
                           const style = status ? STATUS_STYLE[status] : null;
                           return (
                             <td key={mk} className="px-0.5 py-1.5 text-center">
@@ -399,25 +383,28 @@ export default function PpmSection({ reportId, buildingId, readOnly }: SectionPr
                         })}
                         {!readOnly && (
                           <td className="px-1 py-1.5 text-center">
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-11 w-11 sm:h-8 sm:w-8" aria-label={`Remove ${svc.service_name}`}>
-                                  <Trash2 className="h-4 w-4 text-muted-foreground" />
-                                </Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader>
-                                  <AlertDialogTitle>Remove this service?</AlertDialogTitle>
-                                  <AlertDialogDescription>
-                                    “{svc.service_name}” {planBacked ? 'and its overrides will be removed from this report. The building plan is not affected.' : 'and its monthly status grid will be permanently deleted.'}
-                                  </AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction onClick={() => void removeService(svc.id)}>Delete</AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
+                            {/* A plan-backed row is not deleted from a report: deactivate the plan line instead (see PLAN_ROW_HINT). */}
+                            {!planBacked && (
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button variant="ghost" size="icon" className="h-11 w-11 sm:h-8 sm:w-8" aria-label={`Remove ${svc.service_name}`}>
+                                    <Trash2 className="h-4 w-4 text-muted-foreground" />
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Remove this service?</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      “{svc.service_name}” and its monthly status grid will be permanently deleted.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction onClick={() => void removeService(svc.id)}>Delete</AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
+                            )}
                           </td>
                         )}
                       </tr>
@@ -431,7 +418,8 @@ export default function PpmSection({ reportId, buildingId, readOnly }: SectionPr
             <div className="flex flex-wrap items-center gap-2">
               <Input
                 className="h-11 max-w-xs"
-                placeholder="New service name"
+                aria-label="Ad-hoc service (not on the plan)"
+                placeholder="Ad-hoc service (not on the plan)"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addService(); } }}
