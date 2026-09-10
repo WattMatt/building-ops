@@ -119,6 +119,11 @@ begin
     update public.task_instances
        set status = 'completed', completed_at = now(), completed_by = auth.uid()
      where id = p_task_instance_id;
+    -- RLS hid the row (0 rows updated): raising here rolls the completion insert back too, so the
+    -- caller never sees "completed" with the instance still pending.
+    if not found then
+      raise exception 'complete_task: not allowed to update this task' using errcode = '42501';
+    end if;
     return query select v_id, false;
   else
     select tc.id into v_id from public.task_completions tc where tc.task_instance_id = p_task_instance_id;

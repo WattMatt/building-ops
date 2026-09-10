@@ -1,28 +1,32 @@
 /**
- * Sequential, single-flight replay of the queue. Oldest first. A network failure stops the run
- * (everything behind it is still pending and will replay on the next trigger); a duplicate
- * (409 / 23505) means an earlier attempt already landed and the op is done; anything else is a
- * real rejection the user has to look at (retry or discard) — it never blocks the ops behind it.
+ * Sequential, per-user single-flight replay of the queue. Oldest first. A network failure stops
+ * the run (everything behind it is still pending and will replay on the next trigger); a
+ * duplicate (23505) means an earlier attempt already landed and the op is done; anything else is
+ * a real rejection the user has to look at (retry or discard) — it never blocks the ops behind it.
  */
 import { listOps, updateOp, removeOp, getOp } from './queue';
 import { runOp } from './handlers';
 import type { QueuedOp, RunOutcome } from './types';
 
+/** After this many network failures the op is parked as failed so the queue cannot spin forever. */
+export const MAX_ATTEMPTS = 20;
+
+/**
+ * Only a transport failure counts as "network": the TypeError fetch throws, or the same message
+ * after supabase-js/postgrest-js has wrapped it into a plain error object. A bare TypeError is a
+ * programming bug and must surface as failed, not retry silently; a statement timeout (57014) is
+ * a real rejection, so "timed out" is deliberately not matched.
+ */
 export function isNetworkError(e: unknown): boolean {
-  const msg = (e as { message?: string })?.message ?? '';
-  const status = (e as { status?: number })?.status;
+  const msg = (e as { message?: string } | null)?.message ?? '';
   return (
-    e instanceof TypeError ||
-    status === 0 ||
-    /failed to fetch|network|offline|load failed|timed? ?out/i.test(msg) ||
-    (typeof navigator !== 'undefined' && !navigator.onLine)
+    (e instanceof TypeError && /fetch|network|load failed/i.test(e.message)) ||
+    /failed to fetch|network ?error|load failed|networkrequest/i.test(msg)
   );
 }
 
 export function isDuplicateError(e: unknown): boolean {
-  const code = (e as { code?: string })?.code;
-  const status = (e as { status?: number })?.status;
-  return code === '23505' || status === 409;
+  return (e as { code?: string } | null)?.code === '23505';
 }
 
 function messageOf(e: unknown): string {
@@ -36,26 +40,34 @@ export async function runOne(op: QueuedOp): Promise<RunOutcome> {
     await removeOp(op.uid, op.id);
     return { status: 'synced', result };
   } catch (e) {
+    const attempts = op.attempts + 1;
     if (isDuplicateError(e)) {
       await removeOp(op.uid, op.id);
       return { status: 'synced', result: { duplicate: true } };
     }
     if (isNetworkError(e)) {
-      await updateOp(op.uid, op.id, { attempts: op.attempts + 1 });
+      if (attempts >= MAX_ATTEMPTS) {
+        const error = `Could not reach the server after ${MAX_ATTEMPTS} tries`;
+        await updateOp(op.uid, op.id, { status: 'failed', lastError: error, attempts });
+        return { status: 'failed', error };
+      }
+      await updateOp(op.uid, op.id, { attempts });
       return { status: 'queued' };
     }
     const error = messageOf(e);
-    await updateOp(op.uid, op.id, { status: 'failed', lastError: error, attempts: op.attempts + 1 });
+    await updateOp(op.uid, op.id, { status: 'failed', lastError: error, attempts });
     return { status: 'failed', error };
   }
 }
 
-let inFlight: Promise<void> | null = null;
+/** One run per user at a time; a second trigger while a run is going shares that run's promise. */
+const inFlight = new Map<string, Promise<void>>();
 
 /** Replays every pending op for the user (and failed ones when asked). Concurrent calls share one run. */
 export function replayAll(uid: string, opts: { retryFailed?: boolean } = {}): Promise<void> {
-  if (inFlight) return inFlight;
-  inFlight = (async () => {
+  const running = inFlight.get(uid);
+  if (running) return running;
+  const run = (async () => {
     try {
       const ops = await listOps(uid);
       for (const op of ops) {
@@ -67,10 +79,11 @@ export function replayAll(uid: string, opts: { retryFailed?: boolean } = {}): Pr
         if (outcome.status === 'queued') break; // still offline: stop, keep order
       }
     } finally {
-      inFlight = null;
+      inFlight.delete(uid);
     }
   })();
-  return inFlight;
+  inFlight.set(uid, run);
+  return run;
 }
 
 export async function retryOp(uid: string, id: string): Promise<RunOutcome> {

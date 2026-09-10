@@ -48,7 +48,7 @@ import { uploadPhotos } from '@/lib/photos';
 import { notify } from '@/lib/notify';
 import { postIssueComment } from '@/lib/issueActivity';
 import { enqueue, listOps, updateOp, clearQueue } from './queue';
-import { runOne, replayAll, retryOp, isNetworkError, isDuplicateError } from './replay';
+import { runOne, replayAll, retryOp, isNetworkError, isDuplicateError, MAX_ATTEMPTS } from './replay';
 import type { IssueCommentPayload, IssueCreatePayload, IssueResolvePayload, TaskCompletePayload } from './types';
 
 const UID = 'u1';
@@ -67,7 +67,9 @@ const create = (markTaskIssueLogged: string | null): IssueCreatePayload => ({
 });
 const comment: IssueCommentPayload = {
   kind: 'issue_comment', activityId: 'act1', issueId: 'i1', issueTitle: 'Leak', buildingId: 'b1',
-  comment: 'On it', mentions: ['m1', UID], notifyOthers: ['r1', 'm1', UID], userEmail: 'me@x.test',
+  comment: 'On it', mentions: ['m1', UID],
+  // Duplicates and empties come from an unassigned issue / assignee == reporter; the handler must shape them.
+  notifyOthers: ['r1', 'm1', UID, 'r1', '', 'r2'], userEmail: 'me@x.test',
 };
 const resolve: IssueResolvePayload = { kind: 'issue_resolve', activityId: 'act2', issueId: 'i1', note: 'Fixed', userEmail: 'me@x.test' };
 
@@ -138,7 +140,7 @@ describe('offline replay', () => {
     });
     expect(notify).toHaveBeenCalledTimes(2);
     expect(notify).toHaveBeenCalledWith({
-      kind: 'issue_comment', entityType: 'issue', entityId: 'i1', buildingId: 'b1', recipients: ['r1'],
+      kind: 'issue_comment', entityType: 'issue', entityId: 'i1', buildingId: 'b1', recipients: ['r1', 'r2'],
       title: 'Thabo commented on: Leak', body: 'On it', url: '/issues?open=i1',
     });
     expect(notify).toHaveBeenCalledWith({
@@ -181,7 +183,36 @@ describe('offline replay', () => {
 
     expect(isNetworkError(new TypeError('Failed to fetch'))).toBe(true);
     expect(isNetworkError({ message: 'Load failed' })).toBe(true);
+    expect(isNetworkError({ message: 'NetworkError when attempting to fetch resource.' })).toBe(true);
     expect(isNetworkError({ message: 'permission denied', code: '42501' })).toBe(false);
+    // A statement timeout is a real rejection, not a transport failure.
+    expect(isNetworkError({ message: 'canceling statement due to statement timeout', code: '57014' })).toBe(false);
+    // The handler's own permission rejection stays a rejection even while the browser thinks it is offline.
+    const onLine = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    expect(isNetworkError({ message: 'Your note was saved, but you do not have permission to resolve this issue.', code: 'RESOLVE_DENIED' })).toBe(false);
+    onLine.mockRestore();
+  });
+
+  it('6b. a programming bug (bare TypeError) is failed, not retried forever', async () => {
+    state.rpc.mockRejectedValue(new TypeError('x is not a function'));
+    const op = await enqueue(UID, complete(), []);
+    expect(await runOne(op)).toEqual({ status: 'failed', error: 'x is not a function' });
+    expect((await listOps(UID))[0]).toMatchObject({ id: op.id, status: 'failed', attempts: 1, lastError: 'x is not a function' });
+    expect(isNetworkError(new TypeError('x is not a function'))).toBe(false);
+  });
+
+  it('6c. the twentieth network failure parks the op as failed instead of pending', async () => {
+    state.rpc.mockRejectedValue(new TypeError('Failed to fetch'));
+    const op = await enqueue(UID, complete(), []);
+    await updateOp(UID, op.id, { attempts: MAX_ATTEMPTS - 2 });
+    expect(await runOne({ ...op, attempts: MAX_ATTEMPTS - 2 })).toEqual({ status: 'queued' });
+    expect((await listOps(UID))[0]).toMatchObject({ status: 'pending', attempts: MAX_ATTEMPTS - 1, lastError: null });
+
+    const capped = await runOne({ ...op, attempts: MAX_ATTEMPTS - 1 });
+    expect(capped).toEqual({ status: 'failed', error: 'Could not reach the server after 20 tries' });
+    expect((await listOps(UID))[0]).toMatchObject({
+      id: op.id, status: 'failed', attempts: MAX_ATTEMPTS, lastError: 'Could not reach the server after 20 tries',
+    });
   });
 
   it('7. a duplicate means an earlier attempt landed: op dropped, outcome synced', async () => {
@@ -189,14 +220,58 @@ describe('offline replay', () => {
     const a = await enqueue(UID, complete(), []);
     expect(await runOne(a)).toEqual({ status: 'synced', result: { duplicate: true } });
 
-    state.rpc.mockResolvedValue({ data: null, error: { status: 409, message: 'Conflict' } });
-    const b = await enqueue(UID, complete('c2', 't2'), []);
+    expect(await listOps(UID)).toEqual([]);
+
+    // issue_comment is a single write too: the duplicate drops the op and (acceptably) skips the notifies.
+    vi.mocked(postIssueComment).mockRejectedValueOnce({ code: '23505', message: 'duplicate key value violates unique constraint' });
+    const b = await enqueue(UID, comment, []);
     expect(await runOne(b)).toEqual({ status: 'synced', result: { duplicate: true } });
+    expect(notify).not.toHaveBeenCalled();
     expect(await listOps(UID)).toEqual([]);
 
     expect(isDuplicateError({ code: '23505' })).toBe(true);
-    expect(isDuplicateError({ status: 409 })).toBe(true);
+    // PostgrestError carries no `status`; a bare 409 is not a duplicate signal.
+    expect(isDuplicateError({ status: 409 })).toBe(false);
     expect(isDuplicateError({ code: '42501' })).toBe(false);
+  });
+
+  it('7b. issue_resolve whose note already landed still flips the status (write 2 after a duplicate write 1)', async () => {
+    vi.mocked(postIssueComment).mockRejectedValueOnce({ code: '23505', message: 'duplicate key value violates unique constraint' });
+    const op = await enqueue(UID, resolve, []);
+    expect(await runOne(op)).toEqual({ status: 'synced', result: { issueId: 'i1' } });
+    expect(postIssueComment).toHaveBeenCalledTimes(1);
+    expect(state.from).toHaveLength(1);
+    expect(state.from[0]).toMatchObject({ table: 'issues', update: { status: 'resolved' }, eq: [['id', 'i1']], select: 'id' });
+    expect(await listOps(UID)).toEqual([]);
+
+    // A non-duplicate rejection of the note still fails the op without touching the status.
+    state.from.length = 0;
+    vi.mocked(postIssueComment).mockRejectedValueOnce({ code: '42501', message: 'permission denied' });
+    const denied = await enqueue(UID, resolve, []);
+    expect(await runOne(denied)).toEqual({ status: 'failed', error: 'permission denied' });
+    expect(state.from).toHaveLength(0);
+  });
+
+  it('7c. issue_create whose insert already landed still flips the task to issue_logged', async () => {
+    state.results.issues = { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } };
+    const op = await enqueue(UID, create('t1'), []);
+    expect(await runOne(op)).toEqual({ status: 'synced', result: { issueId: 'i1' } });
+    expect(state.from.map((c) => c.table)).toEqual(['issues', 'task_instances']);
+    expect(state.from[1]).toMatchObject({ update: { status: 'issue_logged' }, eq: [['id', 't1']] });
+    expect(await listOps(UID)).toEqual([]);
+
+    // Without a task to flip, the duplicate insert alone is a synced op (no throw, nothing else to do).
+    state.from.length = 0;
+    const standalone = await enqueue(UID, create(null), []);
+    expect(await runOne(standalone)).toEqual({ status: 'synced', result: { issueId: 'i1' } });
+    expect(state.from.map((c) => c.table)).toEqual(['issues']);
+
+    // Any other insert error still fails the op before the task is touched.
+    state.from.length = 0;
+    state.results.issues = { data: null, error: { code: '42501', message: 'permission denied' } };
+    const denied = await enqueue(UID, create('t1'), []);
+    expect(await runOne(denied)).toEqual({ status: 'failed', error: 'permission denied' });
+    expect(state.from.map((c) => c.table)).toEqual(['issues']);
   });
 
   it('8. any other rejection marks the op failed with the message', async () => {
@@ -231,7 +306,10 @@ describe('offline replay', () => {
     const first = replayAll(UID, { retryFailed: true });
     const second = replayAll(UID, { retryFailed: true });
     expect(second).toBe(first);
-    await Promise.all([first, second]);
+    // Single-flight is per user: another user's run mid-flight is its own promise, not this one.
+    const otherUser = replayAll('u2');
+    expect(otherUser).not.toBe(first);
+    await Promise.all([first, second, otherUser]);
     expect(state.rpc.mock.calls.map(([, args]) => args.p_completion_id)).toEqual(['c2', 'c3', 'c4']);
     expect(await listOps(UID)).toEqual([]);
 
