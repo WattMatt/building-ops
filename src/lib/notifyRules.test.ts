@@ -147,6 +147,9 @@ describe('isAllowedUrl', () => {
     ['/my-day', true],
     ['/my-day?d=2026-09-10', true],
     ['/my-dayx', false],
+    ['/calendar', true],
+    ['/calendar?date=2026-09-10&view=week', true],
+    ['/calendarx', false],
     // Not on the allowlist, however in-app it looks.
     ['/settings', false],
     ['/', false],
@@ -340,6 +343,11 @@ describe('push', () => {
   it('allows /my-day deep links', () => {
     expect(isAllowedUrl('/my-day')).toBe(true);
     expect(isAllowedUrl('/my-dayx')).toBe(false);
+  });
+  it('allows /calendar deep links (My Day week strip, task reminders)', () => {
+    expect(isAllowedUrl('/calendar')).toBe(true);
+    expect(isAllowedUrl('/calendar?date=2026-09-10&view=week')).toBe(true);
+    expect(isAllowedUrl('/calendarx')).toBe(false);
   });
   it('shapes a push payload from an inbox row', () => {
     const p = pushPayloadFor({ kind: 'task_assigned', title: 'T', body: 'B', url: '/my-day', entity_id: 'e1' });

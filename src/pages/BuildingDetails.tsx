@@ -12,7 +12,7 @@ import { toast } from 'sonner';
 import TenantsTab from '@/components/building/TenantsTab';
 import AssetsTab from '@/components/building/AssetsTab';
 import DocumentsTab from '@/components/building/DocumentsTab';
-import MaintenanceCalendarTab from '@/components/building/MaintenanceCalendarTab';
+import BuildingCalendarTab from '@/components/building/BuildingCalendarTab';
 import NotesTab from '@/components/building/NotesTab';
 import OverviewWidgets from '@/components/building/OverviewWidgets';
 import ChecklistsTab from '@/components/building/ChecklistsTab';
@@ -27,13 +27,14 @@ import { useBuildingScore } from '@/hooks/useBuildingScore';
 interface Building {
   id: string;
   name: string;
-  address: string;
-  city: string;
+  // Nullable in the regenerated row type; the header renders whatever is there.
+  address: string | null;
+  city: string | null;
   logo_url: string | null;
   logo_position: string | null;
   avatar_color: string | null;
   emergency_contacts: any;
-  created_at: string;
+  created_at: string | null;
 }
 
 export default function BuildingDetails() {
@@ -209,9 +210,10 @@ export default function BuildingDetails() {
           <TabsTrigger value="reports" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Reports</TabsTrigger>
           <TabsTrigger value="tenants" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Tenants</TabsTrigger>
           <TabsTrigger value="assets" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Assets</TabsTrigger>
+          {/* Value stays `maintenance` so existing ?tab=maintenance deep links keep working. */}
           <TabsTrigger value="maintenance" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
-            <span className="hidden sm:inline">Maintenance</span>
-            <span className="sm:hidden">Maint.</span>
+            <span className="hidden sm:inline">Calendar</span>
+            <span className="sm:hidden">Cal.</span>
           </TabsTrigger>
           <TabsTrigger value="electrical" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
             <span className="hidden sm:inline">Electrical &amp; Compliance</span>
@@ -358,7 +360,7 @@ export default function BuildingDetails() {
         </TabsContent>
 
         <TabsContent value="maintenance" className="mt-6">
-          <MaintenanceCalendarTab buildingId={building.id} />
+          <BuildingCalendarTab buildingId={building.id} buildingName={building.name} />
         </TabsContent>
 
         <TabsContent value="documents" className="mt-6">

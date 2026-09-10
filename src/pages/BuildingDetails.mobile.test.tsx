@@ -14,7 +14,7 @@ vi.mock('@/hooks/useBuildingScore', () => ({
 vi.mock('@/components/building/TenantsTab', () => ({ default: () => <div>TenantsTab</div> }));
 vi.mock('@/components/building/AssetsTab', () => ({ default: () => <div>AssetsTab</div> }));
 vi.mock('@/components/building/DocumentsTab', () => ({ default: () => <div>DocumentsTab</div> }));
-vi.mock('@/components/building/MaintenanceCalendarTab', () => ({ default: () => <div>MaintenanceCalendarTab</div> }));
+vi.mock('@/components/building/BuildingCalendarTab', () => ({ default: () => <div>BuildingCalendarTab</div> }));
 vi.mock('@/components/building/NotesTab', () => ({ default: () => <div>NotesTab</div> }));
 vi.mock('@/components/building/OverviewWidgets', () => ({ default: () => <div>OverviewWidgets</div> }));
 vi.mock('@/components/building/ChecklistsTab', () => ({ default: () => <div>ChecklistsTab</div> }));

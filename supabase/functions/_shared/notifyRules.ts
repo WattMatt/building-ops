@@ -64,7 +64,7 @@ export const MAX_RECIPIENTS = 50;
  * `/` test would happily accept `/logout`, `/settings` or any other path a caller invented.
  */
 export const ALLOWED_URL_PREFIXES = [
-  '/issues', '/buildings/', '/reports/fortress/', '/my-signoffs', '/forms', '/inbox', '/my-day',
+  '/issues', '/buildings/', '/reports/fortress/', '/my-signoffs', '/forms', '/inbox', '/my-day', '/calendar',
 ] as const;
 
 /**

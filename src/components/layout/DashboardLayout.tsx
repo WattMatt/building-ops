@@ -58,6 +58,7 @@ import {
   Sun,
   User,
   Search,
+  CalendarDays,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -95,6 +96,12 @@ const mainNavItems: NavItem[] = [
     title: 'Checklists',
     href: '/checklists',
     icon: <ClipboardCheck className="w-4 h-4" />,
+  },
+  {
+    // No role gate: site roles see their assigned buildings, managers the portfolio.
+    title: 'Calendar',
+    href: '/calendar',
+    icon: <CalendarDays className="w-4 h-4" />,
   },
   {
     title: 'Issues',

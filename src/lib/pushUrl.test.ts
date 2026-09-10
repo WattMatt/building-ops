@@ -15,8 +15,11 @@ describe('safeInAppUrl', () => {
     ['/inbox', '/inbox'],
     ['/my-day', '/my-day'],
     ['/my-day?d=2026-09-10', '/my-day?d=2026-09-10'],
+    ['/calendar', '/calendar'],
+    ['/calendar?date=2026-09-10&view=week', '/calendar?date=2026-09-10&view=week'],
     // A bare prefix is a route boundary, not a free-text prefix.
     ['/my-dayx', '/inbox'],
+    ['/calendarx', '/inbox'],
     ['/issuesanything', '/inbox'],
     ['/inboxx', '/inbox'],
     ['/buildingsx', '/inbox'],
@@ -72,7 +75,8 @@ describe('parity with notifyRules.isAllowedUrl', () => {
       '/issues', '/issues?open=x', '/issues/', '/issuesanything', '/buildings/', '/buildings/abc',
       '/buildingsx', '/reports/fortress/', '/reports/fortress/r1', '/reports/fortressx',
       '/my-signoffs', '/my-signoffsx', '/forms', '/forms/1', '/formsx', '/inbox', '/inbox?x=1',
-      '/inboxx', '/my-day', '/my-day?d=1', '/my-day/', '/my-dayx', '/settings', '/', '',
+      '/inboxx', '/my-day', '/my-day?d=1', '/my-day/', '/my-dayx', '/calendar', '/calendar?date=1&view=week',
+      '/calendarx', '/settings', '/', '',
       '//evil.example/issues', '/issues\\evil', 'https://x/issues', ' /issues',
       `/issues?${'a'.repeat(292)}`, `/issues?${'a'.repeat(293)}`,
       // Every prefix, on its own and followed by each boundary character.

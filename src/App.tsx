@@ -31,6 +31,7 @@ const Buildings = lazy(() => import("./pages/Buildings"));
 const BuildingForm = lazy(() => import("./pages/BuildingForm"));
 const BuildingDetails = lazy(() => import("./pages/BuildingDetails"));
 const Checklists = lazy(() => import("./pages/Checklists"));
+const CalendarPage = lazy(() => import("./pages/CalendarPage"));
 const Issues = lazy(() => import("./pages/Issues"));
 const NewIssue = lazy(() => import("./pages/NewIssue"));
 const MapView = lazy(() => import("./pages/MapView"));
@@ -100,6 +101,12 @@ const App = () => (
             <Route path="/checklists" element={
               <ProtectedRoute>
                 <DashboardLayout><Checklists /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            {/* Every role: RLS scopes the events to the buildings the viewer can see. */}
+            <Route path="/calendar" element={
+              <ProtectedRoute>
+                <DashboardLayout><CalendarPage /></DashboardLayout>
               </ProtectedRoute>
             } />
             <Route path="/issues" element={
