@@ -191,4 +191,17 @@ describe('OverviewWidgets — order', () => {
     expect(tasks.compareDocumentPosition(issues) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(issues.compareDocumentPosition(docs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+
+  it("mounts the month-cost card right after the two compact widgets and before the alerts", async () => {
+    renderWidgets();
+    const issues = await screen.findByRole('button', { name: /open issues/i });
+    const costs = await screen.findByRole('button', { name: /this month's costs/i });
+    const docs = await screen.findByText('Document Expiry Alerts');
+    expect(issues.compareDocumentPosition(costs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(costs.compareDocumentPosition(docs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // It reads the view for this building's current month.
+    await waitFor(() =>
+      expect(state.calls.some((c) => c.table === 'building_month_costs' && c.method === 'eq' && c.args[0] === 'month')).toBe(true),
+    );
+  });
 });

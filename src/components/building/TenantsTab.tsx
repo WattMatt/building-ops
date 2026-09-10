@@ -34,6 +34,7 @@ import {
 import { Plus, MoreVertical, Edit, Trash2, FileText, Store, Search, Upload, Download, ChevronRight, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
+import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
 import TenantDocumentsDialog from './TenantDocumentsDialog';
 import TenantShopSpecDialog from './TenantShopSpecDialog';
 import { TenantImportDialog } from '@/components/import';
@@ -298,23 +299,26 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
       return;
     }
 
-    const exportData = tenants.map((tenant) => ({
-      'Shop Number': tenant.shop_number,
-      'Shop Name': tenant.shop_name,
-      'Area': tenant.area || '',
-      'Contact Name': tenant.contact_name || '',
-      'Contact Phone': tenant.contact_phone || '',
-      'Contact Email': tenant.contact_email || '',
-      'Status': tenant.is_active ? 'Active' : 'Inactive',
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Tenants');
+    // One column list feeds both formats so the CSV and the workbook never drift.
+    const columns: CsvColumn<Tenant>[] = [
+      { key: 'shop_number', header: 'Shop Number' },
+      { key: 'shop_name', header: 'Shop Name' },
+      { key: 'area', header: 'Area', format: (v) => (v ? String(v) : '') },
+      { key: 'contact_name', header: 'Contact Name', format: (v) => (v ? String(v) : '') },
+      { key: 'contact_phone', header: 'Contact Phone', format: (v) => (v ? String(v) : '') },
+      { key: 'contact_email', header: 'Contact Email', format: (v) => (v ? String(v) : '') },
+      { key: 'is_active', header: 'Status', format: (v) => (v ? 'Active' : 'Inactive') },
+    ];
 
     if (format === 'csv') {
-      XLSX.writeFile(wb, 'tenants_export.csv', { bookType: 'csv' });
+      exportCsv(tenants, columns, 'tenants_export.csv');
     } else {
+      const exportData = tenants.map((tenant) =>
+        Object.fromEntries(columns.map((c) => [c.header, c.format ? c.format(tenant[c.key], tenant) : tenant[c.key]])),
+      );
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Tenants');
       XLSX.writeFile(wb, 'tenants_export.xlsx');
     }
     toast.success(`Exported ${tenants.length} tenants`);

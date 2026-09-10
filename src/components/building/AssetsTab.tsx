@@ -40,6 +40,7 @@ import {
 import { Plus, MoreVertical, Edit, Trash2, Search, Wrench, AlertTriangle, CheckCircle, Clock, History, Upload, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
+import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
 import { format } from 'date-fns';
 import AssetServiceHistoryDialog from './AssetServiceHistoryDialog';
 import { AssetImportDialog } from '@/components/import';
@@ -58,6 +59,12 @@ interface Asset {
   status: string;
   notes: string | null;
   created_at: string;
+  purchase_date: string | null;
+  purchase_price: number | null;
+  replacement_cost: number | null;
+  warranty_expiry: string | null;
+  warranty_provider: string | null;
+  expected_lifespan_years: number | null;
 }
 
 interface AssetsTabProps {
@@ -81,6 +88,22 @@ const ASSET_STATUSES = [
   { value: 'under_repair', label: 'Under Repair', color: 'secondary' },
   { value: 'out_of_service', label: 'Out of Service', color: 'destructive' },
 ];
+
+/** '' → null; a non-negative amount → number; anything else → undefined (rejected). */
+function parseMoney(text: string): number | null | undefined {
+  const t = text.trim();
+  if (!t) return null;
+  const n = Number(t.replace(/\s/g, '').replace(',', '.'));
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
+/** '' → null; a non-negative whole number → number; anything else → undefined (rejected). */
+function parseYears(text: string): number | null | undefined {
+  const t = text.trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
+}
 
 export default function AssetsTab({ buildingId }: AssetsTabProps) {
   const { isAdminOrManager } = useAuth();
@@ -106,6 +129,13 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
   const [nextServiceDate, setNextServiceDate] = useState('');
   const [status, setStatus] = useState('operational');
   const [notes, setNotes] = useState('');
+  // Cost + warranty (spec §8): kept as strings while editing; parsed on save.
+  const [purchaseDate, setPurchaseDate] = useState('');
+  const [purchasePrice, setPurchasePrice] = useState('');
+  const [replacementCost, setReplacementCost] = useState('');
+  const [warrantyExpiry, setWarrantyExpiry] = useState('');
+  const [warrantyProvider, setWarrantyProvider] = useState('');
+  const [expectedLifespanYears, setExpectedLifespanYears] = useState('');
 
   useEffect(() => {
     fetchAssets();
@@ -141,6 +171,12 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
     setNextServiceDate('');
     setStatus('operational');
     setNotes('');
+    setPurchaseDate('');
+    setPurchasePrice('');
+    setReplacementCost('');
+    setWarrantyExpiry('');
+    setWarrantyProvider('');
+    setExpectedLifespanYears('');
     setEditingAsset(null);
   };
 
@@ -157,6 +193,12 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
     setNextServiceDate(asset.next_service_date || '');
     setStatus(asset.status);
     setNotes(asset.notes || '');
+    setPurchaseDate(asset.purchase_date || '');
+    setPurchasePrice(asset.purchase_price == null ? '' : String(asset.purchase_price));
+    setReplacementCost(asset.replacement_cost == null ? '' : String(asset.replacement_cost));
+    setWarrantyExpiry(asset.warranty_expiry || '');
+    setWarrantyProvider(asset.warranty_provider || '');
+    setExpectedLifespanYears(asset.expected_lifespan_years == null ? '' : String(asset.expected_lifespan_years));
     setIsDialogOpen(true);
   };
 
@@ -165,6 +207,18 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
 
     if (!name.trim() || !category) {
       toast.error('Name and category are required');
+      return;
+    }
+
+    const price = parseMoney(purchasePrice);
+    const replacement = parseMoney(replacementCost);
+    const lifespan = parseYears(expectedLifespanYears);
+    if (price === undefined || replacement === undefined) {
+      toast.error('Purchase price and replacement cost must be amounts of R 0 or more');
+      return;
+    }
+    if (lifespan === undefined) {
+      toast.error('Expected lifespan must be a whole number of years');
       return;
     }
 
@@ -184,6 +238,12 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
         next_service_date: nextServiceDate || null,
         status,
         notes: notes.trim() || null,
+        purchase_date: purchaseDate || null,
+        purchase_price: price,
+        replacement_cost: replacement,
+        warranty_expiry: warrantyExpiry || null,
+        warranty_provider: warrantyProvider.trim() || null,
+        expected_lifespan_years: lifespan,
       };
 
       if (editingAsset) {
@@ -238,27 +298,30 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
       return;
     }
 
-    const exportData = assets.map((asset) => ({
-      'Name': asset.name,
-      'Category': getCategoryLabel(asset.category),
-      'Location': asset.location || '',
-      'Manufacturer': asset.manufacturer || '',
-      'Model': asset.model || '',
-      'Serial Number': asset.serial_number || '',
-      'Installation Date': asset.installation_date || '',
-      'Last Service Date': asset.last_service_date || '',
-      'Next Service Date': asset.next_service_date || '',
-      'Status': getStatusInfo(asset.status).label,
-      'Notes': asset.notes || '',
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Assets');
+    // One column list feeds both formats so the CSV and the workbook never drift.
+    const columns: CsvColumn<Asset>[] = [
+      { key: 'name', header: 'Name' },
+      { key: 'category', header: 'Category', format: (v) => getCategoryLabel(String(v)) },
+      { key: 'location', header: 'Location', format: (v) => (v ? String(v) : '') },
+      { key: 'manufacturer', header: 'Manufacturer', format: (v) => (v ? String(v) : '') },
+      { key: 'model', header: 'Model', format: (v) => (v ? String(v) : '') },
+      { key: 'serial_number', header: 'Serial Number', format: (v) => (v ? String(v) : '') },
+      { key: 'installation_date', header: 'Installation Date', format: (v) => (v ? String(v) : '') },
+      { key: 'last_service_date', header: 'Last Service Date', format: (v) => (v ? String(v) : '') },
+      { key: 'next_service_date', header: 'Next Service Date', format: (v) => (v ? String(v) : '') },
+      { key: 'status', header: 'Status', format: (v) => getStatusInfo(String(v)).label },
+      { key: 'notes', header: 'Notes', format: (v) => (v ? String(v) : '') },
+    ];
 
     if (exportFormat === 'csv') {
-      XLSX.writeFile(wb, 'assets_export.csv', { bookType: 'csv' });
+      exportCsv(assets, columns, 'assets_export.csv');
     } else {
+      const exportData = assets.map((asset) =>
+        Object.fromEntries(columns.map((c) => [c.header, c.format ? c.format(asset[c.key], asset) : asset[c.key]])),
+      );
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Assets');
       XLSX.writeFile(wb, 'assets_export.xlsx');
     }
     toast.success(`Exported ${assets.length} assets`);
@@ -486,6 +549,78 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
                       type="date"
                       value={nextServiceDate}
                       onChange={(e) => setNextServiceDate(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="purchase-date">Purchase date</Label>
+                    <Input
+                      id="purchase-date"
+                      type="date"
+                      value={purchaseDate}
+                      onChange={(e) => setPurchaseDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="purchase-price">Purchase price (R)</Label>
+                    <Input
+                      id="purchase-price"
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      step="0.01"
+                      placeholder="0"
+                      value={purchasePrice}
+                      onChange={(e) => setPurchasePrice(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="replacement-cost">Replacement cost (R)</Label>
+                    <Input
+                      id="replacement-cost"
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      step="0.01"
+                      placeholder="0"
+                      value={replacementCost}
+                      onChange={(e) => setReplacementCost(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="warranty-expiry">Warranty expiry</Label>
+                    <Input
+                      id="warranty-expiry"
+                      type="date"
+                      value={warrantyExpiry}
+                      onChange={(e) => setWarrantyExpiry(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="warranty-provider">Warranty provider</Label>
+                    <Input
+                      id="warranty-provider"
+                      placeholder="e.g., Carrier SA"
+                      value={warrantyProvider}
+                      onChange={(e) => setWarrantyProvider(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="expected-lifespan">Expected lifespan (years)</Label>
+                    <Input
+                      id="expected-lifespan"
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      step={1}
+                      placeholder="e.g., 15"
+                      value={expectedLifespanYears}
+                      onChange={(e) => setExpectedLifespanYears(e.target.value)}
                     />
                   </div>
                 </div>

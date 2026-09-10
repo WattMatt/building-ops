@@ -11,7 +11,8 @@ vi.mock('react-router-dom', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react-router-dom')>()),
   useNavigate: () => navigate,
 }));
-vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u1' } }) }));
+const auth = vi.hoisted(() => ({ value: { user: { id: 'u1' }, isAdminOrManager: false } as { user: { id: string }; isAdminOrManager: boolean } }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth.value }));
 vi.mock('@/hooks/useBuildings', () => ({
   useBuildings: () => ({ buildings: [{ id: 'b1', name: 'North Tower' }], loading: false }),
 }));
@@ -32,6 +33,7 @@ describe('NewIssue', () => {
   beforeEach(() => {
     enqueueAndRun.mockReset().mockResolvedValue({ status: 'synced', result: {} });
     navigate.mockClear();
+    auth.value = { user: { id: 'u1' }, isAdminOrManager: false };
     toast.mockClear(); toast.success.mockClear(); toast.error.mockClear();
   });
 
@@ -52,6 +54,45 @@ describe('NewIssue', () => {
     expect(photos).toEqual([]);
     expect(toast.success).toHaveBeenCalledWith('Issue reported successfully');
     expect(navigate).toHaveBeenCalledWith('/issues');
+  });
+
+  describe('estimated cost', () => {
+    it('is not offered to a plain user and is omitted from the row', async () => {
+      render(<MemoryRouter><NewIssue /></MemoryRouter>);
+      expect(screen.queryByLabelText(/estimated cost/i)).toBeNull();
+      await submit();
+      const [, payload] = enqueueAndRun.mock.calls[0];
+      expect('estimated_cost' in payload.row).toBe(false);
+    });
+
+    it('is written as estimated_cost for a manager, and null when left blank', async () => {
+      auth.value = { user: { id: 'u1' }, isAdminOrManager: true };
+      const { unmount } = render(<MemoryRouter><NewIssue /></MemoryRouter>);
+      fireEvent.change(screen.getByLabelText(/estimated cost/i), { target: { value: '1500.50' } });
+      await submit();
+      expect(enqueueAndRun.mock.calls[0][1].row.estimated_cost).toBe(1500.5);
+      unmount();
+
+      enqueueAndRun.mockReset().mockResolvedValue({ status: 'synced', result: {} });
+      render(<MemoryRouter><NewIssue /></MemoryRouter>);
+      await submit();
+      expect(enqueueAndRun.mock.calls[0][1].row).toHaveProperty('estimated_cost', null);
+    });
+
+    it('rejects a negative estimate before anything is queued', async () => {
+      auth.value = { user: { id: 'u1' }, isAdminOrManager: true };
+      render(<MemoryRouter><NewIssue /></MemoryRouter>);
+      fireEvent.change(screen.getByLabelText(/issue title/i), { target: { value: 'Broken door' } });
+      fireEvent.change(screen.getByLabelText(/^description/i), { target: { value: 'Hinge snapped.' } });
+      const cost = screen.getByLabelText(/estimated cost/i) as HTMLInputElement;
+      fireEvent.change(cost, { target: { value: '-5' } });
+      fireEvent.click(screen.getByRole('button', { name: /report issue/i }));
+      // min={0} makes the browser refuse the submit (jsdom runs the same constraint validation);
+      // parseCost in handleSubmit is the backstop for anything that slips past it.
+      expect(cost.validity.rangeUnderflow).toBe(true);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(enqueueAndRun).not.toHaveBeenCalled();
+    });
   });
 
   it('still goes to the list when the issue is queued, and stays put when it is rejected', async () => {

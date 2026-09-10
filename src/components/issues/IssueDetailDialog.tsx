@@ -10,7 +10,9 @@ import {
 } from '@/components/ui/responsive-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Hint } from '@/components/ui/hint';
 import {
   Select,
   SelectContent,
@@ -74,6 +76,18 @@ const statusLabels: Record<IssueStatus, string> = {
 };
 const STATUS_ORDER: IssueStatus[] = ['open', 'in_progress', 'escalated', 'resolved'];
 
+type CostField = 'estimated_cost' | 'actual_cost';
+const COST_LABELS: Record<CostField, string> = { estimated_cost: 'Estimated cost', actual_cost: 'Actual cost' };
+
+/** '' → null; a non-negative amount → number; anything else → undefined (rejected). */
+function parseCost(text: string): number | null | undefined {
+  const t = text.trim();
+  if (!t) return null;
+  const n = Number(t.replace(/\s/g, '').replace(',', '.'));
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+const costText = (v: number | null | undefined) => (v == null ? '' : String(v));
+
 interface Props {
   issue: Issue;
   open: boolean;
@@ -92,6 +106,11 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
   const [savingStatus, setSavingStatus] = useState(false);
   const [savingAssignee, setSavingAssignee] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
+  // Costs (spec §8, admin/manager): the list queries don't select these columns, so the
+  // dialog reads them itself; `costs` is the saved state, `costDraft` what's being typed.
+  const [costs, setCosts] = useState<Record<CostField, number | null> | null>(null);
+  const [costDraft, setCostDraft] = useState<Record<CostField, string>>({ estimated_cost: '', actual_cost: '' });
+  const [savingCost, setSavingCost] = useState<CostField | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -117,6 +136,45 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
   useEffect(() => {
     if (open) load();
   }, [open, load]);
+
+  useEffect(() => {
+    if (!open || !canManage) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.from('issues').select('estimated_cost, actual_cost').eq('id', issue.id);
+      if (cancelled || error) return;
+      const row = data?.[0];
+      const next = { estimated_cost: row?.estimated_cost ?? null, actual_cost: row?.actual_cost ?? null };
+      setCosts(next);
+      setCostDraft({ estimated_cost: costText(next.estimated_cost), actual_cost: costText(next.actual_cost) });
+    })();
+    return () => { cancelled = true; };
+  }, [open, canManage, issue.id]);
+
+  // Saved on blur; a zero-row update means RLS refused the write (not admin/manager on this building).
+  const saveCost = async (field: CostField) => {
+    const parsed = parseCost(costDraft[field]);
+    if (parsed === undefined) {
+      toast.error(`${COST_LABELS[field]} must be an amount of R 0 or more`);
+      setCostDraft((d) => ({ ...d, [field]: costText(costs?.[field]) }));
+      return;
+    }
+    if (parsed === (costs?.[field] ?? null)) return;
+    setSavingCost(field);
+    try {
+      const { data, error } = await supabase.from('issues').update({ [field]: parsed }).eq('id', issue.id).select('id');
+      if (error) throw error;
+      if (!data?.length) throw new Error("You do not have permission to change this issue's costs.");
+      setCosts((c) => ({ estimated_cost: c?.estimated_cost ?? null, actual_cost: c?.actual_cost ?? null, [field]: parsed }));
+      toast.success(`${COST_LABELS[field]} saved`);
+      onUpdated();
+    } catch (e) {
+      setCostDraft((d) => ({ ...d, [field]: costText(costs?.[field]) }));
+      toast.error(e instanceof Error ? e.message : `Failed to save ${COST_LABELS[field].toLowerCase()}`);
+    } finally {
+      setSavingCost(null);
+    }
+  };
 
   // The issues trigger logs the change to issue_activity automatically.
   const changeStatus = async (status: IssueStatus) => {
@@ -229,6 +287,48 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
                 <Label className="text-xs">Assignee</Label>
                 <AssigneePicker buildingId={issue.building_id} value={issue.assigned_to} onChange={changeAssignee} disabled={savingAssignee} />
               </div>
+            </div>
+          )}
+
+          {/* Costs (admin/manager) */}
+          {canManage && (
+            <div className="space-y-2 border-t pt-4">
+              <Label className="text-xs text-muted-foreground">Costs</Label>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="issue-estimated-cost" className="text-xs">Estimated cost (R)</Label>
+                  <Input
+                    id="issue-estimated-cost"
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="0.01"
+                    placeholder="0"
+                    className="h-11"
+                    value={costDraft.estimated_cost}
+                    onChange={(e) => setCostDraft((d) => ({ ...d, estimated_cost: e.target.value }))}
+                    onBlur={() => void saveCost('estimated_cost')}
+                    disabled={costs === null || savingCost === 'estimated_cost'}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="issue-actual-cost" className="text-xs">Actual cost (R)</Label>
+                  <Input
+                    id="issue-actual-cost"
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="0.01"
+                    placeholder="0"
+                    className="h-11"
+                    value={costDraft.actual_cost}
+                    onChange={(e) => setCostDraft((d) => ({ ...d, actual_cost: e.target.value }))}
+                    onBlur={() => void saveCost('actual_cost')}
+                    disabled={costs === null || savingCost === 'actual_cost'}
+                  />
+                </div>
+              </div>
+              <Hint>Fill in the actual cost when the work is done — it feeds the building's monthly costs</Hint>
             </div>
           )}
 

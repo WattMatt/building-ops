@@ -18,6 +18,8 @@ export interface IssueCreatePayload {
     title: string; description: string; priority: IssuePriority; status: 'open';
     building_id: string; deadline: string | null; corrective_action: string | null;
     reported_by: string; assigned_to: string | null; task_instance_id: string | null;
+    /** Admin/manager only (NewIssue); absent for everyone else. The handler spreads `row` into the insert. */
+    estimated_cost?: number | null;
   };
   /** ReportIssueDialog flips the task to issue_logged after the insert. */
   markTaskIssueLogged: string | null;

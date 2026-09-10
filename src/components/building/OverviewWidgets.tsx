@@ -9,6 +9,7 @@ import { AlertTriangle, AlertCircle, FileText, Wrench, ArrowRight, CheckCircle, 
 import { format, differenceInDays, isPast, isSameDay, subDays } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { todayInOperatingTz } from '@/lib/myWork';
+import MonthCostsCard from './MonthCostsCard';
 
 interface OverviewWidgetsProps {
   buildingId: string;
@@ -248,6 +249,8 @@ export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWid
         <TodayTasksWidget buildingId={buildingId} onTabChange={onTabChange} />
         <OpenIssuesWidget buildingId={buildingId} onTabChange={onTabChange} />
       </div>
+      {/* Spec §8: the month-cost card sits right after the two "what needs me now" widgets. */}
+      <MonthCostsCard buildingId={buildingId} />
       <AlertWidgets buildingId={buildingId} onTabChange={onTabChange} />
     </div>
   );

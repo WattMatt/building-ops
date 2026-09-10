@@ -24,10 +24,18 @@ import { enqueueAndRun } from '@/lib/offline/enqueueAndRun';
 import { toastForOutcome } from '@/lib/offline/outcomeToast';
 import { toast } from 'sonner';
 
+/** '' → null; a non-negative amount → number; anything else → undefined (rejected). */
+function parseCost(text: string): number | null | undefined {
+  const t = text.trim();
+  if (!t) return null;
+  const n = Number(t.replace(/\s/g, '').replace(',', '.'));
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+}
+
 export default function NewIssue() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, isAdminOrManager } = useAuth();
   const { buildings, loading: buildingsLoading } = useBuildings();
 
   // Form state
@@ -38,6 +46,9 @@ export default function NewIssue() {
   const [deadline, setDeadline] = useState('');
   const [correctiveAction, setCorrectiveAction] = useState('');
   const [photos, setPhotos] = useState<PhotoFile[]>([]);
+  // Admin/manager only (spec §8): a rough estimate at logging time; the actual cost is
+  // entered on the issue when the work is done.
+  const [estimatedCost, setEstimatedCost] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   // Set default building if only one exists
@@ -70,6 +81,12 @@ export default function NewIssue() {
       return;
     }
 
+    const estimate = isAdminOrManager ? parseCost(estimatedCost) : null;
+    if (estimate === undefined) {
+      toast.error('Estimated cost must be an amount of R 0 or more');
+      return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -90,6 +107,8 @@ export default function NewIssue() {
           reported_by: user.id,
           assigned_to: null,
           task_instance_id: null,
+          // Only admin/manager may write a cost; everyone else's row omits the column.
+          ...(isAdminOrManager ? { estimated_cost: estimate } : {}),
         },
         markTaskIssueLogged: null,
       }, photos.map((p) => ({ file: p.file })));
@@ -224,6 +243,25 @@ export default function NewIssue() {
                 disabled={submitting}
               />
             </div>
+
+            {/* Estimated cost (admin/manager) */}
+            {isAdminOrManager && (
+              <div className="space-y-2">
+                <Label htmlFor="estimated-cost">Estimated cost (R) (Optional)</Label>
+                <Input
+                  id="estimated-cost"
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step="0.01"
+                  placeholder="0"
+                  className="h-11"
+                  value={estimatedCost}
+                  onChange={(e) => setEstimatedCost(e.target.value)}
+                  disabled={submitting}
+                />
+              </div>
+            )}
 
             {/* Photos */}
             <div className="space-y-2">
