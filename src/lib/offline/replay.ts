@@ -6,24 +6,14 @@
  */
 import { listOps, updateOp, removeOp, getOp } from './queue';
 import { runOp } from './handlers';
+import { isNetworkError } from './network';
 import type { QueuedOp, RunOutcome } from './types';
+
+// Re-exported so callers (and the tests) keep one import for the whole classification.
+export { isNetworkError };
 
 /** After this many network failures the op is parked as failed so the queue cannot spin forever. */
 export const MAX_ATTEMPTS = 20;
-
-/**
- * Only a transport failure counts as "network": the TypeError fetch throws, or the same message
- * after supabase-js/postgrest-js has wrapped it into a plain error object. A bare TypeError is a
- * programming bug and must surface as failed, not retry silently; a statement timeout (57014) is
- * a real rejection, so "timed out" is deliberately not matched.
- */
-export function isNetworkError(e: unknown): boolean {
-  const msg = (e as { message?: string } | null)?.message ?? '';
-  return (
-    (e instanceof TypeError && /fetch|network|load failed/i.test(e.message)) ||
-    /failed to fetch|network ?error|load failed|networkrequest/i.test(msg)
-  );
-}
 
 export function isDuplicateError(e: unknown): boolean {
   return (e as { code?: string } | null)?.code === '23505';

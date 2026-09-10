@@ -63,13 +63,29 @@ describe('ProfessionalTeamSection', () => {
     expect(Object.keys(onChange.mock.calls[0][0])).toEqual(['architect', 'civilEngineer', 'structuralEngineer', 'electricalEngineer', 'wetServicesEngineer']);
   });
 
-  it('maps missing contact details to empty strings so the inputs stay controlled', async () => {
+  it('keeps the typed phone and email when the register entry has none, and maps a missing name to an empty string', async () => {
     const onChange = vi.fn();
     render(<ProfessionalTeamSection team={team} onChange={onChange} />);
     fireEvent.click(screen.getAllByRole('button', { name: /pick from register/i })[1]);
     const picker = await screen.findByLabelText(/pick civil engineer from the contractor register/i);
     fireEvent.change(picker, { target: { value: 'c2' } });
-    expect(onChange).toHaveBeenCalledWith({ ...team, civilEngineer: { name: '', company: 'Bare Co', phone: '', email: '' } });
+    expect(onChange).toHaveBeenCalledWith({ ...team, civilEngineer: { name: '', company: 'Bare Co', phone: '1', email: 'k@civil.test' } });
+  });
+
+  it('maps missing contact details to empty strings when nothing was typed, so the inputs stay controlled', async () => {
+    const onChange = vi.fn();
+    render(<ProfessionalTeamSection team={team} onChange={onChange} />);
+    fireEvent.click(screen.getAllByRole('button', { name: /pick from register/i })[0]);
+    const picker = await screen.findByLabelText(/pick architect from the contractor register/i);
+    fireEvent.change(picker, { target: { value: 'c2' } });
+    expect(onChange).toHaveBeenCalledWith({ ...team, architect: { name: '', company: 'Bare Co', phone: '', email: '' } });
+  });
+
+  it('gives the register picker exactly one accessible name (no duplicate <label>)', async () => {
+    render(<ProfessionalTeamSection team={team} onChange={() => {}} />);
+    fireEvent.click(screen.getAllByRole('button', { name: /pick from register/i })[0]);
+    await screen.findByLabelText(/pick architect from the contractor register/i);
+    expect(document.querySelector('label[for="arch-register"]')).toBeNull();
   });
 
   it('keeps the filled fields editable as free text', () => {

@@ -33,6 +33,7 @@ import { ResolveIssueDialog } from '@/components/issues/ResolveIssueDialog';
 import { notify } from '@/lib/notify';
 import { parseCost } from '@/lib/money';
 import { useAuth } from '@/contexts/AuthContext';
+import type { TablesUpdate } from '@/integrations/supabase/types';
 
 interface Issue {
   id: string;
@@ -49,8 +50,6 @@ interface Issue {
   corrective_action: string | null;
   photo_urls: string[] | null;
   task_instance_id: string | null;
-  /** The list queries do not select this; the dialog loads it itself when absent. */
-  contractor_id?: string | null;
 }
 
 interface Activity {
@@ -102,9 +101,11 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
   const [loading, setLoading] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
   const [savingAssignee, setSavingAssignee] = useState(false);
-  // Contractor (spec §8, admin/manager): loaded with the cost columns below when the issue
-  // prop does not carry it; the resolve dialog needs it to offer a rating.
-  const [contractorId, setContractorId] = useState<string | null>(issue.contractor_id ?? null);
+  // Contractor (spec §8, admin/manager): the list queries do not select it, so it is loaded with
+  // the cost columns below; the resolve dialog needs it to offer a rating. The picker stays
+  // disabled until that fetch resolves (`costs` lands in the same call) so a pick made before
+  // the row arrives cannot be overwritten by it.
+  const [contractorId, setContractorId] = useState<string | null>(null);
   const [savingContractor, setSavingContractor] = useState(false);
   const [resolveOpen, setResolveOpen] = useState(false);
   // Costs (spec §8, admin/manager): the list queries don't select these columns, so the
@@ -153,7 +154,18 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
     return () => { cancelled = true; };
   }, [open, canManage, issue.id]);
 
-  // Saved on blur; a zero-row update means RLS refused the write (not admin/manager on this building).
+  /**
+   * The one write path for every management control. Selecting the id back is what makes RLS
+   * visible: a refused update is not an error, it is zero rows, and zero rows must read as a
+   * permission failure — never as a success.
+   */
+  const updateIssue = async (patch: TablesUpdate<'issues'>, deniedMessage: string) => {
+    const { data, error } = await supabase.from('issues').update(patch).eq('id', issue.id).select('id');
+    if (error) throw error;
+    if (!data?.length) throw new Error(deniedMessage);
+  };
+
+  // Saved on blur.
   const saveCost = async (field: CostField) => {
     const parsed = parseCost(costDraft[field]);
     if (parsed === undefined) {
@@ -164,9 +176,7 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
     if (parsed === (costs?.[field] ?? null)) return;
     setSavingCost(field);
     try {
-      const { data, error } = await supabase.from('issues').update({ [field]: parsed }).eq('id', issue.id).select('id');
-      if (error) throw error;
-      if (!data?.length) throw new Error("You do not have permission to change this issue's costs.");
+      await updateIssue({ [field]: parsed }, "You do not have permission to change this issue's costs.");
       setCosts((c) => ({ estimated_cost: c?.estimated_cost ?? null, actual_cost: c?.actual_cost ?? null, [field]: parsed }));
       toast.success(`${COST_LABELS[field]} saved`);
       onUpdated();
@@ -187,9 +197,7 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
     }
     setSavingStatus(true);
     try {
-      const { data, error } = await supabase.from('issues').update({ status }).eq('id', issue.id).select('id');
-      if (error) throw error;
-      if (!data?.length) throw new Error('You do not have permission to change this issue.');
+      await updateIssue({ status }, 'You do not have permission to change this issue.');
       toast.success(`Status changed to ${statusLabels[status]}`);
       onUpdated();
       await load();
@@ -204,9 +212,7 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
     if (assigned_to === issue.assigned_to) return;
     setSavingAssignee(true);
     try {
-      const { data, error } = await supabase.from('issues').update({ assigned_to }).eq('id', issue.id).select('id');
-      if (error) throw error;
-      if (!data?.length) throw new Error('You do not have permission to assign this issue.');
+      await updateIssue({ assigned_to }, 'You do not have permission to assign this issue.');
       toast.success(assigned_to ? `Assigned to ${nameOf(assigned_to) ?? 'user'}` : 'Unassigned');
       if (assigned_to && assigned_to !== user?.id) {
         void notify({ kind: 'issue_assigned', entityType: 'issue', entityId: issue.id, buildingId: issue.building_id, recipients: [assigned_to], title: `Issue assigned to you: ${issue.title}`, url: `/issues?open=${issue.id}` });
@@ -220,16 +226,13 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
     }
   };
 
-  // Same shape as changeAssignee: a zero-row update is RLS saying no, not a success.
   const changeContractor = async (contractor_id: string | null) => {
     if (contractor_id === contractorId) return;
     const previous = contractorId;
     setSavingContractor(true);
     setContractorId(contractor_id);
     try {
-      const { data, error } = await supabase.from('issues').update({ contractor_id }).eq('id', issue.id).select('id');
-      if (error) throw error;
-      if (!data?.length) throw new Error("You do not have permission to change this issue's contractor.");
+      await updateIssue({ contractor_id }, "You do not have permission to change this issue's contractor.");
       toast.success(contractor_id ? 'Contractor assigned' : 'Contractor removed');
       onUpdated();
       await load();
@@ -316,7 +319,7 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
                   id="issue-contractor"
                   value={contractorId}
                   onChange={(id) => void changeContractor(id)}
-                  disabled={savingContractor}
+                  disabled={costs === null || savingContractor}
                   aria-label="Contractor"
                 />
                 <Hint>Assign the contractor doing the work — you can rate them when the issue is resolved</Hint>

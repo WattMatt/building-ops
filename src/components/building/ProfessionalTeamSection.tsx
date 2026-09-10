@@ -25,13 +25,19 @@ export interface ProfessionalTeam {
   wetServicesEngineer: ProfessionalContact;
 }
 
-/** The four free-text fields a register entry fills. The keys are the persisted jsonb keys — do not rename. */
-function contactFromContractor(c: Pick<Contractor, 'company_name' | 'contact_name' | 'contact_phone' | 'contact_email'>): ProfessionalContact {
+/**
+ * The four free-text fields a register entry fills. The keys are the persisted jsonb keys — do
+ * not rename. A register entry with no phone/email does not blank what is already typed there.
+ */
+function contactFromContractor(
+  c: Pick<Contractor, 'company_name' | 'contact_name' | 'contact_phone' | 'contact_email'>,
+  current: ProfessionalContact,
+): ProfessionalContact {
   return {
     name: c.contact_name ?? '',
     company: c.company_name,
-    phone: c.contact_phone ?? '',
-    email: c.contact_email ?? '',
+    phone: c.contact_phone ?? current.phone,
+    email: c.contact_email ?? current.email,
   };
 }
 
@@ -51,7 +57,7 @@ function ProfessionalField({ title, icon, contact, onChange, idPrefix }: Profess
   const pick = (id: string | null) => {
     if (!id) return;
     const c = contractors.find((x) => x.id === id);
-    if (c) onChange(contactFromContractor(c));
+    if (c) onChange(contactFromContractor(c, contact));
     setPickerOpen(false);
   };
 
@@ -69,8 +75,9 @@ function ProfessionalField({ title, icon, contact, onChange, idPrefix }: Profess
               Pick from register
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-80 space-y-2">
-            <Label htmlFor={`${idPrefix}-register`} className="text-xs">Contractor register</Label>
+          <PopoverContent align="end" className="w-80">
+            {/* The aria-label is the picker's one accessible name (the picker always sets one, so a
+                <Label htmlFor> beside it would only be a second, ignored name). */}
             <ContractorPicker
               id={`${idPrefix}-register`}
               value={null}

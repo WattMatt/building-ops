@@ -10,25 +10,40 @@
  * on write 1 only proves write 1 landed. They swallow the 23505 and always run write 2, which is
  * an idempotent update. Throws on anything else; replay.ts classifies.
  *
- * `issue_resolve` may carry a third, best-effort write (the contractor rating). It runs only
- * after the status flip succeeded and never throws: the issue is resolved by then, and a rating
- * hiccup must not re-queue a completed op.
+ * `issue_resolve` may carry a third write (the contractor rating). It runs only after the status
+ * flip succeeded. A rejection of the rating itself (RLS, a constraint) is best effort: the issue
+ * is resolved by then, so the op completes and the result says the rating failed. A transport
+ * failure is NOT swallowed — the rating never reached the server, and completing the op would
+ * lose it for good — so it propagates and replay.ts re-queues the whole op. On that replay write
+ * 1 collides (23505, swallowed), write 2 is an idempotent update, and write 3 either lands or, if
+ * the lost response had in fact been a success, collides on the unique `issue_id` → 'duplicate'.
  */
 import { supabase } from '@/integrations/supabase/client';
 import { uploadPhotos, photoPrefix } from '@/lib/photos';
 import { postIssueComment } from '@/lib/issueActivity';
 import { notify } from '@/lib/notify';
-import type { QueuedOp } from './types';
+import { isNetworkError } from './network';
+import type { IssueResolvePayload, QueuedOp } from './types';
 
 const isDuplicate = (e: unknown) => (e as { code?: string } | null)?.code === '23505';
 
 /** Outcome of the optional rating write that follows an issue_resolve status flip. */
 export type RatingWriteOutcome = 'saved' | 'duplicate' | 'failed';
 
+/** What a synced `issue_resolve` op hands back; `rating` is present only when the payload carried one. */
+export interface IssueResolveResult {
+  issueId: string;
+  rating?: RatingWriteOutcome;
+}
+
+/**
+ * Write 3 of issue_resolve. Returns the outcome for every rejection the server itself made;
+ * rethrows only when the request never got an answer (transport), so the caller can re-queue.
+ */
 async function insertContractorRating(
   uid: string,
   issueId: string,
-  rating: NonNullable<Extract<QueuedOp['payload'], { kind: 'issue_resolve' }>['rating']>,
+  rating: NonNullable<IssueResolvePayload['rating']>,
 ): Promise<RatingWriteOutcome> {
   try {
     const { error } = await supabase
@@ -43,9 +58,12 @@ async function insertContractorRating(
       } as never);
     if (!error) return 'saved';
     if (isDuplicate(error)) return 'duplicate';
+    // supabase-js wraps a dead connection into a plain error object rather than throwing it.
+    if (isNetworkError(error)) throw error;
     if (import.meta.env.DEV) console.warn('contractor_ratings insert failed after resolve:', error);
     return 'failed';
   } catch (e) {
+    if (isNetworkError(e)) throw e;
     if (import.meta.env.DEV) console.warn('contractor_ratings insert threw after resolve:', e);
     return 'failed';
   }
@@ -136,13 +154,15 @@ export async function runOp(op: QueuedOp): Promise<unknown> {
           { code: 'RESOLVE_DENIED' },
         );
       }
-      if (!p.rating) return { issueId: p.issueId };
-      // Write 3, best effort: the issue IS resolved by now, so a rating problem must never fail
-      // (and so re-queue) the op. `issue_id` is unique, so a replay after a half-failed attempt
-      // collides with 23505 — that is "already rated", not an error. Anything else is logged and
-      // reported in the result for the dialog to mention; the op still completes.
-      const rating = await insertContractorRating(op.uid, p.issueId, p.rating);
-      return { issueId: p.issueId, rating };
+      const result: IssueResolveResult = { issueId: p.issueId };
+      if (!p.rating) return result;
+      // Write 3. The issue IS resolved by now, so a rejection of the rating (RLS, a constraint)
+      // must not fail the op: it is logged and reported in the result for the dialog to mention.
+      // A transport failure is different — the rating may never have arrived — so it throws and
+      // replay.ts re-queues the op; the retry re-runs all three writes (1 and 2 are idempotent)
+      // and, if the lost answer had been a success, write 3 hits the unique `issue_id` → 'duplicate'.
+      result.rating = await insertContractorRating(op.uid, p.issueId, p.rating);
+      return result;
     }
   }
 }

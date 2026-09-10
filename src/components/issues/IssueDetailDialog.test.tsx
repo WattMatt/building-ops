@@ -141,6 +141,16 @@ describe('IssueDetailDialog', () => {
       expect(picker).toHaveValue('c2');
     });
 
+    it('keeps the picker disabled until the issue row has been read, so a pick cannot be overwritten by it', async () => {
+      // The issues read never answers; nothing else is affected.
+      state.result = (table) => (table === 'issues' ? (new Promise(() => {}) as never) : { data: [], error: null });
+      render(<IssueDetailDialog issue={issue} open onOpenChange={() => {}} canManage onUpdated={() => {}} />);
+      const picker = await screen.findByLabelText('Contractor');
+      await new Promise((r) => setTimeout(r, 0));
+      expect(picker).toBeDisabled();
+      expect(picker).toHaveValue('');
+    });
+
     it('is hidden when the viewer cannot manage the issue', async () => {
       render(<IssueDetailDialog issue={issue} open onOpenChange={() => {}} canManage={false} onUpdated={() => {}} />);
       await screen.findByRole('heading', { name: /leaking tap in kitchen/i });

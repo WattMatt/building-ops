@@ -295,6 +295,37 @@ describe('offline replay', () => {
     expect(await listOps(UID)).toEqual([]);
   });
 
+  it('5f. transport failure on the rating write re-queues the op; the retry\'s 23505 reads as duplicate', async () => {
+    // The status flip landed, then the connection died on write 3: the rating may or may not
+    // have arrived. Completing the op here would lose it for good, so the op must stay pending.
+    state.results.contractor_ratings = { data: null, error: { message: 'TypeError: Failed to fetch', code: '' } };
+    const op = await enqueue(UID, resolveRated, []);
+    expect(await runOne(op)).toEqual({ status: 'queued' });
+    expect(state.from.map((c) => c.table)).toEqual(['issues', 'contractor_ratings']);
+    expect((await listOps(UID))[0]).toMatchObject({ id: op.id, status: 'pending', attempts: 1, lastError: null });
+
+    // Back online. Write 1 collides (the note landed first time), write 2 is idempotent, and
+    // write 3 collides too — the lost answer had been a success — which reads as 'duplicate'.
+    state.from.length = 0;
+    vi.mocked(postIssueComment).mockRejectedValueOnce({ code: '23505', message: 'duplicate key value violates unique constraint' });
+    state.results.contractor_ratings = { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } };
+    expect(await runOne({ ...op, attempts: 1 })).toEqual({ status: 'synced', result: { issueId: 'i1', rating: 'duplicate' } });
+    expect(postIssueComment).toHaveBeenCalledTimes(2);
+    expect(state.from.map((c) => c.table)).toEqual(['issues', 'contractor_ratings']);
+    expect(state.from[1].insert).toEqual(ratingRow);
+    expect(await listOps(UID)).toEqual([]);
+
+    // Had the rating never arrived, the retry simply lands it.
+    state.from.length = 0;
+    delete state.results.contractor_ratings;
+    state.results.contractor_ratings = { data: null, error: { message: 'TypeError: Failed to fetch', code: '' } };
+    const again = await enqueue(UID, resolveRated, []);
+    expect(await runOne(again)).toEqual({ status: 'queued' });
+    delete state.results.contractor_ratings;
+    expect(await runOne({ ...again, attempts: 1 })).toEqual({ status: 'synced', result: { issueId: 'i1', rating: 'saved' } });
+    expect(await listOps(UID)).toEqual([]);
+  });
+
   it('5e. the rating is skipped when the status flip is refused (RESOLVE_DENIED)', async () => {
     state.results.issues = { data: [], error: null };
     const op = await enqueue(UID, resolveRated, []);

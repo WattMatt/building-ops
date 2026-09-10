@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
@@ -28,7 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
+import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { ContractorPicker } from '@/components/contractors/ContractorPicker';
 import { useContractors } from '@/hooks/useContractors';
 import { Plus, Wrench, Trash2, Calendar } from 'lucide-react';
@@ -95,17 +95,13 @@ export default function AssetServiceHistoryDialog({
   const [description, setDescription] = useState('');
   const [performedBy, setPerformedBy] = useState('');
   const [contractorId, setContractorId] = useState<string | null>(null);
+  // The company name the picker last wrote into "Performed by" — the only text it may overwrite.
+  const [prefilledPerformedBy, setPrefilledPerformedBy] = useState<string | null>(null);
   const [cost, setCost] = useState('');
   const [nextServiceDate, setNextServiceDate] = useState('');
   const [notes, setNotes] = useState('');
 
-  useEffect(() => {
-    if (open) {
-      fetchRecords();
-    }
-  }, [open, asset.id]);
-
-  const fetchRecords = async () => {
+  const fetchRecords = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('asset_service_history')
@@ -114,6 +110,7 @@ export default function AssetServiceHistoryDialog({
         .order('service_date', { ascending: false });
 
       if (error) throw error;
+      // The contractors(company_name) embed is untyped until types are regenerated after 2026-09-13_05.
       setRecords((data || []) as unknown as ServiceRecord[]);
     } catch (error) {
       console.error('Error fetching service history:', error);
@@ -121,7 +118,13 @@ export default function AssetServiceHistoryDialog({
     } finally {
       setLoading(false);
     }
-  };
+  }, [asset.id]);
+
+  useEffect(() => {
+    if (open) {
+      fetchRecords();
+    }
+  }, [open, fetchRecords]);
 
   const resetForm = () => {
     setServiceDate(format(new Date(), 'yyyy-MM-dd'));
@@ -129,6 +132,7 @@ export default function AssetServiceHistoryDialog({
     setDescription('');
     setPerformedBy('');
     setContractorId(null);
+    setPrefilledPerformedBy(null);
     setCost('');
     setNextServiceDate('');
     setNotes('');
@@ -182,20 +186,24 @@ export default function AssetServiceHistoryDialog({
       resetForm();
       fetchRecords();
       onServiceAdded?.();
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error saving service record:', error);
-      toast.error(error.message || 'Failed to save service record');
+      toast.error((error instanceof Error && error.message) || 'Failed to save service record');
     } finally {
       setSaving(false);
     }
   };
 
-  // Picking a contractor fills an empty "Performed by" with the company name; typed text is left alone.
+  // Picking a contractor fills "Performed by" with the company name when the field is empty or
+  // still holds the name a previous pick put there (A → B swaps A for B; A → none clears it).
+  // Anything the user typed is left alone.
   const chooseContractor = (id: string | null) => {
     setContractorId(id);
-    if (!id || performedBy.trim()) return;
-    const company = contractors.find((c) => c.id === id)?.company_name;
-    if (company) setPerformedBy(company);
+    const typed = performedBy.trim();
+    if (typed && typed !== prefilledPerformedBy) return;
+    const company = (id && contractors.find((c) => c.id === id)?.company_name) || null;
+    setPerformedBy(company ?? '');
+    setPrefilledPerformedBy(company);
   };
 
   const handleDelete = async (record: ServiceRecord) => {
@@ -220,7 +228,7 @@ export default function AssetServiceHistoryDialog({
     return SERVICE_TYPES.find((t) => t.value === value)?.label || value;
   };
 
-  const getServiceTypeBadgeVariant = (value: string) => {
+  const getServiceTypeBadgeVariant = (value: string): BadgeProps['variant'] => {
     switch (value) {
       case 'emergency_repair':
         return 'destructive';
@@ -395,7 +403,7 @@ export default function AssetServiceHistoryDialog({
                         {format(new Date(record.service_date), 'dd MMM yyyy')}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={getServiceTypeBadgeVariant(record.service_type) as any}>
+                        <Badge variant={getServiceTypeBadgeVariant(record.service_type)}>
                           {getServiceTypeLabel(record.service_type)}
                         </Badge>
                       </TableCell>

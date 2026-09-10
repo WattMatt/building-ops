@@ -113,6 +113,44 @@ describe('AssetServiceHistoryDialog', () => {
     expect(performedBy).toHaveValue('Joe (site tech)');
   });
 
+  it('swaps a prefilled "Performed by" when the contractor is switched, and clears it when the pick is removed', async () => {
+    await openForm();
+    const performedBy = screen.getByLabelText(/performed by/i);
+    const picker = screen.getByLabelText('Contractor');
+
+    fireEvent.change(picker, { target: { value: 'c1' } });
+    expect(performedBy).toHaveValue('Sparks');
+    fireEvent.change(picker, { target: { value: 'c2' } });
+    expect(performedBy).toHaveValue('Flow Plumbing');
+    fireEvent.change(picker, { target: { value: '' } });
+    expect(performedBy).toHaveValue('');
+
+    // Once the user has edited the prefill it is theirs: a later switch leaves it alone.
+    fireEvent.change(picker, { target: { value: 'c1' } });
+    fireEvent.change(performedBy, { target: { value: 'Sparks (Joe)' } });
+    fireEvent.change(picker, { target: { value: 'c2' } });
+    expect(performedBy).toHaveValue('Sparks (Joe)');
+  });
+
+  it('shows the company as a sub-line only when "Performed by" names someone else', async () => {
+    const byTech = { ...record, id: 'r2', service_date: '2026-08-15', performed_by: 'Joe (site tech)' };
+    const byCompany = { ...record, id: 'r3', service_date: '2026-08-16', performed_by: 'Sparks' };
+    state.result = (table) => (table === 'asset_service_history' ? { data: [byTech, byCompany], error: null } : { data: [], error: null });
+    render(<AssetServiceHistoryDialog asset={asset} open onOpenChange={() => {}} />);
+
+    const tech = await screen.findByText('Joe (site tech)');
+    const subLine = tech.closest('td')?.querySelector('p');
+    expect(subLine).toHaveTextContent('Sparks');
+    expect(subLine?.className).toMatch(/text-xs/);
+
+    // performed_by equal to the company: the cell says Sparks once, with no sub-line.
+    const rows = screen.getAllByRole('row');
+    const companyRow = rows.find((r) => r.textContent?.includes('16 Aug 2026'))!;
+    const cell = companyRow.querySelectorAll('td')[3];
+    expect(cell).toHaveTextContent(/^Sparks$/);
+    expect(cell.querySelector('p')).toBeNull();
+  });
+
   it('writes contractor_id on the inserted record', async () => {
     state.result = (table, calls) => {
       if (table === 'asset_service_history' && isInsert(calls)) return { data: [{ id: 'new' }], error: null };

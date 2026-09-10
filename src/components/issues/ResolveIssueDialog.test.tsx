@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { mockViewport } from '@/test/mobile';
 
 const enqueueAndRun = vi.hoisted(() => vi.fn());
@@ -34,7 +34,7 @@ describe('ResolveIssueDialog', () => {
   beforeEach(() => {
     enqueueAndRun.mockReset().mockResolvedValue({ status: 'synced', result: {}, opId: 'op-1' });
     removeOp.mockReset().mockResolvedValue(undefined);
-    toast.mockClear(); toast.success.mockClear(); toast.error.mockClear();
+    toast.mockClear(); toast.success.mockClear(); toast.error.mockClear(); toast.info.mockClear();
   });
   afterEach(() => mockViewport(1024));
 
@@ -131,17 +131,53 @@ describe('ResolveIssueDialog', () => {
       });
     });
 
-    it('sends no rating when no star was chosen, and a null comment when the box is empty', async () => {
+    it('sends no rating when no star was chosen', async () => {
       renderDialog({ contractorId: 'con1' });
       await submit();
       expect(enqueueAndRun.mock.calls[0][1]).not.toHaveProperty('rating');
-      cleanup();
+    });
 
-      enqueueAndRun.mockClear();
+    it('sends a null comment when a star was chosen but the comment box is empty', async () => {
       renderDialog({ contractorId: 'con1' });
       fireEvent.click(stars()[0]);
       await submit();
       expect(enqueueAndRun.mock.calls[0][1].rating).toEqual({ contractorId: 'con1', rating: 1, comment: null });
+    });
+
+    it('clears the stars and comment when the contractor changes', () => {
+      const { rerender } = render(<ResolveIssueDialog issueId="i1" open onOpenChange={() => {}} onResolved={() => {}} contractorId="con1" />);
+      fireEvent.click(stars()[2]);
+      fireEvent.change(screen.getByLabelText(/comment about the contractor/i), { target: { value: 'Fine' } });
+      expect(screen.getByText('Good')).toBeInTheDocument();
+
+      rerender(<ResolveIssueDialog issueId="i1" open onOpenChange={() => {}} onResolved={() => {}} contractorId="con2" />);
+      expect(screen.getByText('Not rated')).toBeInTheDocument();
+      for (const b of stars()) expect(b).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByLabelText(/comment about the contractor/i)).toHaveValue('');
+    });
+
+    it('clears the stars and comment when the dialog is closed and reopened', () => {
+      const { rerender } = render(<ResolveIssueDialog issueId="i1" open onOpenChange={() => {}} onResolved={() => {}} contractorId="con1" />);
+      fireEvent.click(stars()[4]);
+      fireEvent.change(screen.getByLabelText(/comment about the contractor/i), { target: { value: 'Great' } });
+      expect(screen.getByText('Excellent')).toBeInTheDocument();
+
+      rerender(<ResolveIssueDialog issueId="i1" open={false} onOpenChange={() => {}} onResolved={() => {}} contractorId="con1" />);
+      rerender(<ResolveIssueDialog issueId="i1" open onOpenChange={() => {}} onResolved={() => {}} contractorId="con1" />);
+      expect(screen.getByText('Not rated')).toBeInTheDocument();
+      expect(screen.getByLabelText(/comment about the contractor/i)).toHaveValue('');
+    });
+
+    it('says the earlier rating was kept when the handler reports a duplicate, and still closes as resolved', async () => {
+      enqueueAndRun.mockResolvedValueOnce({ status: 'synced', result: { issueId: 'i1', rating: 'duplicate' }, opId: 'op-1' });
+      const { onOpenChange, onResolved } = renderDialog({ contractorId: 'con1' });
+      fireEvent.click(stars()[1]);
+      await submit();
+      expect(toast.success).toHaveBeenCalledWith('Issue resolved');
+      expect(toast.info).toHaveBeenCalledWith('This contractor was already rated on this issue. The earlier rating was kept.');
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+      expect(onResolved).toHaveBeenCalledTimes(1);
     });
 
     it('still closes as resolved, but says so, when the handler could not save the rating', async () => {

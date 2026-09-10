@@ -6,7 +6,7 @@
  * The rating rides on the same op and is written after the status flip; it is optional and never
  * blocks the resolve.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Loader2, Star } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,7 @@ import {
 import { PhotoCapture, type PhotoFile } from '@/components/ui/photo-capture';
 import { useAuth } from '@/contexts/AuthContext';
 import { enqueueAndRun } from '@/lib/offline/enqueueAndRun';
+import type { IssueResolveResult } from '@/lib/offline/handlers';
 import { toastForOutcome } from '@/lib/offline/outcomeToast';
 import { removeOp } from '@/lib/offline/queue';
 
@@ -51,6 +52,10 @@ export function ResolveIssueDialog({ issueId, open, onOpenChange, onResolved, ne
 
   const reset = () => { setNote(''); setPhotos([]); setRating(null); setRatingComment(''); };
 
+  // A rating belongs to one contractor on one visit: it must not carry over to a different
+  // contractor, nor survive a cancel and reopen.
+  useEffect(() => { setRating(null); setRatingComment(''); }, [contractorId, open]);
+
   const resolve = async () => {
     if (!user || !note.trim()) return;
     setBusy(true);
@@ -77,9 +82,14 @@ export function ResolveIssueDialog({ issueId, open, onOpenChange, onResolved, ne
         queued: "Saved on this device — it will resolve when you're back online",
       });
       if (outcome.status === 'failed') return;
-      // The handler resolves the issue even when the rating write fails; say so rather than hide it.
-      if (outcome.status === 'synced' && (outcome.result as { rating?: string } | null)?.rating === 'failed') {
+      // The handler resolves the issue whatever became of the rating; say what became of it
+      // rather than hide it. 'duplicate' means an earlier attempt of this same op (or another
+      // resolver) already rated this contractor on this issue — that rating stands.
+      const ratingOutcome = outcome.status === 'synced' ? (outcome.result as IssueResolveResult | null)?.rating : undefined;
+      if (ratingOutcome === 'failed') {
         toast.error('The issue is resolved, but the contractor rating could not be saved.');
+      } else if (ratingOutcome === 'duplicate') {
+        toast.info('This contractor was already rated on this issue. The earlier rating was kept.');
       }
       reset();
       onOpenChange(false);
