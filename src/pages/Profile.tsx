@@ -26,8 +26,9 @@ import { AvatarPicker } from '@/components/avatar/AvatarPicker';
 import { ImageCropper } from '@/components/avatar/ImageCropper';
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter';
 import { PushSwitch } from '@/components/profile/PushSwitch';
+import { SubscribeCard } from '@/components/calendar/SubscribeCard';
 import { gatePassword } from '@/lib/password-strength';
-import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare, Upload, Lock, Eye, EyeOff, Trash2, MapPin } from 'lucide-react';
+import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CalendarDays, CheckSquare, Upload, Lock, Eye, EyeOff, Trash2, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 
 type ProfileData = Pick<
@@ -687,6 +688,22 @@ export default function Profile() {
               )}
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Calendar Subscription Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CalendarDays className="h-5 w-5" />
+            Calendar subscription
+          </CardTitle>
+          <CardDescription>
+            See your tasks, deadlines and inspections in Outlook, Google Calendar or Apple Calendar.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SubscribeCard buildingId={null} />
         </CardContent>
       </Card>
 
