@@ -41,7 +41,8 @@ as $$
      and exists (select 1 from public.user_roles ur where ur.user_id = auth.uid() and ur.role in ('admin','manager'))
 $$;
 
--- Most privileged role wins; a deactivated caller has no role at all.
+-- Most privileged role wins (same rank order as building_members: admin, manager, reviewer, user); a
+-- deactivated caller has no role at all.
 create or replace function public.app_role()
 returns text
 language sql stable security definer
@@ -49,7 +50,7 @@ set search_path = ''
 as $$
   select case when public.is_active_user() then
     (select ur.role from public.user_roles ur where ur.user_id = auth.uid()
-      order by case ur.role when 'admin' then 0 when 'manager' then 1 else 2 end
+      order by case ur.role when 'admin' then 0 when 'manager' then 1 when 'reviewer' then 2 when 'user' then 3 else 4 end
       limit 1)
   end
 $$;
@@ -98,8 +99,9 @@ create or replace view public.organization_branding as
 revoke all on public.organization_branding from public;
 grant select on public.organization_branding to anon, authenticated;
 
--- Default SLA hours per priority, overridable in organizations.settings.sla_hours. Only a JSON number counts;
--- anything else falls back, so a mistyped setting can never break issue inserts.
+-- Default SLA hours per priority, overridable in organizations.settings.sla_hours. Only a JSON number > 0
+-- counts; anything else (a string, null, 0, a negative) falls back to the priority default, so a mistyped
+-- setting can never break issue inserts or produce an instant breach.
 create or replace function public.org_sla_hours(p_priority text)
 returns numeric
 language sql stable security definer
@@ -107,6 +109,7 @@ set search_path = ''
 as $$
   select coalesce(
     (select case when jsonb_typeof(o.settings->'sla_hours'->p_priority) = 'number'
+                  and (o.settings->'sla_hours'->>p_priority)::numeric > 0
                  then (o.settings->'sla_hours'->>p_priority)::numeric end
        from public.organizations o order by o.created_at nulls last limit 1),
     case p_priority when 'critical' then 4 when 'high' then 24 when 'medium' then 72 when 'low' then 168 end)
@@ -120,6 +123,10 @@ grant execute on function public.org_sla_hours(text) to authenticated, service_r
 -- ============================================================
 -- Security INVOKER on purpose: the five source tables' RLS applies to whoever calls it (a site user sees
 -- their buildings, the service role everything, the snapshot below runs it as its own owner).
+-- Performance note: `set search_path` stops the planner inlining this SQL function, so the snapshot's lateral
+-- join evaluates it once per building (measured 206 ms for 49 buildings on staging). Acceptable for a nightly
+-- cron and a per-building call; if it ever matters, drop the search_path clause and schema-qualify (already
+-- done) or fold the union into the snapshot directly.
 create or replace function public.expiring_items_at(p_day date, p_days integer)
 returns table (
   kind text, entity_type text, entity_id uuid, parent_id uuid, building_id uuid, building_name text,
@@ -210,15 +217,27 @@ create table if not exists public.building_metrics_daily (
   primary key (building_id, day)
 );
 create index if not exists building_metrics_daily_day_idx on public.building_metrics_daily (day);
+comment on column public.building_metrics_daily.task_completion_30d_pct is
+  'Share of task instances due in the trailing 30 days that were completed by that day. Only status completed counts as done; issue_logged counts as not done.';
+comment on column public.building_metrics_daily.tasks_overdue is
+  'Task instances due before the day and not completed by it (pending, overdue and issue_logged alike).';
+comment on column public.building_metrics_daily.ppm_done_pct is
+  'Point-in-time read of ppm_monthly_status for the day''s month (a reconstructed day shows the grid as it is now).';
+comment on column public.building_metrics_daily.reconstructed is
+  'True when the row was computed for a day earlier than the run day. Reconstructed rows may be replaced by a later re-run; live (non-reconstructed) history is immutable.';
 alter table public.building_metrics_daily enable row level security;
 drop policy if exists bmd_select on public.building_metrics_daily;
 create policy bmd_select on public.building_metrics_daily for select using (public.can_access_building(building_id));
 revoke all on public.building_metrics_daily from anon;
 revoke insert, update, delete, truncate, references, trigger on public.building_metrics_daily from authenticated;
 
--- One row per building for one SAST day. Report and expiry columns are point-in-time reads of the data as it
--- is now (a re-run for an earlier day is marked reconstructed); task and issue columns are computed from
--- completed_at / created_at / resolved_at so a backfilled day is historically honest where the data allows.
+-- One row per building for one SAST day. Report, PPM (ppm_done_pct) and expiry columns are point-in-time reads
+-- of the data as it is now (a re-run for an earlier day is marked reconstructed); task and issue columns are
+-- computed from completed_at / created_at / resolved_at so a backfilled day is historically honest where the
+-- data allows. Task columns count every instance whose due_date falls in the window: only 'completed' (by
+-- v_day) is done, so 'issue_logged' instances count as not done (overdue / due) like 'pending' and 'overdue'.
+-- Live history is immutable: the upsert only replaces a row for today or a row that was itself reconstructed,
+-- so a past-day re-run cannot overwrite a genuine nightly row (today and backfill re-runs stay idempotent).
 -- expiring_items_at is security INVOKER: called from here it runs as this function's owner, so RLS does not
 -- narrow the counts for the cron; a signed-in caller must be admin/manager (checked below), who see everything.
 create or replace function public.snapshot_building_metrics(p_day date default null, p_building uuid default null)
@@ -297,8 +316,7 @@ begin
                 and coalesce((ti.completed_at at time zone 'Africa/Johannesburg')::date, ti.due_date) <= v_day) as done
           from public.task_instances ti
          where ti.building_id = b.id
-           and ti.status in ('pending','overdue','completed')
-           and ti.due_date between v_day - 365 and v_day + 6)
+           and ti.due_date between v_day - 365 and v_day + 6)   -- every status: issue_logged is "not done"
       select round(100.0 * count(*) filter (where done and due_date between v_day - 29 and v_day)
                    / nullif(count(*) filter (where due_date between v_day - 29 and v_day), 0), 1) as completion_pct,
              count(*) filter (where not done and due_date < v_day)::int as overdue,
@@ -348,7 +366,8 @@ begin
     issues_resolved_30d = excluded.issues_resolved_30d, docs_expiring_30 = excluded.docs_expiring_30,
     docs_expiring_60 = excluded.docs_expiring_60, docs_expiring_90 = excluded.docs_expiring_90,
     docs_expired = excluded.docs_expired, assets_overdue = excluded.assets_overdue,
-    report_state = excluded.report_state, reconstructed = excluded.reconstructed, computed_at = now();
+    report_state = excluded.report_state, reconstructed = excluded.reconstructed, computed_at = now()
+  where m.day >= v_today or m.reconstructed;   -- never overwrite a genuine nightly row for a past day
   get diagnostics v_count = row_count;
 
   if p_building is null then
@@ -419,6 +438,13 @@ select cron.schedule('metrics-snapshot-daily', '0 3 * * *', 'select public.snaps
 -- ============================================================
 -- 4) SLA
 -- ============================================================
+-- The snapshot's per-building issue window (building_id, created_at) and the 15-minute sweep's candidate
+-- set (open, targeted, not yet breached) each get an index; the partial one stays tiny because breached
+-- and resolved issues leave it.
+create index if not exists issues_building_id_created_at_idx on public.issues (building_id, created_at);
+create index if not exists issues_sla_pending_idx on public.issues (created_at)
+  where sla_breached_at is null and sla_target_hours is not null and status in ('open','in_progress','escalated');
+
 alter table public.notifications drop constraint if exists notifications_kind_check;
 alter table public.notifications add constraint notifications_kind_check check (kind in (
   'task_assigned','issue_assigned','issue_comment','issue_mention',
@@ -429,7 +455,8 @@ alter table public.notifications add constraint notifications_kind_check check (
 -- Default target on insert; on a priority change of an open issue the target follows the new priority only
 -- when the row still carries the old priority's default and the same statement did not set a target itself
 -- (an explicit target is always kept). Existing issues are NOT backfilled: only issues created from now on
--- carry a default, so nothing breaches all at once on apply.
+-- carry a default, so nothing breaches all at once on apply — and a pre-migration issue whose target is null
+-- keeps null across priority changes (null is "no SLA", not "use the default").
 create or replace function public.issues_sla_defaults()
 returns trigger
 language plpgsql security definer
@@ -441,7 +468,8 @@ begin
   elsif new.priority is distinct from old.priority
         and new.sla_target_hours is not distinct from old.sla_target_hours   -- the statement did not set a target itself
         and new.status in ('open','in_progress','escalated')
-        and (old.sla_target_hours is null or old.sla_target_hours = public.org_sla_hours(old.priority)) then
+        and old.sla_target_hours is not null
+        and old.sla_target_hours = public.org_sla_hours(old.priority) then
     new.sla_target_hours := public.org_sla_hours(new.priority);
   end if;
   return new;
@@ -531,6 +559,11 @@ select cron.schedule('sla-breach-sweep', '*/15 * * * *', 'select public.mark_sla
 -- ============================================================
 -- 5b) Discard an empty draft
 -- ============================================================
+-- Client-only by design: is_admin() needs a signed-in admin, so the service role (auth.uid() null) is refused
+-- with 42501 like everyone else — there is no cron or edge-function path that discards drafts.
+-- SQLSTATEs the client maps (useFortressReports DISCARD_ERROR_CODES):
+--   42501 not an admin · P0002 report not found · PR001 not a draft · PR002 has saved PDF versions ·
+--   PR003 has saved rows. PostgREST returns HTTP 400 for the custom PR* codes and 403 for 42501.
 create or replace function public.delete_empty_report(p_report uuid)
 returns void
 language plpgsql security definer
@@ -548,10 +581,10 @@ begin
     raise exception 'delete_empty_report: report not found' using errcode = 'P0002';
   end if;
   if v_status <> 'draft' then
-    raise exception 'delete_empty_report: only a draft can be discarded (this report is %)', v_status using errcode = '42501';
+    raise exception 'delete_empty_report: only a draft can be discarded (this report is %)', v_status using errcode = 'PR001';
   end if;
   if exists (select 1 from public.report_artifacts a where a.source_id = p_report) then
-    raise exception 'delete_empty_report: this draft has saved PDF versions; it cannot be discarded' using errcode = '42501';
+    raise exception 'delete_empty_report: this draft has saved PDF versions; it cannot be discarded' using errcode = 'PR002';
   end if;
   select
       (select count(*) from public.report_narratives x where x.report_id = p_report and coalesce(x.body, '') <> '')
@@ -583,7 +616,7 @@ begin
     + (select count(*) from public.local_resources_contacts x where x.report_id = p_report)
     into v_rows;
   if v_rows > 0 then
-    raise exception 'delete_empty_report: this draft has % saved row(s); clear its sections before discarding it', v_rows using errcode = '42501';
+    raise exception 'delete_empty_report: this draft has % saved row(s); clear its sections before discarding it', v_rows using errcode = 'PR003';
   end if;
   -- Scaffold only from here on: plan-seeded PPM rows, empty narratives, auto-created parents.
   delete from public.ppm_services where report_id = p_report;
@@ -595,6 +628,8 @@ end $$;
 revoke all on function public.delete_empty_report(uuid) from public;
 revoke execute on function public.delete_empty_report(uuid) from anon;
 grant execute on function public.delete_empty_report(uuid) to authenticated, service_role;
+comment on function public.delete_empty_report(uuid) is
+  'Admin-only discard of a content-free draft. Client-only: the service role is refused by design (is_admin() needs auth.uid()). Raises 42501 / P0002 / PR001 (not a draft) / PR002 (has PDF versions) / PR003 (has saved rows).';
 
 commit;
 
@@ -614,6 +649,7 @@ commit;
 --   select tgname from pg_trigger where tgrelid = 'public.issues'::regclass and not tgisinternal;               -- includes trg_issues_sla_defaults
 --   select tgname from pg_trigger where tgrelid = 'public.issue_activity'::regclass and not tgisinternal;       -- trg_issue_activity_first_response
 --   select conname from pg_constraint where conname = 'buildings_report_types_check';                           -- 1 row
+--   select indexname from pg_indexes where tablename = 'issues' and indexname like 'issues_%_idx';               -- includes issues_building_id_created_at_idx, issues_sla_pending_idx
 --   select proname, prosecdef, proconfig from pg_proc where pronamespace = 'public'::regnamespace
 --     and proname in ('snapshot_building_metrics','mark_sla_breaches','delete_empty_report','org_sla_hours',
 --                     'issues_sla_defaults','issue_activity_first_response');                                   -- 6 rows, true, {search_path=}

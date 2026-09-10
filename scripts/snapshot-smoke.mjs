@@ -9,8 +9,11 @@
  *            three task_instances (completed yesterday / pending today / overdue 3 days), one open high issue and
  *            one resolved 5 days ago, two building_documents (+10 d, −5 d), a tenant document (+45 d), an asset
  *            with service overdue (−1 d) and a warranty (+80 d)
- *   step 2   snapshot_building_metrics(today, A) as admin → 1; the (A, today) row carries every expected count
- *   step 3   run again → still exactly one row, computed_at strictly newer (idempotent upsert)
+ *   step 2   snapshot_building_metrics(today, A) as admin → 1; the (A, today) row carries the counts this fixture
+ *            drives (tasks, issues, documents, assets, report_state); compliance / critical / inspection / ppm are
+ *            null here because the fixture seeds no assessment, inspection or PPM grid
+ *   step 3   run again → still exactly one row, computed_at strictly newer (today's row is replaced; a genuine
+ *            past-day row is immutable and only a reconstructed one is replaced — see the migration)
  *   step 4   only today exists inside the 90-day window (A is newer than the migration's backfill); a snapshot
  *            for today−7 is marked reconstructed and shows the fixture issues as not yet open
  *   step 5   RLS: the site user reads A's rows and none of B's; anon cannot read the table or the view; the admin

@@ -68,8 +68,9 @@ async function svcInsert(table, row) {
   if (!res.ok) throw new Error(`fixture insert ${table}: HTTP ${res.status} ${await res.text()}`);
   return (await res.json())[0];
 }
-async function svcDelete(table, id) {
-  await fetch(`${URL_BASE}/rest/v1/${table}?id=eq.${id}`, { method: 'DELETE', headers: SVC });
+// `filter` overrides the default id match for tables without an id column (user_roles is keyed by user_id).
+async function svcDelete(table, id, filter = `id=eq.${id}`) {
+  await fetch(`${URL_BASE}/rest/v1/${table}?${filter}`, { method: 'DELETE', headers: SVC });
 }
 
 // ── persona-scoped REST probes ──
@@ -100,24 +101,30 @@ async function canUpdateF(jwt, table, filter, patch) {
   return (await res.json()).length > 0; // 0 rows = filtered by USING = denied
 }
 const canUpdate = (jwt, table, id, patch) => canUpdateF(jwt, table, `id=eq.${id}`, patch);
-async function canDelete(jwt, table, id) {
-  const res = await fetch(`${URL_BASE}/rest/v1/${table}?id=eq.${id}`, {
+async function canDeleteF(jwt, table, filter) {
+  const res = await fetch(`${URL_BASE}/rest/v1/${table}?${filter}`, {
     method: 'DELETE', headers: { ...authed(jwt), Prefer: 'return=representation' },
   });
   if (!res.ok) return false;
   return (await res.json()).length > 0;
 }
+const canDelete = (jwt, table, id) => canDeleteF(jwt, table, `id=eq.${id}`);
 // SECURITY DEFINER RPCs: a denied caller is either an HTTP error (no EXECUTE
 // grant) or an empty row set (the function's own access test failed), so report
-// both rather than collapsing them into a boolean.
+// both rather than collapsing them into a boolean. A void function answers a
+// 2xx with an empty body (never JSON), and a refusal raised with a custom
+// SQLSTATE (PR001…) comes back as HTTP 400 with the code in the JSON body —
+// callers assert `.ok` / `.code`, not a bare status.
 async function rpcCall(jwt, fn, args) {
   const headers = jwt ? authed(jwt) : { apikey: ANON, 'Content-Type': 'application/json' };
   const res = await fetch(`${URL_BASE}/rest/v1/rpc/${fn}`, {
     method: 'POST', headers, body: JSON.stringify(args),
   });
-  if (!res.ok) return { ok: false, status: res.status, rows: [] };
-  const body = await res.json();
-  return { ok: true, status: res.status, rows: Array.isArray(body) ? body : [body] };
+  const text = await res.text();
+  let body = null;
+  try { body = text ? JSON.parse(text) : null; } catch { body = text; } // a non-JSON error page stays readable
+  const rows = !res.ok || body == null ? [] : Array.isArray(body) ? body : [body];
+  return { ok: res.ok, status: res.status, body, code: body?.code ?? null, rows };
 }
 
 async function storagePut(jwt, bucket, path) {
@@ -143,7 +150,7 @@ async function storageDel(jwt, bucket, path) {
 // ── lifecycle state ──
 const personas = {};            // key → {id, jwt, email}
 const createdUsers = [];        // auth user ids, tracked the moment they exist
-const cleanup = [];             // [table, id] service-side teardown, LIFO
+const cleanup = [];             // [table, id] or [table, null, filter] service-side teardown, LIFO
 const storageCleanup = [];      // [bucket, path]
 let A = null, B = null;         // building ids
 
@@ -705,8 +712,13 @@ try {
     assert('organizations not readable by anon', !anonOrg.ok, `expected a non-2xx, got HTTP ${anonOrg.status}`);
     const anonBranding = await fetch(`${URL_BASE}/rest/v1/organization_branding?select=id,name,logo_url,primary_color&limit=1`, { headers: { apikey: ANON } });
     assert('organization_branding readable by anon', anonBranding.ok, `HTTP ${anonBranding.status}`);
-    const brandingCols = Object.keys((await anonBranding.json())[0] ?? { id: 1, name: 1, logo_url: 1, primary_color: 1 }).sort();
-    assert('organization_branding exposes only id/name/logo_url/primary_color', brandingCols.join(',') === 'id,logo_url,name,primary_color', brandingCols.join(','));
+    const brandingRow = anonBranding.ok ? (await anonBranding.json())[0] : null;
+    if (brandingRow) {
+      const brandingCols = Object.keys(brandingRow).sort();
+      assert('organization_branding exposes only id/name/logo_url/primary_color', brandingCols.join(',') === 'id,logo_url,name,primary_color', brandingCols.join(','));
+    } else {
+      skip('organization_branding column shape', 'no organizations row on this project');
+    }
     await probeMatrix('organizations select (settings included)', anyAuth(), (jwt) => canSelectF(jwt, 'organizations', 'settings=not.is.null'));
     const org = (await (await fetch(`${URL_BASE}/rest/v1/organizations?select=id,settings&limit=1`, { headers: SVC })).json())[0];
     if (org?.id) {
@@ -728,6 +740,7 @@ try {
     await probeMatrix('building_metrics_daily[B] select', byAccess('B'), (jwt) => canSelectF(jwt, 'building_metrics_daily', `building_id=eq.${B}`));
     await probeMatrix('building_metrics_daily insert', nobody(), (jwt) => canInsert(jwt, 'building_metrics_daily', { building_id: A, day: '2030-01-01' }));
     await probeMatrix('building_metrics_daily update', nobody(), (jwt) => canUpdateF(jwt, 'building_metrics_daily', `building_id=eq.${A}`, { issues_open: 99 }));
+    await probeMatrix('building_metrics_daily delete', nobody(), (jwt) => canDeleteF(jwt, 'building_metrics_daily', `building_id=eq.${A}`));
     for (const fn of ['snapshot_building_metrics', 'mark_sla_breaches', 'delete_empty_report', 'expiring_items']) {
       const args = fn === 'delete_empty_report' ? { p_report: A } : fn === 'expiring_items' ? { p_days: 30 } : {};
       const anonR = await rpcCall(null, fn, args);
@@ -735,7 +748,7 @@ try {
     }
     assert('snapshot_building_metrics refused for a site user', (await rpcCall(personas.userA.jwt, 'snapshot_building_metrics', { p_building: A })).status === 403, 'site user ran the snapshot');
     assert('mark_sla_breaches refused for a site user', (await rpcCall(personas.userA.jwt, 'mark_sla_breaches', {})).status === 403, 'site user ran the sweep');
-    assert('mark_sla_breaches runs for a manager', (await rpcCall(personas.manager.jwt, 'mark_sla_breaches', {})).status === 200, 'manager could not run the sweep');
+    assert('mark_sla_breaches runs for a manager', (await rpcCall(personas.manager.jwt, 'mark_sla_breaches', {})).ok, 'manager could not run the sweep');
     // expiring_items is invoker: the site user on A sees A's document, not B's.
     const docA = (await svcInsert('building_documents', { building_id: A, name: `ZZTEST-RLS-exp-A-${RUN}`, expiry_date: '2030-01-01' })).id;
     cleanup.push(['building_documents', docA]);
@@ -747,22 +760,53 @@ try {
       assert('expiring_items as userA includes building A', r.ok && names.includes(`ZZTEST-RLS-exp-A-${RUN}`), JSON.stringify(names.filter((n) => String(n).startsWith('ZZTEST-RLS'))));
       assert('expiring_items as userA excludes building B', r.ok && !names.includes(`ZZTEST-RLS-exp-B-${RUN}`), JSON.stringify(names.filter((n) => String(n).startsWith('ZZTEST-RLS'))));
     }
-    // delete_empty_report: admin only; an empty draft goes, a draft with content stays.
+    // delete_empty_report: admin only (42501 → HTTP 403); the refusals carry distinct SQLSTATEs the client maps
+    // (PR001 not a draft, PR002 has PDF versions, PR003 has saved rows — PostgREST answers HTTP 400 for those);
+    // an empty draft goes (void function: 2xx with an empty body).
     const emptyDraft = (await svcInsert('reports', { building_id: A, report_type: 'cm_monthly', report_period: '2029-01-01', status: 'draft', title: `ZZTEST-RLS-${RUN}` })).id;
     cleanup.push(['reports', emptyDraft]);
-    assert('delete_empty_report refused for a manager', (await rpcCall(personas.manager.jwt, 'delete_empty_report', { p_report: emptyDraft })).status === 403, 'manager discarded a draft');
-    assert('delete_empty_report refused for a site user', (await rpcCall(personas.userA.jwt, 'delete_empty_report', { p_report: emptyDraft })).status === 403, 'site user discarded a draft');
+    {
+      const mgr = await rpcCall(personas.manager.jwt, 'delete_empty_report', { p_report: emptyDraft });
+      assert('delete_empty_report refused for a manager', mgr.status === 403 && mgr.code === '42501', `manager discarded a draft: HTTP ${mgr.status} ${mgr.code}`);
+      const site = await rpcCall(personas.userA.jwt, 'delete_empty_report', { p_report: emptyDraft });
+      assert('delete_empty_report refused for a site user', site.status === 403 && site.code === '42501', `site user discarded a draft: HTTP ${site.status} ${site.code}`);
+      const svc = await fetch(`${URL_BASE}/rest/v1/rpc/delete_empty_report`, { method: 'POST', headers: SVC, body: JSON.stringify({ p_report: emptyDraft }) });
+      assert('delete_empty_report refused for the service role (client-only by design)', svc.status === 403, `service role discarded a draft: HTTP ${svc.status}`);
+      const missing = await rpcCall(personas.admin.jwt, 'delete_empty_report', { p_report: '00000000-0000-0000-0000-000000000000' });
+      assert('delete_empty_report on an unknown report → P0002', !missing.ok && missing.code === 'P0002', `HTTP ${missing.status} ${missing.code}`);
+    }
     const fullDraft = (await svcInsert('reports', { building_id: A, report_type: 'cm_monthly', report_period: '2029-02-01', status: 'draft', title: `ZZTEST-RLS-full-${RUN}` })).id;
     cleanup.push(['reports', fullDraft]);
     const narr = (await svcInsert('report_narratives', { report_id: fullDraft, building_id: A, section_key: 'building_overview', heading: 'x', body: 'ZZTEST-RLS content' })).id;
     cleanup.push(['report_narratives', narr]);
-    assert('delete_empty_report refuses a draft with content', (await rpcCall(personas.admin.jwt, 'delete_empty_report', { p_report: fullDraft })).status === 403, 'admin discarded a draft that had rows');
-    assert('delete_empty_report deletes an empty draft for admin', (await rpcCall(personas.admin.jwt, 'delete_empty_report', { p_report: emptyDraft })).status === 200, 'admin could not discard an empty draft');
+    {
+      const r = await rpcCall(personas.admin.jwt, 'delete_empty_report', { p_report: fullDraft });
+      assert('delete_empty_report refuses a draft with content (PR003)', !r.ok && r.code === 'PR003', `HTTP ${r.status} ${r.code} ${JSON.stringify(r.body).slice(0, 120)}`);
+      if (org?.id) {
+        const art = (await svcInsert('report_artifacts', {
+          org_id: org.id, kind: 'cm_pdf', source_id: fullDraft, building_id: A, version: 1,
+          file_path: `zztest-rls/${RUN}/full.pdf`, file_name: `ZZTEST-RLS-${RUN}.pdf`, size_bytes: 0, generated_by: personas.admin.id,
+        })).id;
+        cleanup.push(['report_artifacts', art]);
+        const withPdf = await rpcCall(personas.admin.jwt, 'delete_empty_report', { p_report: fullDraft });
+        assert('delete_empty_report refuses a draft with PDF versions (PR002)', !withPdf.ok && withPdf.code === 'PR002', `HTTP ${withPdf.status} ${withPdf.code}`);
+      } else {
+        skip('delete_empty_report PR002 (PDF versions)', 'no organizations row to own a report_artifacts fixture');
+      }
+      await fetch(`${URL_BASE}/rest/v1/reports?id=eq.${fullDraft}`, { method: 'PATCH', headers: SVC, body: JSON.stringify({ status: 'submitted' }) });
+      const notDraft = await rpcCall(personas.admin.jwt, 'delete_empty_report', { p_report: fullDraft });
+      assert('delete_empty_report refuses a non-draft (PR001)', !notDraft.ok && notDraft.code === 'PR001', `HTTP ${notDraft.status} ${notDraft.code}`);
+    }
+    {
+      const r = await rpcCall(personas.admin.jwt, 'delete_empty_report', { p_report: emptyDraft });
+      assert('delete_empty_report deletes an empty draft for admin', r.ok, `admin could not discard an empty draft: HTTP ${r.status} ${r.code} ${JSON.stringify(r.body).slice(0, 120)}`);
+    }
     assert('empty draft is gone', (await (await fetch(`${URL_BASE}/rest/v1/reports?id=eq.${emptyDraft}&select=id`, { headers: SVC })).json()).length === 0, 'row still present');
     // media_attachments: admin only, every verb (0 rows on every project; the insert probe deletes its own row).
     await probeMatrix('media_attachments insert', adminOnly(), (jwt) => canInsert(jwt, 'media_attachments', { record_type: 'issue', record_id: A, storage_path: `zztest-rls-${RUN}` }));
     // A second user_roles row (building-scoped manager) must not break the helpers (was 21000).
     await svcInsert('user_roles', { user_id: personas.manager.id, role: 'manager', building_id: A });
+    cleanup.push(['user_roles', null, `user_id=eq.${personas.manager.id}&building_id=eq.${A}`]);   // teardown also removes it if the next line throws
     assert('manager with two role rows still reads building B', await canSelect(personas.manager.jwt, 'buildings', B), 'two-role manager lost access (21000 regression)');
     await fetch(`${URL_BASE}/rest/v1/user_roles?user_id=eq.${personas.manager.id}&building_id=eq.${A}`, { method: 'DELETE', headers: SVC });
     console.log('  R4a (organizations, branding view, building_metrics_daily, SLA sweep, delete_empty_report, expiring_items, media_attachments, two-role user): done');
@@ -781,7 +825,7 @@ try {
   if (A || B) {
     await fetch(`${URL_BASE}/rest/v1/task_instances?building_id=in.(${[A, B].filter(Boolean).join(',')})&or=(template_item_id.not.is.null,source_ppm_id.not.is.null)`, { method: 'DELETE', headers: SVC });
   }
-  for (const [table, id] of cleanup.reverse()) await svcDelete(table, id);
+  for (const [table, id, filter] of cleanup.reverse()) await svcDelete(table, id, filter);
   for (const uid of createdUsers) {
     await fetch(`${URL_BASE}/auth/v1/admin/users/${uid}`, { method: 'DELETE', headers: SVC });
   }
