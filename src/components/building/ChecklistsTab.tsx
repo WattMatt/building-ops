@@ -199,23 +199,14 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
 
       if (completionsError) throw completionsError;
 
-      // Fetch profile names for completions
-      const userIds = [...new Set((completionsData || []).map(c => c.completed_by))];
-      const { data: profilesData } = await supabase
-        .from('profiles')
-        .select('id, full_name, email')
-        .in('id', userIds);
-
-      const profileMap = new Map((profilesData || []).map(p => [p.id, p.full_name || p.email]));
-
-      // Map completions to tasks
+      // Map completions to tasks. The completer's name is resolved at render time from the
+      // building's member list (`nameOf`) — other users' `profiles` rows are not readable here.
       const completionMap = new Map(
         (completionsData || []).map(c => [
           c.task_instance_id,
           {
             completed_by: c.completed_by,
             completed_at: c.completed_at,
-            completed_by_name: profileMap.get(c.completed_by) || 'Unknown',
           },
         ])
       );
@@ -466,7 +457,7 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
                   </PopoverTrigger>
                   <PopoverContent className="w-72 space-y-2">
                     <p className="text-sm">Assign the {pendingTasks.length} pending {frequencyLabels[selectedFrequency].toLowerCase()} tasks to:</p>
-                    <AssigneePicker buildingId={buildingId} value={null} onChange={(id) => id && assignTasks(pendingTasks.map((t) => t.id), id)} allowUnassigned={false} />
+                    <AssigneePicker buildingId={buildingId} value={null} onChange={(id) => id && assignTasks(pendingTasks.map((t) => t.id), id)} allowUnassigned={false} placeholder="Choose a person" />
                   </PopoverContent>
                 </Popover>
               )}

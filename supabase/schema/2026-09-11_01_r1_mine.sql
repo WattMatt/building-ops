@@ -21,8 +21,8 @@ alter table public.issue_activity
 create or replace function public.stamp_issue_resolved_at() returns trigger
 language plpgsql set search_path = public as $$
 begin
-  if new.status = 'resolved' and (old.status is distinct from 'resolved') then
-    new.resolved_at := now();
+  if new.status = 'resolved' then
+    if old.status is distinct from 'resolved' then new.resolved_at := now(); end if;
   else
     new.resolved_at := null;
   end if;

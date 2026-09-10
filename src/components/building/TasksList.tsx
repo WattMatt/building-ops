@@ -32,8 +32,7 @@ export interface TaskInstance {
   assigned_to: string | null;
   completion?: {
     completed_by: string;
-    completed_at: string;
-    completed_by_name?: string;
+    completed_at: string | null;
   };
 }
 
@@ -149,8 +148,8 @@ export function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, vari
               {task.completion && (
                 <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                   <User className="h-3 w-3" />
-                  {task.completion.completed_by_name} •{' '}
-                  {format(new Date(task.completion.completed_at), 'MMM d, h:mm a')}
+                  {nameOf(task.completion.completed_by) ?? 'Unknown'} •{' '}
+                  {task.completion.completed_at ? format(new Date(task.completion.completed_at), 'MMM d, h:mm a') : ''}
                 </p>
               )}
 

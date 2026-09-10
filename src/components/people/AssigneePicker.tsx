@@ -20,9 +20,11 @@ interface AssigneePickerProps {
   allowUnassigned?: boolean;
   className?: string;
   id?: string;
+  /** Label shown in the trigger when nothing is chosen. Defaults to 'Unassigned'. */
+  placeholder?: string;
 }
 
-export function AssigneePicker({ buildingId, value, onChange, disabled, allowUnassigned = true, className, id }: AssigneePickerProps) {
+export function AssigneePicker({ buildingId, value, onChange, disabled, allowUnassigned = true, className, id, placeholder = 'Unassigned' }: AssigneePickerProps) {
   const { data: members, isLoading, isError } = useBuildingMembers(buildingId);
   const current = members?.find((m) => m.id === value);
   return (
@@ -34,7 +36,7 @@ export function AssigneePicker({ buildingId, value, onChange, disabled, allowUna
       >
         <SelectTrigger id={id} aria-label="Assignee">
           <SelectValue>
-            {value ? (current ? memberDisplayName(current) : 'Assigned user') : 'Unassigned'}
+            {value ? (current ? memberDisplayName(current) : 'Assigned user') : placeholder}
           </SelectValue>
         </SelectTrigger>
         <SelectContent>

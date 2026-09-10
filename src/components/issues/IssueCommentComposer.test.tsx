@@ -72,4 +72,15 @@ describe('IssueCommentComposer', () => {
     await waitFor(() => expect(onPosted).toHaveBeenCalled());
     expect(posted.inputs[0]).toMatchObject({ issueId: 'i1', comment: '@Thabo M', mentions: ['u1'], userId: 'me' });
   });
+
+  it('closes the picker on Escape and does not reopen it on the matching keyup', async () => {
+    const onPosted = vi.fn();
+    render(<IssueCommentComposer issueId="i1" buildingId="b1" issueTitle="Leak" reporterId="r1" assigneeId={null} onPosted={onPosted} />);
+    const box = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: 'ping @tha', selectionStart: 9 } });
+    await screen.findByRole('listbox');
+    fireEvent.keyDown(box, { key: 'Escape' });
+    fireEvent.keyUp(box, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
 });

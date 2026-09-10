@@ -115,7 +115,7 @@ export function IssueCommentComposer({ issueId, buildingId, issueTitle, reporter
           value={text}
           onChange={(e) => onChange(e.target.value, e.target.selectionStart ?? e.target.value.length)}
           onKeyUp={(e) => {
-            if (isOpen && PICKER_KEYS.has(e.key)) return; // onKeyDown already handled navigation/selection for this key
+            if (PICKER_KEYS.has(e.key)) return; // onKeyDown already handled these keys (or closed the picker); never re-derive the range from them
             setRangeAndResetActive(mentionQueryAt(text, (e.target as HTMLTextAreaElement).selectionStart ?? text.length));
           }}
           onKeyDown={onKeyDown}
