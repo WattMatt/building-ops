@@ -30,7 +30,7 @@ vi.mock('@/integrations/supabase/client', () => ({
   },
 }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'me', email: 'me@example.com' } }) }));
-vi.mock('@/lib/issuePhotos', () => ({ uploadIssuePhotos: async () => [] }));
+vi.mock('@/lib/photos', () => ({ uploadPhotos: vi.fn().mockResolvedValue([]), photoPrefix: (u: string) => `photos/${u}` }));
 vi.mock('@/components/ui/photo-capture', () => ({ PhotoCapture: () => null }));
 
 import { ResolveIssueDialog } from './ResolveIssueDialog';

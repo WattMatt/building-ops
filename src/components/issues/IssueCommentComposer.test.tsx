@@ -11,7 +11,7 @@ vi.mock('@/hooks/useBuildingMembers', () => ({
   useBuildingMembers: () => ({ data: [{ id: 'u1', full_name: 'Thabo M', avatar_url: null, role: 'user' }], byId: new Map([['u1', { id: 'u1', full_name: 'Thabo M', avatar_url: null, role: 'user' }]]) }),
   memberDisplayName: (m: { full_name: string | null }) => m.full_name ?? 'Unnamed user',
 }));
-vi.mock('@/lib/issuePhotos', () => ({ uploadIssuePhotos: async () => [] }));
+vi.mock('@/lib/photos', () => ({ uploadPhotos: vi.fn().mockResolvedValue([]), photoPrefix: (u: string) => `photos/${u}` }));
 vi.mock('@/lib/notify', () => ({ notify }));
 vi.mock('@/components/ui/photo-capture', () => ({ PhotoCapture: () => null }));
 

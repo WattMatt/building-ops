@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/integrations/supabase/client';
+import { uploadPhotos, photoPrefix } from '@/lib/photos';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrganization } from '@/hooks/useOrganization';
 import { toast } from 'sonner';
@@ -156,28 +157,14 @@ export function FillableFormDialog({
     const allUrls: string[] = [];
     
     for (const [fieldLabel, photos] of Object.entries(photoUploads)) {
-      for (const photo of photos) {
-        // Path MUST be photos/<uid>/… — the only tenant-documents prefix a
-        // non-admin may write. Throw on failure rather than silently dropping
-        // the photo the user attached to their submission.
-        const fileName = `photos/${user?.id}/${Date.now()}-${photo.file.name}`;
-        const { error: uploadError } = await supabase.storage
-          .from('tenant-documents')
-          .upload(fileName, photo.file);
-
-        if (uploadError) {
-          throw new Error(`Photo upload failed: ${uploadError.message}`);
-        }
-
-        const { data: urlData } = supabase.storage
-          .from('tenant-documents')
-          .getPublicUrl(fileName);
-
-        if (urlData) {
-          allUrls.push(urlData.publicUrl);
-          // Also store in form data for reference
-          handleFieldChange(fieldLabel, [...(formData[fieldLabel] || []), urlData.publicUrl]);
-        }
+      // Path MUST be photos/<uid>/… — the only tenant-documents prefix a
+      // non-admin may write (see src/lib/photos.ts). Throws on failure rather
+      // than silently dropping the photo the user attached to their submission.
+      const urls = await uploadPhotos(photos, { prefix: photoPrefix(user!.id) });
+      allUrls.push(...urls);
+      // Also store in form data for reference
+      if (urls.length > 0) {
+        handleFieldChange(fieldLabel, [...(formData[fieldLabel] || []), ...urls]);
       }
     }
     

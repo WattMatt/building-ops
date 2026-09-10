@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { formatBuildingName } from '@/lib/buildingName';
 import { supabase } from '@/integrations/supabase/client';
+import { uploadPhotos, photoPrefix } from '@/lib/photos';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   ResponsiveDialog,
@@ -90,28 +91,10 @@ export default function ReportIssueDialog({
 
     try {
       // Upload photos if any. Path MUST be photos/<uid>/… — the only
-      // tenant-documents prefix a non-admin may write (storage policy
-      // "td write own photos"). Throw on failure rather than silently
-      // dropping the evidence the user attached.
-      const photoUrls: string[] = [];
-      for (const photo of photos) {
-        const fileName = `photos/${user.id}/${Date.now()}-${photo.file.name}`;
-        const { error: uploadError } = await supabase.storage
-          .from('tenant-documents')
-          .upload(fileName, photo.file);
-
-        if (uploadError) {
-          throw new Error(`Photo upload failed: ${uploadError.message}`);
-        }
-
-        const { data: urlData } = supabase.storage
-          .from('tenant-documents')
-          .getPublicUrl(fileName);
-
-        if (urlData) {
-          photoUrls.push(urlData.publicUrl);
-        }
-      }
+      // tenant-documents prefix a non-admin may write (see src/lib/photos.ts).
+      // Throws on failure rather than silently dropping the evidence the
+      // user attached.
+      const photoUrls = await uploadPhotos(photos, { prefix: photoPrefix(user.id) });
 
       // Create the issue
       const { error: issueError } = await supabase.from('issues').insert({

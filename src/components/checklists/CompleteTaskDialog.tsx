@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { uploadPhotos, photoPrefix } from '@/lib/photos';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   ResponsiveDialog,
@@ -78,30 +79,10 @@ export default function CompleteTaskDialog({
 
     try {
       // Upload photos if any. Path MUST be photos/<uid>/… — the only
-      // tenant-documents prefix a non-admin may write (storage policy
-      // "td write own photos"). A failed upload throws rather than silently
-      // dropping compliance evidence the user believes they attached.
-      const photoUrls: string[] = [];
-      for (const photo of photos) {
-        const fileName = `photos/${user.id}/${Date.now()}-${photo.file.name}`;
-        const { error: uploadError } = await supabase.storage
-          .from('tenant-documents')
-          .upload(fileName, photo.file);
-
-        if (uploadError) {
-          throw new Error(`Photo upload failed: ${uploadError.message}`);
-        }
-
-        // Stored as a public-style URL; resolveStorageUrl re-signs it for the
-        // private bucket at display time (mirrors the forms/reports pattern).
-        const { data: urlData } = supabase.storage
-          .from('tenant-documents')
-          .getPublicUrl(fileName);
-
-        if (urlData) {
-          photoUrls.push(urlData.publicUrl);
-        }
-      }
+      // tenant-documents prefix a non-admin may write (see src/lib/photos.ts).
+      // A failed upload throws rather than silently dropping compliance
+      // evidence the user believes they attached.
+      const photoUrls = await uploadPhotos(photos, { prefix: photoPrefix(user.id) });
 
       // Create task completion record. task_completions has a unique index on
       // task_instance_id, so a double-click or a retry after a flaky network

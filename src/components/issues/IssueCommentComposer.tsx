@@ -12,7 +12,7 @@ import { PhotoCapture, type PhotoFile } from '@/components/ui/photo-capture';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBuildingMembers, memberDisplayName } from '@/hooks/useBuildingMembers';
 import { postIssueComment } from '@/lib/issueActivity';
-import { uploadIssuePhotos } from '@/lib/issuePhotos';
+import { uploadPhotos, photoPrefix } from '@/lib/photos';
 import { mentionQueryAt, insertMention, mentionPresent, type MentionRange } from '@/lib/mentions';
 import { notify } from '@/lib/notify';
 import { track } from '@/lib/analytics';
@@ -87,7 +87,7 @@ export function IssueCommentComposer({ issueId, buildingId, issueTitle, reporter
     if (!comment || !user) return;
     setPosting(true);
     try {
-      const photoUrls = photos.length ? await uploadIssuePhotos(photos, user.id) : [];
+      const photoUrls = photos.length ? await uploadPhotos(photos, { prefix: photoPrefix(user.id) }) : [];
       // Keep only mentions whose @Name still appears in the text (exact, boundary-aware match).
       const kept = mentions.filter((id) => { const m = byId.get(id); return m && mentionPresent(comment, memberDisplayName(m)); });
       const { authorName } = await postIssueComment({ issueId, userId: user.id, userEmail: user.email, comment, photoUrls, mentions: kept });

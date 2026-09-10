@@ -21,7 +21,7 @@ import { PRIORITY_OPTIONS } from '@/lib/constants';
 import type { IssuePriority } from '@/lib/constants';
 import { PageLoading } from '@/components/ui/loading-spinner';
 import { PhotoCapture, type PhotoFile } from '@/components/ui/photo-capture';
-import { supabase } from '@/integrations/supabase/client';
+import { uploadPhotos, photoPrefix } from '@/lib/photos';
 import { toast } from 'sonner';
 
 export default function NewIssue() {
@@ -74,33 +74,9 @@ export default function NewIssue() {
     setSubmitting(true);
 
     try {
-      // Upload photos to Supabase Storage if any
-      let photoUrls: string[] = [];
-      
-      if (photos.length > 0) {
-        for (const photo of photos) {
-          // photos/<uid>/… in the private tenant-documents bucket — the only
-          // prefix a non-admin may write. (Previously building-logos, an
-          // admin-write-only PUBLIC bucket, so site users were denied and
-          // evidence leaked public when they weren't.)
-          const fileName = `photos/${user.id}/${Date.now()}-${crypto.randomUUID()}.jpg`;
-          const { error: uploadError } = await supabase.storage
-            .from('tenant-documents')
-            .upload(fileName, photo.file, { contentType: photo.file.type });
-
-          if (uploadError) {
-            throw new Error(`Photo upload failed: ${uploadError.message}`);
-          }
-
-          const { data: urlData } = supabase.storage
-            .from('tenant-documents')
-            .getPublicUrl(fileName);
-
-          if (urlData) {
-            photoUrls.push(urlData.publicUrl);
-          }
-        }
-      }
+      // photos/<uid>/… in the private tenant-documents bucket — the only prefix
+      // a non-admin may write (see src/lib/photos.ts). Throws on failure.
+      const photoUrls = await uploadPhotos(photos, { prefix: photoPrefix(user.id) });
 
       const issueId = await createIssue({
         title: title.trim(),

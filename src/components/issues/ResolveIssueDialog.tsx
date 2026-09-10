@@ -16,7 +16,7 @@ import { PhotoCapture, type PhotoFile } from '@/components/ui/photo-capture';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { postIssueComment } from '@/lib/issueActivity';
-import { uploadIssuePhotos } from '@/lib/issuePhotos';
+import { uploadPhotos, photoPrefix } from '@/lib/photos';
 
 interface Props {
   issueId: string;
@@ -37,7 +37,7 @@ export function ResolveIssueDialog({ issueId, open, onOpenChange, onResolved, ne
     if (!user || !note.trim()) return;
     setBusy(true);
     try {
-      const photoUrls = photos.length ? await uploadIssuePhotos(photos, user.id) : [];
+      const photoUrls = photos.length ? await uploadPhotos(photos, { prefix: photoPrefix(user.id) }) : [];
       await postIssueComment({ issueId, userId: user.id, userEmail: user.email, comment: note.trim(), photoUrls });
       // The note is saved even if the status flip fails — it is true either way.
       const { data, error } = await supabase.from('issues').update({ status: 'resolved' }).eq('id', issueId).select('id');

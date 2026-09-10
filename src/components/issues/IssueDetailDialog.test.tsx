@@ -20,7 +20,7 @@ vi.mock('@/hooks/useBuildingMembers', () => ({
   memberDisplayName: (m: { full_name: string | null }) => m.full_name ?? 'Unnamed user',
 }));
 vi.mock('@/lib/issueActivity', () => ({ postIssueComment: async () => ({ id: 'a1', authorName: 'Me' }) }));
-vi.mock('@/lib/issuePhotos', () => ({ uploadIssuePhotos: async () => [] }));
+vi.mock('@/lib/photos', () => ({ uploadPhotos: vi.fn().mockResolvedValue([]), photoPrefix: (u: string) => `photos/${u}` }));
 vi.mock('@/lib/notify', () => ({ notify: async () => {} }));
 vi.mock('@/components/ui/photo-capture', () => ({ PhotoCapture: () => null }));
 
