@@ -32,6 +32,7 @@ import { IssueCommentComposer } from '@/components/issues/IssueCommentComposer';
 import { ResolveIssueDialog } from '@/components/issues/ResolveIssueDialog';
 import { notify } from '@/lib/notify';
 import { parseCost } from '@/lib/money';
+import { throwIfRefused } from '@/lib/pgErrors';
 import { useAuth } from '@/contexts/AuthContext';
 import type { TablesUpdate } from '@/integrations/supabase/types';
 
@@ -161,8 +162,7 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
    */
   const updateIssue = async (patch: TablesUpdate<'issues'>, deniedMessage: string) => {
     const { data, error } = await supabase.from('issues').update(patch).eq('id', issue.id).select('id');
-    if (error) throw error;
-    if (!data?.length) throw new Error(deniedMessage);
+    throwIfRefused(error, data, deniedMessage);
   };
 
   // Saved on blur.

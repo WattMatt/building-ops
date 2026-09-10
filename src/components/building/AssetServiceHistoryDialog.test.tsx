@@ -168,6 +168,50 @@ describe('AssetServiceHistoryDialog', () => {
     });
   });
 
+  it('parses the cost through the shared helper: blank stores null, an amount stores the number', async () => {
+    state.result = (table, calls) => (table === 'asset_service_history' && isInsert(calls) ? { data: [{ id: 'new' }], error: null } : { data: [], error: null });
+    await openForm();
+    chooseServiceType(/inspection/i);
+    fireEvent.change(screen.getByLabelText(/cost/i), { target: { value: '1234.5' } });
+    fireEvent.click(screen.getByRole('button', { name: /add record/i }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    const insert = state.calls.find((c) => c.table === 'asset_service_history' && c.method === 'insert');
+    expect(insert?.args[0]).toMatchObject({ cost: 1234.5 });
+  });
+
+  it('stores null for a blank cost', async () => {
+    await openForm();
+    chooseServiceType(/inspection/i);
+    fireEvent.click(screen.getByRole('button', { name: /add record/i }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    const insert = state.calls.find((c) => c.table === 'asset_service_history' && c.method === 'insert');
+    expect(insert?.args[0]).toMatchObject({ cost: null });
+  });
+
+  it('refuses a negative cost with a plain message and writes nothing', async () => {
+    await openForm();
+    chooseServiceType(/inspection/i);
+    fireEvent.change(screen.getByLabelText(/cost/i), { target: { value: '-5' } });
+    // The input's native `min="0"` stops a click-submit before the handler runs (in jsdom as in
+    // a browser); submitting the form directly exercises the handler's own guard.
+    fireEvent.submit(screen.getByRole('button', { name: /add record/i }).closest('form')!);
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Cost must be an amount of R 0 or more'));
+    expect(state.calls.some((c) => c.method === 'insert')).toBe(false);
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('shows recorded costs in the shared Rand format, and a dash when none was recorded', async () => {
+    const withCents = { ...record, id: 'r2', service_date: '2026-08-15', cost: 1234.5 };
+    const noCost = { ...record, id: 'r3', service_date: '2026-08-16', cost: null };
+    state.result = (table) => (table === 'asset_service_history' ? { data: [record, withCents, noCost], error: null } : { data: [], error: null });
+    render(<AssetServiceHistoryDialog asset={asset} open onOpenChange={() => {}} />);
+    expect(await screen.findByText('R 1 500')).toBeInTheDocument();
+    expect(screen.getByText('R 1 234,50')).toBeInTheDocument();
+    const rows = screen.getAllByRole('row');
+    const noCostRow = rows.find((r) => r.textContent?.includes('16 Aug 2026'))!;
+    expect(noCostRow.querySelectorAll('td')[4]).toHaveTextContent(/^-$/);
+  });
+
   it('writes a null contractor_id when none is picked', async () => {
     await openForm();
     chooseServiceType(/inspection/i);

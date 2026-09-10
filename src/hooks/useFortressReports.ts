@@ -193,9 +193,7 @@ export function useCarryForwardReport() {
       // PPM: seed from the plan (idempotent — creation usually did this already, so this
       // only adds lines the plan gained since, or seeds a report created another way).
       cloned += await seedPpmOrWarn(newReport);
-      // cloned_from_report_id is not yet in the generated types.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (fdb.from('reports') as any).update({ cloned_from_report_id: fromReportId }).eq('id', newReport.id);
+      await fdb.from('reports').update({ cloned_from_report_id: fromReportId }).eq('id', newReport.id);
       return cloned;
     },
     onSuccess: (n) => {

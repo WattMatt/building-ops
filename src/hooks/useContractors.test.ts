@@ -9,7 +9,7 @@ interface RecordedCall {
   ops: [string, unknown[]][];
 }
 
-type Result = { data: unknown; error: { message: string } | null };
+type Result = { data: unknown; error: { message: string; code?: string } | null };
 
 const state = vi.hoisted(() => ({
   calls: [] as RecordedCall[],
@@ -69,6 +69,7 @@ import {
   useContractorDocuments,
   useContractorHistory,
   useContractors,
+  CONTRACTOR_EXISTS_MESSAGE,
   type ContractorInput,
 } from './useContractors';
 
@@ -142,10 +143,23 @@ describe('useContractors', () => {
     expect(ops(call, 'eq')).toEqual([['id', 'c1']]);
   });
 
-  it('surfaces a database error message', async () => {
+  it('surfaces a database error message when the code has no plain copy', async () => {
     state.results.contractors = (call) => (call.ops.some(([m]) => m === 'insert') ? { data: null, error: { message: 'duplicate key' } } : { data: [], error: null });
     const { result } = renderHook(() => useContractors(), { wrapper });
     await expect(result.current.create.mutateAsync(INPUT)).rejects.toThrow('duplicate key');
+  });
+
+  it('reads a 23505 as "that name already exists" and a 42501 as the permission message', async () => {
+    state.results.contractors = (call) => (call.ops.some(([m]) => m === 'insert')
+      ? { data: null, error: { message: 'duplicate key value violates unique constraint "contractors_company_name_key"', code: '23505' } }
+      : { data: [], error: null });
+    const { result } = renderHook(() => useContractors(), { wrapper });
+    await expect(result.current.create.mutateAsync(INPUT)).rejects.toThrow(CONTRACTOR_EXISTS_MESSAGE);
+
+    state.results.contractors = (call) => (call.ops.some(([m]) => m === 'update')
+      ? { data: null, error: { message: 'new row violates row-level security policy', code: '42501' } }
+      : { data: [], error: null });
+    await expect(result.current.update.mutateAsync({ id: 'c1', ...INPUT })).rejects.toThrow(CONTRACTOR_PERMISSION_MESSAGE);
   });
 });
 

@@ -50,12 +50,14 @@ vi.mock('@/components/checklists/RecurrenceEditor', async () => {
     ),
   };
 });
-vi.mock('@/integrations/supabase/client', () => {
-  const chain: Record<string, unknown> = {};
-  for (const m of ['select', 'eq', 'in', 'order']) chain[m] = () => chain;
-  chain.then = (resolve: (r: unknown) => unknown) => Promise.resolve({ data: [{ id: 'c1', company_name: 'Otis' }], error: null }).then(resolve);
-  return { supabase: { from: () => chain } };
-});
+// The tab reads contractor names off the shared register query (the one the picker holds).
+vi.mock('@/hooks/useContractors', () => ({
+  useContractors: () => ({
+    contractors: [{ id: 'c1', company_name: 'Otis', trade: 'Lifts', is_active: true }],
+    isLoading: false,
+    isError: false,
+  }),
+}));
 
 import PpmTab from './PpmTab';
 
@@ -105,12 +107,10 @@ describe('PpmTab — plan lines', () => {
     expect(state.generateNow).toHaveBeenCalledTimes(1);
   });
 
-  it('Export CSV hands the plan lines to the shared exporter with cadence and contractor columns', async () => {
-    const { qc } = renderTab();
+  it('Export CSV hands the plan lines to the shared exporter with cadence and contractor columns', () => {
+    renderTab();
     type Col = { key: string; header: string; format?: (v: unknown) => string };
-    // The contractor column resolves names through a query (the picker's own "Otis" option is
-    // there from the first render, so wait on the query, not the text); then click once.
-    await waitFor(() => expect(qc.getQueryData(['ppm-contractor-names', ['c1']])).toEqual({ c1: 'Otis' }));
+    // The contractor column resolves names through `useContractors` (mocked above), not a query of its own.
     fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
     expect(state.exportCsv).toHaveBeenCalledTimes(1);
     const [rows, columns, filename] = state.exportCsv.mock.calls[0] as unknown as [BuildingPpmLine[], Col[], string];

@@ -17,6 +17,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { openStorageFile } from '@/integrations/supabase/storage';
 import type { Tables } from '@/integrations/supabase/types';
+import { ALREADY_EXISTS_MESSAGE, throwIfRefused, type PgErrorLike } from '@/lib/pgErrors';
 
 export const CONTRACTORS_KEY = ['contractors'] as const;
 export const CONTRACTOR_DOCUMENTS_KEY = (contractorId: string) => ['contractor-documents', contractorId] as const;
@@ -26,8 +27,10 @@ export const CONTRACTOR_DOCS_BUCKET = 'tenant-documents';
 /** Required by the storage policies `td read contractor docs` / `td write contractor docs`. */
 export const CONTRACTOR_DOCS_PREFIX = 'contractor-docs';
 
-/** Plain guardrail copy for a write that RLS filtered to nothing. */
+/** Plain guardrail copy for a write that RLS filtered to nothing (or a `42501`). */
 export const CONTRACTOR_PERMISSION_MESSAGE = 'Only admins and managers can change the contractor register.';
+/** Plain copy for a `23505` on `contractors` (the company name is unique). */
+export const CONTRACTOR_EXISTS_MESSAGE = 'A contractor with that name already exists.';
 
 export type Contractor = Tables<'contractors'>;
 
@@ -80,11 +83,18 @@ export interface ContractorService {
   building_id: string | null;
 }
 
-/** `.select('id')` after a write: zero rows means RLS filtered the row away, not that it worked. */
-function assertWrote(rows: { id: string }[] | null, error: { message: string } | null): string {
-  if (error) throw new Error(error.message);
-  if (!rows || rows.length === 0) throw new Error(CONTRACTOR_PERMISSION_MESSAGE);
-  return rows[0].id;
+/**
+ * `.select('id')` after a write: zero rows means RLS filtered the row away, not that it worked.
+ * `throwIfRefused` turns that, a `42501` and a `23505` into plain copy; any other database
+ * error keeps its message and SQLSTATE.
+ */
+function assertWrote(
+  rows: { id: string }[] | null,
+  error: PgErrorLike | null,
+  existsMessage: string = CONTRACTOR_EXISTS_MESSAGE,
+): string {
+  throwIfRefused(error, rows, CONTRACTOR_PERMISSION_MESSAGE, existsMessage);
+  return rows![0].id;
 }
 
 export function useContractors() {
@@ -209,7 +219,7 @@ export function useContractorDocuments(contractorId: string | null | undefined) 
         // Do not leave an orphan object behind a row that never existed.
         await supabase.storage.from(CONTRACTOR_DOCS_BUCKET).remove([path]);
       }
-      return assertWrote(data, error);
+      return assertWrote(data, error, ALREADY_EXISTS_MESSAGE);
     },
     onSuccess: invalidate,
   });
@@ -221,7 +231,7 @@ export function useContractorDocuments(contractorId: string | null | undefined) 
         .update({ is_verified })
         .eq('id', id)
         .select('id');
-      return assertWrote(data, error);
+      return assertWrote(data, error, ALREADY_EXISTS_MESSAGE);
     },
     onSuccess: invalidate,
   });
@@ -229,7 +239,7 @@ export function useContractorDocuments(contractorId: string | null | undefined) 
   const remove = useMutation({
     mutationFn: async (doc: Pick<ContractorDocument, 'id' | 'file_url'>): Promise<void> => {
       const { data, error } = await supabase.from('contractor_documents').delete().eq('id', doc.id).select('id');
-      assertWrote(data, error);
+      assertWrote(data, error, ALREADY_EXISTS_MESSAGE);
       const objectKey = contractorDocumentKey(doc.file_url);
       if (objectKey) {
         const { error: storageError } = await supabase.storage.from(CONTRACTOR_DOCS_BUCKET).remove([objectKey]);

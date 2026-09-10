@@ -35,6 +35,7 @@ import { useContractors } from '@/hooks/useContractors';
 import { Plus, Wrench, Trash2, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import { parseCost, formatRand } from '@/lib/money';
 
 type Asset = Pick<Tables<'building_assets'>, 'id' | 'name' | 'category'>;
 
@@ -132,6 +133,13 @@ export default function AssetServiceHistoryDialog({
       return;
     }
 
+    // Blank → null (nothing recorded); an unparseable or negative amount is refused, not coerced.
+    const parsedCost = parseCost(cost);
+    if (parsedCost === undefined) {
+      toast.error('Cost must be an amount of R 0 or more');
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -142,7 +150,7 @@ export default function AssetServiceHistoryDialog({
         description: description.trim() || null,
         performed_by: performedBy.trim() || null,
         contractor_id: contractorId,
-        cost: cost ? parseFloat(cost) : null,
+        cost: parsedCost,
         next_service_date: nextServiceDate || null,
         notes: notes.trim() || null,
         created_by: user?.id || null,
@@ -405,7 +413,7 @@ export default function AssetServiceHistoryDialog({
                         )}
                       </TableCell>
                       <TableCell>
-                        {record.cost ? `R ${record.cost.toLocaleString()}` : '-'}
+                        {record.cost != null ? formatRand(record.cost) : '-'}
                       </TableCell>
                       {isAdminOrManager && (
                         <TableCell>

@@ -169,6 +169,46 @@ describe('ppmEvents', () => {
     expect(ppmEvents({ ...row, months: { '2026-09': 'due', '2026-10': { status: 'due', date: 7 } } }, BN, TODAY))
       .toEqual([expect.objectContaining({ date: '2026-10-01', status: 'open' })]);
   });
+
+  describe('plan-backed rows (plan_service_id set)', () => {
+    const overrides = {
+      '2026-08': { status: 'missed', note: 'Contractor no-show', by: 'u1', at: '2026-09-01T08:00:00Z' },
+      '2026-09': { status: 'done', note: '', by: 'u1', at: '2026-09-05T08:00:00Z' },
+      '2026-10': { status: 'na', note: 'Decommissioned' },
+      '2026-11': { status: 'due', note: 'Pinned' },
+    };
+    const planBacked = { ...row, plan_service_id: 'ps1', overrides };
+
+    it('ignores the derived months grid and emits only due/missed override cells, on the 1st', () => {
+      const out = ppmEvents(planBacked, BN, TODAY);
+      expect(out.map((e) => [e.id, e.date, e.status])).toEqual([
+        ['ppm-p1-2026-08', '2026-08-01', 'overdue'],
+        ['ppm-p1-2026-11', '2026-11-01', 'open'],
+      ]);
+      expect(out.every((e) => e.kind === 'ppm' && e.entityId === 'p1' && e.href === '/reports/fortress/r9')).toBe(true);
+      // The months grid holds a due cell for 2026-12 that a legacy row would emit; here it is a task already.
+      expect(out.find((e) => e.date.startsWith('2026-12'))).toBeUndefined();
+    });
+
+    it('a stray date on an override is ignored — pinned months have no day', () => {
+      const out = ppmEvents({ ...planBacked, overrides: { '2026-09': { status: 'due', date: '2026-09-15' } } }, BN, TODAY);
+      expect(out).toEqual([expect.objectContaining({ date: '2026-09-01', status: 'overdue' })]);
+    });
+
+    it('yields no events without overrides (empty, null, missing or malformed), whatever months holds', () => {
+      expect(ppmEvents({ ...planBacked, overrides: {} }, BN, TODAY)).toEqual([]);
+      expect(ppmEvents({ ...planBacked, overrides: null }, BN, TODAY)).toEqual([]);
+      expect(ppmEvents({ ...row, plan_service_id: 'ps1' }, BN, TODAY)).toEqual([]);
+      expect(ppmEvents({ ...planBacked, overrides: [1] }, BN, TODAY)).toEqual([]);
+      expect(ppmEvents({ ...planBacked, overrides: { '2026-09': 'due' } }, BN, TODAY)).toEqual([]);
+    });
+
+    it('a legacy row (no plan_service_id) is unchanged even when overrides are present', () => {
+      const legacy = { ...row, plan_service_id: null, overrides };
+      expect(ppmEvents(legacy, BN, TODAY)).toEqual(ppmEvents(row, BN, TODAY));
+      expect(ppmEvents(legacy, BN, TODAY).map((e) => e.date)).toEqual(['2026-08-01', '2026-09-15', '2026-12-01']);
+    });
+  });
 });
 
 describe('signoffEvent', () => {

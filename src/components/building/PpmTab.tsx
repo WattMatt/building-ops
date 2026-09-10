@@ -8,7 +8,6 @@
  * with a noted override. Admin/manager write the plan; everyone with access reads it.
  */
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Plus, Pencil, Download, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,7 +23,7 @@ import RecurrenceEditor, { recurrenceProblem } from '@/components/checklists/Rec
 import { ContractorPicker } from '@/components/contractors/ContractorPicker';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBuildingPpm, type BuildingPpmLine } from '@/hooks/useBuildingPpm';
-import { fdb } from '@/integrations/supabase/fortress-db';
+import { useContractors } from '@/hooks/useContractors';
 import { exportCsv } from '@/lib/exportCsv';
 import { describeRule, type RecurrenceRule } from '@/lib/recurrence';
 import { todayInOperatingTz } from '@/lib/myWork';
@@ -60,20 +59,14 @@ export default function PpmTab({ buildingId }: Props) {
     generateNow, isGenerating, derived, derivedLoading,
   } = useBuildingPpm(buildingId, months);
 
-  const contractorIds = useMemo(
-    () => Array.from(new Set(lines.map((l) => l.contractor_id).filter((id): id is string => !!id))).sort(),
-    [lines],
+  // The register is one org-wide query (`CONTRACTORS_KEY`) the picker already holds, so the
+  // name lookup for the list and the CSV comes from the same cache instead of a second fetch.
+  const { contractors } = useContractors();
+  const contractorNames = useMemo(
+    () => Object.fromEntries(contractors.map((c) => [c.id, c.company_name])) as Record<string, string>,
+    [contractors],
   );
-  const { data: contractorNames } = useQuery({
-    queryKey: ['ppm-contractor-names', contractorIds],
-    enabled: contractorIds.length > 0,
-    queryFn: async (): Promise<Record<string, string>> => {
-      const { data, error } = await fdb.from('contractors').select('id, company_name').in('id', contractorIds);
-      if (error) throw error;
-      return Object.fromEntries((data ?? []).map((c) => [c.id, c.company_name]));
-    },
-  });
-  const contractorName = (id: string | null) => (id ? contractorNames?.[id] ?? '' : '');
+  const contractorName = (id: string | null) => (id ? contractorNames[id] ?? '' : '');
 
   // ---- Add / edit sheet ----------------------------------------------------------------
   const [open, setOpen] = useState(false);

@@ -81,6 +81,17 @@ function ppmMonthsFilter(from: string, to: string): string {
   return monthKeysBetween(from, to).map((k) => `months->${k}.not.is.null`).join(",");
 }
 
+/**
+ * The full PPM row filter, the same one `useCalendarEvents.ppmRowsFilter` sends: rows with a
+ * non-empty `overrides` (a plan-backed row whose manager pinned a month — the only plan-backed
+ * cells that become month events, see `ppmEvents`) plus the legacy rows `ppmMonthsFilter`
+ * admits. `overrides.neq.{}` is a jsonb inequality against the empty object. Both halves are
+ * narrowed to the day-level window after the mapper expands them.
+ */
+function ppmRowsFilter(from: string, to: string): string {
+  return ["overrides.neq.{}", ppmMonthsFilter(from, to)].filter(Boolean).join(",");
+}
+
 function textResponse(status: number, body: string, headers: Record<string, string>): Response {
   return new Response(body, {
     status,
@@ -244,15 +255,17 @@ serve(async (req: Request): Promise<Response> => {
           .lte("next_service_date", to)
           .order("next_service_date")
           .limit(ROW_CAP),
-        // PPM rows hold a jsonb of month cells. Rows are limited to those with a cell in one
-        // of the window's months; the mapper expands them and the day-level window is applied
-        // afterwards. There is no date column to order by, so the cap cuts by id instead —
-        // deterministic, but not "the far end of the window" like the other sources.
+        // PPM rows hold a jsonb of month cells (`months` on legacy rows, `overrides` on
+        // plan-backed ones — `ppmEvents` picks by `plan_service_id`). Rows are limited to those
+        // with a legacy cell in one of the window's months or any override; the mapper expands
+        // them and the day-level window is applied afterwards. There is no date column to order
+        // by, so the cap cuts by id instead — deterministic, but not "the far end of the window"
+        // like the other sources.
         supabase
           .from("ppm_services")
-          .select("id, building_id, service_name, months, report_id")
+          .select("id, building_id, service_name, months, report_id, plan_service_id, overrides")
           .in("building_id", buildingIds)
-          .or(ppmMonthsFilter(from, to))
+          .or(ppmRowsFilter(from, to))
           .order("id")
           .limit(ROW_CAP),
         // Fortress reports live in the same database, so the same client reads them.

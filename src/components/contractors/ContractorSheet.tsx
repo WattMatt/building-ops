@@ -22,9 +22,9 @@ import {
 import { ContractorDocuments } from './ContractorDocuments';
 import { useContractorHistory, type Contractor } from '@/hooks/useContractors';
 import { cn } from '@/lib/utils';
+import { formatRand } from '@/lib/money';
 import type { IssueStatus } from '@/lib/constants';
 
-const zar = new Intl.NumberFormat('en-ZA', { style: 'currency', currency: 'ZAR', maximumFractionDigits: 0 });
 const fmtDate = (d: string | null | undefined) => (d ? format(parseISO(d), 'dd MMM yyyy') : '—');
 
 /** Read-only 1–5 stars for an average (`contractors.rating`) or a single rating. */
@@ -184,7 +184,7 @@ function SheetBody({
                       <p className="truncate text-sm font-medium">{i.title}</p>
                       <p className="text-xs text-muted-foreground">
                         {i.building_name ?? 'Unknown building'} · {fmtDate(i.created_at)}
-                        {i.actual_cost != null ? ` · ${zar.format(i.actual_cost)}` : ''}
+                        {i.actual_cost != null ? ` · ${formatRand(i.actual_cost)}` : ''}
                       </p>
                     </div>
                     {/* `issues.status` is text in the schema; the badge maps the four known values. */}
@@ -204,7 +204,7 @@ function SheetBody({
                     <p className="truncate text-sm font-medium">{s.asset_name ?? 'Asset'}{s.service_type ? ` · ${s.service_type}` : ''}</p>
                     <p className="text-xs text-muted-foreground">
                       {fmtDate(s.service_date)}
-                      {s.cost != null ? ` · ${zar.format(s.cost)}` : ''}
+                      {s.cost != null ? ` · ${formatRand(s.cost)}` : ''}
                       {s.next_service_date ? ` · next ${fmtDate(s.next_service_date)}` : ''}
                     </p>
                     {s.description && <p className="mt-1 text-xs">{s.description}</p>}

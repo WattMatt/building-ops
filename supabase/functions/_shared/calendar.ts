@@ -92,6 +92,17 @@ export interface PpmMonthCell {
   date?: string | null;
 }
 
+/**
+ * One `ppm_services.overrides` entry, keyed by "YYYY-MM" — mirrors `PpmOverride` in
+ * `src/lib/ppmGrid.ts`. A pinned month carries no day, so its event falls on the 1st.
+ */
+export interface PpmOverrideCell {
+  status?: 'due' | 'done' | 'missed' | 'na';
+  note?: string;
+  by?: string | null;
+  at?: string | null;
+}
+
 export interface PpmRow {
   id: string;
   service_name: string;
@@ -99,6 +110,14 @@ export interface PpmRow {
   report_id: string | null;
   /** The raw jsonb grid; callers pass it through untyped and `ppmEvents` narrows it. */
   months: unknown;
+  /**
+   * Set on a PLAN-BACKED row (R3c). Its `months` are derived from execution and every
+   * derived due/missed month is already a `task_instances` row on the calendar, so
+   * `ppmEvents` ignores `months` and reads only `overrides`. Absent/null = legacy row.
+   */
+  plan_service_id?: string | null;
+  /** The raw `overrides` jsonb (`{ "YYYY-MM": PpmOverrideCell }`); read only when `plan_service_id` is set. */
+  overrides?: unknown;
 }
 
 export interface SignoffRequestRow {
@@ -226,18 +245,31 @@ export function assetEvent(row: AssetRow, buildingName: string | null, today: st
  * One event per `due` / `missed` month cell. `done` and `na` cells are history, not
  * calendar items. Day = the cell's `date` when set, else the 1st of the month. A `due`
  * cell whose day has passed reads as overdue (a manager may not have flagged it `missed` yet).
+ *
+ * LEGACY rows (no `plan_service_id`) expand their hand-captured `months` grid.
+ *
+ * PLAN-BACKED rows do NOT expand `months`: every derived due/missed month IS a task on the
+ * calendar already (`taskEvent`, via `task_instances.source_ppm_id`), so a month event would
+ * be the same job twice, on the 1st. Only OVERRIDE cells reading due/missed become events — a
+ * pinned month has no task behind it. Same rule as `calendarPpmRows` in
+ * `src/hooks/useCalendarEvents.ts`, so the ICS feed and the in-app calendar agree.
  */
-const isMonthGrid = (v: unknown): v is Record<string, PpmMonthCell | null | undefined> =>
+const isMonthGrid = (v: unknown): v is Record<string, PpmMonthCell | PpmOverrideCell | null | undefined> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
 
 export function ppmEvents(row: PpmRow, buildingName: string | null, today: string): CalendarEvent[] {
-  const months = isMonthGrid(row.months) ? row.months : {};
+  const planBacked = !!row.plan_service_id;
+  const source = planBacked ? row.overrides : row.months;
+  const cells = isMonthGrid(source) ? source : {};
   const href = row.report_id ? `/reports/fortress/${row.report_id}` : buildingHref(row.building_id, 'maintenance');
   const out: CalendarEvent[] = [];
-  for (const month of Object.keys(months).sort()) {
-    const cell = months[month];
+  for (const month of Object.keys(cells).sort()) {
+    const cell = cells[month];
     if (!cell || typeof cell !== 'object' || (cell.status !== 'due' && cell.status !== 'missed')) continue;
-    const date = typeof cell.date === 'string' && cell.date ? cell.date : `${month}-01`;
+    // Overrides carry no day (`calendarPpmRows` hands them over with `date: null`), so a stray
+    // `date` on one is ignored and the event sits on the 1st, like the in-app calendar.
+    const cellDate = !planBacked && 'date' in cell && typeof cell.date === 'string' && cell.date ? cell.date : null;
+    const date = cellDate ?? `${month}-01`;
     out.push({
       id: `ppm-${row.id}-${month}`,
       kind: 'ppm',
