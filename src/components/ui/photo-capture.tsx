@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { useUserProfile } from '@/hooks/useUserProfile';
+import { useGeotagPreference } from '@/hooks/useGeotagPreference';
 import { useGeotag } from '@/hooks/useGeotag';
 import { captionText, drawCaption } from '@/lib/photoCaption';
 import { Camera, X, ImagePlus, Loader2 } from 'lucide-react';
@@ -127,8 +127,12 @@ export function PhotoCapture({
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const isMobile = useIsMobile();
-  const { profile } = useUserProfile();
-  const geotagOn = caption?.geotag ?? !!profile?.geotag_photos;
+  // Labels/helper text follow touch capability, not just viewport width, so an
+  // iPad (>= 768px) still reads "Camera / Gallery". Class names and the
+  // capture attribute stay keyed off isMobile.
+  const isTouch = isMobile || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
+  const geotagPreferred = useGeotagPreference();
+  const geotagOn = caption?.geotag ?? geotagPreferred;
   const { position } = useGeotag(geotagOn);
   // Any caption forces the canvas path: re-encoding strips EXIF, so the strip
   // is the only capture-time provenance the stored file keeps.
@@ -395,7 +399,7 @@ export function PhotoCapture({
             >
               <Camera className={sizes.icon} />
               <span className={sizes.text}>
-                {isMobile ? 'Camera' : 'Take'}
+                {isTouch ? 'Camera' : 'Take'}
               </span>
             </button>
 
@@ -416,7 +420,7 @@ export function PhotoCapture({
             >
               <ImagePlus className={sizes.icon} />
               <span className={sizes.text}>
-                {isMobile ? 'Gallery' : 'Upload'}
+                {isTouch ? 'Gallery' : 'Upload'}
               </span>
             </button>
           </>
@@ -461,7 +465,7 @@ export function PhotoCapture({
       {/* Helper text */}
       {canAddMore && !isProcessing && (
         <p className="text-xs text-muted-foreground">
-          {isMobile ? (
+          {isTouch ? (
             <>Tap <strong>Camera</strong> to take a photo or <strong>Gallery</strong> to choose existing</>
           ) : (
             <>Add up to {remainingSlots} more photo{remainingSlots !== 1 ? 's' : ''} (max {maxSizeMB}MB each)</>

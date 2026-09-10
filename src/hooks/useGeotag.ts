@@ -8,14 +8,19 @@ export interface GeotagPosition {
 const FIX_TTL_MS = 5 * 60 * 1000;
 
 // One fix per session (refreshed after five minutes) so a batch of photos does
-// not trigger a permission prompt or a GPS wake-up for every capture.
-let cachedFix: { position: GeotagPosition; at: number } | null = null;
+// not trigger a permission prompt or a GPS wake-up for every capture. A denial
+// or error is cached the same way (position: null) so a denied user is not
+// re-prompted on every PhotoCapture mount within the TTL.
+let cachedFix: { position: GeotagPosition | null; at: number } | null = null;
 let inFlight: Promise<GeotagPosition | null> | null = null;
 
+function freshCache(): { position: GeotagPosition | null } | null {
+  return cachedFix && Date.now() - cachedFix.at < FIX_TTL_MS ? cachedFix : null;
+}
+
 function requestFix(): Promise<GeotagPosition | null> {
-  if (cachedFix && Date.now() - cachedFix.at < FIX_TTL_MS) {
-    return Promise.resolve(cachedFix.position);
-  }
+  const cached = freshCache();
+  if (cached) return Promise.resolve(cached.position);
   if (inFlight) return inFlight;
   if (typeof navigator === 'undefined' || !navigator.geolocation) {
     return Promise.resolve(null);
@@ -29,7 +34,9 @@ function requestFix(): Promise<GeotagPosition | null> {
         resolve(position);
       },
       () => {
-        // Denied, unavailable, or timed out: the caption simply omits the location.
+        // Denied, unavailable, or timed out: the caption simply omits the
+        // location, and we remember that so the next mount does not re-ask.
+        cachedFix = { position: null, at: Date.now() };
         inFlight = null;
         resolve(null);
       },
@@ -45,7 +52,7 @@ function requestFix(): Promise<GeotagPosition | null> {
  */
 export function useGeotag(enabled: boolean): { position: GeotagPosition | null } {
   const [position, setPosition] = useState<GeotagPosition | null>(() =>
-    enabled && cachedFix && Date.now() - cachedFix.at < FIX_TTL_MS ? cachedFix.position : null
+    enabled ? (freshCache()?.position ?? null) : null
   );
   const mounted = useRef(true);
 

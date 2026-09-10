@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { generateRandomAvatar } from '@/lib/avatars';
+import { queryClient } from '@/lib/queryClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,7 +25,7 @@ import { AvatarPicker } from '@/components/avatar/AvatarPicker';
 import { ImageCropper } from '@/components/avatar/ImageCropper';
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter';
 import { gatePassword } from '@/lib/password-strength';
-import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare, Upload, Lock, Eye, EyeOff, Trash2, Crop, MapPin } from 'lucide-react';
+import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare, Upload, Lock, Eye, EyeOff, Trash2, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface ProfileData {
@@ -178,6 +178,8 @@ export default function Profile() {
         return;
       }
       toast.success('Notification preferences saved');
+      // PhotoCapture reads this flag through a cached query, not a realtime channel.
+      queryClient.invalidateQueries({ queryKey: ['profile', 'geotag'] });
     } catch (error) {
       if (import.meta.env.DEV) console.error('Error saving notifications:', error);
       toast.error('Failed to save notification preferences');
@@ -380,15 +382,6 @@ export default function Profile() {
     } finally {
       setIsUploading(false);
     }
-  };
-
-  const handleGenerateRandom = async () => {
-    if (!user) return;
-    // Randomly select a style from available cartoon styles
-    const styles: Array<'adventurer' | 'lorelei' | 'notionists' | 'fun-emoji'> = ['adventurer', 'lorelei', 'notionists', 'fun-emoji'];
-    const randomStyle = styles[Math.floor(Math.random() * styles.length)];
-    const randomUrl = generateRandomAvatar(user.id + Date.now(), randomStyle);
-    await handleSelectDefaultAvatar(randomUrl);
   };
 
   const triggerFileUpload = () => {
