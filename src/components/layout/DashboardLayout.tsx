@@ -65,7 +65,7 @@ interface NavItem {
   title: string;
   href: string;
   icon: ReactNode;
-  roles?: ('admin' | 'manager' | 'user' | 'reviewer')[];
+  roles?: ('admin' | 'manager' | 'user')[];
   /** Unread notifications of these kinds show as a count beside the item. */
   badgeKinds?: NotificationKind[];
 }

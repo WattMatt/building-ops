@@ -11,7 +11,7 @@ import { unsubscribePush } from '@/lib/push';
 export interface InviteUserPayload {
   email: string;
   fullName?: string;
-  role: 'admin' | 'manager' | 'user' | 'reviewer';
+  role: 'admin' | 'manager' | 'user';
   buildingIds?: string[];
   mode?: 'invite' | 'temp_password';
 }

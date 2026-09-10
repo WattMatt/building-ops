@@ -11,7 +11,7 @@ const corsHeaders = {
 // the setup link always points at this deployment, not the original app.
 const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
 const SET_PASSWORD_URL = `${APP_URL}/set-password`;
-const VALID_ROLES = ["admin", "manager", "user", "reviewer"];
+const VALID_ROLES = ["admin", "manager", "user"];
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {

@@ -88,14 +88,12 @@ const roleColors: Record<string, string> = {
   admin: 'bg-destructive text-destructive-foreground',
   manager: 'bg-primary text-primary-foreground',
   user: 'bg-success text-success-foreground',
-  reviewer: 'bg-muted text-muted-foreground',
 };
 
 const roleLabels: Record<string, string> = {
   admin: 'Admin',
   manager: 'Manager',
   user: 'Field Staff',
-  reviewer: 'Reviewer',
 };
 
 export default function UserManagement() {
@@ -504,7 +502,6 @@ export default function UserManagement() {
                   <SelectContent>
                     <SelectItem value="user">Field Staff</SelectItem>
                     <SelectItem value="manager">Manager</SelectItem>
-                    <SelectItem value="reviewer">Reviewer</SelectItem>
                     <SelectItem value="admin">Admin</SelectItem>
                   </SelectContent>
                 </Select>
@@ -693,7 +690,6 @@ export default function UserManagement() {
                         <SelectContent>
                           <SelectItem value="user">Field Staff</SelectItem>
                           <SelectItem value="manager">Manager</SelectItem>
-                          <SelectItem value="reviewer">Reviewer</SelectItem>
                           <SelectItem value="admin">Admin</SelectItem>
                         </SelectContent>
                       </Select>

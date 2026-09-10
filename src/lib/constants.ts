@@ -9,11 +9,11 @@
 // is plain text and app_role() is a text-returning function (verified against
 // the 2026-08-05 prod DDL pull). Keep in sync with ROLE_OPTIONS below and the
 // invite-user edge function's accepted roles.
-export type AppRole = 'admin' | 'manager' | 'user' | 'reviewer';
+export type AppRole = 'admin' | 'manager' | 'user';
 
 // Privilege order for deriving a user's effective role when user_roles holds
 // multiple rows (highest wins). Index 0 = most privileged.
-export const ROLE_PRECEDENCE: readonly AppRole[] = ['admin', 'manager', 'reviewer', 'user'] as const;
+export const ROLE_PRECEDENCE: readonly AppRole[] = ['admin', 'manager', 'user'] as const;
 
 // Production has NO Postgres enums for these either — the columns are plain text guarded by
 // check constraints (supabase/schema/2026-08-04_04_enum_check_constraints.sql). The literal
@@ -94,7 +94,6 @@ export const ROLE_LABELS: Record<AppRole, string> = {
   admin: 'Admin',
   manager: 'Manager',
   user: 'User',
-  reviewer: 'Reviewer',
 };
 
 // Role badge colors
@@ -102,7 +101,6 @@ export const ROLE_COLORS: Record<AppRole, string> = {
   admin: 'bg-destructive/10 text-destructive border-destructive/20',
   manager: 'bg-primary/10 text-primary border-primary/20',
   user: 'bg-muted text-muted-foreground',
-  reviewer: 'bg-accent/10 text-accent border-accent/20',
 };
 
 // Frequency options for dropdowns
@@ -135,5 +133,4 @@ export const ROLE_OPTIONS = [
   { value: 'admin', label: 'Admin' },
   { value: 'manager', label: 'Manager' },
   { value: 'user', label: 'User' },
-  { value: 'reviewer', label: 'Reviewer' },
 ] as const;

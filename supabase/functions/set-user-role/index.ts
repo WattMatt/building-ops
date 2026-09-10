@@ -4,7 +4,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 
 type AdminClient = ReturnType<typeof createClient>;
 
-const VALID_ROLES = ["admin", "manager", "user", "reviewer"];
+const VALID_ROLES = ["admin", "manager", "user"];
 
 /**
  * Server-side role change. Previously the admin UI wrote user_roles directly from

@@ -31,8 +31,7 @@ import { track } from '@/lib/analytics';
 export default function FortressReportEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user, role, isAdminOrManager } = useAuth();
-  const isReviewer = role === 'reviewer';
+  const { user, isAdminOrManager } = useAuth();
   const { organization, loading: orgLoading } = useOrganization();
   const { data: report, isLoading } = useFortressReport(id);
   const lifecycle = useReportLifecycle(id!);
@@ -192,7 +191,7 @@ export default function FortressReportEditor() {
           ? 'Fill in each section, then Submit for review. Each section saves on its own.'
           : 'Draft in progress — waiting on the author to complete and submit it.';
       case 'submitted':
-        return isReviewer || isAdminOrManager
+        return isAdminOrManager
           ? 'Look through the sections, then Mark reviewed, Approve, or Reject with a note for the author.'
           : 'Locked while awaiting review. An admin or manager can reopen it as a draft.';
       case 'reviewed':
@@ -242,8 +241,8 @@ export default function FortressReportEditor() {
   if ((status === 'draft' || status === 'rejected') && (isAuthor || isAdminOrManager)) {
     actions.push({ label: status === 'rejected' ? 'Re-submit for review' : 'Submit for review', icon: Send, next: 'submitted' });
   }
-  // submitted → reviewed: reviewer role or admin/manager.
-  if (status === 'submitted' && (isReviewer || isAdminOrManager)) {
+  // submitted → reviewed: admin/manager only.
+  if (status === 'submitted' && isAdminOrManager) {
     actions.push({ label: 'Mark reviewed', icon: ClipboardCheck, next: 'reviewed', variant: 'outline' });
   }
   // approve/reject reachable from both submitted and reviewed (admin/manager only).
