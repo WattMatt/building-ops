@@ -203,3 +203,32 @@ as the validator was tightened.
   template is saved through the new dialog (which writes a rule). Dailies are capped at 14 days ahead.
 - Rotating a template's rule replaces only untouched future occurrences (pending, no completion, assigned per the rule).
 - CI runs on Node 22 now and stubs the Supabase env for tests; the branch's CI is green.
+
+## R3b "Calendar" (2026-09-10)
+
+Spec `docs/superpowers/specs/2026-09-10-r3-plan-design.md` §5.5, §7; plan `docs/superpowers/plans/2026-09-10-r3b-calendar.md`.
+
+### Migration and function
+
+`2026-09-13_02_r3_calendar.sql` (GMI `173bacb`) — `calendar_tokens` (owner-only RLS, building tokens need
+`can_access_building`) and `user_can_access_building(p_user, p_building)` (definer, service_role-only) used by the
+feed to evaluate the token OWNER's access. Edge function `ics-feed` (`verify_jwt = false`, token in the query
+string, identical 404 for missing/revoked/out-of-scope/garbage, `Cache-Control: private`).
+
+### Staging — DONE 2026-09-10
+
+- [x] Applied (201); `ics-feed` deployed; live probe: valid token 200 `text/calendar`, garbage 404, revoked 404,
+      `last_used_at` stamped.
+- [x] `npm run smoke:calendar` 19/0 (user and building tokens, no cross-building leakage, 404 paths); full battery,
+      notifications 34/0, offline 21/0 green.
+
+### Production — DONE 2026-09-10
+
+- [x] Applied (201), PostgREST reloaded, `ics-feed` deployed; `rls-smoke` 475/0. Types regenerated; cast dropped.
+
+### Notes
+
+- A feed link is a bearer secret: rotate from Profile → Calendar subscription (inserts the new token before revoking
+  the old). Task events in the feed cover −14/+60 days (pending/overdue only); the rest −90/+180. A truncated task
+  source adds a single "Calendar truncated" marker event.
+- The Building Details "Maintenance" tab is now "Calendar" (same `?tab=maintenance` deep link).
