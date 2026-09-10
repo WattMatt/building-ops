@@ -8,6 +8,11 @@ import {
   BODY_MAX,
   NOTIFICATION_KINDS,
   buildInboxRows,
+  isAllowedUrl,
+  parseNotifyBody,
+  CLIENT_KINDS,
+  ORG_WIDE_KINDS,
+  MAX_RECIPIENTS,
   type InboxInput,
   type NotificationKind,
   type PrefFlag,
@@ -122,6 +127,160 @@ describe('buildInboxRows', () => {
     expect(buildInboxRows(input({ url: 'https://x' }))).toEqual([]);
     expect(buildInboxRows(input({ url: '' }))).toEqual([]);
     expect(buildInboxRows(input({ url: '/issues' }))).toHaveLength(1);
+  });
+});
+
+describe('isAllowedUrl', () => {
+  const TABLE: [string, boolean][] = [
+    ['/issues', true],
+    ['/issues?open=abc', true],
+    ['/buildings/123?tab=checklists', true],
+    ['/reports/fortress/abc', true],
+    ['/my-signoffs', true],
+    ['/forms', true],
+    ['/inbox', true],
+    // Not on the allowlist, however in-app it looks.
+    ['/settings', false],
+    ['/', false],
+    ['', false],
+    // Off-site, or a path that resolves off-site once a browser normalises it.
+    ['//evil.example', false],
+    ['https://evil.example', false],
+    ['/issues\\evil.example', false],
+    ['\\\\evil.example', false],
+    // Longer than the column.
+    [`/issues?open=${'a'.repeat(300)}`, false],
+  ];
+
+  it.each(TABLE)('%j -> %s', (url, allowed) => {
+    expect(isAllowedUrl(url)).toBe(allowed);
+  });
+
+  it('accepts a url of exactly the maximum length', () => {
+    expect(isAllowedUrl(`/issues${'a'.repeat(293)}`)).toBe(true);
+  });
+});
+
+describe('CLIENT_KINDS / ORG_WIDE_KINDS', () => {
+  it('org-wide means report_submitted and nothing else', () => {
+    // form_submitted and signoff_overdue are org-wide too, but their own edge functions raise
+    // them — the client cannot ask `notify` for them at all.
+    expect([...ORG_WIDE_KINDS]).toEqual(['report_submitted']);
+    expect(ORG_WIDE_KINDS.has('form_submitted')).toBe(false);
+    expect(ORG_WIDE_KINDS.has('signoff_overdue')).toBe(false);
+  });
+
+  it('every org-wide kind is a kind the client may send', () => {
+    for (const kind of ORG_WIDE_KINDS) expect(CLIENT_KINDS.has(kind)).toBe(true);
+  });
+
+  it('is a subset of the known kinds', () => {
+    for (const kind of CLIENT_KINDS) expect(NOTIFICATION_KINDS).toContain(kind);
+  });
+});
+
+describe('parseNotifyBody', () => {
+  const UUID_A = '11111111-2222-4333-8444-555555555555';
+  const UUID_B = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const valid = (over: Record<string, unknown> = {}) => ({
+    kind: 'issue_comment', entityType: 'issue', entityId: UUID_A, buildingId: UUID_B,
+    recipients: [UUID_A], title: 'Someone commented', body: ' hi ', url: '/issues?open=1', ...over,
+  });
+
+  const reject = (raw: unknown): string => {
+    const parsed = parseNotifyBody(raw);
+    expect(parsed.ok).toBe(false);
+    return parsed.ok ? '' : parsed.reason;
+  };
+
+  it('accepts a valid client payload', () => {
+    const parsed = parseNotifyBody(valid());
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value).toEqual({
+      kind: 'issue_comment', entityType: 'issue', entityId: UUID_A, buildingId: UUID_B,
+      title: 'Someone commented', body: 'hi', url: '/issues?open=1', recipients: [UUID_A],
+    });
+  });
+
+  it('treats an absent entityId, body and recipients as empty rather than invalid', () => {
+    const parsed = parseNotifyBody({ kind: 'report_submitted', entityType: 'report', buildingId: UUID_B, title: 't', url: '/reports/fortress/1' });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value).toMatchObject({ entityId: null, body: null, recipients: [] });
+  });
+
+  it('rejects a kind the client is not allowed to send', () => {
+    expect(reject(valid({ kind: 'form_submitted', entityType: 'form_submission' }))).toMatch(/kind/i);
+    expect(reject(valid({ kind: 'signoff_overdue', entityType: 'signoff_request' }))).toMatch(/kind/i);
+    expect(reject(valid({ kind: 'document_expiring', entityType: 'document' }))).toMatch(/kind/i);
+    expect(reject(valid({ kind: 'not_a_kind' }))).toMatch(/kind/i);
+  });
+
+  it('accepts every kind on the client allowlist', () => {
+    for (const kind of CLIENT_KINDS) expect(parseNotifyBody(valid({ kind })).ok).toBe(true);
+  });
+
+  it('rejects an unknown entity type', () => {
+    expect(reject(valid({ entityType: 'building' }))).toMatch(/entity type/i);
+  });
+
+  it('rejects an id that is not a uuid', () => {
+    expect(reject(valid({ buildingId: 'b1' }))).toMatch(/buildingId/);
+    expect(reject(valid({ buildingId: undefined }))).toMatch(/buildingId/);
+    // 36 characters of hex and dashes, but not in the uuid layout: the old loose regex took it.
+    expect(reject(valid({ buildingId: '1111111122224333844455555555-5555' }))).toMatch(/buildingId/);
+    expect(reject(valid({ entityId: 'i1' }))).toMatch(/entityId/);
+  });
+
+  it('rejects a url that is off-site or not on the allowlist', () => {
+    expect(reject(valid({ url: '//evil' }))).toMatch(/url/);
+    expect(reject(valid({ url: '/settings' }))).toMatch(/url/);
+    expect(reject(valid({ url: '/issues\\evil' }))).toMatch(/url/);
+    expect(reject(valid({ url: undefined }))).toMatch(/url/);
+  });
+
+  it('rejects a title that is empty or only whitespace', () => {
+    expect(reject(valid({ title: '' }))).toMatch(/title/);
+    expect(reject(valid({ title: '   \n\t ' }))).toMatch(/title/);
+    expect(reject(valid({ title: 42 }))).toMatch(/title/);
+  });
+
+  it('rejects a body that is not a JSON object', () => {
+    expect(reject(null)).toMatch(/object/i);
+    expect(reject('nope')).toMatch(/object/i);
+    expect(reject([valid()])).toMatch(/object/i);
+  });
+
+  it('clamps the title and body to the column limits', () => {
+    const parsed = parseNotifyBody(valid({ title: 'a'.repeat(300), body: 'b'.repeat(700) }));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.title).toHaveLength(TITLE_MAX);
+    expect(parsed.value.body).toHaveLength(BODY_MAX);
+  });
+
+  it('de-duplicates recipients, drops non-uuids, and caps the list at 50', () => {
+    const ids = Array.from({ length: 60 }, (_, i) => `${String(i).padStart(8, '0')}-2222-4333-8444-555555555555`);
+    const parsed = parseNotifyBody(valid({ recipients: [...ids, ...ids, 'not-a-uuid', 7, null] }));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.recipients).toHaveLength(MAX_RECIPIENTS);
+    expect(parsed.value.recipients).toEqual(ids.slice(0, MAX_RECIPIENTS));
+  });
+
+  it('de-duplicates before capping, so 60 copies of one id is one recipient', () => {
+    const parsed = parseNotifyBody(valid({ recipients: Array.from({ length: 60 }, () => UUID_A) }));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.recipients).toEqual([UUID_A]);
+  });
+
+  it('ignores a recipients value that is not an array', () => {
+    const parsed = parseNotifyBody(valid({ recipients: UUID_A }));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.recipients).toEqual([]);
   });
 });
 

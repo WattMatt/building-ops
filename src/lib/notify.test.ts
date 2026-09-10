@@ -17,6 +17,14 @@ describe('notify', () => {
     await notify({ kind: 'report_submitted', entityType: 'report', entityId: 'r', buildingId: 'b', recipients: [], title: 'x', url: '/x' });
     expect(invoke).toHaveBeenCalledTimes(1);
   });
+  it('report_submitted is the only org-wide kind this seam sends', async () => {
+    // form_submitted and signoff_overdue are raised by their own edge functions; sending them
+    // from here with no recipients would be a call the `notify` function rejects with a 400.
+    invoke.mockClear();
+    await notify({ kind: 'form_submitted', entityType: 'form_submission', entityId: 'f', buildingId: 'b', recipients: [], title: 'x', url: '/forms' });
+    await notify({ kind: 'signoff_overdue', entityType: 'signoff_request', entityId: 's', buildingId: 'b', recipients: [], title: 'x', url: '/my-signoffs' });
+    expect(invoke).not.toHaveBeenCalled();
+  });
   it('never throws when the function fails', async () => {
     invoke.mockResolvedValueOnce({ data: null, error: { message: 'boom' } });
     await expect(notify({ kind: 'task_assigned', entityType: 'task', entityId: 't', buildingId: 'b', recipients: ['u'], title: 'x', url: '/x' })).resolves.toBeUndefined();

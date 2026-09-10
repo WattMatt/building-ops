@@ -29,7 +29,15 @@ export interface NotifyInput {
   url: string;
 }
 
-const ORG_WIDE: ReadonlySet<NotificationKind> = new Set(['report_submitted', 'form_submitted', 'signoff_overdue']);
+/**
+ * Kinds the edge function fans out to every admin and manager, so the caller sends no
+ * recipients. Mirrors ORG_WIDE_KINDS in supabase/functions/_shared/notifyRules.ts — declared
+ * again rather than imported, because that module is Deno-land and is not in the app bundle.
+ *
+ * `form_submitted` and `signoff_overdue` are org-wide too but never travel through this seam:
+ * their own edge functions raise them, and `notify` rejects them outright.
+ */
+const ORG_WIDE = new Set<NotificationKind>(['report_submitted']);
 
 /** Fire-and-forget: a failure to notify must never fail the action that caused it. */
 export async function notify(input: NotifyInput): Promise<void> {

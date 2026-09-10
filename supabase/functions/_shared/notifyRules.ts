@@ -14,6 +14,25 @@ export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 export const ENTITY_TYPES = ['task', 'issue', 'report', 'form_submission', 'signoff_request', 'document', 'asset'] as const;
 export type NotificationEntityType = (typeof ENTITY_TYPES)[number];
 
+/**
+ * The only kinds the web client may send through the `notify` edge function. The rest are
+ * produced server-side by their own functions (form review/submission, sign-off reminders,
+ * expiring-document alerts), which reach the inbox without going through `notify` at all —
+ * so a browser has no business asking for them.
+ */
+export const CLIENT_KINDS: ReadonlySet<NotificationKind> = new Set([
+  'task_assigned', 'issue_assigned', 'issue_comment', 'issue_mention',
+  'report_submitted', 'report_returned', 'report_approved',
+]);
+
+/**
+ * Client kinds whose recipients are resolved server-side (every admin and manager) instead of
+ * being taken from the request body. Only `report_submitted` qualifies: `form_submitted` and
+ * `signoff_overdue` are org-wide too, but their own edge functions fan them out, and the
+ * client cannot send them at all (they are not in CLIENT_KINDS).
+ */
+export const ORG_WIDE_KINDS: ReadonlySet<NotificationKind> = new Set(['report_submitted']);
+
 export type PrefFlag = 'issue_updates' | 'task_reminders' | 'overdue_alerts';
 export interface NotificationPrefs {
   email_notifications: boolean | null;
@@ -26,6 +45,108 @@ export interface NotificationPrefs {
 /** Column limits for the inbox row; the email is rendered from the same clamped values. */
 export const TITLE_MAX = 200;
 export const BODY_MAX = 500;
+export const URL_MAX = 300;
+export const MAX_RECIPIENTS = 50;
+
+/**
+ * Every in-app destination a notification is allowed to deep-link to. An allowlist rather than
+ * a "starts with /" check, because the url becomes the CTA href in the outgoing email: a bare
+ * `/` test would happily accept `/logout`, `/settings` or any other path a caller invented.
+ */
+export const ALLOWED_URL_PREFIXES = [
+  '/issues', '/buildings/', '/reports/fortress/', '/my-signoffs', '/forms', '/inbox',
+] as const;
+
+/**
+ * A url is usable only if it is one of the known in-app paths, is not protocol-relative
+ * (`//evil.example` is a fully qualified off-site link once the browser resolves it), contains
+ * no backslash (which several clients normalise to `/`, so `/issues\evil` can escape the
+ * prefix it appears to match) and fits the column.
+ */
+export function isAllowedUrl(url: string): boolean {
+  if (typeof url !== 'string' || url.length === 0 || url.length > URL_MAX) return false;
+  if (url.startsWith('//') || url.includes('\\')) return false;
+  return ALLOWED_URL_PREFIXES.some((prefix) => url.startsWith(prefix));
+}
+
+/** Ids are uuids everywhere in this schema; accept nothing looser. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface NotifyBody {
+  kind: NotificationKind;
+  entityType: NotificationEntityType;
+  entityId: string | null;
+  buildingId: string;
+  title: string;
+  body: string | null;
+  url: string;
+  recipients: string[];
+}
+
+export type ParsedNotifyBody =
+  | { ok: true; value: NotifyBody }
+  | { ok: false; reason: string };
+
+/**
+ * Validate an untrusted `notify` request body. Lives here, not in the edge function, so the
+ * whole allowlist is covered by the web app's vitest suite (Deno is not part of the test run).
+ *
+ * Recipients are only shape-checked here; the edge function still has to intersect them with
+ * the caller's building membership, which needs a database round-trip.
+ */
+export function parseNotifyBody(raw: unknown): ParsedNotifyBody {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, reason: 'Body must be a JSON object' };
+  const input = raw as Record<string, unknown>;
+
+  const kind = NOTIFICATION_KINDS.find((k) => k === input.kind);
+  if (!kind || !CLIENT_KINDS.has(kind)) return { ok: false, reason: 'Unsupported notification kind' };
+
+  const entityType = ENTITY_TYPES.find((t) => t === input.entityType);
+  if (!entityType) return { ok: false, reason: 'Unknown entity type' };
+
+  if (typeof input.buildingId !== 'string' || !UUID_RE.test(input.buildingId)) {
+    return { ok: false, reason: 'buildingId must be a uuid' };
+  }
+  const buildingId = input.buildingId;
+
+  // Optional, but a value that is present has to be a real id rather than being silently dropped.
+  let entityId: string | null = null;
+  if (input.entityId !== undefined && input.entityId !== null && input.entityId !== '') {
+    if (typeof input.entityId !== 'string' || !UUID_RE.test(input.entityId)) {
+      return { ok: false, reason: 'entityId must be a uuid' };
+    }
+    entityId = input.entityId;
+  }
+
+  const title = typeof input.title === 'string' ? input.title.trim() : '';
+  if (!title) return { ok: false, reason: 'title is required' };
+
+  const body = typeof input.body === 'string' ? input.body.trim() : '';
+
+  const url = typeof input.url === 'string' ? input.url : '';
+  if (!isAllowedUrl(url)) return { ok: false, reason: 'url is not a known in-app path' };
+
+  const seen = new Set<string>();
+  const recipients: string[] = [];
+  if (Array.isArray(input.recipients)) {
+    for (const id of input.recipients) {
+      if (typeof id !== 'string' || !UUID_RE.test(id) || seen.has(id)) continue;
+      seen.add(id);
+      recipients.push(id);
+      if (recipients.length === MAX_RECIPIENTS) break;
+    }
+  }
+
+  return {
+    ok: true,
+    value: {
+      kind, entityType, entityId, buildingId,
+      title: clamp(title, TITLE_MAX),
+      body: body ? clamp(body, BODY_MAX) : null,
+      url, recipients,
+    },
+  };
+}
 
 /**
  * Truncate to `max` Unicode code points. `String.slice` counts UTF-16 units and would cut an
@@ -113,7 +234,7 @@ export interface InboxRow {
 
 /**
  * One row per distinct recipient, never the actor. Returns [] for a notification that has no
- * title or whose url is not an in-app path.
+ * title or whose url is not one of the known in-app paths.
  *
  * The `notify` edge function already rejects both cases before it calls this; the check is
  * repeated here as defence in depth, because senders retrofitted onto this module call
@@ -121,7 +242,7 @@ export interface InboxRow {
  */
 export function buildInboxRows(input: InboxInput): InboxRow[] {
   if (!input.title.trim()) return [];
-  if (!input.url.startsWith('/') || input.url.startsWith('//')) return [];
+  if (!isAllowedUrl(input.url)) return [];
 
   const seen = new Set<string>();
   const rows: InboxRow[] = [];
