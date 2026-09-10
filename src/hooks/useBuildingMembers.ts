@@ -23,12 +23,12 @@ export function useBuildingMembers(buildingId: string | undefined) {
   const query = useQuery({
     queryKey: ['building-members', buildingId],
     enabled: !!buildingId,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 60 * 1000,
     queryFn: async (): Promise<BuildingMember[]> => {
-      // The RPC is not in the generated types until the migration ships; narrow at the boundary.
-      const { data, error } = await (supabase.rpc as unknown as (fn: string, args: Record<string, unknown>) => Promise<{ data: BuildingMember[] | null; error: { message: string } | null }>)('building_members', { b: buildingId });
+      // building_members is not yet in the generated types; regenerate after the migration ships.
+      const { data, error } = await supabase.rpc('building_members' as never, { b: buildingId } as never);
       if (error) throw new Error(error.message);
-      return data ?? [];
+      return ((data as unknown) as BuildingMember[] | null) ?? [];
     },
   });
   const byId = useMemo(() => new Map((query.data ?? []).map((m) => [m.id, m])), [query.data]);

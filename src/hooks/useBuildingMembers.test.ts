@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -12,6 +12,10 @@ const wrapper = ({ children }: { children: ReactNode }) =>
   createElement(QueryClientProvider, { client: new QueryClient({ defaultOptions: { queries: { retry: false } } }) }, children);
 
 describe('useBuildingMembers', () => {
+  beforeEach(() => {
+    rpc.mockReset();
+  });
+
   it('calls building_members with the building id and returns members', async () => {
     rpc.mockResolvedValueOnce({ data: [{ id: 'u1', full_name: 'Thabo M', avatar_url: null, role: 'user' }], error: null });
     const { result } = renderHook(() => useBuildingMembers('b1'), { wrapper });
@@ -23,7 +27,7 @@ describe('useBuildingMembers', () => {
   it('is disabled without a building id', () => {
     const { result } = renderHook(() => useBuildingMembers(undefined), { wrapper });
     expect(result.current.isLoading).toBe(false);
-    expect(rpc).not.toHaveBeenCalledWith('building_members', { b: undefined });
+    expect(rpc).not.toHaveBeenCalled();
   });
 });
 
