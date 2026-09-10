@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { mockViewport } from '@/test/mobile';
 
 const state = vi.hoisted(() => ({
   calls: [] as string[],
@@ -46,6 +47,14 @@ describe('ResolveIssueDialog', () => {
     state.calls = [];
     state.commentInputs = [];
     state.updateRows = [{ id: 'i1' }];
+  });
+  afterEach(() => mockViewport(1024));
+
+  it('opens as a bottom sheet on a phone with the Resolve button present', async () => {
+    mockViewport(375);
+    renderDialog();
+    expect(await screen.findByRole('button', { name: /resolve/i })).toBeInTheDocument();
+    expect(document.querySelector('[data-vaul-drawer]')).not.toBeNull();
   });
 
   it('keeps Resolve disabled while the note is only whitespace', () => {

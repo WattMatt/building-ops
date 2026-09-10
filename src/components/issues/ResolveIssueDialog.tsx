@@ -4,7 +4,14 @@ import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from '@/components/ui/responsive-dialog';
 import { PhotoCapture, type PhotoFile } from '@/components/ui/photo-capture';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
@@ -43,21 +50,21 @@ export function ResolveIssueDialog({ issueId, open, onOpenChange, onResolved }: 
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Resolve this issue</DialogTitle>
-          <DialogDescription>Say what was done. This note is recorded on the issue and is required.</DialogDescription>
-        </DialogHeader>
+    <ResponsiveDialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
+      <ResponsiveDialogContent>
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle>Resolve this issue</ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>Say what was done. This note is recorded on the issue and is required.</ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
         <Textarea rows={4} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Replaced the faulty breaker; tested under load." disabled={busy} />
         <PhotoCapture photos={photos} onPhotosChange={setPhotos} maxPhotos={3} size="sm" disabled={busy} label="Photo of the fix (optional)" />
-        <DialogFooter>
+        <ResponsiveDialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
-          <Button onClick={resolve} disabled={busy || !note.trim()}>
+          <Button onClick={resolve} disabled={busy || !note.trim()} className="w-full sm:w-auto">
             {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Resolve
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </ResponsiveDialogFooter>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 }
