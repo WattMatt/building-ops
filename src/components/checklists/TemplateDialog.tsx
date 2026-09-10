@@ -8,8 +8,11 @@
  * with zero rows and no error, which must read as "no permission", not "saved".
  *
  * After an UPDATE that changed the effective rule, a confirm offers `reschedule_template`,
- * which replaces pending future tasks nobody has touched. It opens after the sheet closes so
- * the two dialogs never fight over focus.
+ * which replaces pending future tasks nobody has touched. The id is stashed and the confirm is
+ * opened from an effect only once `open` is false and the sheet's close transition has run
+ * (`SHEET_CLOSE_MS`): on phones the vaul Drawer closing and the Radix AlertDialog opening in the
+ * same render overlap and fight over focus/scroll lock. Meanwhile a head-count of the tasks the
+ * regenerate would replace is fetched so the confirm can say how many.
  */
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
@@ -50,6 +53,7 @@ import { Hint } from '@/components/ui/hint';
 import { BUILDING_TYPES } from '@/lib/compliance';
 import type { TaskFrequency } from '@/lib/constants';
 import { legacyFrequency, ruleFromFrequency, type RecurrenceRule } from '@/lib/recurrence';
+import { todayInOperatingTz } from '@/lib/myWork';
 import RecurrenceEditor, { recurrenceProblem } from '@/components/checklists/RecurrenceEditor';
 import { responsibleParties } from '@/components/checklists/TemplateItemDialog';
 
@@ -130,6 +134,38 @@ async function rescheduleTemplate(templateId: string): Promise<RescheduleResult>
   return { deleted: row?.deleted ?? 0, generated: row?.generated ?? 0 };
 }
 
+/** vaul's drawer close transition; the confirm waits this long after `open` turns false. */
+export const SHEET_CLOSE_MS = 500;
+
+/**
+ * How many tasks `reschedule_template` would replace: pending, due after today, from this
+ * template's items. null when the count could not be read (the confirm then says "pending tasks").
+ */
+async function countReplaceablePending(templateId: string): Promise<number | null> {
+  try {
+    const { count, error } = await supabase
+      .from('task_instances')
+      .select('id, template_items!inner(template_id)', { count: 'exact', head: true })
+      .eq('template_items.template_id', templateId)
+      .eq('status', 'pending')
+      .gt('due_date', todayInOperatingTz());
+    if (error) throw new Error(error.message);
+    return typeof count === 'number' ? count : null;
+  } catch (err) {
+    console.warn('Could not count pending tasks for the regenerate confirm:', err);
+    return null;
+  }
+}
+
+/** The "regenerate?" confirm's state: stashed at save, shown once the sheet has closed. */
+interface PendingReschedule {
+  id: string;
+  /** null until the head-count answers, or when it failed. */
+  count: number | null;
+  /** True once `open` has been false for SHEET_CLOSE_MS. */
+  ready: boolean;
+}
+
 async function resolveOrganizationId(given: string | null | undefined): Promise<string | null> {
   if (given) return given;
   const { data } = await supabase.from('organizations').select('id').limit(1).maybeSingle();
@@ -143,9 +179,18 @@ export default function TemplateDialog({ open, onOpenChange, template, onSaved, 
   const [role, setRole] = useState('user');
   const [buildingTypes, setBuildingTypes] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  /** Template id awaiting the "regenerate?" answer; set only after a rule-changing update. */
-  const [rescheduleFor, setRescheduleFor] = useState<string | null>(null);
+  /** Set only after a rule-changing update; the confirm shows once `ready`. */
+  const [reschedule, setReschedule] = useState<PendingReschedule | null>(null);
   const [rescheduling, setRescheduling] = useState(false);
+
+  // Open the confirm only after the sheet has closed and its transition has run.
+  useEffect(() => {
+    if (open || !reschedule || reschedule.ready) return;
+    const timer = setTimeout(() => {
+      setReschedule((prev) => (prev && !prev.ready ? { ...prev, ready: true } : prev));
+    }, SHEET_CLOSE_MS);
+    return () => clearTimeout(timer);
+  }, [open, reschedule]);
 
   useEffect(() => {
     if (!open) return;
@@ -189,7 +234,13 @@ export default function TemplateDialog({ open, onOpenChange, template, onSaved, 
         toast.success('Template updated');
         onSaved();
         onOpenChange(false);
-        if (!sameRule(effectiveRule(template), rule)) setRescheduleFor(template.id);
+        if (!sameRule(effectiveRule(template), rule)) {
+          const id = template.id;
+          setReschedule({ id, count: null, ready: false });
+          void countReplaceablePending(id).then((count) => {
+            setReschedule((prev) => (prev && prev.id === id ? { ...prev, count } : prev));
+          });
+        }
         return;
       }
 
@@ -214,10 +265,10 @@ export default function TemplateDialog({ open, onOpenChange, template, onSaved, 
   };
 
   const handleReschedule = async () => {
-    if (!rescheduleFor) return;
+    if (!reschedule) return;
     setRescheduling(true);
     try {
-      const { deleted, generated } = await rescheduleTemplate(rescheduleFor);
+      const { deleted, generated } = await rescheduleTemplate(reschedule.id);
       toast.success(`Regenerated: ${deleted} removed, ${generated} created`);
       onSaved();
     } catch (err) {
@@ -225,9 +276,15 @@ export default function TemplateDialog({ open, onOpenChange, template, onSaved, 
       toast.error(err instanceof Error ? err.message : 'Failed to regenerate tasks');
     } finally {
       setRescheduling(false);
-      setRescheduleFor(null);
+      setReschedule(null);
     }
   };
+
+  const replaceCount = reschedule?.count ?? null;
+  const replaceSentence =
+    replaceCount === null
+      ? 'Pending tasks that nobody has touched will be replaced.'
+      : `${replaceCount} pending task${replaceCount === 1 ? '' : 's'} that nobody has touched will be replaced.`;
 
   return (
     <>
@@ -338,13 +395,12 @@ export default function TemplateDialog({ open, onOpenChange, template, onSaved, 
         </ResponsiveDialogContent>
       </ResponsiveDialog>
 
-      <AlertDialog open={rescheduleFor !== null} onOpenChange={(o) => { if (!o && !rescheduling) setRescheduleFor(null); }}>
+      <AlertDialog open={reschedule?.ready === true} onOpenChange={(o) => { if (!o && !rescheduling) setReschedule(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Regenerate future tasks?</AlertDialogTitle>
             <AlertDialogDescription>
-              Pending tasks that nobody has touched will be replaced. Tasks someone has completed, reassigned or
-              edited stay as they are.
+              {replaceSentence} Tasks someone has completed, reassigned or edited stay as they are.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

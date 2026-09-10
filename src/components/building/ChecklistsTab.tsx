@@ -48,13 +48,31 @@ import CompleteTaskDialog from '@/components/checklists/CompleteTaskDialog';
 import { TasksList, type TaskInstance, type TaskFrequency, type TaskStatus } from '@/components/building/TasksList';
 import { RoleAssignmentsPanel } from '@/components/building/RoleAssignmentsPanel';
 import { UpcomingTasks, HORIZON_DAYS, groupUpcoming } from '@/components/building/UpcomingTasks';
-import { useIsMobile } from '@/hooks/use-mobile';
 import { todayInOperatingTz } from '@/lib/myWork';
 import { ALL_FREQUENCIES } from '@/lib/taskSchedule';
 import type { Database } from '@/integrations/supabase/types';
 
 /** Days ahead the on-demand generate buttons fill (the nightly job uses its own horizon). */
 const GENERATE_HORIZON_DAYS = 90;
+
+/**
+ * The plan's phone breakpoint for this tab is `< sm` (640 px), not `useIsMobile`'s 768. The
+ * value is read synchronously from `matchMedia` on the first render so a phone's first paint
+ * is the horizon card, never a flash of the desktop strip (`useIsMobile` starts `false`).
+ */
+const PHONE_LAYOUT_QUERY = '(max-width: 639px)';
+const phoneLayoutNow = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(PHONE_LAYOUT_QUERY).matches;
+function usePhoneLayout(): boolean {
+  const [phone, setPhone] = useState<boolean>(phoneLayoutNow);
+  useEffect(() => {
+    const mql = window.matchMedia(PHONE_LAYOUT_QUERY);
+    const onChange = (e: { matches: boolean }) => setPhone(e.matches);
+    mql.addEventListener('change', onChange);
+    setPhone(mql.matches);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+  return phone;
+}
 
 /** The tab strip: the rolling horizon view, then one tab per legacy frequency bucket. */
 type ChecklistView = 'upcoming' | TaskFrequency;
@@ -118,7 +136,7 @@ function getCurrentPeriodRange(frequency: TaskFrequency): { start: Date; end: Da
 export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTabProps) {
   const { user, isAdminOrManager } = useAuth();
   const { byId: members } = useBuildingMembers(buildingId);
-  const isMobile = useIsMobile();
+  const isMobile = usePhoneLayout();
   const [tasks, setTasks] = useState<TaskInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);

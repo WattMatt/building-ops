@@ -345,10 +345,13 @@ export default function Checklists() {
                         <Plus className="h-4 w-4 mr-2" />
                         Add Task
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleApplyTemplate(template)}>
-                        <Send className="h-4 w-4 mr-2" />
-                        Apply to Buildings
-                      </DropdownMenuItem>
+                      {/* An archived template generates nothing, so it cannot be applied either. */}
+                      {!template.archived_at && (
+                        <DropdownMenuItem onClick={() => handleApplyTemplate(template)}>
+                          <Send className="h-4 w-4 mr-2" />
+                          Apply to Buildings
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuItem onClick={() => handleEditTemplate(template)}>
                         <Pencil className="h-4 w-4 mr-2" />
                         Edit
@@ -392,15 +395,17 @@ export default function Checklists() {
                     <Eye className="h-3 w-3 mr-1" />
                     Preview
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleApplyTemplate(template)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <Building2 className="h-3 w-3 mr-1" />
-                    Apply
-                  </Button>
+                  {!template.archived_at && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleApplyTemplate(template)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Building2 className="h-3 w-3 mr-1" />
+                      Apply
+                    </Button>
+                  )}
                 </div>
               </div>
             </CardContent>

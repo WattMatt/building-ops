@@ -336,6 +336,11 @@ try {
   // organizations: anon-readable; update admin/manager; insert/delete admin (allow-probe skipped: apps assume a single org row)
   const anonOrg = await fetch(`${URL_BASE}/rest/v1/organizations?select=id&limit=1`, { headers: { apikey: ANON } });
   assert('organizations anon read', anonOrg.ok, `HTTP ${anonOrg.status}`);
+  // TemplateDialog's "file under the first organisation" fallback reads this row as the signed-in
+  // manager; a 200 with zero rows would silently make "New template" fail for them.
+  const mgrOrg = await fetch(`${URL_BASE}/rest/v1/organizations?select=id&limit=1`, { headers: authed(personas.manager.jwt) });
+  const mgrOrgRows = mgrOrg.ok ? await mgrOrg.json() : [];
+  assert('manager can read the organisation row', mgrOrg.ok && mgrOrgRows.length >= 1, mgrOrg.ok ? 'HTTP 200 but zero rows (RLS filtered)' : `HTTP ${mgrOrg.status}`);
   const orgRows = await (await fetch(`${URL_BASE}/rest/v1/organizations?select=id,name&limit=1`, { headers: SVC })).json();
   if (orgRows.length) {
     await probeMatrix('organizations update', adminMgr(), (jwt) => canUpdate(jwt, 'organizations', orgRows[0].id, { name: orgRows[0].name }));

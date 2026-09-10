@@ -49,15 +49,21 @@ interface TemplateRow {
   responsible_role: string | null;
   applies_to_building_types: string[] | null;
   is_active: boolean | null;
+  /** Set = archived: the generator skips it, so its labels are not worth ruling on. */
+  archived_at?: string | null;
   template_items: { responsible_party: string | null }[] | null;
 }
+
+/** The template columns the labels query reads; `archived_at` lands with the R3a migration. */
+const TEMPLATE_LABEL_COLUMNS = 'responsible_role, applies_to_building_types, is_active, archived_at, template_items(responsible_party)';
 
 /** Distinct labels the generator could stamp on this building's tasks, from the templates that apply to it. */
 export function roleLabelsFor(templates: TemplateRow[], buildingType: string | null | undefined): string[] {
   const labels = new Set<string>();
   for (const t of templates) {
-    // Mirrors the generator's `where`: inactive templates never produce tasks.
+    // Mirrors the generator's `where`: inactive and archived templates never produce tasks.
     if (t.is_active === false) continue;
+    if (t.archived_at) continue;
     if (!templateAppliesToBuilding(t.applies_to_building_types, buildingType)) continue;
     const fallback = t.responsible_role?.trim() || 'user';
     for (const item of t.template_items ?? []) labels.add(item.responsible_party?.trim() || fallback);
@@ -75,7 +81,11 @@ export interface BuildingRoleAssignments {
   isLoading: boolean;
   isError: boolean;
   setRule: (role: string, userId: string | null) => Promise<void>;
-  /** Assigns every unassigned pending task whose role has a rule; notifies each person once. Returns the total. */
+  /**
+   * Assigns every unassigned pending task whose role is listed in `roles` AND has a rule; notifies
+   * each person once. Returns the total. Rules on labels no longer offered (an archived template's)
+   * are left alone so the count the panel shows and the set this touches agree.
+   */
   applyToPending: () => Promise<number>;
 }
 
@@ -101,12 +111,13 @@ export function useBuildingRoleAssignments(buildingId: string | undefined): Buil
       if (!buildingId) return { roles: sortRoles([]), buildingName: null };
       const [building, templates] = await Promise.all([
         supabase.from('buildings').select('name, building_type').eq('id', buildingId).maybeSingle(),
-        supabase.from('checklist_templates').select('responsible_role, applies_to_building_types, is_active, template_items(responsible_party)'),
+        // archived_at is not yet in the generated types; regenerate after the migration ships.
+        supabase.from('checklist_templates').select(TEMPLATE_LABEL_COLUMNS as 'responsible_role'),
       ]);
       if (building.error) throw new Error(building.error.message);
       if (templates.error) throw new Error(templates.error.message);
       return {
-        roles: roleLabelsFor((templates.data ?? []) as TemplateRow[], building.data?.building_type),
+        roles: roleLabelsFor((templates.data ?? []) as unknown as TemplateRow[], building.data?.building_type),
         buildingName: building.data?.name ?? null,
       };
     },
@@ -149,9 +160,10 @@ export function useBuildingRoleAssignments(buildingId: string | undefined): Buil
 
   const applyToPending = useCallback(async (): Promise<number> => {
     if (!buildingId) return 0;
-    // One update per rule; the same person may hold several roles, so tally per person before notifying.
+    // One update per listed rule; the same person may hold several roles, so tally per person before notifying.
     const perPerson = new Map<string, { n: number; firstTaskId: string }>();
     for (const [role, userId] of rules) {
+      if (!roles.includes(role)) continue;
       const { data, error } = await supabase
         .from('task_instances')
         .update({ assigned_to: userId })
@@ -181,7 +193,7 @@ export function useBuildingRoleAssignments(buildingId: string | undefined): Buil
     }
     await queryClient.invalidateQueries({ queryKey: buildingRolesKey(buildingId) });
     return total;
-  }, [buildingId, rules, labelsQuery.data?.buildingName, queryClient]);
+  }, [buildingId, rules, roles, labelsQuery.data?.buildingName, queryClient]);
 
   return {
     rules,

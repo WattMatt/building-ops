@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+
+// Radix DropdownMenu opens on pointerdown and needs these jsdom gaps filled.
+if (!Element.prototype.hasPointerCapture) Element.prototype.hasPointerCapture = () => false;
+if (!Element.prototype.releasePointerCapture) Element.prototype.releasePointerCapture = () => {};
+if (!Element.prototype.setPointerCapture) Element.prototype.setPointerCapture = () => {};
+if (!Element.prototype.scrollIntoView) Element.prototype.scrollIntoView = () => {};
 
 const state = vi.hoisted(() => ({ isAdminOrManager: false }));
 
@@ -40,11 +46,12 @@ vi.mock('@/contexts/AuthContext', () => ({
 vi.mock('sonner', () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }) }));
 
 // The dialogs have their own tests; the page only has to open them.
+const archiveTemplate = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock('@/components/checklists/TemplateDialog', () => ({
   default: ({ open, template }: { open: boolean; template: { name: string } | null }) => (
     <div>{`TemplateDialog open=${open} template=${template?.name ?? 'new'}`}</div>
   ),
-  archiveTemplate: vi.fn(),
+  archiveTemplate,
 }));
 vi.mock('@/components/checklists/TemplateItemDialog', () => ({ default: () => null }));
 vi.mock('@/components/checklists/ApplyTemplateDialog', () => ({ default: () => null }));
@@ -52,8 +59,17 @@ vi.mock('@/components/checklists/PreviewTemplateDialog', () => ({ default: () =>
 
 import Checklists from './Checklists';
 
+/** The summary card that carries the given template name. */
+const cardFor = (name: string) => screen.getByText(name).closest('.group') as HTMLElement;
+const openCardMenu = (name: string) => {
+  const trigger = within(cardFor(name)).getAllByRole('button').find((b) => b.getAttribute('aria-haspopup') === 'menu');
+  if (!trigger) throw new Error(`no menu trigger on the "${name}" card`);
+  // jsdom has no PointerEvent, so Radix's pointerdown path never sees button 0; the keyboard path is deterministic.
+  fireEvent.keyDown(trigger, { key: 'Enter' });
+};
+
 describe('Checklists page', () => {
-  beforeEach(() => { state.isAdminOrManager = false; });
+  beforeEach(() => { state.isAdminOrManager = false; archiveTemplate.mockClear(); });
 
   it('shows New template and the archived toggle to an admin, hiding archived cards until asked', async () => {
     state.isAdminOrManager = true;
@@ -68,6 +84,41 @@ describe('Checklists page', () => {
     fireEvent.click(toggle);
     expect(screen.getByText('Old lift checks')).toBeInTheDocument();
     expect(screen.getByText('Archived')).toBeInTheDocument();
+  });
+
+  it('an archived card offers no Apply, on the card or in its menu', async () => {
+    state.isAdminOrManager = true;
+    render(<Checklists />);
+    fireEvent.click(await screen.findByRole('switch', { name: /show archived/i }));
+
+    const live = cardFor('Daily walk');
+    expect(within(live).getByRole('button', { name: /^apply$/i })).toBeInTheDocument();
+    const archived = cardFor('Old lift checks');
+    expect(within(archived).queryByRole('button', { name: /^apply$/i })).toBeNull();
+    expect(within(archived).getByRole('button', { name: /preview/i })).toBeInTheDocument();
+
+    openCardMenu('Old lift checks');
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).queryByRole('menuitem', { name: /apply to buildings/i })).toBeNull();
+    expect(within(menu).getByRole('menuitem', { name: /restore/i })).toBeInTheDocument();
+  });
+
+  it('Archive in the card menu confirms, then calls archiveTemplate(id, true)', async () => {
+    state.isAdminOrManager = true;
+    render(<Checklists />);
+    await screen.findByText('Daily walk');
+    openCardMenu('Daily walk');
+    const menu = await screen.findByRole('menu');
+    expect(within(menu).getByRole('menuitem', { name: /apply to buildings/i })).toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /^archive$/i }));
+
+    const confirm = await screen.findByRole('alertdialog');
+    expect(within(confirm).getByText(/Archive "Daily walk"\?/)).toBeInTheDocument();
+    expect(archiveTemplate).not.toHaveBeenCalled();
+    fireEvent.click(within(confirm).getByRole('button', { name: /^archive$/i }));
+
+    await waitFor(() => expect(archiveTemplate).toHaveBeenCalledWith('t1', true));
+    expect(archiveTemplate).toHaveBeenCalledTimes(1);
   });
 
   it('labels the frequency badge from the recurrence rule when there is one, else the legacy bucket', async () => {

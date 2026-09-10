@@ -57,6 +57,7 @@ const templates = [
   { responsible_role: null, applies_to_building_types: ['office'], is_active: true, template_items: [{ responsible_party: 'Cleaner' }] },
   { responsible_role: 'Security', applies_to_building_types: ['retail'], is_active: true, template_items: [{ responsible_party: null }] },
   { responsible_role: 'Archived Role', applies_to_building_types: null, is_active: false, template_items: [{ responsible_party: 'Archived Role' }] },
+  { responsible_role: 'Old Lift Contractor', applies_to_building_types: null, is_active: true, archived_at: '2026-09-01T00:00:00Z', template_items: [{ responsible_party: null }] },
 ];
 
 beforeEach(() => {
@@ -81,9 +82,15 @@ describe('roleLabelsFor / sortRoles', () => {
     expect(roleLabelsFor(templates, 'office')).toEqual(['user', 'manager', 'Cleaner', 'HVAC Contractor']);
   });
 
-  it('drops templates that do not apply to the building type, and inactive ones', () => {
+  it('drops templates that do not apply to the building type, inactive ones, and archived ones', () => {
     expect(roleLabelsFor(templates, 'retail')).toEqual(['user', 'manager', 'HVAC Contractor', 'Security']);
     expect(roleLabelsFor(templates, null)).toEqual(['user', 'manager', 'HVAC Contractor']);
+    expect(roleLabelsFor(templates, 'office')).not.toContain('Old Lift Contractor');
+    expect(roleLabelsFor([{ ...templates[4], archived_at: null }], 'office')).toContain('Old Lift Contractor');
+  });
+
+  it('an empty applies_to list matches no building (SQL = any(\'{}\')), only null means all', () => {
+    expect(roleLabelsFor([{ responsible_role: 'Nobody', applies_to_building_types: [], is_active: true, template_items: [{ responsible_party: null }] }], 'office')).toEqual(['user', 'manager']);
   });
 
   it('falls back to the template role, then user, when an item names nobody', () => {
@@ -104,6 +111,9 @@ describe('useBuildingRoleAssignments', () => {
     expect(result.current.roles).toEqual(['user', 'manager', 'Cleaner', 'HVAC Contractor']);
     const rulesRead = state.queries.find((q) => q.table === 'building_role_assignments');
     expect(rulesRead && has(rulesRead.calls, 'eq', 'building_id', 'b1')).toBe(true);
+    // The labels query must read archived_at, or an archived template's labels would keep being offered.
+    const templatesRead = state.queries.find((q) => q.table === 'checklist_templates');
+    expect(templatesRead && has(templatesRead.calls, 'select', 'responsible_role, applies_to_building_types, is_active, archived_at, template_items(responsible_party)')).toBe(true);
   });
 
   it('counts unassigned pending tasks per role', async () => {
@@ -159,6 +169,28 @@ describe('useBuildingRoleAssignments', () => {
       title: '2 tasks assigned to you at Fortress Mall', url: '/buildings/b1?tab=checklists',
     }));
     expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({ recipients: ['u2'], entityId: 't3', title: '1 task assigned to you at Fortress Mall' }));
+  });
+
+  it('applyToPending leaves rules alone whose label is no longer offered (archived template), so it agrees with the panel count', async () => {
+    const base = state.result;
+    state.result = (table, calls) => {
+      if (table === 'building_role_assignments' && has(calls, 'select')) {
+        return { data: [{ role: 'user', user_id: 'u1' }, { role: 'Old Lift Contractor', user_id: 'u5' }], error: null };
+      }
+      if (table === 'task_instances' && has(calls, 'update')) return { data: [{ id: 't9' }], error: null };
+      return base(table, calls);
+    };
+    const { result } = renderHook(() => useBuildingRoleAssignments('b1'), { wrapper });
+    await waitFor(() => expect(result.current.rules.size).toBe(2));
+    await waitFor(() => expect(result.current.roles).toEqual(['user', 'manager', 'Cleaner', 'HVAC Contractor']));
+
+    const total = await result.current.applyToPending();
+    expect(total).toBe(1);
+    const updates = state.queries.filter((q) => q.table === 'task_instances' && has(q.calls, 'update'));
+    expect(updates).toHaveLength(1);
+    expect(has(updates[0].calls, 'eq', 'responsible_role', 'user')).toBe(true);
+    expect(notifyMock).toHaveBeenCalledTimes(1);
+    expect(notifyMock).toHaveBeenCalledWith(expect.objectContaining({ recipients: ['u1'] }));
   });
 
   it('applyToPending skips people whose rules matched nothing', async () => {

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { useState } from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { mockViewport } from '@/test/mobile';
 
@@ -14,30 +15,40 @@ if (!('ResizeObserver' in globalThis)) {
 
 vi.mock('@/lib/myWork', () => ({ todayInOperatingTz: () => '2026-09-10' }));
 
-type Call = { table: string; op: string; payload?: unknown; filters: unknown[][] };
+type Call = { table: string; op: string; payload?: unknown; filters: unknown[][]; select?: unknown[] };
 
 /**
- * A recording Supabase stub: every `from()` call becomes a Call whose insert/update payload
- * and `.eq` filters are captured; awaiting the builder yields one row (the RLS "allowed" shape).
+ * A recording Supabase stub: every `from()` call becomes a Call whose insert/update payload,
+ * `.select` arguments and `.eq`/`.gt` filters are captured; awaiting the builder yields one row
+ * (the RLS "allowed" shape). A `head: true` select answers with `countBack` instead.
  */
 const db = vi.hoisted(() => {
   const calls: Call[] = [];
   const rpc = vi.fn();
   let rowsBack: unknown[] = [{ id: 't1' }];
+  let countBack: { count: number | null; error: { message: string } | null } = { count: 7, error: null };
   const from = (table: string) => {
     const call: Call = { table, op: 'select', filters: [] };
     calls.push(call);
     const b: Record<string, unknown> = {};
     b.insert = (p: unknown) => { call.op = 'insert'; call.payload = p; return b; };
     b.update = (p: unknown) => { call.op = 'update'; call.payload = p; return b; };
-    b.select = () => b;
+    b.select = (...args: unknown[]) => { call.select = args; return b; };
     b.limit = () => b;
     b.eq = (...args: unknown[]) => { call.filters.push(args); return b; };
+    b.gt = (...args: unknown[]) => { call.filters.push(['gt', ...args]); return b; };
     b.maybeSingle = async () => ({ data: { id: 'org-first-row' }, error: null });
-    b.then = (resolve: (v: unknown) => void) => resolve({ data: rowsBack, error: null });
+    b.then = (resolve: (v: unknown) => void) => {
+      const head = (call.select?.[1] as { head?: boolean } | undefined)?.head === true;
+      resolve(head ? { data: null, ...countBack } : { data: rowsBack, error: null });
+    };
     return b;
   };
-  return { calls, rpc, from, setRowsBack: (rows: unknown[]) => { rowsBack = rows; } };
+  return {
+    calls, rpc, from,
+    setRowsBack: (rows: unknown[]) => { rowsBack = rows; },
+    setCountBack: (c: typeof countBack) => { countBack = c; },
+  };
 });
 vi.mock('@/integrations/supabase/client', () => ({ supabase: { from: db.from, rpc: db.rpc } }));
 
@@ -58,21 +69,37 @@ const weeklyTemplate: EditableTemplate = {
   organization_id: 'org1',
 };
 
+/** Owns `open` the way the page does, so `onOpenChange(false)` really closes the sheet. */
+function Harness({ template, organizationId, onOpenChange, onSaved }: {
+  template: EditableTemplate | null; organizationId?: string; onOpenChange: (o: boolean) => void; onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <TemplateDialog
+      open={open}
+      onOpenChange={(o) => { onOpenChange(o); setOpen(o); }}
+      template={template}
+      onSaved={onSaved}
+      organizationId={organizationId}
+    />
+  );
+}
+
 const renderDialog = (template: EditableTemplate | null, organizationId?: string) => {
   const onOpenChange = vi.fn();
   const onSaved = vi.fn();
-  render(
-    <TemplateDialog open onOpenChange={onOpenChange} template={template} onSaved={onSaved} organizationId={organizationId} />,
-  );
+  render(<Harness template={template} organizationId={organizationId} onOpenChange={onOpenChange} onSaved={onSaved} />);
   return { onOpenChange, onSaved };
 };
 
 const writes = () => db.calls.filter((c) => c.op === 'insert' || c.op === 'update');
+const countReads = () => db.calls.filter((c) => c.table === 'task_instances' && (c.select?.[1] as { head?: boolean } | undefined)?.head === true);
 
 describe('TemplateDialog', () => {
   beforeEach(() => {
     db.calls.length = 0;
     db.setRowsBack([{ id: 't1' }]);
+    db.setCountBack({ count: 7, error: null });
     db.rpc.mockReset().mockResolvedValue({ data: [{ deleted: 2, generated: 5 }], error: null });
     toast.mockClear(); toast.success.mockClear(); toast.error.mockClear();
   });
@@ -153,13 +180,58 @@ describe('TemplateDialog', () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
     expect(onOpenChange).toHaveBeenCalledWith(false);
 
-    expect(await screen.findByRole('heading', { name: 'Regenerate future tasks?' })).toBeInTheDocument();
-    expect(screen.getByText(/Pending tasks that nobody has touched will be replaced/)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Regenerate future tasks?' }, { timeout: 2000 })).toBeInTheDocument();
+    // The confirm says how many tasks the regenerate would replace: pending, future, from this template's items.
+    expect(screen.getByText(/7 pending tasks that nobody has touched will be replaced/)).toBeInTheDocument();
+    const [count] = countReads();
+    expect(count.select).toEqual(['id, template_items!inner(template_id)', { count: 'exact', head: true }]);
+    expect(count.filters).toEqual([
+      ['template_items.template_id', 't1'],
+      ['status', 'pending'],
+      ['gt', 'due_date', '2026-09-10'],
+    ]);
     fireEvent.click(screen.getByRole('button', { name: 'Regenerate' }));
 
     await waitFor(() => expect(db.rpc).toHaveBeenCalledWith('reschedule_template', { p_template: 't1' }));
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Regenerated: 2 removed, 5 created'));
     expect(onSaved).toHaveBeenCalledTimes(2);
+  });
+
+  it('singular count, and the countless sentence when the head-count fails', async () => {
+    db.setCountBack({ count: 1, error: null });
+    renderDialog(weeklyTemplate);
+    fireEvent.click(screen.getByRole('button', { name: 'Wednesday' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText(/1 pending task that nobody has touched will be replaced/, {}, { timeout: 2000 })).toBeInTheDocument();
+  });
+
+  it('falls back to the countless sentence when the head-count errors', async () => {
+    db.setCountBack({ count: null, error: { message: 'permission denied' } });
+    renderDialog(weeklyTemplate);
+    fireEvent.click(screen.getByRole('button', { name: 'Wednesday' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText(/^Pending tasks that nobody has touched will be replaced/, {}, { timeout: 2000 })).toBeInTheDocument();
+    expect(countReads()).toHaveLength(1);
+  });
+
+  it('on a phone, the confirm opens only after the sheet has closed (never in the same render)', async () => {
+    mockViewport(375);
+    const { onOpenChange } = renderDialog(weeklyTemplate);
+    expect(document.querySelector('[data-vaul-drawer]')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Wednesday' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+
+    // Same tick as the close: the sheet is on its way out and the confirm is NOT yet mounted.
+    expect(screen.queryByRole('heading', { name: 'Regenerate future tasks?' })).toBeNull();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(screen.queryByRole('heading', { name: 'Regenerate future tasks?' })).toBeNull();
+
+    // After vaul's close transition the sheet is gone and only then does the confirm appear.
+    expect(await screen.findByRole('heading', { name: 'Regenerate future tasks?' }, { timeout: 2000 })).toBeInTheDocument();
+    const drawer = document.querySelector('[data-vaul-drawer]');
+    expect(drawer === null || drawer.getAttribute('data-state') === 'closed').toBe(true);
+    expect(screen.getByText(/7 pending tasks that nobody has touched will be replaced/)).toBeInTheDocument();
   });
 
   it('an update that keeps the rule does not offer to regenerate', async () => {
