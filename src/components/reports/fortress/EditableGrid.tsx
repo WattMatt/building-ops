@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Loader2, Plus, Trash2 } from 'lucide-react';
 import { SectionCard } from './SectionCard';
 import { useReportSection } from '@/hooks/useReportSection';
+import { useReportDirty } from './dirtySections';
 import type { FTableName } from '@/integrations/supabase/fortress-db';
 
 export type GridColType = 'text' | 'number' | 'date' | 'select' | 'tristate' | 'bool';
@@ -44,6 +45,8 @@ export function EditableGrid({ reportId, buildingId, readOnly, table, title, hin
   const { rows, isLoading, saveAll, isSaving } = useReportSection<Row>(table, reportId);
   const [draft, setDraft] = useState<Row[]>([]);
   const [dirty, setDirty] = useState(false);
+  // Tell the editor this section has unsaved edits, so leaving/submitting warns first (D1).
+  useReportDirty(table, dirty);
 
   useEffect(() => { setDraft(rows.map((r) => ({ ...r }))); setDirty(false); }, [rows]);
 

@@ -24,6 +24,7 @@ import { useReportSectionCounts } from '@/hooks/useReportSectionCounts';
 import { ReportSavedVersions } from '@/components/reports/fortress/ReportSavedVersions';
 import { fdb, REPORT_TYPE_LABELS, type ReportStatus } from '@/integrations/supabase/fortress-db';
 import { getSectionComponent } from './sections/registry';
+import { dirtySections, useDirtyCount } from './dirtySections';
 import { Hint } from '@/components/ui/hint';
 
 export default function FortressReportEditor() {
@@ -42,6 +43,30 @@ export default function FortressReportEditor() {
   const [reviewNotes, setReviewNotes] = useState('');
   const [exporting, setExporting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Unsaved section edits (D1). Only the active section is mounted, so any dirty grid
+  // belongs to the section on screen.
+  const dirtyCount = useDirtyCount();
+  const anyDirty = dirtyCount > 0;
+
+  // Refresh / tab close with unsaved edits: the browser shows its own confirm.
+  useEffect(() => {
+    if (!anyDirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [anyDirty]);
+
+  // Leaving the editor entirely must not leave stale ids behind for the next report.
+  useEffect(() => () => dirtySections.reset(), []);
+
+  /** True when it is safe to leave the current section (clean, or the user chose to discard). */
+  const confirmLeave = () => {
+    if (!anyDirty) return true;
+    const ok = window.confirm('This section has unsaved changes. Discard them?');
+    if (ok) dirtySections.reset();
+    return ok;
+  };
 
   useEffect(() => { setPreparedFor(report?.prepared_for ?? ''); }, [report?.prepared_for]);
 
@@ -65,6 +90,9 @@ export default function FortressReportEditor() {
 
   const handleExport = async () => {
     if (!id) return;
+    // The PDF is generated from saved rows — exporting while dirty would quietly ship a
+    // document missing what is on screen.
+    if (anyDirty) { toast.error('Save your changes in this section before exporting.'); return; }
     setExporting(true);
     try {
       // Report header uses the organisation's configured name + logo (Settings).
@@ -167,6 +195,9 @@ export default function FortressReportEditor() {
   /** Block draft→submitted until each required section has at least one row. */
   const validateAndSubmit = async () => {
     if (!id || !report) return;
+    // Submitting locks the report; typed-but-unsaved rows would be lost with the gate
+    // passing on previously saved rows.
+    if (anyDirty) { toast.error('Save your changes in this section before submitting.'); return; }
     setSubmitting(true);
     try {
       const metas = REPORT_SECTIONS[report.report_type as keyof typeof REPORT_SECTIONS] ?? [];
@@ -211,7 +242,7 @@ export default function FortressReportEditor() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <Button variant="ghost" size="sm" className="-ml-2 mb-1" onClick={() => navigate(`/buildings/${report.building_id}?tab=reports`)}>
+          <Button variant="ghost" size="sm" className="-ml-2 mb-1" onClick={() => { if (confirmLeave()) navigate(`/buildings/${report.building_id}?tab=reports`); }}>
             <ArrowLeft className="mr-2 h-4 w-4" /> Back to building
           </Button>
           {/* Building names always display uppercase; the name is baked into the composed title. */}
@@ -288,14 +319,19 @@ export default function FortressReportEditor() {
             return (
               <button
                 key={s.key}
-                onClick={() => setActiveKey(s.key)}
+                onClick={() => { if (s.key === current || confirmLeave()) setActiveKey(s.key); }}
                 className={cn(
                   'flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors',
                   current === s.key ? 'bg-muted font-medium' : 'hover:bg-muted/50',
                   n === 0 && 'text-muted-foreground',
                 )}
               >
-                <span className="truncate">{s.label}</span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate">{s.label}</span>
+                  {current === s.key && anyDirty && (
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" aria-label="Unsaved changes" />
+                  )}
+                </span>
                 {!built ? (
                   <span className="text-[10px] text-muted-foreground">soon</span>
                 ) : n === null || n === undefined ? null : n > 0 ? (
