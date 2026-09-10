@@ -1,4 +1,4 @@
-import { enqueue } from './queue';
+import { enqueue, getOp } from './queue';
 import { replayAll, runOne } from './replay';
 import type { OpPayload, QueuedPhoto, RunOutcome } from './types';
 
@@ -16,5 +16,9 @@ export async function enqueueAndRun(uid: string, payload: OpPayload, photos: Que
   if (typeof navigator !== 'undefined' && !navigator.onLine) return { status: 'queued', opId: op.id };
   const { blocked } = await replayAll(uid, { stopAt: op.id });
   if (blocked) return { status: 'queued', opId: op.id };
+  // A runner-triggered replay that started between the enqueue and the replayAll above shares
+  // that run — which has no stopAt, so it already ran this op. Running it again would upload the
+  // photos twice and, for complete_task, report already_completed as if someone else had done it.
+  if (!(await getOp(uid, op.id))) return { status: 'synced', result: null, opId: op.id };
   return { ...(await runOne(op)), opId: op.id };
 }

@@ -504,4 +504,6 @@ Deviations worth knowing:
 Follow-ups: spec §6.3's "not available offline" state on report/form/sign-off/admin actions is not
 implemented (they fail with a network error offline); queued issues show no building line when the
 building is in neither the live issues list nor the My Day cache; `useIssues.createIssue` is now unused;
-no "stuck" affordance distinct from "rejected" in the sheet (both are "failed").
+no "stuck" affordance distinct from "rejected" in the sheet (both are "failed"). Per-action "not
+available offline" guards for reports, forms, sign-offs and admin are still to do; until then the
+offline banner promises the sync only for tasks and issues.

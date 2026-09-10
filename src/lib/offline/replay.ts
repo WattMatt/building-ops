@@ -59,6 +59,9 @@ export async function runOne(op: QueuedOp): Promise<RunOutcome> {
       await updateOp(op.uid, op.id, { attempts });
       return { status: 'queued' };
     }
+    // Includes the handlers' own terminal codes (RESOLVE_DENIED, USER_MISMATCH). From a dialog the
+    // caller discards the op itself; from a background replay it is simply left failed, with the
+    // message, so the sheet shows it and the user can discard it. A retry re-runs it honestly.
     const error = messageOf(e);
     const code = codeOf(e);
     await updateOp(op.uid, op.id, { status: 'failed', lastError: error, attempts });
@@ -82,6 +85,26 @@ export interface ReplayResult {
   blocked: boolean;
 }
 
+/**
+ * Per-user lock: a replay run and a single-op retry for the same user never overlap, so one op is
+ * never run twice at once. Callers queue behind whatever holds the lock, in order.
+ */
+const locks = new Map<string, Promise<void>>();
+async function withUserLock<T>(uid: string, fn: () => Promise<T>): Promise<T> {
+  const prev = locks.get(uid) ?? Promise.resolve();
+  let release!: () => void;
+  const mine = new Promise<void>((r) => { release = r; });
+  const tail = prev.then(() => mine);
+  locks.set(uid, tail);
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (locks.get(uid) === tail) locks.delete(uid);
+  }
+}
+
 /** One run per user at a time; a second trigger while a run is going shares that run's promise. */
 const inFlight = new Map<string, Promise<ReplayResult>>();
 
@@ -92,31 +115,34 @@ const inFlight = new Map<string, Promise<ReplayResult>>();
 export function replayAll(uid: string, opts: ReplayOptions = {}): Promise<ReplayResult> {
   const running = inFlight.get(uid);
   if (running) return running;
-  const run = (async (): Promise<ReplayResult> => {
+  const run = withUserLock(uid, async (): Promise<ReplayResult> => {
     let blocked = false;
-    try {
-      const ops = await listOps(uid);
-      for (const op of ops) {
-        if (op.id === opts.stopAt) break; // the caller runs this one (and reports on it) itself
-        if (op.status === 'failed' && !opts.retryFailed) continue;
-        const fresh = await getOp(uid, op.id); // may have been discarded meanwhile
-        if (!fresh) continue;
-        if (fresh.status === 'failed') await updateOp(uid, fresh.id, { status: 'pending', lastError: null });
-        const outcome = await runOne({ ...fresh, status: 'pending' });
-        if (outcome.status === 'queued') { blocked = true; break; } // still offline: stop, keep order
-      }
-    } finally {
-      inFlight.delete(uid);
+    const ops = await listOps(uid);
+    for (const op of ops) {
+      if (op.id === opts.stopAt) break; // the caller runs this one (and reports on it) itself
+      if (op.status === 'failed' && !opts.retryFailed) continue;
+      const fresh = await getOp(uid, op.id); // may have been discarded meanwhile
+      if (!fresh) continue;
+      if (fresh.status === 'failed') await updateOp(uid, fresh.id, { status: 'pending', lastError: null });
+      const outcome = await runOne({ ...fresh, status: 'pending' });
+      if (outcome.status === 'queued') { blocked = true; break; } // still offline: stop, keep order
     }
     return { blocked };
-  })();
+  }).finally(() => { inFlight.delete(uid); });
   inFlight.set(uid, run);
   return run;
 }
 
-export async function retryOp(uid: string, id: string): Promise<RunOutcome> {
-  const op = await getOp(uid, id);
-  if (!op) return { status: 'failed', error: 'This change is no longer queued.' };
-  await updateOp(uid, id, { status: 'pending', lastError: null });
-  return runOne({ ...op, status: 'pending', lastError: null });
+/**
+ * Re-runs one parked op on the user's request. Takes the same per-user lock as `replayAll`, so a
+ * background replay (retryAll, or the runner coming back online) that is already running this op
+ * finishes first — the retry then finds the op gone instead of running it a second time.
+ */
+export function retryOp(uid: string, id: string): Promise<RunOutcome> {
+  return withUserLock(uid, async () => {
+    const op = await getOp(uid, id);
+    if (!op) return { status: 'failed', error: 'This change is no longer queued.' };
+    await updateOp(uid, id, { status: 'pending', lastError: null });
+    return runOne({ ...op, status: 'pending', lastError: null });
+  });
 }

@@ -7,7 +7,7 @@ vi.mock('./replay', () => ({
 }));
 
 import { replayAll, runOne } from './replay';
-import { listOps, clearQueue } from './queue';
+import { listOps, clearQueue, removeOp } from './queue';
 import { enqueueAndRun } from './enqueueAndRun';
 import type { TaskCompletePayload } from './types';
 
@@ -51,6 +51,19 @@ describe('enqueueAndRun', () => {
     const failed = await enqueueAndRun(UID, payload, []);
     const [, second] = await listOps(UID);
     expect(failed).toEqual({ status: 'failed', error: 'permission denied', code: 'RESOLVE_DENIED', opId: second.id });
+  });
+
+  it('online, but a background replay shared the run and already synced the op: reports synced without running it again', async () => {
+    // A runner-triggered replayAll (no stopAt) that started in the enqueue→replayAll gap is what our call shares.
+    vi.mocked(replayAll).mockImplementation(async (uid) => {
+      for (const o of await listOps(uid)) await removeOp(uid, o.id);
+      return { blocked: false };
+    });
+    const outcome = await enqueueAndRun(UID, payload, []);
+    expect(replayAll).toHaveBeenCalledTimes(1);
+    expect(runOne).not.toHaveBeenCalled();
+    expect(outcome).toEqual({ status: 'synced', result: null, opId: expect.any(String) });
+    expect(await listOps(UID)).toEqual([]);
   });
 
   it('online but older ops cannot reach the server: the new op waits behind them (queued, not run)', async () => {

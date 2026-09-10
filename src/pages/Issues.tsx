@@ -60,7 +60,12 @@ export default function Issues() {
   const { issues, stats, loading, error, refetch } = useIssues();
   // The live list is not react-query backed, so a background replay (OfflineQueueRunner) would
   // otherwise leave a just-synced issue as a stale queued row: every queue mutation refetches.
-  useEffect(() => subscribeQueue(() => { void refetch(); }), [refetch]);
+  // Not while offline, though: the fetch would only fail (and flash the spinner over the queued
+  // rows); the queue itself is the whole picture until the connection is back.
+  useEffect(() => subscribeQueue(() => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+    void refetch();
+  }), [refetch]);
   // Issues reported while offline sit in the queue until they sync; the server does not have
   // them yet, so they are overlaid at the top of the list. Names come from the live list first,
   // then from the persisted My Day tasks cache (the building the caretaker was working in when
@@ -131,37 +136,46 @@ export default function Issues() {
     toast(row.failed ? 'This issue could not sync yet' : 'This issue is waiting to sync');
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold">Issues</h1>
-          <p className="text-muted-foreground">Track and resolve maintenance issues</p>
+  // Guardrail: the error card must never hide a queued issue. A caretaker who reports an issue
+  // offline lands here with the fetch failing; on its own the card replaces the page, but with
+  // queued rows it sits above them and the rows still render. Same for the spinner.
+  const errorCard = error ? (
+    <Card className="border-destructive/50">
+      <CardContent className="flex flex-col items-center justify-center py-12">
+        <div className="h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
+          <AlertTriangle className="h-6 w-6 text-destructive" />
         </div>
-        <Card className="border-destructive/50">
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <div className="h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
-              <AlertTriangle className="h-6 w-6 text-destructive" />
-            </div>
-            <h3 className="text-lg font-semibold mb-2">Failed to load issues</h3>
-            <p className="text-muted-foreground text-center mb-4 max-w-md">
-              {error.message || 'An unexpected error occurred while fetching issues.'}
-            </p>
-            <Button onClick={() => refetch()} variant="outline">
-              Try Again
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
+        <h3 className="text-lg font-semibold mb-2">Failed to load issues</h3>
+        <p className="text-muted-foreground text-center mb-4 max-w-md">
+          {error.message || 'An unexpected error occurred while fetching issues.'}
+        </p>
+        <Button onClick={() => refetch()} variant="outline">
+          Try Again
+        </Button>
+      </CardContent>
+    </Card>
+  ) : null;
+
+  if (pendingIssues.length === 0) {
+    if (loading) {
+      return (
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      );
+    }
+
+    if (error) {
+      return (
+        <div className="space-y-6">
+          <div>
+            <h1 className="text-2xl font-bold">Issues</h1>
+            <p className="text-muted-foreground">Track and resolve maintenance issues</p>
+          </div>
+          {errorCard}
+        </div>
+      );
+    }
   }
 
   return (
@@ -182,61 +196,71 @@ export default function Issues() {
         </Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Open</p>
-                <p className="text-2xl font-bold">{stats.open}</p>
+      {loading && (
+        <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading issues…
+        </p>
+      )}
+      {errorCard}
+
+      {/* Stats: server counts, so not shown while the server list could not be loaded. */}
+      {!error && (
+        <div className="grid gap-4 md:grid-cols-4">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Open</p>
+                  <p className="text-2xl font-bold">{stats.open}</p>
+                </div>
+                <div className="h-10 w-10 rounded-full bg-warning/10 flex items-center justify-center">
+                  <AlertTriangle className="h-5 w-5 text-warning" />
+                </div>
               </div>
-              <div className="h-10 w-10 rounded-full bg-warning/10 flex items-center justify-center">
-                <AlertTriangle className="h-5 w-5 text-warning" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">In Progress</p>
+                  <p className="text-2xl font-bold">{stats.inProgress}</p>
+                </div>
+                <div className="h-10 w-10 rounded-full bg-info/10 flex items-center justify-center">
+                  <Clock className="h-5 w-5 text-info" />
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">In Progress</p>
-                <p className="text-2xl font-bold">{stats.inProgress}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Escalated</p>
+                  <p className="text-2xl font-bold">{stats.escalated}</p>
+                </div>
+                <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center">
+                  <AlertTriangle className="h-5 w-5 text-destructive" />
+                </div>
               </div>
-              <div className="h-10 w-10 rounded-full bg-info/10 flex items-center justify-center">
-                <Clock className="h-5 w-5 text-info" />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Resolved</p>
+                  <p className="text-2xl font-bold">{stats.resolved}</p>
+                </div>
+                <div className="h-10 w-10 rounded-full bg-success/10 flex items-center justify-center">
+                  <AlertTriangle className="h-5 w-5 text-success" />
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Escalated</p>
-                <p className="text-2xl font-bold">{stats.escalated}</p>
-              </div>
-              <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center">
-                <AlertTriangle className="h-5 w-5 text-destructive" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Resolved</p>
-                <p className="text-2xl font-bold">{stats.resolved}</p>
-              </div>
-              <div className="h-10 w-10 rounded-full bg-success/10 flex items-center justify-center">
-                <AlertTriangle className="h-5 w-5 text-success" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-4">

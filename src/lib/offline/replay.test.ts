@@ -15,6 +15,8 @@ const state = vi.hoisted(() => ({
   from: [] as FromCall[],
   /** Per-table result every chain on that table resolves to; default is one row back, no error. */
   results: {} as Record<string, { data: unknown; error: unknown }>,
+  /** `supabase.auth.getSession()`; the handlers refuse to run an op under a different user. */
+  getSession: vi.fn<() => Promise<{ data: { session: { user: { id: string } } | null } }>>(),
 }));
 
 vi.mock('@/integrations/supabase/client', () => {
@@ -33,7 +35,13 @@ vi.mock('@/integrations/supabase/client', () => {
     };
     return c;
   }
-  return { supabase: { from: chain, rpc: (name: string, args: Record<string, unknown>) => state.rpc(name, args) } };
+  return {
+    supabase: {
+      from: chain,
+      rpc: (name: string, args: Record<string, unknown>) => state.rpc(name, args),
+      auth: { getSession: () => state.getSession() },
+    },
+  };
 });
 vi.mock('@/lib/photos', () => ({
   uploadPhotos: vi.fn().mockResolvedValue(['https://x/p.jpg']),
@@ -87,6 +95,8 @@ describe('offline replay', () => {
     state.results = {};
     state.rpc.mockReset();
     state.rpc.mockResolvedValue(ok());
+    state.getSession.mockReset();
+    state.getSession.mockResolvedValue({ data: { session: { user: { id: UID } } } });
     vi.mocked(uploadPhotos).mockClear();
     vi.mocked(notify).mockClear();
     vi.mocked(postIssueComment).mockClear();
@@ -281,6 +291,23 @@ describe('offline replay', () => {
     expect((await listOps(UID))[0]).toMatchObject({ id: op.id, status: 'failed', attempts: 1, lastError: 'permission denied' });
   });
 
+  it('8b. an op whose user is no longer signed in is failed (USER_MISMATCH) before anything reaches the backend', async () => {
+    state.getSession.mockResolvedValue({ data: { session: { user: { id: 'u2' } } } });
+    const op = await enqueue(UID, complete(), [photo()]);
+    expect(await runOne(op)).toEqual({ status: 'failed', error: 'Signed-in user changed while syncing', code: 'USER_MISMATCH' });
+    expect(uploadPhotos).not.toHaveBeenCalled();
+    expect(state.rpc).not.toHaveBeenCalled();
+    expect((await listOps(UID))[0]).toMatchObject({
+      id: op.id, status: 'failed', attempts: 1, lastError: 'Signed-in user changed while syncing',
+    });
+
+    // Signed out entirely is a change of user too.
+    state.getSession.mockResolvedValue({ data: { session: null } });
+    const other = await enqueue(UID, create(null), []);
+    expect(await runOne(other)).toMatchObject({ status: 'failed', code: 'USER_MISMATCH' });
+    expect(state.from).toHaveLength(0);
+  });
+
   it('9. replayAll runs oldest-first, stops at a network failure, skips failed unless asked, and is single-flight', async () => {
     const a = await enqueue(UID, complete('c1', 't1'), []);
     const b = await enqueue(UID, complete('c2', 't2'), []);
@@ -321,6 +348,33 @@ describe('offline replay', () => {
     expect(await retryOp(UID, e.id)).toEqual({ status: 'synced', result: { completion_id: 'c5', already_completed: false } });
     expect(await listOps(UID)).toEqual([]);
     expect(await retryOp(UID, 'gone')).toEqual({ status: 'failed', error: 'This change is no longer queued.' });
+  });
+
+  it('9b. retryOp waits for an in-flight replay of the same user, so the two cannot run one op twice', async () => {
+    const a = await enqueue(UID, complete('c1', 't1'), []);
+    const b = await enqueue(UID, complete('c2', 't2'), []);
+    await updateOp(UID, b.id, { status: 'failed', lastError: 'earlier rejection', attempts: 1 });
+
+    // The replay is parked inside op a's RPC; the user taps Retry on b meanwhile.
+    let releaseA!: () => void;
+    const gate = new Promise<void>((r) => { releaseA = r; });
+    state.rpc.mockImplementation(async (_name, args) => {
+      if (args.p_completion_id === 'c1') await gate;
+      return ok(args.p_completion_id as string);
+    });
+    const replay = replayAll(UID, { retryFailed: true });
+    const retry = retryOp(UID, b.id);
+    // The replay is inside a's RPC; b has not been touched by anyone yet.
+    await vi.waitFor(() => expect(state.rpc).toHaveBeenCalledTimes(1));
+    expect(state.rpc.mock.calls.map(([, args]) => args.p_completion_id)).toEqual(['c1']);
+
+    releaseA();
+    await expect(replay).resolves.toEqual({ blocked: false });
+    // The replay ran b; the retry, queued behind it, found nothing left to run rather than running it again.
+    expect(await retry).toEqual({ status: 'failed', error: 'This change is no longer queued.' });
+    expect(state.rpc.mock.calls.map(([, args]) => args.p_completion_id)).toEqual(['c1', 'c2']);
+    expect(await listOps(UID)).toEqual([]);
+    expect(a.id).not.toBe(b.id);
   });
 
   it('10. stopAt halts before the named op (nothing behind it touched); blocked is true only after a network stop', async () => {

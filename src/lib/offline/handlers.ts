@@ -20,6 +20,14 @@ const isDuplicate = (e: unknown) => (e as { code?: string } | null)?.code === '2
 
 /** Runs one op against the backend. Throws on failure; the caller classifies the error. */
 export async function runOp(op: QueuedOp): Promise<unknown> {
+  // A replay that started under one user must not finish under another: on an implicit user
+  // switch the old user's queue is being cleared, and any op still in flight would otherwise go
+  // out with the new user's JWT. Checked before the photo upload so nothing lands under the wrong
+  // user. Not a network error, so replay.ts marks the op failed rather than retrying it.
+  const sessionUid = (await supabase.auth.getSession()).data.session?.user.id;
+  if (sessionUid !== op.uid) {
+    throw Object.assign(new Error('Signed-in user changed while syncing'), { code: 'USER_MISMATCH' });
+  }
   // Fresh paths every attempt: overwriting an existing object needs the admin-only update policy.
   const photoUrls = op.photos.length
     ? await uploadPhotos(op.photos.map((p) => ({ file: p.file, preview: '' })), { prefix: photoPrefix(op.uid) })

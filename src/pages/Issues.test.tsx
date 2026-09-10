@@ -201,4 +201,53 @@ describe('Issues', () => {
     expect(screen.getByText('Broken gate motor')).toBeInTheDocument();
     expect(screen.queryByText('No issues found')).not.toBeInTheDocument();
   });
+
+  it('shows the queued row together with the error card when the live list cannot be loaded', () => {
+    // Offline after reporting: NewIssue navigates here, the fetch fails, the issue is only in the queue.
+    state.data = baseData({ issues: [], error: new Error('Failed to fetch') });
+    state.queuedOps = [queuedIssueOp()];
+    renderPage();
+    expect(screen.getByText('Failed to load issues')).toBeInTheDocument();
+    expect(screen.getByText('Failed to fetch')).toBeInTheDocument();
+    const queuedCard = screen.getByTestId('queued-issue');
+    expect(within(queuedCard).getByText('Broken gate motor')).toBeInTheDocument();
+    expect(within(queuedCard).getByText('Queued')).toBeInTheDocument();
+    // The card is above the queued row, not instead of it.
+    expect(screen.getByText('Failed to load issues').compareDocumentPosition(queuedCard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('shows the queued row while the live list is still loading', () => {
+    state.data = baseData({ issues: [], loading: true });
+    state.queuedOps = [queuedIssueOp()];
+    renderPage();
+    expect(screen.getByText('Broken gate motor')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading issues');
+  });
+
+  it('still replaces the page with the spinner or the error card when nothing is queued', () => {
+    state.data = baseData({ issues: [], error: new Error('Failed to fetch') });
+    const { unmount } = renderPage();
+    expect(screen.getByText('Failed to load issues')).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('Search issues...')).not.toBeInTheDocument();
+    unmount();
+
+    state.data = baseData({ issues: [], loading: true });
+    renderPage();
+    expect(screen.queryByPlaceholderText('Search issues...')).not.toBeInTheDocument();
+    expect(screen.queryByText('Loading issues')).not.toBeInTheDocument();
+  });
+
+  it('does not refetch on a queue change while offline: the fetch would only fail and flash the spinner', () => {
+    const onLine = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    try {
+      const refetch = vi.fn().mockResolvedValue(undefined);
+      state.data = baseData({ refetch });
+      renderPage();
+      expect(queueListeners.size).toBe(1);
+      act(() => { for (const fn of queueListeners) fn(); });
+      expect(refetch).not.toHaveBeenCalled();
+    } finally {
+      onLine.mockRestore();
+    }
+  });
 });
