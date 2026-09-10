@@ -47,10 +47,12 @@ export default defineConfig(() => ({
         navigateFallback: "/index.html",
         navigateFallbackDenylist: [/^\/api\//, /^\/rest\//, /^\/storage\//, /^\/auth\//],
         runtimeCaching: [],
-        // The main chunk is ~7.4 MB (no route-level code splitting yet), above Workbox's
-        // 2 MiB default. It must be precached or the offline shell is index.html without
-        // its script. Shrinking the bundle is a separate task; lower this when it lands.
-        maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
+        // Routes are code-split (src/App.tsx), so the entry is ~0.8 MB and the largest
+        // chunk is pdfmake's embedded fonts (vfs_fonts, ~1.8 MB). Everything must be
+        // precached or that route is unusable offline, so the limit sits at the smallest
+        // power of two that covers the largest chunk. If a build's biggest chunk grows
+        // past this, Workbox skips it silently: check `precache N entries` in the build log.
+        maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
       },
       devOptions: { enabled: false },
     }),

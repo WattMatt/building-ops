@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -10,31 +11,38 @@ import { OrganizationThemeProvider } from "@/components/OrganizationThemeProvide
 import ProtectedRoute from "@/components/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import RouteFallback from "@/components/RouteFallback";
 
-// Pages
+// Pages. Public/auth pages, the role-shaped home and 404 are small and on the
+// first-paint path, so they stay in the shell chunk. Everything else is loaded on
+// demand: each `lazy()` becomes its own route chunk, which keeps the PWA's first
+// install small and lets heavy vendors (xlsx, pdfmake, mapbox-gl, recharts,
+// heic2any) download only when a page that needs them is opened.
 import Auth from "./pages/Auth";
 import SetPassword from "./pages/SetPassword";
 import ResetPassword from "./pages/ResetPassword";
 import Onboarding from "./pages/Onboarding";
 import RoleHome from "./pages/RoleHome";
-import MyDay from "./pages/MyDay";
-import Buildings from "./pages/Buildings";
-import BuildingForm from "./pages/BuildingForm";
-import BuildingDetails from "./pages/BuildingDetails";
-import Checklists from "./pages/Checklists";
-import Issues from "./pages/Issues";
-import NewIssue from "./pages/NewIssue";
-import MapView from "./pages/MapView";
-import Reports from "./pages/Reports";
-import FortressReportEditor from "./components/reports/fortress/FortressReportEditor";
-import FortressReports from "./pages/FortressReports";
-import FormsLibrary from "./pages/FormsLibrary";
-import MySignoffs from "./pages/MySignoffs";
-import Inbox from "./pages/Inbox";
-import UserManagement from "./pages/UserManagement";
-import Settings from "./pages/Settings";
-import Profile from "./pages/Profile";
 import NotFound from "./pages/NotFound";
+
+// MyDay is lazy because its task/issue dialogs pull PhotoCapture (heic2any).
+const MyDay = lazy(() => import("./pages/MyDay"));
+const Buildings = lazy(() => import("./pages/Buildings"));
+const BuildingForm = lazy(() => import("./pages/BuildingForm"));
+const BuildingDetails = lazy(() => import("./pages/BuildingDetails"));
+const Checklists = lazy(() => import("./pages/Checklists"));
+const Issues = lazy(() => import("./pages/Issues"));
+const NewIssue = lazy(() => import("./pages/NewIssue"));
+const MapView = lazy(() => import("./pages/MapView"));
+const Reports = lazy(() => import("./pages/Reports"));
+const FortressReportEditor = lazy(() => import("./components/reports/fortress/FortressReportEditor"));
+const FortressReports = lazy(() => import("./pages/FortressReports"));
+const FormsLibrary = lazy(() => import("./pages/FormsLibrary"));
+const MySignoffs = lazy(() => import("./pages/MySignoffs"));
+const Inbox = lazy(() => import("./pages/Inbox"));
+const UserManagement = lazy(() => import("./pages/UserManagement"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Profile = lazy(() => import("./pages/Profile"));
 
 const App = () => (
   <ErrorBoundary>
@@ -47,6 +55,7 @@ const App = () => (
           <AuthProvider>
             <HintsProvider>
             <OrganizationThemeProvider>
+            <Suspense fallback={<RouteFallback />}>
             <Routes>
               {/* Public routes (outside ProtectedRoute) */}
               <Route path="/auth" element={<Auth />} />
@@ -157,6 +166,7 @@ const App = () => (
             
             <Route path="*" element={<NotFound />} />
             </Routes>
+            </Suspense>
             </OrganizationThemeProvider>
             </HintsProvider>
           </AuthProvider>
