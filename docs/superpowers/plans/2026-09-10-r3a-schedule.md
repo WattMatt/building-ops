@@ -23,7 +23,7 @@
 - Create: `docs/fixtures/recurrence-occurrences.json`
 - Modify: `scripts/checklist-smoke.mjs`, `scripts/rls-smoke.mjs`
 
-- [ ] **Step 1: Fixture** (the SQL and TS implementations must both reproduce every row; the controller checks SQL on staging):
+- [x] **Step 1: Fixture** (the SQL and TS implementations must both reproduce every row; the controller checks SQL on staging):
 
 ```json
 [
@@ -42,7 +42,7 @@
 
 Semantics: `from`/`to` inclusive. `day`: from `from`, every N days. `week`: weeks are Monday-start; week 0 is the week containing `from`; every N weeks the listed ISO weekdays (1 = Mon … 7 = Sun), dates < `from` dropped. `month`: starting from `from`'s month and scanning month by month, the anchor is the first candidate whose `monthDay` (clamped to the month's last day; `"last"` = last day) is ≥ `from`; then every N months from that anchor, `monthDay` clamped per occurrence month (so every 6 months on the 1st from 2026-09-10 → 2026-10-01, 2027-04-01, 2027-10-01). `year`: starting from `from`'s year and scanning year by year, the anchor is the first candidate whose `month`/`monthDay` (clamped) is ≥ `from`; then every N years from that anchor. `lead` (default 0) is NOT applied by `occurrences` (it shifts visibility, not the due date) — ignore in this task.
 
-- [ ] **Step 2: Migration**
+- [x] **Step 2: Migration**
 
 ```sql
 -- 2026-09-13_01_r3_schedule.sql — R3a "Schedule" (spec §5.1–§5.4). Additive, idempotent.
@@ -276,9 +276,9 @@ commit;
 
 Check the `building_members` body against the committed version in `supabase/schema/2026-09-11_01_r1_mine.sql` before re-creating it — copy it verbatim except the precedence CASE. Confirm the `user_roles` check constraint name in `supabase/schema/2026-08-04_04_enum_check_constraints.sql:63` (adjust `drop constraint` accordingly).
 
-- [ ] **Step 3: Smokes.** `checklist-smoke.mjs`: create a template with `recurrence: { every: 1, unit: 'week', weekdays: [1,3] }` + one item via the service role, insert a `building_role_assignments` row `(building, 'Maintenance', userId)` with the item's `responsible_party = 'Maintenance'`, call `generate_scheduled_tasks` as the admin persona with `{ p_building, p_template, p_horizon_days: 28 }` → assert exactly 8 rows (4 weeks × 2 days, counting only dates ≥ today), all `assigned_to = userId` and `responsible_role = 'Maintenance'`; update the template's recurrence to `weekdays: [1]` and call `reschedule_template` → `deleted` = the pending future rows not completed (7 or 8 depending on today), `generated` = 4-ish; assert the template's `frequency` is `'weekly'` and `version` bumped to 2; cleanup rows. `rls-smoke.mjs`: `building_role_assignments` matrix (select by access: `byAccess('A')`; insert as userA → false, as manager → true); anon cannot execute `recurrence_occurrences`/`reschedule_template`; `user_roles` insert with `'reviewer'` via service role → rejected (assert the error), and the old 3-arg `generate_scheduled_tasks` no longer exists (call with 3 args → 404 or a signature error, assert `!== 200`... careful: PostgREST resolves defaults, so calling with 3 named args still hits the 4-arg function — instead assert the 4-arg call with `p_horizon_days` works for admin).
+- [x] **Step 3: Smokes.** `checklist-smoke.mjs`: create a template with `recurrence: { every: 1, unit: 'week', weekdays: [1,3] }` + one item via the service role, insert a `building_role_assignments` row `(building, 'Maintenance', userId)` with the item's `responsible_party = 'Maintenance'`, call `generate_scheduled_tasks` as the admin persona with `{ p_building, p_template, p_horizon_days: 28 }` → assert exactly 8 rows (4 weeks × 2 days, counting only dates ≥ today), all `assigned_to = userId` and `responsible_role = 'Maintenance'`; update the template's recurrence to `weekdays: [1]` and call `reschedule_template` → `deleted` = the pending future rows not completed (7 or 8 depending on today), `generated` = 4-ish; assert the template's `frequency` is `'weekly'` and `version` bumped to 2; cleanup rows. `rls-smoke.mjs`: `building_role_assignments` matrix (select by access: `byAccess('A')`; insert as userA → false, as manager → true); anon cannot execute `recurrence_occurrences`/`reschedule_template`; `user_roles` insert with `'reviewer'` via service role → rejected (assert the error), and the old 3-arg `generate_scheduled_tasks` no longer exists (call with 3 args → 404 or a signature error, assert `!== 200`... careful: PostgREST resolves defaults, so calling with 3 named args still hits the 4-arg function — instead assert the 4-arg call with `p_horizon_days` works for admin).
 
-- [ ] **Step 4:** `node --check` both; commit GMI `git add sql/2026-09-13_01_r3_schedule.sql && git commit -m "R3a schedule schema: recurrence, horizon generation with assignment, reschedule, reviewer removed"`; vendor; FORTRESS `git add supabase/schema/2026-09-13_01_r3_schedule.sql supabase/schema/.source docs/fixtures/recurrence-occurrences.json scripts/checklist-smoke.mjs scripts/rls-smoke.mjs && git commit -m "R3a: migration (vendored), recurrence fixture, smoke assertions"`.
+- [x] **Step 4:** `node --check` both; commit GMI `git add sql/2026-09-13_01_r3_schedule.sql && git commit -m "R3a schedule schema: recurrence, horizon generation with assignment, reschedule, reviewer removed"`; vendor; FORTRESS `git add supabase/schema/2026-09-13_01_r3_schedule.sql supabase/schema/.source docs/fixtures/recurrence-occurrences.json scripts/checklist-smoke.mjs scripts/rls-smoke.mjs && git commit -m "R3a: migration (vendored), recurrence fixture, smoke assertions"`.
 
 **Controller after Task 1:** apply on staging, run the fixture rows through `recurrence_occurrences` with `supa.mjs query`, run checklist + rls smokes.
 
@@ -288,9 +288,9 @@ Check the `building_members` body against the committed version in `supabase/sch
 
 **Files:** Create `src/lib/recurrence.ts`, `src/lib/recurrence.test.ts`
 
-- [ ] Types: `RecurrenceRule = { every: number; unit: 'day'|'week'|'month'|'year'; weekdays?: number[]; monthDay?: number | 'last'; month?: number; lead?: number }`. Exports: `occurrences(rule, fromIso, toIso): string[]` (same semantics as the SQL; date-only UTC arithmetic like `taskSchedule.ts`; cap 400), `isValidRule(rule): boolean` (mirror of `recurrence_is_valid`), `legacyFrequency(rule): TaskFrequency` (mirror of `legacy_frequency`), `describeRule(rule): string` ("Every day", "Every 2 weeks on Mon, Wed", "Monthly on the 1st", "Every 3 months on the 15th", "Every 6 months on the last day", "Yearly on 1 Jan"), `ruleFromFrequency(freq): RecurrenceRule` (daily→{1,day}; weekly→{1,week,[1]}; monthly→{1,month,1}; quarterly→{3,month,1}; annually→{1,year,1,1}) for editing legacy templates, `nextOccurrences(rule, n, fromIso)` (first n after or on from, scanning up to 3 years).
-- [ ] Tests: every fixture row; `isValidRule` accept/reject cases mirroring the SQL predicate; `legacyFrequency` for the six mappings; `describeRule` strings; `ruleFromFrequency` round-trips through `legacyFrequency`; `nextOccurrences` returns exactly n.
-- [ ] Commit: `git add src/lib/recurrence.ts src/lib/recurrence.test.ts && git commit -m "Recurrence rules: occurrences, validation, legacy bucket, labels (pinned to the SQL fixture)"`
+- [x] Types: `RecurrenceRule = { every: number; unit: 'day'|'week'|'month'|'year'; weekdays?: number[]; monthDay?: number | 'last'; month?: number; lead?: number }`. Exports: `occurrences(rule, fromIso, toIso): string[]` (same semantics as the SQL; date-only UTC arithmetic like `taskSchedule.ts`; cap 400), `isValidRule(rule): boolean` (mirror of `recurrence_is_valid`), `legacyFrequency(rule): TaskFrequency` (mirror of `legacy_frequency`), `describeRule(rule): string` ("Every day", "Every 2 weeks on Mon, Wed", "Monthly on the 1st", "Every 3 months on the 15th", "Every 6 months on the last day", "Yearly on 1 Jan"), `ruleFromFrequency(freq): RecurrenceRule` (daily→{1,day}; weekly→{1,week,[1]}; monthly→{1,month,1}; quarterly→{3,month,1}; annually→{1,year,1,1}) for editing legacy templates, `nextOccurrences(rule, n, fromIso)` (first n after or on from, scanning up to 3 years).
+- [x] Tests: every fixture row; `isValidRule` accept/reject cases mirroring the SQL predicate; `legacyFrequency` for the six mappings; `describeRule` strings; `ruleFromFrequency` round-trips through `legacyFrequency`; `nextOccurrences` returns exactly n.
+- [x] Commit: `git add src/lib/recurrence.ts src/lib/recurrence.test.ts && git commit -m "Recurrence rules: occurrences, validation, legacy bucket, labels (pinned to the SQL fixture)"`
 
 ---
 
@@ -300,10 +300,10 @@ Check the `building_members` body against the committed version in `supabase/sch
 - Create: `src/components/checklists/RecurrenceEditor.tsx` (+ test), `src/components/checklists/TemplateDialog.tsx` (+ test)
 - Modify: `src/pages/Checklists.tsx`
 
-- [ ] `RecurrenceEditor({ value, onChange })`: "Every [N] [day|week|month|year]"; week → weekday chips (Mon…Sun, ≥ 1 required); month/year → "on day [N] / last day" select; year → month select; "Show [N] days before" (lead); a live preview "Next: …" listing `nextOccurrences(rule, 6, today)` via `describeRule`. Invalid state disables Save with a plain-text reason.
-- [ ] `TemplateDialog({ open, template | null, onSaved })` (`ResponsiveDialog`): name, description, recurrence (seeded from `ruleFromFrequency(template.frequency)` when the template has none), responsible role (select: `user`, `manager`, plus the `responsibleParties` list exported from `TemplateItemDialog` — export it), building types (multi-select over `BUILDING_TYPES`, empty = all). Insert/update `checklist_templates` (boundary cast comment for `recurrence`); on update where the rule changed: confirm "Regenerate future tasks? N pending tasks that nobody has touched will be replaced." then `rpc('reschedule_template', { p_template })` and toast the counts. Archive/Restore actions (`archived_at`), never delete.
-- [ ] `Checklists.tsx`: "New template" button (admin/manager) beside "Add Task"; card menu gains Edit, Archive/Restore; an "Archived" toggle shows archived cards dimmed; the frequency badge shows `describeRule(recurrence)` when present, else the legacy label; select `recurrence, archived_at, version` (cast comment). Tests: dialog validation + save payload; page shows the New template button and archived toggle (mock supabase like `MyDay.test.tsx` mocks its hooks).
-- [ ] Commit: `git add src/components/checklists/RecurrenceEditor.tsx src/components/checklists/RecurrenceEditor.test.tsx src/components/checklists/TemplateDialog.tsx src/components/checklists/TemplateDialog.test.tsx src/components/checklists/TemplateItemDialog.tsx src/pages/Checklists.tsx && git commit -m "Templates: create, edit with a recurrence editor, archive; reschedule after a rule change"`
+- [x] `RecurrenceEditor({ value, onChange })`: "Every [N] [day|week|month|year]"; week → weekday chips (Mon…Sun, ≥ 1 required); month/year → "on day [N] / last day" select; year → month select; "Show [N] days before" (lead); a live preview "Next: …" listing `nextOccurrences(rule, 6, today)` via `describeRule`. Invalid state disables Save with a plain-text reason.
+- [x] `TemplateDialog({ open, template | null, onSaved })` (`ResponsiveDialog`): name, description, recurrence (seeded from `ruleFromFrequency(template.frequency)` when the template has none), responsible role (select: `user`, `manager`, plus the `responsibleParties` list exported from `TemplateItemDialog` — export it), building types (multi-select over `BUILDING_TYPES`, empty = all). Insert/update `checklist_templates` (boundary cast comment for `recurrence`); on update where the rule changed: confirm "Regenerate future tasks? N pending tasks that nobody has touched will be replaced." then `rpc('reschedule_template', { p_template })` and toast the counts. Archive/Restore actions (`archived_at`), never delete.
+- [x] `Checklists.tsx`: "New template" button (admin/manager) beside "Add Task"; card menu gains Edit, Archive/Restore; an "Archived" toggle shows archived cards dimmed; the frequency badge shows `describeRule(recurrence)` when present, else the legacy label; select `recurrence, archived_at, version` (cast comment). Tests: dialog validation + save payload; page shows the New template button and archived toggle (mock supabase like `MyDay.test.tsx` mocks its hooks).
+- [x] Commit: `git add src/components/checklists/RecurrenceEditor.tsx src/components/checklists/RecurrenceEditor.test.tsx src/components/checklists/TemplateDialog.tsx src/components/checklists/TemplateDialog.test.tsx src/components/checklists/TemplateItemDialog.tsx src/pages/Checklists.tsx && git commit -m "Templates: create, edit with a recurrence editor, archive; reschedule after a rule change"`
 
 ---
 
@@ -313,10 +313,10 @@ Check the `building_members` body against the committed version in `supabase/sch
 - Create: `src/hooks/useBuildingRoleAssignments.ts` (+ test), `src/components/building/RoleAssignmentsPanel.tsx` (+ test), `src/components/building/UpcomingTasks.tsx` (+ test)
 - Modify: `src/components/building/ChecklistsTab.tsx`
 
-- [ ] Hook: `useBuildingRoleAssignments(buildingId)` → `{ rules: Map<role,userId>, roles: string[] (distinct labels from the building's applicable templates: responsible_party ∪ responsible_role ∪ ['user','manager']), setRule(role, userId|null), applyToPending(): Promise<number> }` — `setRule` upserts/deletes `building_role_assignments` (cast comment); `applyToPending` updates `task_instances set assigned_to` for pending tasks of the building whose `responsible_role` matches and `assigned_to is null`, then one `notify('task_assigned')` per person (title "N tasks assigned to you at <building>", url `/buildings/<id>?tab=checklists`). Query keys `['building-roles', buildingId]`.
-- [ ] `RoleAssignmentsPanel` (admin/manager only): a card "Who does what here" with one row per role label → member picker (`useBuildingMembers`, reuse `AssigneePicker` if it exists — grep `AssigneePicker`), "Apply to existing pending tasks" button with a count. Coaching line via `<Hint>`: "New tasks are assigned automatically from these rules every night."
-- [ ] `UpcomingTasks`: next 30 days grouped by week (Mon–Sun), each row = task name, due date, assignee chip, Complete button (reuses the existing row action from `TasksList` where possible); mobile-first (single column). In `ChecklistsTab`, render `UpcomingTasks` above the frequency tabs on `< sm` and as the first tab "Next 30 days" on desktop; the generate buttons pass `p_horizon_days: 90`.
-- [ ] Commit: `git add src/hooks/useBuildingRoleAssignments.ts src/hooks/useBuildingRoleAssignments.test.ts src/components/building/RoleAssignmentsPanel.tsx src/components/building/RoleAssignmentsPanel.test.tsx src/components/building/UpcomingTasks.tsx src/components/building/UpcomingTasks.test.tsx src/components/building/ChecklistsTab.tsx && git commit -m "Who does what here: per-building role assignments feed generation; next-30-days view"`
+- [x] Hook: `useBuildingRoleAssignments(buildingId)` → `{ rules: Map<role,userId>, roles: string[] (distinct labels from the building's applicable templates: responsible_party ∪ responsible_role ∪ ['user','manager']), setRule(role, userId|null), applyToPending(): Promise<number> }` — `setRule` upserts/deletes `building_role_assignments` (cast comment); `applyToPending` updates `task_instances set assigned_to` for pending tasks of the building whose `responsible_role` matches and `assigned_to is null`, then one `notify('task_assigned')` per person (title "N tasks assigned to you at <building>", url `/buildings/<id>?tab=checklists`). Query keys `['building-roles', buildingId]`.
+- [x] `RoleAssignmentsPanel` (admin/manager only): a card "Who does what here" with one row per role label → member picker (`useBuildingMembers`, reuse `AssigneePicker` if it exists — grep `AssigneePicker`), "Apply to existing pending tasks" button with a count. Coaching line via `<Hint>`: "New tasks are assigned automatically from these rules every night."
+- [x] `UpcomingTasks`: next 30 days grouped by week (Mon–Sun), each row = task name, due date, assignee chip, Complete button (reuses the existing row action from `TasksList` where possible); mobile-first (single column). In `ChecklistsTab`, render `UpcomingTasks` above the frequency tabs on `< sm` and as the first tab "Next 30 days" on desktop; the generate buttons pass `p_horizon_days: 90`.
+- [x] Commit: `git add src/hooks/useBuildingRoleAssignments.ts src/hooks/useBuildingRoleAssignments.test.ts src/components/building/RoleAssignmentsPanel.tsx src/components/building/RoleAssignmentsPanel.test.tsx src/components/building/UpcomingTasks.tsx src/components/building/UpcomingTasks.test.tsx src/components/building/ChecklistsTab.tsx && git commit -m "Who does what here: per-building role assignments feed generation; next-30-days view"`
 
 ---
 
@@ -324,8 +324,8 @@ Check the `building_members` body against the committed version in `supabase/sch
 
 **Files:** `src/lib/constants.ts`, `src/contexts/AuthContext.tsx`, `src/components/layout/DashboardLayout.tsx`, `src/pages/UserManagement.tsx`, `src/pages/Onboarding.tsx`, `src/components/reports/fortress/FortressReportEditor.tsx`, `supabase/functions/invite-user/index.ts`, `supabase/functions/set-user-role/index.ts`, `docs/superpowers/specs/2026-09-10-r1-mine-design.md` (one-line note), any test asserting the role list.
 
-- [ ] Remove `'reviewer'` from `AppRole`, `ROLE_PRECEDENCE`, labels/colours/options (`constants.ts:12,16,97,105,138`), `AuthContext.tsx:14`, `DashboardLayout.tsx:68`, `UserManagement.tsx:91,98,507,696`, `Onboarding.tsx:33`; `FortressReportEditor.tsx:35,245-247`: drop `isReviewer` (the `submitted → reviewed` action stays for admin/manager); both edge functions' `VALID_ROLES`. Grep `reviewer` across `src/` and `supabase/functions/` afterwards — only the word in the sentence at `FortressReportEditor.tsx:326` ("Ask the reviewer…" = the person who reviewed) may remain. Tests: update any snapshot/list; add a type-level test that `AppRole` has exactly three members.
-- [ ] Commit: `git add <files> && git commit -m "Remove the reviewer role: no holders, no server-side power"`
+- [x] Remove `'reviewer'` from `AppRole`, `ROLE_PRECEDENCE`, labels/colours/options (`constants.ts:12,16,97,105,138`), `AuthContext.tsx:14`, `DashboardLayout.tsx:68`, `UserManagement.tsx:91,98,507,696`, `Onboarding.tsx:33`; `FortressReportEditor.tsx:35,245-247`: drop `isReviewer` (the `submitted → reviewed` action stays for admin/manager); both edge functions' `VALID_ROLES`. Grep `reviewer` across `src/` and `supabase/functions/` afterwards — only the word in the sentence at `FortressReportEditor.tsx:326` ("Ask the reviewer…" = the person who reviewed) may remain. Tests: update any snapshot/list; add a type-level test that `AppRole` has exactly three members.
+- [x] Commit: `git add <files> && git commit -m "Remove the reviewer role: no holders, no server-side power"`
 
 ---
 
@@ -333,13 +333,44 @@ Check the `building_members` body against the committed version in `supabase/sch
 
 **Files:** `supabase/functions/notify-expiring-alerts/index.ts`, `scripts/notifications-smoke.mjs`
 
-- [ ] After computing `expiringDocuments`, `expiredDocuments`, `overdueMaintenance`, and BEFORE the email: for each document → `createNotifications(supabase, { recipients: adminAndManagerIds, actorId: null, actorName: null, kind: 'document_expiring', entityType: 'document', entityId: doc.id, buildingId: doc.building_id, title: `${doc.name} expires ${dateLabel}` (or "expired N days ago"), body: doc.document_type, url: `/buildings/${doc.building_id}?tab=documents` })`; for each asset → kind `asset_service_due`, entityType `asset`, url `…?tab=assets`. Idempotent per entity per day: skip when a `notifications` row with that `kind`+`entity_id` exists with `created_at >= today 00:00 +02:00`. Import `createNotifications`, `adminAndManagerIds` from `../_shared/notify.ts` (they exist). Both kinds are `DIGEST_ONLY` so `createNotifications` sends no email; the function's own summary email stays. Return counts `{ …, inboxRows }`. Keep `dryRun` semantics (no inbox rows on dry run).
-- [ ] Smoke: `notifications-smoke.mjs` gains a step guarded by `process.env.EXPIRING_ALERTS_SECRET` (skip with a `SKIP` line when unset): insert a `building_documents` row expiring in 3 days for a ZZTEST building, POST the function with `x-alerts-secret`, assert one `document_expiring` inbox row for the admin persona with the right `entity_id`, call again → still one row; cleanup.
-- [ ] Commit: `git add supabase/functions/notify-expiring-alerts/index.ts scripts/notifications-smoke.mjs && git commit -m "Expiring documents and overdue asset services land in the inbox"`
+- [x] After computing `expiringDocuments`, `expiredDocuments`, `overdueMaintenance`, and BEFORE the email: for each document → `createNotifications(supabase, { recipients: adminAndManagerIds, actorId: null, actorName: null, kind: 'document_expiring', entityType: 'document', entityId: doc.id, buildingId: doc.building_id, title: `${doc.name} expires ${dateLabel}` (or "expired N days ago"), body: doc.document_type, url: `/buildings/${doc.building_id}?tab=documents` })`; for each asset → kind `asset_service_due`, entityType `asset`, url `…?tab=assets`. Idempotent per entity per day: skip when a `notifications` row with that `kind`+`entity_id` exists with `created_at >= today 00:00 +02:00`. Import `createNotifications`, `adminAndManagerIds` from `../_shared/notify.ts` (they exist). Both kinds are `DIGEST_ONLY` so `createNotifications` sends no email; the function's own summary email stays. Return counts `{ …, inboxRows }`. Keep `dryRun` semantics (no inbox rows on dry run).
+- [x] Smoke: `notifications-smoke.mjs` gains a step guarded by `process.env.EXPIRING_ALERTS_SECRET` (skip with a `SKIP` line when unset): insert a `building_documents` row expiring in 3 days for a ZZTEST building, POST the function with `x-alerts-secret`, assert one `document_expiring` inbox row for the admin persona with the right `entity_id`, call again → still one row; cleanup.
+- [x] Commit: `git add supabase/functions/notify-expiring-alerts/index.ts scripts/notifications-smoke.mjs && git commit -m "Expiring documents and overdue asset services land in the inbox"`
 
 ---
 
 ### Task 7 (controller): apply, verify, regenerate, record
 
-- [ ] Staging: apply, fixture check via SQL, set `EXPIRING_ALERTS_SECRET` on staging (it is missing) and register nothing new (the cron exists on prod only — leave as is), deploy `notify-expiring-alerts`, run `npm run smoke` + `smoke:notifications` (with the secret in env) + `smoke:offline`.
-- [ ] Prod: apply (the reviewer guard passes: 0 rows), deploy the function, `rls-smoke`; regenerate types; drop the casts; tsc ≤ baseline; Status section; `APPLY_CHECKLIST.md` R3a; push; PR body.
+- [x] Staging: apply, fixture check via SQL, set `EXPIRING_ALERTS_SECRET` on staging (it is missing) and register nothing new (the cron exists on prod only — leave as is), deploy `notify-expiring-alerts`, run `npm run smoke` + `smoke:notifications` (with the secret in env) + `smoke:offline`.
+- [x] Prod: apply (the reviewer guard passes: 0 rows), deploy the function, `rls-smoke`; regenerate types; drop the casts; tsc ≤ baseline; Status section; `APPLY_CHECKLIST.md` R3a; push; PR body.
+
+---
+
+## Status (2026-09-10)
+
+**DONE and LIVE on staging and prod.** Commits `143cb2d..bfc1780` on `feat/reports-access-hardening` (PR #3);
+canonical SQL GMI `3936792`, `8cd0ee8`, `baff1ad`. Gates: typecheck 55 (= baseline, ratcheted from 56), 809 tests,
+build green; staging full battery green; prod `rls-smoke` 463/0. Apply record: `docs/plans/APPLY_CHECKLIST.md` → R3a.
+
+Task → commit: 1 migration + smokes `33fad14` (+ `04c7d50`, `89c384b`); 2 recurrence library `d23cc7c`
+(+ `0873469`, `2e053a0`, `04c7d50`); 3 template admin `8bd804b` (+ `4f889d9`); 4 role assignments + horizon `5debb42`
+(+ `4f889d9`); 5 reviewer removal `143cb2d` (+ `b3cbcc0`); 6 alerts inbox rows `ca7e3ed` (+ `6b4fa86`, `b3cbcc0`);
+CI fix `a681863`; types regen + casts `bfc1780`.
+
+Deviations worth knowing:
+- Month/year rules anchor on the first occurrence on or after the start date, then step every N (a 6-monthly rule made
+  on 10 Sep → 1 Oct, 1 Apr, 1 Oct), not on the start month; the fixture, SQL and TS all pin this.
+- `generate_scheduled_tasks` takes `(p_building, p_template, p_frequency, p_horizon_days)`; the role label is
+  `coalesce(nullif(item.responsible_party,''), nullif(template.responsible_role,''), 'user')` in SQL and the hook alike.
+- The reschedule confirm counts the pending future tasks it will replace and opens after the sheet has closed on phones.
+- Archived templates cannot be applied or generated and drop out of "Who does what here".
+- `templateAppliesToBuilding([])` is false (matches SQL `= any('{}')`).
+- `notify-expiring-alerts` constructs the Resend client lazily (staging has no key) and writes inbox rows regardless of
+  `notifyAdmins`, skipping only on `dryRun`.
+- CI: Supabase env stubbed in `src/test/setup.ts`; Node 22; the `File`-through-IndexedDB test is skipped where Node's
+  structured clone drops the name (Node 20/22).
+
+Follow-ups: `useIssues`-style pages still don't use the horizon; the digest email lists expiring documents AND the
+inbox now carries them (fine, no double email); `reschedule_template` re-ids replaced rows (notification `entity_id`s
+may dangle); a global `pointerCapture` shim in `src/test/setup.ts` would dedupe four tests; `TaskFrequency` is still
+declared in two places (`constants.ts`, `TasksList.tsx`).

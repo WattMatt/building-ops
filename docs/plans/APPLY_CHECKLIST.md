@@ -167,3 +167,39 @@ VAPID secret disables push and logs, it no longer breaks the senders.
   toggle push off and on again.
 - Push cannot be smoke-tested end to end without a browser; the first real device is the owner's phone: Profile →
   "Push notifications on this device", then assign yourself a task from another account.
+
+## R3a "Schedule" (2026-09-10)
+
+Spec `docs/superpowers/specs/2026-09-10-r3-plan-design.md` §5.1–§5.4, §6; plan `docs/superpowers/plans/2026-09-10-r3a-schedule.md`.
+
+### Migration
+
+`2026-09-13_01_r3_schedule.sql` (GMI `baff1ad`) — `checklist_templates.recurrence/archived_at/updated_at/version` + validator
+`recurrence_is_valid` + trigger deriving the legacy `frequency`; `recurrence_occurrences`; `building_role_assignments`
++ RLS; `generate_scheduled_tasks(p_building, p_template, p_frequency, p_horizon_days)` (old 3-arg signature dropped;
+per-unit caps 14/90/365; `assigned_to` from the building's role rule); `reschedule_template`; reviewer role removed from
+the `user_roles` check and `building_members` precedence (guarded: raises if any reviewer row exists); cron
+`task-generation-daily` now `generate_scheduled_tasks(null, null, null, 90)`. Idempotent; applied three times on staging
+as the validator was tightened.
+
+### Staging — DONE 2026-09-10
+
+- [x] The one `reviewer` account (`qa-reviewer@zztest.local`, a QA persona) was moved to `user`, then applied (201).
+- [x] Fixture rows verified through `recurrence_occurrences`; empty/non-array `weekdays` rejected.
+- [x] `EXPIRING_ALERTS_SECRET` set on staging (was missing); `notify-expiring-alerts` deployed.
+- [x] Full battery green: RLS 463/0, checklist 34/0 (horizon, assignment, reschedule, version bump), notifications 34/0
+      (incl. `document_expiring` inbox rows, idempotent), offline 21/0, rest unchanged.
+
+### Production — DONE 2026-09-10
+
+- [x] 0 reviewer rows; applied (201); PostgREST reloaded; five functions present, one `generate_scheduled_tasks`
+      overload, cron string verified, `user_roles_role_check` = admin/manager/user; `rls-smoke` 463/0.
+- [x] `notify-expiring-alerts` deployed (prod already had `EXPIRING_ALERTS_SECRET`).
+- [x] Types regenerated; boundary casts dropped.
+
+### Notes
+
+- Legacy templates (`recurrence null`) keep generating one occurrence per period; the 90-day horizon only applies once a
+  template is saved through the new dialog (which writes a rule). Dailies are capped at 14 days ahead.
+- Rotating a template's rule replaces only untouched future occurrences (pending, no completion, assigned per the rule).
+- CI runs on Node 22 now and stubs the Supabase env for tests; the branch's CI is green.
