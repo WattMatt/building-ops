@@ -1,10 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type KeyboardEvent, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, FileText, Wrench, ArrowRight, CheckCircle, ClipboardList } from 'lucide-react';
+import { AlertTriangle, AlertCircle, FileText, Wrench, ArrowRight, CheckCircle, ClipboardList, ListChecks } from 'lucide-react';
 import { format, differenceInDays, isPast, isSameDay, subDays } from 'date-fns';
+import { cn } from '@/lib/utils';
+import { todayInOperatingTz } from '@/lib/myWork';
 
 interface OverviewWidgetsProps {
   buildingId: string;
@@ -58,7 +62,202 @@ const ASSET_CATEGORY_LABELS: Record<string, string> = {
   other: 'Other',
 };
 
+/* ---------------------------------------------------------------------------
+ * Compact "what needs me now" widgets. Spec §5.3: on a phone the overview reads
+ * score (chips in the page header), today's tasks, open issues, contacts, then the
+ * rest — so these two render first and the DOM order is the phone order.
+ * ------------------------------------------------------------------------- */
+
+interface TaskCounts {
+  /** Open tasks (pending/overdue) due on or before today. */
+  due: number;
+  /** The subset of `due` whose due_date is before today — same rule as My Day's bucketTasks. */
+  overdue: number;
+}
+
+interface IssueCounts {
+  /** Issues not yet resolved. */
+  open: number;
+  /** The subset of `open` with priority high or critical. */
+  urgent: number;
+}
+
+const OPEN_TASK_STATUSES = ['pending', 'overdue'];
+const URGENT_ISSUE_PRIORITIES = ['high', 'critical'];
+
+async function fetchTaskCounts(buildingId: string): Promise<TaskCounts> {
+  const today = todayInOperatingTz();
+  const [{ count: due, error: dueError }, { count: overdue, error: overdueError }] = await Promise.all([
+    supabase
+      .from('task_instances')
+      .select('id', { count: 'exact', head: true })
+      .eq('building_id', buildingId)
+      .in('status', OPEN_TASK_STATUSES)
+      .lte('due_date', today),
+    supabase
+      .from('task_instances')
+      .select('id', { count: 'exact', head: true })
+      .eq('building_id', buildingId)
+      .in('status', OPEN_TASK_STATUSES)
+      .lt('due_date', today),
+  ]);
+  if (dueError) throw new Error(dueError.message);
+  if (overdueError) throw new Error(overdueError.message);
+  return { due: due ?? 0, overdue: overdue ?? 0 };
+}
+
+async function fetchIssueCounts(buildingId: string): Promise<IssueCounts> {
+  const [{ count: open, error: openError }, { count: urgent, error: urgentError }] = await Promise.all([
+    supabase
+      .from('issues')
+      .select('id', { count: 'exact', head: true })
+      .eq('building_id', buildingId)
+      .neq('status', 'resolved'),
+    supabase
+      .from('issues')
+      .select('id', { count: 'exact', head: true })
+      .eq('building_id', buildingId)
+      .neq('status', 'resolved')
+      .in('priority', URGENT_ISSUE_PRIORITIES),
+  ]);
+  if (openError) throw new Error(openError.message);
+  if (urgentError) throw new Error(urgentError.message);
+  return { open: open ?? 0, urgent: urgent ?? 0 };
+}
+
+interface CompactWidgetProps {
+  icon: ReactNode;
+  title: string;
+  /** Whole card is the tap target (>= 44px), keyboard operable via Enter / Space. */
+  onActivate: () => void;
+  isLoading: boolean;
+  isError: boolean;
+  /** Draws the destructive border, mirroring the alert widgets below. */
+  attention: boolean;
+  children: ReactNode;
+}
+
+function CompactWidget({ icon, title, onActivate, isLoading, isError, attention, children }: CompactWidgetProps) {
+  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onActivate();
+    }
+  };
+
+  return (
+    <Card
+      role="button"
+      tabIndex={0}
+      aria-busy={isLoading}
+      onClick={onActivate}
+      onKeyDown={handleKeyDown}
+      className={cn(
+        'min-h-11 cursor-pointer select-none transition-colors hover:bg-muted/50',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+        attention && 'border-destructive',
+      )}
+    >
+      <CardHeader className="p-4 pb-1">
+        <CardTitle className="text-sm font-medium flex items-center gap-2 text-muted-foreground">
+          {icon}
+          {title}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-4 pt-1">
+        {isLoading ? (
+          <div className="h-6 w-24 animate-pulse rounded bg-muted" aria-hidden="true" />
+        ) : isError ? (
+          // Guardrail, not a hint: a failed count must never read as "nothing due".
+          <p className="text-sm text-destructive">Couldn't load</p>
+        ) : (
+          children
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function TodayTasksWidget({ buildingId, onTabChange }: OverviewWidgetsProps) {
+  const { data, isPending, isError } = useQuery({
+    queryKey: ['building-overview', 'tasks', buildingId],
+    queryFn: () => fetchTaskCounts(buildingId),
+    staleTime: 60_000,
+  });
+  const due = data?.due ?? 0;
+  const overdue = data?.overdue ?? 0;
+
+  return (
+    <CompactWidget
+      icon={<ListChecks className="h-4 w-4" aria-hidden="true" />}
+      title="Today's tasks"
+      onActivate={() => onTabChange?.('checklists')}
+      isLoading={isPending}
+      isError={isError}
+      attention={overdue > 0}
+    >
+      {due === 0 ? (
+        <p className="text-sm text-muted-foreground">Nothing due today</p>
+      ) : (
+        <p className="text-lg font-semibold leading-tight">
+          {due} due
+          {overdue > 0 && <span className="text-destructive"> · {overdue} overdue</span>}
+        </p>
+      )}
+    </CompactWidget>
+  );
+}
+
+function OpenIssuesWidget({ buildingId }: OverviewWidgetsProps) {
+  const navigate = useNavigate();
+  const { data, isPending, isError } = useQuery({
+    queryKey: ['building-overview', 'issues', buildingId],
+    queryFn: () => fetchIssueCounts(buildingId),
+    staleTime: 60_000,
+  });
+  const open = data?.open ?? 0;
+  const urgent = data?.urgent ?? 0;
+
+  return (
+    <CompactWidget
+      icon={<AlertCircle className="h-4 w-4" aria-hidden="true" />}
+      title="Open issues"
+      // Building Details has no issues tab and /issues does not read a ?building= param
+      // yet, so the best we can do is land on the issues list.
+      onActivate={() => navigate('/issues')}
+      isLoading={isPending}
+      isError={isError}
+      attention={urgent > 0}
+    >
+      {open === 0 ? (
+        <p className="text-sm text-muted-foreground">No open issues</p>
+      ) : (
+        <p className="text-lg font-semibold leading-tight">
+          {open} open
+          {urgent > 0 && <span className="text-destructive"> · {urgent} high priority</span>}
+        </p>
+      )}
+    </CompactWidget>
+  );
+}
+
 export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWidgetsProps) {
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4">
+        <TodayTasksWidget buildingId={buildingId} onTabChange={onTabChange} />
+        <OpenIssuesWidget buildingId={buildingId} onTabChange={onTabChange} />
+      </div>
+      <AlertWidgets buildingId={buildingId} onTabChange={onTabChange} />
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * Document / maintenance / form alert widgets (the "rest" in spec §5.3).
+ * ------------------------------------------------------------------------- */
+
+function AlertWidgets({ buildingId, onTabChange }: OverviewWidgetsProps) {
   const [expiringDocs, setExpiringDocs] = useState<ExpiringDocument[]>([]);
   const [expiredDocs, setExpiredDocs] = useState<ExpiringDocument[]>([]);
   const [overdueAssets, setOverdueAssets] = useState<OverdueAsset[]>([]);

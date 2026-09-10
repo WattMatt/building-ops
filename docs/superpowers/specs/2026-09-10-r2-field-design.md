@@ -156,7 +156,7 @@ $$;
 
 ### 5.3 Mobile-first pass
 
-- `BuildingDetails.tsx`: the ten-tab `TabsList` becomes a horizontally scrollable segmented control on `< md` (CSS only, `overflow-x-auto`, snap, active tab scrolled into view on change), with the overview reordered for phone: score, today's tasks, open issues, contacts, then the rest.
+- `BuildingDetails.tsx`: the ten-tab `TabsList` becomes a horizontally scrollable segmented control on `< sm` (640 px, the app's phone breakpoint for layout; `useIsMobile` stays at 768 for behaviour) (CSS only, `overflow-x-auto`, snap, active tab scrolled into view on change), with the overview reordered for phone: score, today's tasks, open issues, contacts, then the rest.
 - My Day: single column, task rows are 56px tap targets, primary action ("Complete") is a full-width button in a bottom sheet (`Drawer` from vaul, already a dependency via shadcn) rather than a centred dialog on mobile. `CompleteTaskDialog`, `NewIssue`, `IssueDetailDialog` render inside `Drawer` on mobile and `Dialog` on desktop via one `ResponsiveDialog` wrapper.
 - `PhotoCapture` drops its two copies of UA sniffing (`photo-capture.tsx:118-132`, `:517-529`) for `useIsMobile()`.
 - Review checklist gains "renders at 375px without horizontal scroll" and each touched screen gets a vitest render at a mobile `matchMedia` (override the stub in `src/test/setup.ts:21-33`).

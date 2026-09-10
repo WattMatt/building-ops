@@ -119,6 +119,8 @@ describe('BuildingDetails on a phone', () => {
     expect(active).not.toBeNull();
     expect(active).toHaveTextContent('Docs');
 
+    // Not just "something scrolled": the receiver (`this`) must be the active trigger.
     expect(scrollIntoView).toHaveBeenCalled();
+    expect(scrollIntoView.mock.contexts[0]).toBe(active);
   });
 });

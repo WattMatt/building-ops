@@ -225,17 +225,18 @@ export default function BuildingDetails() {
         </TabsList>
 
         <TabsContent value="overview" className="mt-6">
-          {/* Phone-first order: alert widgets, then contacts (score chips live in the
-              header). A flex column with gap-6 renders the same as the old block stack
-              on desktop, so the order-* classes only need resetting at sm. */}
+          {/* Phone-first order (spec §5.3): score chips live in the header;
+              OverviewWidgets leads with today's tasks and open issues, then the
+              alert widgets; contacts follow. That is plain DOM order — nothing is
+              reordered per breakpoint. */}
           <div className="flex flex-col gap-6">
-            {/* Alert Widgets */}
-            <div className="order-1 sm:order-none">
-              <OverviewWidgets buildingId={building.id} onTabChange={setActiveTab} />
+            {/* Overview Widgets */}
+            <div>
+              <OverviewWidgets buildingId={building.id} onTabChange={handleTabChange} />
             </div>
 
             {/* Contacts Grid */}
-            <div className="order-2 sm:order-none grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
             {/* Asset Manager */}
             <Card>
               <CardHeader className="pb-3">
