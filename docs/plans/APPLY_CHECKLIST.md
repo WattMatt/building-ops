@@ -361,3 +361,52 @@ Spec `docs/superpowers/specs/2026-09-10-r4-insight-design.md` §5.7–5.9; plan 
 - Confirm the mail provider key is set on the project before switching `report_schedules` on. See the plan's
   follow-ups: a run with no provider currently records the send as successful and cannot be repeated.
 - **Flag `tenant_intake`** belongs to R4c.
+
+## R4c "Intake & Forms" (2026-09-11)
+
+Spec `docs/superpowers/specs/2026-09-10-r4-insight-design.md` §5.10–5.11; plan `docs/superpowers/plans/2026-09-10-r4c-intake-forms.md`.
+
+### Migration
+
+- `2026-09-14_03_r4_intake_forms.sql` (GMI `7a1bdda`) — additive, idempotent, one transaction. `intake_tokens`;
+  `intake_rate` plus `intake_rate_hit` and `intake_touch` (service-role only, both `anon` and `authenticated`
+  revoked); `issues.source`, `reporter` and `reference` with the `issues_intake_guard` trigger and a partial unique
+  index on the reference; `form_templates` seeded with the fourteen templates whose ids `form_submissions` already
+  holds, plus the version-bump trigger; `form_submissions.template_version` and `fields_snapshot`; a read policy for
+  the intake storage prefix and no insert policy, since only the service role writes there; and the notification
+  kind check restated as the union of every R4 kind plus `issue_reported`.
+
+### Staging — DONE 2026-09-11
+
+- [x] Applied twice (idempotent), PostgREST reloaded; fourteen templates seeded and active.
+- [x] `tenant-intake` deployed and answering 404 to an unknown token; `INTAKE_IP_SALT` set.
+- [x] `rls-smoke` 737/0; `smoke:intake` 31/0; teardown clean, no fixtures left.
+
+### Production — DONE 2026-09-11
+
+- [x] Applied, PostgREST reloaded; fourteen templates seeded and active.
+- [x] `tenant-intake` deployed and answering 404 to an unknown token; `INTAKE_IP_SALT` set.
+- [x] `rls-smoke` 737/0. `organizations.settings` is `{}`, so `tenant_intake` is OFF and the endpoint 404s for every
+      token until the owner switches it on.
+- [ ] After the first real report: confirm the assignee got the push and that the photo opens from the issue.
+
+### Owner items
+
+- **Flag `tenant_intake`.** Turning it on makes the public intake route live for every building that has an active
+  token, and reveals the intake card on Building → Tenants. With it off the endpoint answers 404 to every token, so
+  the flag is a kill switch, not a hide.
+- **Mint the tokens and print the sheets first.** Nothing is exposed until a building has a link. The link inside
+  the QR code is a bearer credential: anyone holding it can file a report in that building, and it is meant to be
+  displayed in public, so treat it as posted rather than secret. Rotating stops every printed code, so reprint the
+  same day. Disabling stops that building's intake entirely.
+- **Decide per centre whether the shop list may carry names.** The endpoint behind the token lists that building's
+  shop numbers so a tenant can identify themselves; names are opt-in.
+- **Triage.** A report arrives as an issue with a Tenant chip, the reporter's details and a reference the tenant was
+  told to quote. It is assigned to the building's issue-rule holder, so set those assignments before switching the
+  flag on or reports land unassigned. Every admin and manager is notified; only the assignee is pushed. There is no
+  de-duplication, so ten tenants reporting one broken light create ten issues.
+- **Rate limits are deliberate and visible to tenants**: a per-building hourly cap and a smaller per-device cap. A
+  centre on shared wi-fi will reach the device cap sooner than expected.
+- **Settings → Forms (admin).** The fourteen forms are rows now, not code: deactivate one to hide it, edit its
+  fields, reorder it. Editing bumps the version, and submissions already filled keep their own field list and print
+  unchanged. There is no "create new template" yet.
