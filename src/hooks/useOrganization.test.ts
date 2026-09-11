@@ -32,7 +32,7 @@ const stub = vi.hoisted(() => {
     channels: [] as FakeChannel[],
     bindings: [] as Binding[],
   };
-  const removeChannel = vi.fn(async (_channel: unknown) => 'ok');
+  const removeChannel = vi.fn(async () => 'ok');
   const channel = vi.fn((name: string) => {
     const chan: FakeChannel = {
       topic: `realtime:${name}`,

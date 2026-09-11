@@ -3,17 +3,29 @@ import { render, renderHook, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
+interface FakeChannel { on: () => FakeChannel; subscribe: () => FakeChannel }
+
 const state = vi.hoisted(() => {
-  const channelObj: any = { on: () => channelObj, subscribe: () => channelObj };
+  const channelObj: FakeChannel = { on: () => channelObj, subscribe: () => channelObj };
   return {
     rows: [] as Record<string, unknown>[],
     updates: [] as Record<string, unknown>[],
     channel: vi.fn(() => channelObj),
-    removeChannel: vi.fn(),
+    // The registry awaits the leave before it will reopen the key, so this must be thenable.
+    removeChannel: vi.fn(async () => 'ok'),
   };
 });
+interface FakeQuery {
+  select: () => FakeQuery;
+  eq: () => FakeQuery;
+  order: () => FakeQuery;
+  limit: () => Promise<{ data: Record<string, unknown>[]; error: null }>;
+  is: () => Promise<{ count: number; error: null }>;
+  update: (patch: Record<string, unknown>) => { eq: () => { is: () => Promise<{ error: null }> } };
+}
+
 vi.mock('@/integrations/supabase/client', () => {
-  const chain: any = {
+  const chain: FakeQuery = {
     select: () => chain, eq: () => chain, order: () => chain,
     limit: () => Promise.resolve({ data: state.rows, error: null }),
     // The row query ends at .limit(); the head-only unread count ends at .is('read_at', null).
@@ -65,7 +77,8 @@ describe('useNotificationsRealtime', () => {
   // bell and the inbox page each asked for the topic `notifications-<uid>`. Supabase hands back
   // the SAME channel for a repeated topic, so the extra callers only appended bindings to an
   // already-joined channel — which errors it — and the first one to unmount removed the channel
-  // out from under the rest. Exactly one owner now opens and removes it.
+  // out from under the rest. The subscription now goes through the ref-counted registry, which
+  // owns the channel for however many callers there are.
   it('opens one channel for many consumers and only removes it when its owner unmounts', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const shared = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children);
@@ -86,5 +99,22 @@ describe('useNotificationsRealtime', () => {
     expect(state.removeChannel).toHaveBeenCalledTimes(1);
 
     consumerB.unmount();
+  });
+
+  it('two owners still share one channel, removed only when the last releases', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const shared = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children);
+    const Owner = () => { useNotificationsRealtime(); return null; };
+
+    const first = render(createElement(Owner), { wrapper: shared });
+    const second = render(createElement(Owner), { wrapper: shared });
+
+    await waitFor(() => expect(state.channel).toHaveBeenCalledTimes(1));
+
+    first.unmount();
+    expect(state.removeChannel).not.toHaveBeenCalled();
+
+    second.unmount();
+    expect(state.removeChannel).toHaveBeenCalledTimes(1);
   });
 });
