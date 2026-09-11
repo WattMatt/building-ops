@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Download, Printer, FileText, Maximize2, Minimize2, FileDown, Loader2, Camera } from 'lucide-react';
+import { downloadBlob } from '@/lib/exportCsv';
 import { FormField } from '@/lib/formFields';
 import { generateFormPdf } from '@/lib/pdfGenerator';
 import { useOrganization } from '@/hooks/useOrganization';
@@ -62,14 +63,7 @@ export function FormPreviewDialog({ form, open, onOpenChange }: FormPreviewDialo
   const handleDownloadHtml = () => {
     const formHtml = generateFormHtml(form, fields);
     const blob = new Blob([formHtml], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${form.name.replace(/\s+/g, '_')}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${form.name.replace(/\s+/g, '_')}.html`);
   };
 
   const generateFormHtml = (form: FormTemplate, fields: FormField[]) => {

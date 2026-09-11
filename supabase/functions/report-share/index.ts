@@ -1,5 +1,5 @@
 // report-share — public share links for issued report PDFs (spec §5.8).
-// GET ?t=   → metadata; POST {t, passcode?} → 10-minute signed URL; POST {action:'create'} (JWT) → new link.
+// GET ?t=   → metadata; POST {t, passcode?} → 60-second signed URL; POST {action:'create'} (JWT) → new link.
 // No user JWT on the public paths (verify_jwt = false): the token IS the credential. Rows are read with
 // the service role. Every public failure that could reveal whether a token exists answers the same 404;
 // the only other public status is 429 while a passcode lockout is running. The function never generates
@@ -12,7 +12,12 @@ import { callerId, canAccessBuilding, isAdminOrManager, type Admin } from "../_s
 import { EXPIRY_DAYS_ALLOWED, PASSCODE_MAX, PASSCODE_MIN, TOKEN_RE, passcodeHash } from "../_shared/distribution.ts";
 
 const SHARE_SALT = Deno.env.get("SHARE_SALT") ?? "";
-const SIGNED_URL_TTL = 600;
+/**
+ * Seconds a signed storage URL stays valid after an open. Revocation cannot reach a URL that was
+ * already handed out, so this window IS the tail on every revoke: 60 seconds is all the viewer needs
+ * (the page fetches the PDF immediately) and it is the shortest honest answer the copy can give.
+ */
+const SIGNED_URL_TTL = 60;
 const MAX_FAILURES = 10;
 const LOCK_MINUTES = 15;
 const BUCKET = "generated-reports";

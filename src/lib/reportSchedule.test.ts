@@ -66,7 +66,13 @@ describe('toResultRows', () => {
     expect(rows[0].when).toBe('7 Oct, 07:30');
     // No name for the id: the row falls back to the id itself, never to a blank cell.
     expect(rows[1].building).toBe('gone');
+    // No recipient count given, and nothing was attempted: the bare number, as the pre-R4b rows read.
     expect(rows[1].recipients).toBe('0');
+
+    // With the schedule's count, a recorded skip reads exactly as the live run dialog labels it.
+    expect(toResultRows(recorded, { b1: 'Alpha' }, TZ, 2)[1].recipients).toBe('0 of 2');
+    // A delivered-of-attempted row is never overwritten by the fallback.
+    expect(toResultRows(recorded, { b1: 'Alpha' }, TZ, 5)[0].recipients).toBe('1 of 2');
   });
 
   it('names a building that was deleted after the run', () => {

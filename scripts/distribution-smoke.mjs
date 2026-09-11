@@ -4,13 +4,17 @@
  * (both functions deployed; REPORT_DISTRIBUTION_SECRET and SHARE_SALT set; 2026-09-14_01 + _02 applied).
  *
  *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... SUPABASE_ANON_KEY=... REPORT_DISTRIBUTION_SECRET=... \
- *   node scripts/distribution-smoke.mjs
+ *   DISTRIBUTION_ALLOW_NO_MAILER=true node scripts/distribution-smoke.mjs
+ *
+ * DISTRIBUTION_ALLOW_NO_MAILER must also be set as a secret ON THE TARGET PROJECT (staging does,
+ * production must not): without it a run that delivers nothing records `failed`, and the send half of
+ * this smoke is written against `sent`.
  *
  * Proves: schedule -> run-now dry run lists the target building with skipped_not_approved (draft report) and
  * writes nothing; approved report without artifact -> skipped_no_artifact + report_export_needed inbox row for
  * the author; approved report with an artifact -> a dry run answers would_send and still writes nothing (no
  * share, no distribution row), then the real run writes a report_distributions 'sent' row and a
- * report_shares row (expires ~30 days, no passcode), emails counted (0 when RESEND_API_KEY is absent);
+ * report_shares row (expires ~30 days, no passcode), emails counted (0 when the project has no mail provider);
  * a manual run writes last_result but never last_run_on, so the same day a second run-now is 'already_sent'
  * (the per-report sent row), the first cron run is 'already_sent' too and stamps last_run_on, and only the cron
  * run after that is 'already_ran'; reminders: a schedule whose reminder date is today raises one
@@ -36,6 +40,21 @@ const ANON = process.env.SUPABASE_ANON_KEY;
 const CRON_SECRET = process.env.REPORT_DISTRIBUTION_SECRET;
 if (!URL_BASE || !SERVICE || !ANON || !CRON_SECRET) {
   console.error('Set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY and REPORT_DISTRIBUTION_SECRET');
+  process.exit(2);
+}
+
+// A run that delivers nothing records `failed`, INCLUDING a project with no mail provider: the `sent`
+// row claims the once-only guard permanently, so recording an unsent report as sent would make that
+// report undistributable forever. `DISTRIBUTION_ALLOW_NO_MAILER` is the one explicit opt-out, and the
+// send half of this smoke (sent row, share row, already_sent guards) is written against `sent` — so the
+// target project must have that secret set, and this run must be told the same thing.
+// Staging: `supabase secrets set DISTRIBUTION_ALLOW_NO_MAILER=true`. Production never sets it.
+if (process.env.DISTRIBUTION_ALLOW_NO_MAILER !== 'true') {
+  console.error(
+    'Set DISTRIBUTION_ALLOW_NO_MAILER=true, and set the same secret on the target project.\n' +
+    'Without it a run that delivers nothing (no RESEND_API_KEY on the project) records `failed`, ' +
+    'and every send assertion below expects `sent`.'
+  );
   process.exit(2);
 }
 
@@ -311,12 +330,14 @@ try {
 
     const r = await runNow(admin.jwt, { scheduleId: schedule.id, dryRun: false });
     const b = forA(entryFor(r, schedule.id), A);
-    assert('with artifact: real run answers sent with a shareId and a "<delivered> of 2" label', r.status === 200 && b?.status === 'sent' && typeof b?.shareId === 'string' && /^\d+ of 2$/.test(b?.recipients ?? '') && r.body?.counts?.sent === 1 && r.body?.counts?.would_send === 0, `HTTP ${r.status} ${JSON.stringify(b)} ${JSON.stringify(r.body?.counts)}`);
+    // `sent` here means either a real delivery or the explicit no-mailer allowance checked at startup —
+    // never "nothing was delivered and we called it sent anyway".
+    assert('with artifact: real run answers sent with a shareId and a "<delivered> of 2" label', r.status === 200 && b?.status === 'sent' && typeof b?.shareId === 'string' && /^\d+ of 2$/.test(b?.recipients ?? '') && r.body?.counts?.sent === 1 && r.body?.counts?.would_send === 0, `HTTP ${r.status} ${JSON.stringify(b)} ${JSON.stringify(r.body?.counts)} — a 'failed' here means DISTRIBUTION_ALLOW_NO_MAILER is not set on the project`);
     const dist = await svcSelect('report_distributions', `schedule_id=eq.${schedule.id}&status=eq.sent&select=report_id,artifact_id,share_id,sent_to,error`);
     assert('with artifact: one sent distribution row pinned to the artifact and share', dist.length === 1 && dist[0].report_id === report.id && dist[0].artifact_id === artifact.id && dist[0].share_id === b?.shareId && dist[0].error === null, JSON.stringify(dist));
     const sentTo = Array.isArray(dist[0]?.sent_to) ? dist[0].sent_to : [];
     assert('with artifact: sent_to lists both recipients with the internal one resolved to an address and an ok flag each', sentTo.length === 2 && sentTo.every((x) => typeof x.ok === 'boolean') && sentTo.some((x) => x.email === external) && sentTo.some((x) => x.user_id === admin.id && x.email === admin.email), JSON.stringify(sentTo));
-    console.log(`  NOTE  emails delivered: ${sentTo.filter((x) => x.ok).length} of ${sentTo.length} (0 when RESEND_API_KEY is absent on the project)`);
+    console.log(`  NOTE  emails delivered: ${sentTo.filter((x) => x.ok).length} of ${sentTo.length} (0 when the project has no mail provider; the row still reads 'sent' only because DISTRIBUTION_ALLOW_NO_MAILER is set)`);
     const shares = await svcSelect('report_shares', `report_id=eq.${report.id}&select=id,artifact_id,token,created_by,created_at,expires_at,passcode_hash,view_count,last_viewed_at,revoked_at,failed_attempts,locked_until`);
     share = shares[0] ?? null;
     const days = share ? (Date.parse(share.expires_at) - Date.parse(share.created_at)) / 86_400_000 : NaN;
@@ -383,7 +404,7 @@ try {
     assert('share GET: 200 JSON', g.status === 200 && g.body !== null, `HTTP ${g.status} ${g.text.slice(0, 120)}`);
     assert('share GET: metadata (building, title, type, period, approved, needsPasscode false)', g.body?.building === `ZZTEST-DIST-A-${RUN}` && g.body?.title === `ZZTEST-DIST ops ${RUN}` && g.body?.type === REPORT_TYPE && g.body?.period === period && g.body?.reportStatus === 'approved' && g.body?.needsPasscode === false && typeof g.body?.issuedAt === 'string' && g.body?.expiresAt === share.expires_at, JSON.stringify(g.body));
     const o = await shareOpen(share.token);
-    assert('share POST: 200 with a signed url, fileName and expiresInSeconds 600', o.status === 200 && typeof o.body?.url === 'string' && o.body?.fileName === `ZZTEST-DIST-${RUN}.pdf` && o.body?.expiresInSeconds === 600, `HTTP ${o.status} ${o.text.slice(0, 160)}`);
+    assert('share POST: 200 with a signed url, fileName and expiresInSeconds 60', o.status === 200 && typeof o.body?.url === 'string' && o.body?.fileName === `ZZTEST-DIST-${RUN}.pdf` && o.body?.expiresInSeconds === 60, `HTTP ${o.status} ${o.text.slice(0, 160)}`);
     if (o.body?.url) {
       const pdf = await fetch(o.body.url);
       const bytes = Buffer.from(await pdf.arrayBuffer());

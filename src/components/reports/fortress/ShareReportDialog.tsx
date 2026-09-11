@@ -254,7 +254,9 @@ export function ShareReportDialog({ reportId, artifacts, initialArtifactId, open
                           and a two-step confirm that cannot be backed out of is a trap. */}
                       {confirmRevoke === s.id ? (
                         <div className="flex flex-wrap items-center gap-2" role="status">
-                          <span className="text-sm">Revoke this link? It stops working immediately.</span>
+                          {/* Honest about the tail: a signed storage URL already handed out lives its
+                              own 60 seconds out (report-share SIGNED_URL_TTL) and revocation cannot recall it. */}
+                          <span className="text-sm">Revoke this link? It stops working immediately for anyone who has not already opened it.</span>
                           <Button
                             variant="destructive"
                             size="sm"

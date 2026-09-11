@@ -62,8 +62,20 @@ function whenLabel(iso: string, timeZone: string): string {
   return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone });
 }
 
-/** One row shape for a run's per-building result and a recorded `report_distributions` row. */
-export function toResultRows(rows: RunRow[] | Distribution[], buildingNames: Record<string, string>, timeZone: string): ResultRow[] {
+/**
+ * One row shape for a run's per-building result and a recorded `report_distributions` row.
+ *
+ * `recipientCount` is the schedule's configured recipient count. A row that never reached the sending
+ * loop (every skip, and a failure before it) stores an empty `sent_to`, and the live run dialog labels
+ * exactly those "0 of 2" — so history reads it the same way instead of a bare "0". The edge function's
+ * own `recipientsLabel` is the rule being mirrored: no recipients configured at all is plain "0".
+ */
+export function toResultRows(
+  rows: RunRow[] | Distribution[],
+  buildingNames: Record<string, string>,
+  timeZone: string,
+  recipientCount = 0,
+): ResultRow[] {
   return (rows as (RunRow | Distribution)[]).map((r, i) => {
     if (isDistribution(r)) {
       const ok = r.sent_to.filter((s) => s.ok).length;
@@ -71,7 +83,7 @@ export function toResultRows(rows: RunRow[] | Distribution[], buildingNames: Rec
         key: r.id,
         building: (r.building_id && buildingNames[r.building_id]) || r.building_id || 'Building removed',
         status: r.status,
-        recipients: r.sent_to.length ? `${ok} of ${r.sent_to.length}` : '0',
+        recipients: r.sent_to.length ? `${ok} of ${r.sent_to.length}` : recipientCount ? `0 of ${recipientCount}` : '0',
         when: whenLabel(r.sent_at, timeZone),
         error: r.error,
       };

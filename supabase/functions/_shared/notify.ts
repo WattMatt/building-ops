@@ -36,7 +36,9 @@ export async function sendEmail(from: string, to: string[], subject: string, htm
     body: JSON.stringify({ from, to, subject, html }),
     signal: AbortSignal.timeout(10_000),
   });
-  if (!res.ok) throw new Error(`Resend API error: ${await res.text()}`);
+  // The status ONLY: the provider's 4xx bodies routinely echo the offending address, and callers log
+  // this message (see report-distribution), which this module promises never carries an email address.
+  if (!res.ok) throw new Error(`Resend API error ${res.status}`);
   return true;
 }
 

@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { downloadBlob } from '@/lib/exportCsv';
 import {
   createArtifactSignedUrl,
   listReportArtifacts,
@@ -76,14 +77,7 @@ export function SavedReportsCard() {
         toast.error('Download failed: the stored file is empty.');
         return;
       }
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = artifact.file_name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+      downloadBlob(blob, artifact.file_name);
     } catch (e) {
       if (import.meta.env.DEV) console.error('Artifact download failed:', e);
       toast.error('Download failed.');

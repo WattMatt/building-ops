@@ -13,6 +13,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { downloadBlob } from '@/lib/exportCsv';
 import { listReportArtifactsForSource, createArtifactSignedUrl, type ReportArtifactRow } from '@/lib/reportArtifacts';
 
 const fmtSize = (bytes: number) =>
@@ -57,14 +58,9 @@ export function ReportSavedVersions({ reportId, onShare }: ReportSavedVersionsPr
         toast.error(`Could not download this version (${res.status}).`);
         return;
       }
-      const objectUrl = URL.createObjectURL(await res.blob());
-      const link = document.createElement('a');
-      link.href = objectUrl;
-      link.download = a.file_name;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(objectUrl);
+      // The shared helper, not a local copy: it defers the revoke, which the copy here did not —
+      // a synchronous revoke can beat a browser that starts the download asynchronously.
+      downloadBlob(await res.blob(), a.file_name);
     } catch (e) {
       if (import.meta.env.DEV) console.error('Artifact download failed:', e);
       toast.error('Could not download this version.');

@@ -148,12 +148,21 @@ describe('ReportDistributionCard', () => {
     expect(screen.getByText('2 skipped: not approved')).toBeInTheDocument();
   });
 
-  it('a paused schedule cannot be run: both run buttons are disabled', () => {
+  it('a paused schedule cannot send, but can still be previewed', () => {
+    // A new schedule is created paused, so previewing it is the ONLY way to check it before the cron
+    // is let loose. A dry run writes nothing and emails nobody; only "Send now" is gated on active.
     state.schedules = [{ ...SCHEDULE, is_active: false }];
     render(<ReportDistributionCard />);
     expect(screen.getByText('Paused')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Preview run' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Preview run' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Send now' })).toBeDisabled();
+  });
+
+  it('a schedule with no recipients cannot send: the button is disabled and the confirm refuses', () => {
+    state.schedules = [{ ...SCHEDULE, recipients: [] }];
+    render(<ReportDistributionCard />);
+    expect(screen.getByRole('button', { name: 'Send now' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Preview run' })).toBeEnabled();
   });
 
   it('the Active switch updates is_active only', async () => {

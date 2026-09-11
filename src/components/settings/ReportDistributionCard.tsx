@@ -42,7 +42,9 @@ import { ScheduleDialog } from '@/components/settings/ScheduleDialog';
 
 interface RunOutcome { title: string; dryRun: boolean; counts: Record<string, number>; rows: LastResult['buildings'] }
 
-const PAUSED_HINT = 'This schedule is paused. Switch it on to run it.';
+const PAUSED_HINT = 'This schedule is paused. Switch it on to send.';
+/** A send with nobody to send to still mints a share link and records a failed row — so it is refused. */
+const NO_RECIPIENTS_HINT = 'Add at least one recipient before sending.';
 /**
  * A centred 44 × 44 px pointer overlay on a control that is drawn smaller (the switch is 24 px tall).
  * It changes the hit area only — never the layout or the look. `ScheduleDialog` does the same for its
@@ -73,7 +75,7 @@ function HistoryDialog({ schedule, onClose }: { schedule: ReportSchedule; onClos
         </ResponsiveDialogHeader>
         {isLoading && <p className="text-sm text-muted-foreground" role="status">Loading…</p>}
         {isError && <p className="text-sm text-destructive">History could not be loaded.</p>}
-        {data && <DistributionResults rows={data} title="Sends" buildingNames={byId} />}
+        {data && <DistributionResults rows={data} title="Sends" buildingNames={byId} recipientCount={schedule.recipients.length} />}
       </ResponsiveDialogContent>
     </ResponsiveDialog>
   );
@@ -142,7 +144,10 @@ export function ReportDistributionCard() {
         {isLoading && <p className="text-sm text-muted-foreground" role="status">Loading schedules…</p>}
         {isError && <p className="text-sm text-destructive">Schedules could not be loaded</p>}
         {!isLoading && !isError && schedules.length === 0 && (
-          <p className="text-sm text-muted-foreground">No schedules yet. Approved reports are only emailed through a schedule.</p>
+          <p className="text-sm text-muted-foreground">
+            No schedules yet. Approved reports are only emailed through a schedule, and a new schedule starts paused until it has been
+            previewed.
+          </p>
         )}
 
         {schedules.length > 0 && (
@@ -181,14 +186,15 @@ export function ReportDistributionCard() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button variant="outline" size="sm" className="min-h-11" onClick={() => setEditing(s)}>Edit</Button>
-                    {/* A paused schedule sends nothing on the cron, so neither run button may force one. */}
+                    {/* Preview stays available while paused ON PURPOSE: a new schedule is created paused,
+                        and a dry run is how you check it before switching the cron loose. It writes
+                        nothing and emails nobody. Only "Send now" is gated on active. */}
                     <Button
                       variant="outline"
                       size="sm"
                       className="min-h-11"
                       onClick={() => void run(s, true)}
-                      disabled={isRunning || !s.is_active}
-                      title={s.is_active ? undefined : PAUSED_HINT}
+                      disabled={isRunning}
                     >
                       {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}
                       Preview run
@@ -198,8 +204,8 @@ export function ReportDistributionCard() {
                       size="sm"
                       className="min-h-11"
                       onClick={() => setSendTarget(s)}
-                      disabled={isRunning || !s.is_active}
-                      title={s.is_active ? undefined : PAUSED_HINT}
+                      disabled={isRunning || !s.is_active || s.recipients.length === 0}
+                      title={!s.is_active ? PAUSED_HINT : s.recipients.length === 0 ? NO_RECIPIENTS_HINT : undefined}
                     >
                       Send now
                     </Button>
@@ -250,22 +256,27 @@ export function ReportDistributionCard() {
           <AlertDialogHeader>
             <AlertDialogTitle>Send now?</AlertDialogTitle>
             <AlertDialogDescription>
-              {sendTarget && (
+              {sendTarget && (sendTarget.recipients.length === 0 ? (
+                NO_RECIPIENTS_HINT + ' A send with no recipients still mints a share link and records a failed send.'
+              ) : (
                 <>
                   This emails the share links for {periodLabel(previousMonthStart(today))} to {sendTarget.recipients.length} recipient
                   {sendTarget.recipients.length === 1 ? '' : 's'} now. Reports already sent by this schedule are not re-sent.
                 </>
-              )}
+              ))}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="min-h-11">Cancel</AlertDialogCancel>
+            {/* The confirm is guarded too, not just the button that opens it: a send with nobody to send
+                to mints a share link and records a failed row for nothing. */}
             <AlertDialogAction
               className="min-h-11"
+              disabled={(sendTarget?.recipients.length ?? 0) === 0}
               onClick={() => {
                 const s = sendTarget;
                 setSendTarget(null);
-                if (s) void run(s, false);
+                if (s && s.recipients.length > 0) void run(s, false);
               }}
             >
               Send now

@@ -27,6 +27,15 @@ import {
 } from "../_shared/distribution.ts";
 
 const SECRET = Deno.env.get("REPORT_DISTRIBUTION_SECRET");
+/**
+ * Staging only, and opt-in by name: a run that delivered nothing because the project has no mail
+ * provider still records `sent`, so the smoke can exercise the whole send path. Production must never
+ * set it — the `sent` row claims the once-only guard (`report_distributions_sent_once`) permanently,
+ * so recording an unsent report as sent would make that report undistributable forever. Without this
+ * secret a missing or rotated-out RESEND_API_KEY records `failed`, which releases the guard and lets
+ * the next run try again.
+ */
+const ALLOW_NO_MAILER = Deno.env.get("DISTRIBUTION_ALLOW_NO_MAILER") === "true";
 const PERIOD_RE = /^\d{4}-\d{2}-01$/;
 /** Every building read is capped so a runaway table cannot turn one run into a full scan. */
 const BUILDING_CAP = 500;
@@ -343,14 +352,19 @@ async function runSchedule(
           sentTo.push({ ...rcpt, email, ok: false });
         }
       }
-      // Without RESEND_API_KEY (staging) nothing can be delivered; the run still counts as sent so
-      // the share row and the distribution record exist for the smoke test.
-      const status = delivered > 0 || !Deno.env.get("RESEND_API_KEY") ? "sent" : "failed";
+      // Nothing delivered is a FAILED send, including when there is no mail provider at all: the
+      // `sent` row above already claimed the once-only guard, and only `failed` releases it. The
+      // no-provider allowance is explicit and staging-only (see ALLOW_NO_MAILER).
+      const noMailer = !Deno.env.get("RESEND_API_KEY");
+      const status = delivered > 0 || (ALLOW_NO_MAILER && noMailer) ? "sent" : "failed";
       if (status === "sent") counts.sent++;
       else counts.failed++;
+      // The card shows this, so a no-provider run says so rather than blaming the recipients.
+      const failure = noMailer ? "no mail provider configured" : "no recipient accepted";
+      if (status === "failed") console.error("report-distribution: nothing delivered", { noMailer, recipients: recipients.length });
       await admin
         .from("report_distributions")
-        .update({ status, sent_to: sentTo, error: status === "failed" ? "no recipient accepted" : null })
+        .update({ status, sent_to: sentTo, error: status === "failed" ? failure : null })
         .eq("id", record.id);
       results.push({ ...base, status, shareId: share.id, recipients: recipientsLabel(delivered, recipients.length) });
     } catch (e) {

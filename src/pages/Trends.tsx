@@ -4,16 +4,16 @@
  */
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Download } from 'lucide-react';
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { usePortfolioTrend } from '@/hooks/usePortfolioTrend';
 import { useBuildingsTrends } from '@/hooks/useBuildingTrend';
 import { useBuildingNames } from '@/hooks/useBuildingNames';
 import { deltaLeaderboard, reconstructionBoundary } from '@/lib/trendSeries';
 import { num, type PortfolioRow } from '@/lib/snapshotClient';
-import { exportCsv } from '@/lib/exportCsv';
+import type { CsvColumn } from '@/lib/exportCsv';
 import { formatBuildingName } from '@/lib/buildingName';
 import { Button } from '@/components/ui/button';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Hint } from '@/components/ui/hint';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -21,6 +21,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 
 const RANGES = [30, 90, 365] as const;
 type Range = (typeof RANGES)[number];
+
+/** Every snapshot column, in the order the page reads them; the button dates the filename itself. */
+const TREND_CSV_COLUMNS: CsvColumn<PortfolioRow>[] = [
+  { key: 'day', header: 'Day' }, { key: 'buildings', header: 'Buildings' }, { key: 'compliance_avg', header: 'Compliance avg %' },
+  { key: 'critical_avg', header: 'Critical avg %' }, { key: 'task_completion_avg', header: 'Task completion avg %' },
+  { key: 'tasks_overdue', header: 'Overdue tasks' }, { key: 'issues_open', header: 'Open issues' }, { key: 'issues_breached', header: 'SLA breached' },
+  { key: 'docs_expiring_30', header: 'Docs expiring 30d' }, { key: 'docs_expiring_60', header: 'Docs expiring 60d' }, { key: 'docs_expiring_90', header: 'Docs expiring 90d' },
+  { key: 'docs_expired', header: 'Docs expired' }, { key: 'assets_overdue', header: 'Assets overdue' },
+];
 
 /** A chart plots the sum of `keys` per day: one column for most, building + contractor documents for expiry. */
 interface ChartSpec { id: string; keys: (keyof PortfolioRow)[]; title: string; pct?: boolean }
@@ -82,14 +91,6 @@ export default function Trends() {
   const up = board.filter((b) => b.delta > 0).slice(0, 5);
   const down = board.filter((b) => b.delta < 0).slice(-5).reverse();
 
-  const onExport = () => exportCsv(rows, [
-    { key: 'day', header: 'Day' }, { key: 'buildings', header: 'Buildings' }, { key: 'compliance_avg', header: 'Compliance avg %' },
-    { key: 'critical_avg', header: 'Critical avg %' }, { key: 'task_completion_avg', header: 'Task completion avg %' },
-    { key: 'tasks_overdue', header: 'Overdue tasks' }, { key: 'issues_open', header: 'Open issues' }, { key: 'issues_breached', header: 'SLA breached' },
-    { key: 'docs_expiring_30', header: 'Docs expiring 30d' }, { key: 'docs_expiring_60', header: 'Docs expiring 60d' }, { key: 'docs_expiring_90', header: 'Docs expiring 90d' },
-    { key: 'docs_expired', header: 'Docs expired' }, { key: 'assets_overdue', header: 'Assets overdue' },
-  ], `portfolio-trend-${range}d.csv`);
-
   return (
     <div className="space-y-6 p-4 sm:p-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -103,7 +104,7 @@ export default function Trends() {
               <Button key={r} variant={r === range ? 'default' : 'outline'} className="h-11 min-w-16" onClick={() => setRange(r)} aria-pressed={r === range}>{r} days</Button>
             ))}
           </div>
-          <Button variant="outline" className="h-11" onClick={onExport} disabled={!rows.length}><Download className="mr-2 h-4 w-4" />CSV</Button>
+          <ExportCsvButton rows={rows} columns={TREND_CSV_COLUMNS} filename={`portfolio-trend-${range}d`} label="CSV" className="h-11" size="default" />
         </div>
       </div>
       <Hint>Sparklines on each building header show the same series for that building; this page is the whole portfolio.</Hint>

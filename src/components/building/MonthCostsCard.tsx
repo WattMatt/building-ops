@@ -8,14 +8,14 @@
  */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, Download, Wallet } from 'lucide-react';
+import { ChevronDown, Wallet } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import type { Tables } from '@/integrations/supabase/types';
 import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
 import { cn } from '@/lib/utils';
 import { todayInOperatingTz } from '@/lib/myWork';
-import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
+import type { CsvColumn } from '@/lib/exportCsv';
 import { formatRand } from '@/lib/money';
 
 export { formatRand };
@@ -190,15 +190,13 @@ export default function MonthCostsCard({ buildingId }: MonthCostsCardProps) {
                   ))}
                 </tbody>
               </table>
-              <Button
-                type="button"
-                variant="outline"
+              <ExportCsvButton
+                rows={history.data}
+                columns={CSV_COLUMNS}
+                filename={`building-costs-${month}`}
                 className="mt-3 min-h-11 w-full sm:w-auto"
-                onClick={() => exportCsv(history.data, CSV_COLUMNS, `building-costs-${month}.csv`)}
-              >
-                <Download className="mr-2 h-4 w-4" aria-hidden="true" />
-                Export CSV
-              </Button>
+                size="default"
+              />
             </>
           )}
         </CardContent>

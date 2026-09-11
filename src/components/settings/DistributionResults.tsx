@@ -14,6 +14,11 @@ interface DistributionResultsProps {
   title: string;
   /** building id → name, for history rows (which carry only the id). */
   buildingNames?: Record<string, string>;
+  /**
+   * The schedule's configured recipient count. A recorded row with an empty `sent_to` then reads
+   * "0 of 2" exactly as the live run dialog labels the same skipped building.
+   */
+  recipientCount?: number;
 }
 
 function statusClass(status: string): string {
@@ -33,8 +38,8 @@ export function StatusChip({ status }: { status: string }) {
   );
 }
 
-export function DistributionResults({ rows, title, buildingNames }: DistributionResultsProps) {
-  const list = toResultRows(rows, buildingNames ?? {}, OPERATING_TZ);
+export function DistributionResults({ rows, title, buildingNames, recipientCount }: DistributionResultsProps) {
+  const list = toResultRows(rows, buildingNames ?? {}, OPERATING_TZ, recipientCount);
   return (
     <section aria-label={title} className="space-y-2">
       <h3 className="text-sm font-medium">{title}</h3>

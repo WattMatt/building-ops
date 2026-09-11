@@ -64,7 +64,9 @@ export function ScheduleDialog({ open, onOpenChange, schedule, onSubmit }: Sched
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [sendDay, setSendDay] = useState('7');
   const [remindDays, setRemindDays] = useState('3');
-  const [isActive, setIsActive] = useState(true);
+  // A NEW schedule is born paused: the cron is the path that actually emails, and nothing else forces
+  // a preview before it does. Editing keeps whatever the schedule already is.
+  const [isActive, setIsActive] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -76,7 +78,7 @@ export function ScheduleDialog({ open, onOpenChange, schedule, onSubmit }: Sched
     setRecipients(schedule?.recipients ?? []);
     setSendDay(String(schedule?.send_day ?? settings.report_due_day));
     setRemindDays(String(schedule?.remind_days_before ?? 3));
-    setIsActive(schedule?.is_active ?? true);
+    setIsActive(schedule ? schedule.is_active : false);
   }, [open, schedule, settings.report_due_day]);
 
   // `buildings.report_types` (R4a) is NOT NULL with the two monthly types as its default, so every
@@ -240,9 +242,17 @@ export function ScheduleDialog({ open, onOpenChange, schedule, onSubmit }: Sched
             </div>
           )}
 
-          <div className="flex min-h-11 items-center justify-between gap-3">
-            <Label htmlFor="schedule-active">Active</Label>
-            <Switch id="schedule-active" checked={isActive} onCheckedChange={setIsActive} />
+          <div className="space-y-2">
+            <div className="flex min-h-11 items-center justify-between gap-3">
+              <Label htmlFor="schedule-active">Active</Label>
+              <Switch id="schedule-active" checked={isActive} onCheckedChange={setIsActive} />
+            </div>
+            {/* Why the switch is off, not coaching: this is the state of the control in front of them. */}
+            {!schedule && !isActive && (
+              <p className="text-xs text-muted-foreground">
+                A new schedule starts paused. Preview a run first, then switch it on — the cron sends for real.
+              </p>
+            )}
           </div>
 
           <Hint>

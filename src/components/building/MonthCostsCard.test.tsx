@@ -148,6 +148,8 @@ describe('MonthCostsCard', () => {
     expect(rows[0]).toMatchObject({ month: m0, total: 150 });
     expect(rows[2]).toMatchObject({ issues_actual: 0, services_cost: 0, total: 0 });
     expect(columns.map((c: { header: string }) => c.header)).toEqual(['Month', 'Issues (R)', 'Services (R)', 'Total (R)']);
-    expect(filename).toBe(`building-costs-${month}.csv`);
+    // Through the shared ExportCsvButton now, so the filename carries the export date like every
+    // other surface: `building-costs-2026-09_2026-09-11.csv`.
+    expect(filename).toBe(`building-costs-${month}_${todayInOperatingTz()}.csv`);
   });
 });

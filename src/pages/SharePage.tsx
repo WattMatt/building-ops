@@ -1,7 +1,7 @@
 /**
  * Public share page (spec §5.8): /share/:token. No session. Branding from the anon-readable
  * organization_branding view; report metadata from report-share GET; the PDF opens through a
- * 10-minute signed URL from report-share POST. The PDF itself carries DRAFT unless approved.
+ * 60-second signed URL from report-share POST. The PDF itself carries DRAFT unless approved.
  *
  * The token is the credential, so nothing on this page may reveal more than the function already
  * returns: every refusal (unknown, revoked, expired, wrong passcode) comes back as the same 404 and
