@@ -313,3 +313,51 @@ Spec `docs/superpowers/specs/2026-09-10-r4-insight-design.md` §5.1–5.6; plan 
 - Feature flags `share_links`, `report_schedules`, `tenant_intake` stay off until R4b/R4c land.
 - Archive or delete superseded expired documents: an expired document stays in the alert email and resurfaces in the inbox
   every seventh day.
+
+## R4b "Distribute & Share" (2026-09-11)
+
+Spec `docs/superpowers/specs/2026-09-10-r4-insight-design.md` §5.7–5.9; plan `docs/superpowers/plans/2026-09-10-r4b-distribute-share.md`.
+
+### Migration
+
+- `2026-09-14_02_r4_distribute.sql` (GMI `99bf1b4`) — additive, idempotent, one transaction plus a cron block.
+  `report_schedules`, `report_shares` (column-privileged SELECT: `passcode_hash`, `failed_attempts` and
+  `locked_until` revoked, with a generated `has_passcode` granted in their place), `report_distributions` plus the
+  `sent_once` partial unique index, kinds `report_due_soon` and `report_export_needed`, and an index for the
+  reminder dedupe. The `<PROJECT_REF>` and `<REPORT_DISTRIBUTION_SECRET>` placeholders are substituted at apply
+  time and never committed.
+
+### Staging — DONE 2026-09-11
+
+- [x] Applied twice (idempotent), PostgREST reloaded; `report-distribution` and `report-share` deployed.
+- [x] Secrets `REPORT_DISTRIBUTION_SECRET` and `SHARE_SALT` set.
+- [x] `rls-smoke` 737/0; `smoke:distribution` 73/0; `smoke:intake` 31/0; all teardowns clean, no fixtures left.
+
+### Production — DONE 2026-09-11
+
+- [x] Applied, PostgREST reloaded, cron registered with the placeholders substituted.
+- [x] `report-distribution` and `report-share` deployed; both answer 404 to an unknown token.
+- [x] Secrets set. `rls-smoke` 737/0. `organizations.settings` is `{}`, so every flag is OFF.
+- [ ] The morning after the first send day, check `cron.job_run_details` for `report-distribution-daily`.
+
+### Ships live on this deploy, NOT behind a flag
+
+- Approving a report now renders and stores the final unwatermarked PDF automatically. A failure is non-fatal: the
+  approval still stands and the toast says to use Export PDF.
+- Evidence packs on issues, completed tasks and assets, for any signed-in viewer who can already see the subject,
+  and CSV export on twelve grids, registers and lists.
+
+### Owner items
+
+- **Flag `share_links`.** Turning it on reveals Share in the report editor and makes the public link route live. A
+  share link is a bearer credential: anyone holding the URL opens the PDF with no sign-in. Set a passcode for
+  external recipients. Revocation is one-way and stops every new open, though a PDF opened in the previous ten
+  minutes stays open until its signed URL expires. Switching the flag off is a kill switch, not a hide: every
+  existing link answers 404.
+- **Flag `report_schedules`.** Turning it on reveals the distribution screen AND arms the 07:00 SAST cron. Nothing
+  sends until a schedule exists, so build the schedules first, then press Preview run on every one before leaving
+  it active. A preview sends nothing and writes nothing. An active schedule sends for real on its send day with no
+  further confirmation.
+- Confirm the mail provider key is set on the project before switching `report_schedules` on. See the plan's
+  follow-ups: a run with no provider currently records the send as successful and cannot be repeated.
+- **Flag `tenant_intake`** belongs to R4c.
