@@ -8,7 +8,8 @@
  *
  * Proves: schedule -> run-now dry run lists the target building with skipped_not_approved (draft report) and
  * writes nothing; approved report without artifact -> skipped_no_artifact + report_export_needed inbox row for
- * the author; approved report with an artifact -> real run writes a report_distributions 'sent' row and a
+ * the author; approved report with an artifact -> a dry run answers would_send and still writes nothing (no
+ * share, no distribution row), then the real run writes a report_distributions 'sent' row and a
  * report_shares row (expires ~30 days, no passcode), emails counted (0 when RESEND_API_KEY is absent);
  * a second real run the same day is 'already_ran'; reminders: a schedule whose reminder date is today raises one
  * report_due_soon per (building, type) and not twice; share GET 200 with needsPasscode=false; POST returns a
@@ -20,6 +21,9 @@
  * Fixtures are scoped to one ZZTEST-DIST building and torn down (LIFO) afterwards. The cron-secret calls run
  * every active schedule on the project exactly as the 05:00 UTC cron would (idempotent per day: a schedule that
  * already ran today answers already_ran), so on staging they change nothing the cron would not have done.
+ * WARNING: the reminder step is a real fan-out — it raises a genuine report_due_soon for every building of
+ * every matching schedule on the target project, which means an inbox row AND an email for every real
+ * admin/manager there; the inbox rows are cleaned up afterwards, the emails cannot be recalled.
  * Refuses production unless SMOKE_ALLOW_PROD=1 — same guard as calendar-smoke.
  */
 
@@ -269,6 +273,27 @@ try {
       file_path: filePath, file_name: `ZZTEST-DIST-${RUN}.pdf`, size_bytes: TINY_PDF.length, generated_by: admin.id, status: 'issued', report_status: 'approved',
     });
     cleanup.unshift(['report_artifacts', `id=eq.${artifact.id}`]);
+
+    // ── 4a. dry run ON the path that can actually send ──
+    // Step 2's dry run only ever reached skipped_not_approved, so nothing had tested the branch the real
+    // send takes. With the artifact in place this reaches `would_send`, and must still write nothing:
+    // no share, and no new report_distributions row beyond step 3's skipped_no_artifact one.
+    {
+      const distBefore = await svcSelect('report_distributions', `report_id=eq.${report.id}&select=id,status`);
+      const d = await runNow(admin.jwt, { scheduleId: schedule.id, dryRun: true });
+      const b = forA(entryFor(d, schedule.id), A);
+      assert('dry run on the send path: HTTP 200, dryRun true', d.status === 200 && d.body?.ok === true && d.body?.dryRun === true, `HTTP ${d.status} ${JSON.stringify(d.body).slice(0, 200)}`);
+      assert('dry run on the send path: building A is would_send', b?.status === 'would_send' && b?.reportId === report.id && b?.recipients === 2, JSON.stringify(b));
+      // The count key is `sent` at 8f2113e and may be renamed to `would_send`; the per-building status above
+      // is the stable assertion, so accept either key here rather than pinning a name that is in flux.
+      const wouldSend = d.body?.counts?.would_send ?? d.body?.counts?.sent;
+      assert('dry run on the send path: one would-be send counted', wouldSend === 1 && (d.body?.counts?.skipped_no_artifact ?? 0) === 0 && (d.body?.counts?.failed ?? 0) === 0, JSON.stringify(d.body?.counts));
+      const sharesAfter = await svcSelect('report_shares', `report_id=eq.${report.id}&select=id`);
+      const distAfter = await svcSelect('report_distributions', `report_id=eq.${report.id}&select=id,status`);
+      assert('dry run on the send path: no share was minted', sharesAfter.length === 0, `${sharesAfter.length} share row(s) after a dry run`);
+      assert('dry run on the send path: no distribution row was written', distAfter.length === distBefore.length && !distAfter.some((x) => x.status === 'sent'), `${distBefore.length} → ${distAfter.length} ${JSON.stringify(distAfter)}`);
+    }
+
     const r = await runNow(admin.jwt, { scheduleId: schedule.id, dryRun: false });
     const b = forA(entryFor(r, schedule.id), A);
     assert('with artifact: real run answers sent with a shareId', r.status === 200 && b?.status === 'sent' && typeof b?.shareId === 'string' && r.body?.counts?.sent === 1, `HTTP ${r.status} ${JSON.stringify(b)} ${JSON.stringify(r.body?.counts)}`);

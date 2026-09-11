@@ -5,11 +5,15 @@
 --
 --   1) report_recipients_valid(jsonb): immutable shape check for a schedule's recipient list.
 --   2) report_schedules: "this report type goes to these people on day N of the following month";
---      admin/manager CRUD, the six editable columns by column privilege, run bookkeeping service-role only.
+--      admin/manager CRUD, the six editable columns by column privilege on INSERT as well as UPDATE, run
+--      bookkeeping (last_run_on / last_result) service-role only.
 --   3) report_shares: a bearer link to ONE issued artifact (token minted by the client or by
 --      report-distribution, passcode hash written only by report-share); a trigger pins the artifact to
---      the report; clients may only create (no passcode, zero counters) and revoke.
---   4) report_distributions: per-building log of every run; service role writes, admin/manager read.
+--      the report; clients may only create (no passcode, zero counters, ≤90 days) and revoke, revocation
+--      is one-way, and the passcode verifier + lockout columns are not readable by a client at all —
+--      only the generated has_passcode boolean, which is what the UI's Passcode chip reads.
+--   4) report_distributions: per-building log of every run; service role writes, admin/manager read; a
+--      unique partial index makes one 'sent' row per (schedule, report) the DB-level double-send guard.
 --   5) notifications_kind_check restated with report_due_soon and report_export_needed (server-only kinds).
 --   6) cron report-distribution-daily (05:00 UTC = 07:00 SAST, after the 05:00 SAST snapshot).
 --
@@ -60,7 +64,9 @@ create table if not exists public.report_schedules (
   last_run_on        date,
   last_result        jsonb
 );
-create index if not exists report_schedules_active_idx on public.report_schedules (is_active, send_day);
+-- Partial: the cron only ever reads the active rows, so the inactive ones need not be in the index.
+create index if not exists report_schedules_active_idx on public.report_schedules (is_active, send_day)
+  where is_active;
 drop trigger if exists trg_report_schedules_touch on public.report_schedules;
 create trigger trg_report_schedules_touch before update on public.report_schedules
   for each row execute function public.fortress_touch_updated_at();
@@ -76,10 +82,16 @@ create policy rs_update on public.report_schedules for update
   using (public.is_admin_or_manager()) with check (public.is_admin_or_manager());
 drop policy if exists rs_delete on public.report_schedules;
 create policy rs_delete on public.report_schedules for delete using (public.is_admin_or_manager());
--- last_run_on / last_result / created_by are written by the function (service role) only.
+-- last_run_on / last_result are written by the function (service role) only, on INSERT as well as on
+-- UPDATE: without the INSERT column grant an admin could create a schedule already stamped
+-- last_run_on = today and silently suppress that day's cron run. created_by is client-supplied on
+-- insert (rs_insert pins it to auth.uid()) and immutable afterwards.
 revoke all on table public.report_schedules from anon;
 revoke update on table public.report_schedules from authenticated;
 grant update (report_type, building_ids, recipients, send_day, remind_days_before, is_active)
+  on table public.report_schedules to authenticated;
+revoke insert on table public.report_schedules from authenticated;
+grant insert (report_type, building_ids, recipients, send_day, remind_days_before, is_active, created_by)
   on table public.report_schedules to authenticated;
 
 -- ============================================================
@@ -105,6 +117,11 @@ create table if not exists public.report_shares (
   constraint report_shares_expiry_check check (expires_at > created_at and expires_at <= created_at + interval '366 days')
 );
 create index if not exists report_shares_report_idx on public.report_shares (report_id, created_at desc);
+-- The one bit of passcode_hash a client is allowed to know: "is this link protected?". Hiding the verifier
+-- (see the grants below) otherwise costs the active-links list its Passcode chip. Generated = no new write
+-- surface: a client cannot set it, and it leaks a boolean rather than something brute-forceable.
+alter table public.report_shares
+  add column if not exists has_passcode boolean generated always as (passcode_hash is not null) stored;
 
 -- The artifact must be a PDF of that very report (source_id), whoever inserts.
 create or replace function public.report_shares_check_artifact()
@@ -122,26 +139,45 @@ create trigger trg_report_shares_artifact before insert on public.report_shares
   for each row execute function public.report_shares_check_artifact();
 
 alter table public.report_shares enable row level security;
+-- NOTE (not building-scoped in practice): can_access_building() returns true for ANY admin or manager, so
+-- `is_admin_or_manager() and exists (… can_access_building(r.building_id))` is a tautology today. The EXISTS
+-- is kept deliberately — it is the clause that would start biting if per-building admins are ever introduced,
+-- and it also proves report_id points at a real report — but do not read these policies as a building fence.
 drop policy if exists rsh_select on public.report_shares;
 create policy rsh_select on public.report_shares for select
   using (public.is_admin_or_manager()
          and exists (select 1 from public.reports r where r.id = report_id and public.can_access_building(r.building_id)));
 drop policy if exists rsh_insert on public.report_shares;
+-- expires_at is capped at 90 days here too: report-share only ever offers 7/30/90, and without this a client
+-- inserting straight into the table could mint a link good for the table CHECK's full 366 days.
 create policy rsh_insert on public.report_shares for insert
   with check (public.is_admin_or_manager()
               and created_by = auth.uid()
               and exists (select 1 from public.reports r where r.id = report_id and public.can_access_building(r.building_id))
               and passcode_hash is null and view_count = 0 and failed_attempts = 0
-              and last_viewed_at is null and revoked_at is null and locked_until is null);
+              and last_viewed_at is null and revoked_at is null and locked_until is null
+              and expires_at <= created_at + interval '90 days');
 drop policy if exists rsh_update on public.report_shares;
+-- Revocation is one-way: `revoked_at is not null` in the WITH CHECK stops an admin PATCHing
+-- {revoked_at: null} and resurrecting a link that was already handed out and then pulled.
 create policy rsh_update on public.report_shares for update
   using (public.is_admin_or_manager()
          and exists (select 1 from public.reports r where r.id = report_id and public.can_access_building(r.building_id)))
-  with check (public.is_admin_or_manager());
+  with check (public.is_admin_or_manager() and revoked_at is not null);
 -- Clients may only revoke; every other column belongs to the functions.
 revoke all on table public.report_shares from anon;
 revoke update, delete on table public.report_shares from authenticated;
 grant update (revoked_at) on table public.report_shares to authenticated;
+-- passcode_hash is a verifier for a short human passcode: readable, it is brute-forceable offline against
+-- SHARE_SALT, so a stolen admin JWT must not be able to fetch it. failed_attempts / locked_until are the
+-- lockout state and are equally none of a client's business. Supabase grants SELECT on every column of a new
+-- public table to `authenticated`, so the grant has to be narrowed by column, not by RLS.
+-- CONSEQUENCE: PostgREST `select=*` (and a bare `Prefer: return=representation`) now 403s on this table for
+-- `authenticated`; the client hook and scripts/rls-smoke.mjs must name the granted columns explicitly.
+revoke select on table public.report_shares from authenticated;
+grant select (id, report_id, artifact_id, token, created_by, created_at, expires_at, view_count,
+              last_viewed_at, revoked_at, has_passcode)
+  on table public.report_shares to authenticated;
 
 -- ============================================================
 -- 4) Distribution log
@@ -162,6 +198,12 @@ create table if not exists public.report_distributions (
 );
 create index if not exists report_distributions_schedule_idx on public.report_distributions (schedule_id, sent_at desc);
 create index if not exists report_distributions_report_idx on public.report_distributions (report_id);
+-- THE double-send guard. report-distribution claims the send by inserting this row BEFORE the emails go out
+-- and treats 23505 as "already sent", so two concurrent runs (cron + run-now, or two cron ticks) cannot both
+-- deliver. The function's own "has it already been sent?" SELECT is a courtesy; this index is the guarantee.
+-- Partial on status so a 'failed' attempt may be retried and re-logged as often as needed.
+create unique index if not exists report_distributions_sent_once_idx
+  on public.report_distributions (schedule_id, report_id) where status = 'sent';
 alter table public.report_distributions enable row level security;
 drop policy if exists rd_select on public.report_distributions;
 create policy rd_select on public.report_distributions for select using (public.is_admin_or_manager());
@@ -181,6 +223,11 @@ alter table public.notifications add constraint notifications_kind_check check (
   'document_expiring','asset_service_due','task_due_today',
   'issue_sla_breached',
   'report_due_soon','report_export_needed'));
+-- The reminder dedupe asks "is there already a report_due_soon for this building today?" on every building of
+-- every active schedule, once a day; notifications is the largest table in the app and had no index for that
+-- shape (kind + building_id + a created_at window).
+create index if not exists notifications_kind_building_created_idx
+  on public.notifications (kind, building_id, created_at desc);
 
 commit;
 
@@ -211,6 +258,16 @@ select cron.schedule(
 --     where grantee = 'authenticated' and table_name = 'report_shares' and privilege_type = 'UPDATE';         -- revoked_at only
 --   select column_name from information_schema.column_privileges
 --     where grantee = 'authenticated' and table_name = 'report_schedules' and privilege_type = 'UPDATE';      -- the six editable columns
+--   select column_name from information_schema.column_privileges
+--     where grantee = 'authenticated' and table_name = 'report_schedules' and privilege_type = 'INSERT'
+--     order by 1;                                    -- the six + created_by; NOT last_run_on / last_result
+--   select column_name from information_schema.column_privileges
+--     where grantee = 'authenticated' and table_name = 'report_shares' and privilege_type = 'SELECT'
+--     order by 1;                                    -- eleven columns incl. has_passcode; NOT passcode_hash /
+--                                                    -- failed_attempts / locked_until
+--   select indexdef from pg_indexes where indexname in
+--     ('report_distributions_sent_once_idx','notifications_kind_building_created_idx','report_schedules_active_idx');
+--                                                    -- 3 rows; the first UNIQUE … where status = 'sent'
 --   select has_table_privilege('anon', 'public.report_schedules', 'select'),
 --          has_table_privilege('anon', 'public.report_shares', 'select'),
 --          has_table_privilege('anon', 'public.report_distributions', 'select');                              -- false ×3
@@ -218,4 +275,6 @@ select cron.schedule(
 --   select tgname from pg_trigger where tgrelid = 'public.report_shares'::regclass and not tgisinternal;      -- trg_report_shares_artifact
 --   select pg_get_constraintdef(oid) ~ 'report_due_soon' from pg_constraint where conname = 'notifications_kind_check'; -- true
 --   select jobname, schedule from cron.job where jobname = 'report-distribution-daily';                       -- 0 5 * * *
+--   select command !~ '<PROJECT_REF>|<REPORT_DISTRIBUTION_SECRET>' as placeholders_substituted, command
+--     from cron.job where jobname = 'report-distribution-daily';   -- true: the apply-time values went in
 --   Then: node scripts/rls-smoke.mjs; after Task 2's functions deploy: npm run smoke:distribution.
