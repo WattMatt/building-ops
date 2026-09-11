@@ -24,7 +24,8 @@ import { ContractorPicker } from '@/components/contractors/ContractorPicker';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBuildingPpm, type BuildingPpmLine } from '@/hooks/useBuildingPpm';
 import { useContractors } from '@/hooks/useContractors';
-import { exportCsv } from '@/lib/exportCsv';
+import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
+import { toast } from 'sonner';
 import { describeRule, type RecurrenceRule } from '@/lib/recurrence';
 import { todayInOperatingTz } from '@/lib/myWork';
 import { PpmLegend } from '@/components/ppm/PpmLegend';
@@ -111,6 +112,7 @@ export default function PpmTab({ buildingId }: Props) {
       ],
       `ppm-plan-${buildingId}.csv`,
     );
+    toast.success(`Exported ${lines.length} ${lines.length === 1 ? 'row' : 'rows'}`);
   };
 
   // ---- Derived grid ----------------------------------------------------------------------
@@ -120,6 +122,28 @@ export default function PpmTab({ buildingId }: Props) {
     [lines, months, byService],
   );
   const fy = `${months[0].slice(0, 4)}/${months[11].slice(2, 4)}`;
+
+  /**
+   * The 12-month grid as a spreadsheet: one row per service, one column per fiscal month,
+   * carrying the word the legend uses (`done`/`missed`/`due`/`na`) rather than the glyph.
+   * A month with no occurrence stays "—", the same as the cell.
+   */
+  const exportGrid = () => {
+    const columns: CsvColumn<BuildingPpmLine>[] = [
+      { key: 'service_name', header: 'Service' },
+      { key: 'contractor_id', header: 'Contractor', format: (v) => contractorName((v as string | null) ?? null) },
+      ...months.map((mk): CsvColumn<BuildingPpmLine> => {
+        const { mon, yr } = colHeader(mk);
+        return {
+          key: 'id',
+          header: `${mon} ${yr}`,
+          format: (_v, row) => grids.get(row.id)?.[mk]?.status ?? '—',
+        };
+      }),
+    ];
+    exportCsv(lines, columns, `ppm-grid-${buildingId}-${months[0].slice(0, 4)}.csv`);
+    toast.success(`Exported ${lines.length} ${lines.length === 1 ? 'row' : 'rows'}`);
+  };
 
   return (
     <div className="space-y-6">
@@ -135,6 +159,9 @@ export default function PpmTab({ buildingId }: Props) {
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" className="min-h-11" onClick={exportPlan} disabled={lines.length === 0}>
               <Download className="mr-2 h-4 w-4" /> Export CSV
+            </Button>
+            <Button variant="outline" className="min-h-11" onClick={exportGrid} disabled={lines.length === 0 || derivedLoading}>
+              <Download className="mr-2 h-4 w-4" /> Export grid CSV
             </Button>
             {isAdminOrManager && (
               <>

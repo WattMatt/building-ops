@@ -1,7 +1,7 @@
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, Plus } from 'lucide-react';
+import { Search, Plus, Download } from 'lucide-react';
 import type { DocFilters, GroupBy } from './documents/filterDocuments';
 import type { UnifiedDocument } from './documents/types';
 
@@ -15,6 +15,10 @@ interface Props {
   docs: UnifiedDocument[]; // unfiltered, for building filter option lists
   canAdd: boolean;
   onAdd: () => void;
+  /** Exports the documents currently on screen (after search + filters). */
+  onExport: () => void;
+  /** Nothing matches the filters, so there is nothing to export. */
+  exportDisabled?: boolean;
 }
 
 const STATUS_OPTIONS = [
@@ -35,6 +39,8 @@ export default function DocumentsToolbar({
   docs,
   canAdd,
   onAdd,
+  onExport,
+  exportDisabled,
 }: Props) {
   const types = Array.from(new Map(docs.map((d) => [d.typeValue, d.type])).entries()).sort((a, b) =>
     a[1].localeCompare(b[1]),
@@ -130,6 +136,10 @@ export default function DocumentsToolbar({
           </SelectContent>
         </Select>
       </div>
+
+      <Button variant="outline" size="sm" className="min-h-11" onClick={onExport} disabled={exportDisabled}>
+        <Download className="h-4 w-4 mr-2" /> Export CSV
+      </Button>
 
       {canAdd && (
         <Button onClick={onAdd}>

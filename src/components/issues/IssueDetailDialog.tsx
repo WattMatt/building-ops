@@ -31,6 +31,7 @@ import { ContractorPicker } from '@/components/contractors/ContractorPicker';
 import { IssueCommentComposer } from '@/components/issues/IssueCommentComposer';
 import { ResolveIssueDialog } from '@/components/issues/ResolveIssueDialog';
 import { SlaChip } from '@/components/issues/SlaChip';
+import { EvidencePackMenu } from '@/components/evidence/EvidencePackMenu';
 import { formatSlaInstant, slaState } from '@/lib/slaState';
 import { useNow } from '@/hooks/useNow';
 import { notify } from '@/lib/notify';
@@ -288,6 +289,11 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
             )}
             <SlaChip issue={issue} now={now} />
           </ResponsiveDialogDescription>
+          {/* Anyone who can open this issue may hand it over as evidence: RLS already decides
+              what they can read, and the pack holds nothing they are not looking at. */}
+          <div className="flex flex-wrap items-center gap-2 pt-2">
+            <EvidencePackMenu kind="issue" id={issue.id} buildingName={formatBuildingName(issue.building_name)} />
+          </div>
         </ResponsiveDialogHeader>
 
         <div className="space-y-4">

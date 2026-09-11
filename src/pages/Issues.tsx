@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/select';
 import {
   AlertTriangle,
+  Download,
   Plus,
   Search,
   Building2,
@@ -34,6 +35,9 @@ import {
 import { Link, useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
+import { formatSlaInstant, slaState } from '@/lib/slaState';
+import type { Issue } from '@/hooks/useIssues';
 import type { IssuePriority, IssueStatus } from '@/lib/constants';
 
 const priorityColors: Record<IssuePriority, string> = {
@@ -56,6 +60,32 @@ const statusLabels: Record<IssueStatus, string> = {
   escalated: 'Escalated',
   resolved: 'Resolved',
 };
+
+const csvText = (v: unknown) => (v == null || v === '' ? '' : String(v));
+const csvInstant = (v: unknown) => (typeof v === 'string' && v ? formatSlaInstant(new Date(v)) : '');
+
+/**
+ * The issue register as a spreadsheet: what is on screen after the filters, with the SLA clock
+ * spelled out (target, due, state) so an export can answer "which of these breached?" without
+ * the reader re-deriving it. `slaState` is the same function the chips use.
+ */
+const ISSUE_CSV_COLUMNS: CsvColumn<Issue>[] = [
+  { key: 'title', header: 'Title' },
+  { key: 'building_name', header: 'Building', format: csvText },
+  { key: 'priority', header: 'Priority' },
+  { key: 'status', header: 'Status', format: (v) => statusLabels[v as IssueStatus] ?? String(v) },
+  { key: 'created_at', header: 'Reported', format: csvInstant },
+  { key: 'deadline', header: 'Deadline', format: csvText },
+  // The list query returns ids only; resolving names would need a per-building member fetch.
+  { key: 'assigned_to', header: 'Assigned to (user id)', format: csvText },
+  { key: 'resolved_at', header: 'Resolved at', format: csvInstant },
+  { key: 'sla_target_hours', header: 'SLA target (hours)', format: csvText },
+  { key: 'sla_target_hours', header: 'SLA due', format: (_v, row) => { const d = slaState(row).due; return d ? formatSlaInstant(d) : ''; } },
+  { key: 'sla_target_hours', header: 'SLA state', format: (_v, row) => slaState(row).label },
+  { key: 'sla_breached_at', header: 'SLA breached at', format: csvInstant },
+  { key: 'first_response_at', header: 'First response', format: csvInstant },
+  { key: 'corrective_action', header: 'Corrective action', format: csvText },
+];
 
 export default function Issues() {
   const { isAdminOrManager, user } = useAuth();
@@ -140,6 +170,12 @@ export default function Issues() {
     toast(row.failed ? 'This issue could not sync yet' : 'This issue is waiting to sync');
   };
 
+  // Server rows only: a queued issue has no server row, so it carries no SLA clock to export.
+  const handleExport = () => {
+    exportCsv(filteredIssues, ISSUE_CSV_COLUMNS, `issues_${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Exported ${filteredIssues.length} ${filteredIssues.length === 1 ? 'row' : 'rows'}`);
+  };
+
   // Guardrail: the error card must never hide a queued issue. A caretaker who reports an issue
   // offline lands here with the fetch failing; on its own the card replaces the page, but with
   // queued rows it sits above them and the rows still render. Same for the spinner.
@@ -192,12 +228,18 @@ export default function Issues() {
             Track and resolve maintenance issues
           </p>
         </div>
-        <Button asChild>
-          <Link to="/issues/new">
-            <Plus className="w-4 h-4 mr-2" />
-            Report Issue
-          </Link>
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" className="min-h-11" onClick={handleExport} disabled={filteredIssues.length === 0}>
+            <Download className="w-4 h-4 mr-2" />
+            Export CSV
+          </Button>
+          <Button asChild>
+            <Link to="/issues/new">
+              <Plus className="w-4 h-4 mr-2" />
+              Report Issue
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {loading && (

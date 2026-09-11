@@ -13,6 +13,7 @@ import {
   Calendar,
   CalendarDays,
   AlertTriangle,
+  Download,
   Loader2,
   RefreshCw,
   Plus,
@@ -50,6 +51,7 @@ import { RoleAssignmentsPanel } from '@/components/building/RoleAssignmentsPanel
 import { UpcomingTasks, HORIZON_DAYS, groupUpcoming } from '@/components/building/UpcomingTasks';
 import { todayInOperatingTz } from '@/lib/myWork';
 import { ALL_FREQUENCIES } from '@/lib/taskSchedule';
+import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
 
 /** Days ahead the on-demand generate buttons fill (the nightly job uses its own horizon). */
 const GENERATE_HORIZON_DAYS = 90;
@@ -333,6 +335,29 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
   // Badge on the horizon tab: open tasks due within the window (plus anything already overdue).
   const upcomingCount = useMemo(() => groupUpcoming(tasks, todayInOperatingTz()).reduce((n, w) => n + w.tasks.length, 0), [tasks]);
 
+  // The rows the active tab is showing: the horizon window, or the selected frequency bucket.
+  const exportableTasks = useMemo(
+    () => (activeView === 'upcoming' ? groupUpcoming(tasks, todayInOperatingTz()).flatMap((w) => w.tasks) : filteredTasks),
+    [activeView, tasks, filteredTasks],
+  );
+
+  const handleExport = () => {
+    const columns: CsvColumn<TaskInstance>[] = [
+      { key: 'task_name', header: 'Task' },
+      { key: 'category', header: 'Category', format: (v) => (v ? String(v) : '') },
+      { key: 'frequency', header: 'Frequency' },
+      { key: 'responsible_role', header: 'Responsible role', format: (v) => (v ? String(v) : '') },
+      { key: 'assigned_to', header: 'Assignee', format: (v) => nameOf((v as string | null) ?? null) ?? '' },
+      { key: 'due_date', header: 'Due date' },
+      { key: 'status', header: 'Status' },
+      { key: 'id', header: 'Completed by', format: (_v, row) => (row.completion ? nameOf(row.completion.completed_by) ?? '' : '') },
+      { key: 'id', header: 'Completed at', format: (_v, row) => row.completion?.completed_at ?? '' },
+    ];
+    const label = activeView === 'upcoming' ? 'upcoming' : activeView;
+    exportCsv(exportableTasks, columns, `checklists-${label}_${todayInOperatingTz()}.csv`);
+    toast.success(`Exported ${exportableTasks.length} ${exportableTasks.length === 1 ? 'row' : 'rows'}`);
+  };
+
   // Calculate progress
   const pendingTasks = filteredTasks.filter(t => t.status === 'pending');
   const completedTasksList = filteredTasks.filter(t => t.status === 'completed');
@@ -362,21 +387,33 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
             <Hint>Tasks are generated automatically every night; use these buttons to run it now.</Hint>
           )}
         </div>
-        {isAdminOrManager && (
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"
-            onClick={handleGenerateAllFrequencies}
-            disabled={generating}
+            className="min-h-11"
+            onClick={handleExport}
+            disabled={exportableTasks.length === 0}
           >
-            {generating ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-            ) : (
-              <RefreshCw className="h-4 w-4 mr-2" />
-            )}
-            Generate All Tasks
+            <Download className="h-4 w-4 mr-2" />
+            Export CSV
           </Button>
-        )}
+          {isAdminOrManager && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleGenerateAllFrequencies}
+              disabled={generating}
+            >
+              {generating ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-2" />
+              )}
+              Generate All Tasks
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Who does what here — the panel renders nothing for non-managers; the guard here only skips its queries. */}
@@ -618,6 +655,8 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
                   nameOf={nameOf}
                   canAssign={canAssignTask}
                   onAssign={onAssignTask}
+                  showEvidencePack
+                  buildingName={buildingName}
                 />
               </CardContent>
             </Card>

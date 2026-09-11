@@ -9,9 +9,11 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Loader2, Plus, Trash2 } from 'lucide-react';
+import { Download, Loader2, Plus, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { SectionCard } from './SectionCard';
 import { useReportSection } from '@/hooks/useReportSection';
+import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
 import type { FTableName } from '@/integrations/supabase/fortress-db';
 
 export type GridColType = 'text' | 'number' | 'date' | 'select' | 'tristate' | 'bool';
@@ -28,6 +30,34 @@ export interface GridColumn {
 }
 
 type Row = Record<string, unknown> & { id?: string };
+
+const TRISTATE_DEFAULTS = [
+  { value: 'yes', label: 'Yes' },
+  { value: 'no', label: 'No' },
+  { value: 'na', label: 'N/A' },
+];
+
+/**
+ * The cell text a CSV gets for one column: the same value the grid shows, not the raw column.
+ * A `select` exports its option LABEL (what the author picked), a `bool` Yes/No and a
+ * `tristate` Yes/No/N/A — a spreadsheet full of `na` and `true` is not evidence anyone reads.
+ */
+export function gridCellText(c: GridColumn, row: Row): string {
+  const raw = c.compute ? c.compute(row) : row[c.key];
+  if (c.format) return c.format(raw);
+  if (raw === null || raw === undefined || raw === '') return '';
+  if (c.type === 'bool') return raw === true ? 'Yes' : raw === false ? 'No' : '';
+  if (c.type === 'tristate' || c.type === 'select') {
+    const options = c.options ?? (c.type === 'tristate' ? TRISTATE_DEFAULTS : []);
+    return options.find((o) => o.value === raw)?.label ?? String(raw);
+  }
+  return String(raw);
+}
+
+/** One CSV column per grid column, in the order the grid renders them. */
+export function gridCsvColumns(columns: GridColumn[]): CsvColumn<Row>[] {
+  return columns.map((c) => ({ key: c.key, header: c.label, format: (_v, row) => gridCellText(c, row) }));
+}
 
 interface EditableGridProps {
   reportId: string;
@@ -63,6 +93,17 @@ export function EditableGrid({ reportId, buildingId, readOnly, table, title, hin
 
   const numericKeys = useMemo(() => new Set(columns.filter((c) => c.type === 'number').map((c) => c.key)), [columns]);
 
+  // Exports the SAVED rows, never the draft — the same rule as the PDF. Handing someone a CSV
+  // of edits the report itself does not have yet is how two versions of "the truth" start.
+  const handleExport = () => {
+    if (dirty) {
+      toast.error('Save your changes before exporting');
+      return;
+    }
+    exportCsv(rows, gridCsvColumns(columns), `${table}_${reportId.slice(0, 8)}.csv`);
+    toast.success(`Exported ${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`);
+  };
+
   return (
     <SectionCard
       title={title}
@@ -71,7 +112,15 @@ export function EditableGrid({ reportId, buildingId, readOnly, table, title, hin
       saving={isSaving}
       dirty={dirty}
       readOnly={readOnly}
-      headerAccessory={<span className="text-sm text-muted-foreground">{draft.length} {draft.length === 1 ? 'row' : 'rows'}</span>}
+      headerAccessory={
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">{draft.length} {draft.length === 1 ? 'row' : 'rows'}</span>
+          <Button variant="outline" size="sm" className="min-h-11" onClick={handleExport} disabled={rows.length === 0}>
+            <Download className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        </div>
+      }
     >
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>

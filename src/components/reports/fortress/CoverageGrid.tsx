@@ -4,7 +4,8 @@
  * discard an empty draft — the same gates as the buildings RLS and delete_empty_report. Discarding is
  * confirmed by the page's DiscardDraftDialog: this grid only reports which draft was asked for.
  */
-import { MoreHorizontal, Trash2 } from 'lucide-react';
+import { Download, MoreHorizontal, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import type { ReportType } from '@/integrations/supabase/fortress-db';
 import { REPORT_STATUS_VARIANT, formatPeriodLabel } from '@/lib/fortressReports';
 import { formatBuildingName } from '@/lib/buildingName';
@@ -14,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
 
 export interface CoverageGridProps {
   period: string;
@@ -30,11 +32,32 @@ export interface CoverageGridProps {
   discarding?: boolean;
 }
 
+/** Building + one column per report type, carrying the same status word the chips show. */
+const coverageCsvColumns = (): CsvColumn<CoverageRow>[] => [
+  { key: 'name', header: 'Building', format: (v) => formatBuildingName(String(v)) },
+  ...COVERAGE_TYPES.map((t): CsvColumn<CoverageRow> => ({
+    key: 'buildingId',
+    header: COVERAGE_TYPE_LABELS[t],
+    format: (_v, row) => (row.cells[t].status === 'na' ? 'Not required' : row.cells[t].status),
+  })),
+];
+
 export function CoverageGrid({ period, rows, summary, canEditTypes, canDiscard, onOpenReport, onOpenBuilding, onDiscardDraft, onSetReportTypes, discarding }: CoverageGridProps) {
+  const handleExport = () => {
+    exportCsv(rows, coverageCsvColumns(), `coverage-${period.slice(0, 7)}.csv`);
+    toast.success(`Exported ${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`);
+  };
+
   return (
     <Card>
       <CardHeader className="space-y-2">
-        <CardTitle className="text-base">Coverage — {formatPeriodLabel(period)}</CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-base">Coverage — {formatPeriodLabel(period)}</CardTitle>
+          <Button variant="outline" size="sm" className="min-h-11" onClick={handleExport} disabled={rows.length === 0}>
+            <Download className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+        </div>
         <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-muted-foreground">
           {COVERAGE_TYPES.map((t) => (
             <span key={t} data-testid={`summary-${t}`}><span className="font-medium text-foreground">{COVERAGE_TYPE_LABELS[t]}:</span> {summaryLine(summary[t])}</span>

@@ -33,7 +33,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Plus, MoreVertical, Edit, Trash2, FileText, Store, Search, Upload, Download, ChevronRight, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
-import * as XLSX from 'xlsx';
 import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
 import TenantDocumentsDialog from './TenantDocumentsDialog';
 import TenantShopSpecDialog from './TenantShopSpecDialog';
@@ -293,13 +292,14 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
     }
   };
 
-  const handleExport = (format: 'csv' | 'xlsx') => {
-    if (tenants.length === 0) {
+  const handleExport = () => {
+    // Exactly the rows on screen after the search, in the order they are listed.
+    const rows = filteredTenants;
+    if (rows.length === 0) {
       toast.error('No tenants to export');
       return;
     }
 
-    // One column list feeds both formats so the CSV and the workbook never drift.
     const columns: CsvColumn<Tenant>[] = [
       { key: 'shop_number', header: 'Shop Number' },
       { key: 'shop_name', header: 'Shop Name' },
@@ -310,18 +310,8 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
       { key: 'is_active', header: 'Status', format: (v) => (v ? 'Active' : 'Inactive') },
     ];
 
-    if (format === 'csv') {
-      exportCsv(tenants, columns, 'tenants_export.csv');
-    } else {
-      const exportData = tenants.map((tenant) =>
-        Object.fromEntries(columns.map((c) => [c.header, c.format ? c.format(tenant[c.key], tenant) : tenant[c.key]])),
-      );
-      const ws = XLSX.utils.json_to_sheet(exportData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Tenants');
-      XLSX.writeFile(wb, 'tenants_export.xlsx');
-    }
-    toast.success(`Exported ${tenants.length} tenants`);
+    exportCsv(rows, columns, `tenants_${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Exported ${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`);
   };
 
   const filteredTenants = tenants
@@ -356,22 +346,10 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
         </div>
         {isAdminOrManager && (
           <div className="flex items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline">
-                  <Download className="w-4 h-4 mr-2" />
-                  Export
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => handleExport('xlsx')}>
-                  Export as Excel (.xlsx)
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleExport('csv')}>
-                  Export as CSV
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button variant="outline" size="sm" className="min-h-11" onClick={handleExport} disabled={filteredTenants.length === 0}>
+              <Download className="w-4 h-4 mr-2" />
+              Export CSV
+            </Button>
             <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
               <Upload className="w-4 h-4 mr-2" />
               Import

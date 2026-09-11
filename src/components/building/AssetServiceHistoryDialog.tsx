@@ -32,10 +32,11 @@ import {
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { ContractorPicker } from '@/components/contractors/ContractorPicker';
 import { useContractors } from '@/hooks/useContractors';
-import { Plus, Wrench, Trash2, Calendar } from 'lucide-react';
+import { Download, Plus, Wrench, Trash2, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { parseCost, formatRand } from '@/lib/money';
+import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
 
 type Asset = Pick<Tables<'building_assets'>, 'id' | 'name' | 'category'>;
 
@@ -221,6 +222,26 @@ export default function AssetServiceHistoryDialog({
     return SERVICE_TYPES.find((t) => t.value === value)?.label || value || '-';
   };
 
+  // The contractor name comes from the joined row; the register is the fallback for rows the
+  // join could not resolve (a contractor that is no longer readable keeps its id, not a blank).
+  const contractorName = (record: ServiceRecord): string =>
+    record.contractors?.company_name ?? contractors.find((c) => c.id === record.contractor_id)?.company_name ?? '';
+
+  const handleExport = () => {
+    const columns: CsvColumn<ServiceRecord>[] = [
+      { key: 'service_date', header: 'Service date' },
+      { key: 'service_type', header: 'Service type', format: (v) => getServiceTypeLabel(v as string | null) },
+      { key: 'description', header: 'Description', format: (v) => (v ? String(v) : '') },
+      { key: 'performed_by', header: 'Performed by', format: (v) => (v ? String(v) : '') },
+      { key: 'contractor_id', header: 'Contractor', format: (_v, row) => contractorName(row) },
+      { key: 'cost', header: 'Cost', format: (v) => (v == null ? '' : String(v)) },
+      { key: 'next_service_date', header: 'Next service date', format: (v) => (v ? String(v) : '') },
+      { key: 'notes', header: 'Notes', format: (v) => (v ? String(v) : '') },
+    ];
+    exportCsv(records, columns, `service-history-${asset.id.slice(0, 8)}.csv`);
+    toast.success(`Exported ${records.length} ${records.length === 1 ? 'row' : 'rows'}`);
+  };
+
   const getServiceTypeBadgeVariant = (value: string | null): BadgeProps['variant'] => {
     switch (value) {
       case 'emergency_repair':
@@ -247,6 +268,12 @@ export default function AssetServiceHistoryDialog({
           <DialogDescription>
             View and manage maintenance records and repairs for this asset
           </DialogDescription>
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" className="min-h-11" onClick={handleExport} disabled={records.length === 0}>
+              <Download className="w-4 h-4 mr-2" />
+              Export CSV
+            </Button>
+          </div>
         </DialogHeader>
 
         <div className="space-y-4">

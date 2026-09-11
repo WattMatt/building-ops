@@ -8,7 +8,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { HardHat, Loader2, Plus, Search, Shield } from 'lucide-react';
+import { Download, HardHat, Loader2, Plus, Search, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -23,8 +23,25 @@ import { Hint } from '@/components/ui/hint';
 import { ContractorDialog } from '@/components/contractors/ContractorDialog';
 import { ContractorSheet, RatingStars } from '@/components/contractors/ContractorSheet';
 import { useContractors, type Contractor, type ContractorInput } from '@/hooks/useContractors';
+import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
 
 const ALL_TRADES = '__all__';
+
+const text = (v: unknown) => (v == null || v === '' ? '' : String(v));
+
+/** The register as a spreadsheet — the rows on screen after the search, trade and inactive filters. */
+const CONTRACTOR_CSV_COLUMNS: CsvColumn<Contractor>[] = [
+  { key: 'company_name', header: 'Company' },
+  { key: 'trade', header: 'Trade', format: text },
+  { key: 'default_trade_role', header: 'Default trade role', format: text },
+  { key: 'contact_name', header: 'Contact name', format: text },
+  { key: 'contact_email', header: 'Contact email', format: text },
+  { key: 'contact_phone', header: 'Contact phone', format: text },
+  { key: 'rating', header: 'Rating', format: text },
+  { key: 'vat_number', header: 'VAT number', format: text },
+  { key: 'address', header: 'Address', format: text },
+  { key: 'is_active', header: 'Active', format: (v) => (v === false ? 'No' : 'Yes') },
+];
 
 /** Pure: the rows the list shows for a search + trade + inactive setting. */
 export function filterContractors(
@@ -103,6 +120,11 @@ export default function Contractors() {
     );
   }
 
+  const handleExport = () => {
+    exportCsv(visible, CONTRACTOR_CSV_COLUMNS, `contractors_${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Exported ${visible.length} ${visible.length === 1 ? 'row' : 'rows'}`);
+  };
+
   const openNew = () => {
     setEditing(null);
     setDialogOpen(true);
@@ -145,10 +167,16 @@ export default function Contractors() {
           </h1>
           <p className="text-muted-foreground">The companies you call out for repairs, services and planned maintenance.</p>
         </div>
-        <Button className="min-h-11" onClick={openNew}>
-          <Plus className="mr-2 h-4 w-4" />
-          New contractor
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" className="min-h-11" onClick={handleExport} disabled={visible.length === 0}>
+            <Download className="mr-2 h-4 w-4" />
+            Export CSV
+          </Button>
+          <Button className="min-h-11" onClick={openNew}>
+            <Plus className="mr-2 h-4 w-4" />
+            New contractor
+          </Button>
+        </div>
       </div>
 
       <Hint>Add every company you use, then pick them on issues, asset services and PPM lines. Documents with expiry dates (insurance, certifications) show amber before they lapse.</Hint>

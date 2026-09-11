@@ -15,6 +15,7 @@ import {
   type GroupBy,
 } from './documents/filterDocuments';
 import { resolveDocUrl } from './documents/resolveDocUrl';
+import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
 import type { UnifiedDocument, BuildingDocumentRow } from './documents/types';
 import DocumentsToolbar from './DocumentsToolbar';
 import DocumentsTable from './DocumentsTable';
@@ -26,6 +27,21 @@ interface DocumentsTabProps {
 }
 
 const METRIC = 'rounded-md bg-muted/50 px-4 py-3';
+
+const docText = (v: unknown) => (v == null || v === '' ? '' : String(v));
+
+/** The register as a spreadsheet: one row per document on screen, both sources together. */
+const DOCUMENT_CSV_COLUMNS: CsvColumn<UnifiedDocument>[] = [
+  { key: 'name', header: 'Name' },
+  { key: 'type', header: 'Type' },
+  { key: 'scope', header: 'Scope' },
+  { key: 'shopNumber', header: 'Shop number', format: docText },
+  { key: 'tenantName', header: 'Tenant', format: docText },
+  { key: 'issueDate', header: 'Issue date', format: docText },
+  { key: 'expiryDate', header: 'Expiry date', format: docText },
+  { key: 'status', header: 'Status', format: (_v, row) => row.status.label },
+  { key: 'source', header: 'Source' },
+];
 
 export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
   const { isAdminOrManager, user } = useAuth();
@@ -95,6 +111,12 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
     for (const d of picked) {
       await download(d); // sequential, no zip
     }
+  };
+
+  // `flat` is the grouped view flattened: exactly the rows the table is rendering.
+  const handleExport = () => {
+    exportCsv(flat, DOCUMENT_CSV_COLUMNS, `documents_${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Exported ${flat.length} ${flat.length === 1 ? 'row' : 'rows'}`);
   };
 
   const submitForm = async ({ values, files }: DocumentFormSubmit) => {
@@ -206,6 +228,8 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
           setEditing(null);
           setFormOpen(true);
         }}
+        onExport={handleExport}
+        exportDisabled={flat.length === 0}
       />
 
       {isAdminOrManager && selected.size > 0 && (

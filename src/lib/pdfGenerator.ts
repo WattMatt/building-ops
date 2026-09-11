@@ -34,6 +34,15 @@ export interface GeneratedPdf {
   fileName: string;
 }
 
+/**
+ * Render a doc definition to a Blob WITHOUT downloading it — the runtime entry for builders
+ * that own their own delivery (the evidence packs zip the blob with the original photos).
+ * This module is the one place `pdfMake.vfs` is wired, so every renderer goes through it.
+ */
+export async function renderPdfBlob(doc: Parameters<typeof pdfMake.createPdf>[0]): Promise<Blob> {
+  return pdfMake.createPdf(doc).getBlob();
+}
+
 /** Render a doc definition once, download it, and hand the blob back. */
 async function renderAndDownload(doc: Parameters<typeof pdfMake.createPdf>[0], fileName: string): Promise<GeneratedPdf> {
   const pdf = pdfMake.createPdf(doc);

@@ -40,8 +40,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Plus, MoreVertical, Edit, Trash2, Search, Wrench, AlertTriangle, CheckCircle, Clock, History, Upload, Download } from 'lucide-react';
 import { toast } from 'sonner';
-import * as XLSX from 'xlsx';
 import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
+import { EvidencePackItems } from '@/components/evidence/EvidencePackMenu';
+import { useBuildingNames } from '@/hooks/useBuildingNames';
 import { parseCost } from '@/lib/money';
 import { format } from 'date-fns';
 import AssetServiceHistoryDialog from './AssetServiceHistoryDialog';
@@ -81,6 +82,10 @@ function parseYears(text: string): number | null | undefined {
 
 export default function AssetsTab({ buildingId }: AssetsTabProps) {
   const { isAdminOrManager } = useAuth();
+  // The evidence pack prints the building on its cover; this is the cached org-wide name list,
+  // not a second per-tab query.
+  const { data: buildingNames } = useBuildingNames();
+  const buildingName = buildingNames?.find((b) => b.id === buildingId)?.name ?? '';
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -266,13 +271,14 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
     }
   };
 
-  const handleExport = (exportFormat: 'csv' | 'xlsx') => {
-    if (assets.length === 0) {
+  const handleExport = () => {
+    // Exactly the rows on screen after the search and the category filter.
+    const rows = filteredAssets;
+    if (rows.length === 0) {
       toast.error('No assets to export');
       return;
     }
 
-    // One column list feeds both formats so the CSV and the workbook never drift.
     const columns: CsvColumn<Asset>[] = [
       { key: 'name', header: 'Name' },
       { key: 'category', header: 'Category', format: (v) => getCategoryLabel(String(v)) },
@@ -287,18 +293,8 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
       { key: 'notes', header: 'Notes', format: (v) => (v ? String(v) : '') },
     ];
 
-    if (exportFormat === 'csv') {
-      exportCsv(assets, columns, 'assets_export.csv');
-    } else {
-      const exportData = assets.map((asset) =>
-        Object.fromEntries(columns.map((c) => [c.header, c.format ? c.format(asset[c.key], asset) : asset[c.key]])),
-      );
-      const ws = XLSX.utils.json_to_sheet(exportData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Assets');
-      XLSX.writeFile(wb, 'assets_export.xlsx');
-    }
-    toast.success(`Exported ${assets.length} assets`);
+    exportCsv(rows, columns, `assets_${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Exported ${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`);
   };
 
   const filteredAssets = assets.filter((asset) => {
@@ -371,22 +367,10 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
         </div>
         {isAdminOrManager && (
           <div className="flex items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline">
-                  <Download className="w-4 h-4 mr-2" />
-                  Export
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => handleExport('xlsx')}>
-                  Export as Excel (.xlsx)
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleExport('csv')}>
-                  Export as CSV
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button variant="outline" size="sm" className="min-h-11" onClick={handleExport} disabled={filteredAssets.length === 0}>
+              <Download className="w-4 h-4 mr-2" />
+              Export CSV
+            </Button>
             <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
               <Upload className="w-4 h-4 mr-2" />
               Import
@@ -716,6 +700,7 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
                             <History className="h-4 w-4 mr-2" />
                             Service History
                           </DropdownMenuItem>
+                          <EvidencePackItems kind="asset" id={asset.id} buildingName={buildingName} />
                           {isAdminOrManager && (
                             <>
                               <DropdownMenuItem onClick={() => openEditDialog(asset)}>

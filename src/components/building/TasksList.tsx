@@ -13,6 +13,7 @@ import {
 import { format } from 'date-fns';
 import { categoryMeta } from '@/lib/compliance';
 import { AssigneePicker } from '@/components/people/AssigneePicker';
+import { EvidencePackMenu } from '@/components/evidence/EvidencePackMenu';
 
 export type TaskFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually';
 export type TaskStatus = 'pending' | 'completed' | 'overdue' | 'issue_logged';
@@ -54,9 +55,16 @@ export interface TasksListProps {
   nameOf: (id: string | null) => string | null;
   canAssign: (task: TaskInstance) => boolean;
   onAssign: (task: TaskInstance, userId: string | null) => void;
+  /**
+   * Offer the evidence pack on completed tasks (R4b §5.9). Off by default so the compact
+   * lists (My Day, the horizon card) stay unchanged; the building's Checklists tab turns it on.
+   */
+  showEvidencePack?: boolean;
+  /** Printed on the pack's cover; only read when `showEvidencePack` is set. */
+  buildingName?: string;
 }
 
-export function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, variant = 'default', showDueDate = false, buildingId, nameOf, canAssign, onAssign }: TasksListProps) {
+export function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, variant = 'default', showDueDate = false, buildingId, nameOf, canAssign, onAssign, showEvidencePack = false, buildingName = '' }: TasksListProps) {
   if (tasks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-8 text-center">
@@ -151,6 +159,13 @@ export function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, vari
                   {nameOf(task.completion.completed_by) ?? 'Unknown'} •{' '}
                   {task.completion.completed_at ? format(new Date(task.completion.completed_at), 'MMM d, h:mm a') : ''}
                 </p>
+              )}
+
+              {/* A completed task is the one that can be proved; there is nothing to hand over otherwise. */}
+              {showEvidencePack && task.completion && (
+                <div className="mt-2">
+                  <EvidencePackMenu kind="task" id={task.id} buildingName={buildingName} />
+                </div>
               )}
 
               {/* Actions for pending tasks */}
