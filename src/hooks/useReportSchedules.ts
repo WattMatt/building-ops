@@ -12,10 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import type { ReportType } from '@/integrations/supabase/fortress-db';
-
-// report_schedules / report_distributions are not yet in the generated types; regenerate after the migration ships.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const db = supabase as unknown as { from: (table: string) => any };
+import type { TablesInsert, TablesUpdate } from '@/integrations/supabase/types';
 
 /** External: `email` (+ optional name). Colleague: `user_id` (+ display name) — the address is resolved server-side. */
 export interface Recipient { email?: string; name?: string; user_id?: string }
@@ -98,10 +95,15 @@ export function isEmail(s: string): boolean {
   return EMAIL_RE.test(s);
 }
 
-function pickEditable(patch: Partial<ScheduleInput>): Partial<ScheduleInput> {
+/**
+ * The client-writable subset, shaped for the row. `recipients` is jsonb, and the generated column
+ * type is `Json`, which a `Recipient[]` (an interface, so no implicit index signature) does not
+ * structurally satisfy — the value written is identical either way.
+ */
+function pickEditable(patch: Partial<ScheduleInput>): TablesUpdate<'report_schedules'> {
   const out: Record<string, unknown> = {};
   for (const k of EDITABLE) if (k in patch) out[k] = patch[k];
-  return out as Partial<ScheduleInput>;
+  return out as TablesUpdate<'report_schedules'>;
 }
 
 /** Zero rows back with no error is RLS saying no; a CHECK violation is the recipient list. */
@@ -131,7 +133,7 @@ export function useReportSchedules() {
     queryKey: SCHEDULES_KEY,
     enabled: isAdminOrManager,
     queryFn: async (): Promise<ReportSchedule[]> => {
-      const { data, error } = await db.from('report_schedules').select('*').order('created_at');
+      const { data, error } = await supabase.from('report_schedules').select('*').order('created_at');
       if (error) throw new Error(error.message);
       return (data ?? []) as ReportSchedule[];
     },
@@ -141,7 +143,8 @@ export function useReportSchedules() {
 
   const createMutation = useMutation({
     mutationFn: async (input: ScheduleInput): Promise<string> => {
-      const { data, error } = await db.from('report_schedules').insert({ ...pickEditable(input), created_by: user?.id ?? null }).select('id');
+      const row = { ...pickEditable(input), created_by: user?.id ?? null } as TablesInsert<'report_schedules'>;
+      const { data, error } = await supabase.from('report_schedules').insert(row).select('id');
       guardRows(data, error);
       return (data as { id: string }[])[0].id;
     },
@@ -150,7 +153,7 @@ export function useReportSchedules() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, patch }: { id: string; patch: Partial<ScheduleInput> }): Promise<void> => {
-      const { data, error } = await db.from('report_schedules').update(pickEditable(patch)).eq('id', id).select('id');
+      const { data, error } = await supabase.from('report_schedules').update(pickEditable(patch)).eq('id', id).select('id');
       guardRows(data, error);
     },
     onSuccess: invalidate,
@@ -158,7 +161,7 @@ export function useReportSchedules() {
 
   const removeMutation = useMutation({
     mutationFn: async (id: string): Promise<void> => {
-      const { data, error } = await db.from('report_schedules').delete().eq('id', id).select('id');
+      const { data, error } = await supabase.from('report_schedules').delete().eq('id', id).select('id');
       guardRows(data, error);
     },
     onSuccess: invalidate,
@@ -199,14 +202,16 @@ export function useScheduleDistributions(scheduleId: string | undefined) {
     enabled: !!scheduleId,
     queryFn: async (): Promise<Distribution[]> => {
       if (!scheduleId) return [];
-      const { data, error } = await db
+      const { data, error } = await supabase
         .from('report_distributions')
         .select('*')
         .eq('schedule_id', scheduleId)
         .order('sent_at', { ascending: false })
         .limit(100);
       if (error) throw new Error(error.message);
-      return (data ?? []) as Distribution[];
+      // `sent_to` is jsonb (generated as `Json`) and `status` plain text; the service role writes
+      // both, and the CHECK on `status` makes the narrowing safe.
+      return (data ?? []) as unknown as Distribution[];
     },
   });
 }

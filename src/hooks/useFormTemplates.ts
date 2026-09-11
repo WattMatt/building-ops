@@ -7,13 +7,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { FormField } from '@/lib/formFields';
+import type { TablesUpdate } from '@/integrations/supabase/types';
 
 export const FORM_TEMPLATES_KEY = ['form-templates'] as const;
 
 /** Plain guardrail copy for a write RLS refused or filtered to nothing. */
 export const FORM_TEMPLATE_PERMISSION_MESSAGE = 'Only admins can change form templates.';
 
-// form_templates is not yet in the generated types — regenerate after 2026-09-14_03 ships.
 export interface FormTemplate {
   id: string;
   name: string;
@@ -30,10 +30,6 @@ export interface FormTemplate {
 export type FormTemplatePatch = Partial<
   Pick<FormTemplate, 'name' | 'description' | 'category' | 'icon' | 'fields' | 'is_active' | 'sort_order'>
 >;
-
-// form_templates is not yet in the generated types — regenerate after 2026-09-14_03 ships.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const db = supabase as unknown as { from: (table: string) => any };
 
 const COLUMNS = 'id, name, description, category, icon, fields, is_active, sort_order, version, updated_at';
 
@@ -65,7 +61,7 @@ export function mapTemplate(row: Record<string, unknown>): FormTemplate {
 }
 
 export async function fetchFormTemplates(): Promise<FormTemplate[]> {
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from('form_templates')
     .select(COLUMNS)
     .order('sort_order', { ascending: true })
@@ -95,7 +91,10 @@ export function useFormTemplateMutations() {
 
   const update = useMutation({
     mutationFn: async ({ id, patch }: { id: string; patch: FormTemplatePatch }): Promise<FormTemplate> => {
-      const { data, error } = await db.from('form_templates').update(patch).eq('id', id).select(COLUMNS);
+      // `fields` is jsonb, generated as `Json`, which a `FormField[]` (an interface, so no implicit
+      // index signature) does not structurally satisfy — the value written is identical.
+      const row = patch as TablesUpdate<'form_templates'>;
+      const { data, error } = await supabase.from('form_templates').update(row).eq('id', id).select(COLUMNS);
       if (error) {
         if (error.code === '42501') throw new Error(FORM_TEMPLATE_PERMISSION_MESSAGE);
         throw error;
@@ -110,7 +109,7 @@ export function useFormTemplateMutations() {
     // One update per moved row; sort_order = position. Small list (14), so no RPC.
     mutationFn: async (orderedIds: string[]) => {
       for (let i = 0; i < orderedIds.length; i++) {
-        const { data, error } = await db
+        const { data, error } = await supabase
           .from('form_templates')
           .update({ sort_order: i + 1 })
           .eq('id', orderedIds[i])

@@ -16,7 +16,6 @@ export const intakeTokensKey = (buildingId: string | undefined) => ['intake-toke
 /** Plain guardrail copy for a write RLS refused or filtered to nothing. */
 export const INTAKE_PERMISSION_MESSAGE = "Only admins and managers can manage this building's intake link.";
 
-// intake_tokens is not yet in the generated types; regenerate after the migration ships.
 export interface IntakeToken {
   id: string;
   building_id: string;
@@ -28,9 +27,6 @@ export interface IntakeToken {
   last_used_at: string | null;
   submissions_count: number;
 }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const db = supabase as unknown as { from: (table: string) => any };
-
 const TOKEN_COLUMNS = 'id, building_id, token, label, is_active, created_by, created_at, last_used_at, submissions_count';
 
 interface PgError { code?: string; message?: string }
@@ -43,7 +39,7 @@ function assertWrote(error: PgError | null, rows: unknown[] | null | undefined):
 }
 
 export async function readActiveToken(buildingId: string): Promise<IntakeToken | null> {
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from('intake_tokens')
     .select(TOKEN_COLUMNS)
     .eq('building_id', buildingId)
@@ -52,20 +48,20 @@ export async function readActiveToken(buildingId: string): Promise<IntakeToken |
     .limit(1)
     .maybeSingle();
   if (error) throw error;
-  return (data as IntakeToken | null) ?? null;
+  return data ?? null;
 }
 
 async function insertToken(uid: string, buildingId: string, label: string): Promise<IntakeToken> {
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from('intake_tokens')
     .insert({ building_id: buildingId, token: mintToken(), label, created_by: uid })
     .select(TOKEN_COLUMNS);
   assertWrote(error, data);
-  return (data as IntakeToken[])[0];
+  return data![0];
 }
 
 async function disableToken(id: string): Promise<void> {
-  const { data, error } = await db.from('intake_tokens').update({ is_active: false }).eq('id', id).select('id');
+  const { data, error } = await supabase.from('intake_tokens').update({ is_active: false }).eq('id', id).select('id');
   assertWrote(error, data);
 }
 

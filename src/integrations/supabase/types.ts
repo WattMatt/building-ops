@@ -1639,6 +1639,7 @@ export type Database = {
         Row: {
           building_id: string | null
           created_at: string | null
+          fields_snapshot: Json | null
           form_data: Json | null
           form_name: string
           form_template_id: string | null
@@ -1651,11 +1652,13 @@ export type Database = {
           signoff_status: string
           status: string | null
           submitted_by: string | null
+          template_version: number | null
           updated_at: string | null
         }
         Insert: {
           building_id?: string | null
           created_at?: string | null
+          fields_snapshot?: Json | null
           form_data?: Json | null
           form_name: string
           form_template_id?: string | null
@@ -1668,11 +1671,13 @@ export type Database = {
           signoff_status?: string
           status?: string | null
           submitted_by?: string | null
+          template_version?: number | null
           updated_at?: string | null
         }
         Update: {
           building_id?: string | null
           created_at?: string | null
+          fields_snapshot?: Json | null
           form_data?: Json | null
           form_name?: string
           form_template_id?: string | null
@@ -1685,6 +1690,7 @@ export type Database = {
           signoff_status?: string
           status?: string | null
           submitted_by?: string | null
+          template_version?: number | null
           updated_at?: string | null
         }
         Relationships: [
@@ -1693,6 +1699,59 @@ export type Database = {
             columns: ["building_id"]
             isOneToOne: false
             referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      form_templates: {
+        Row: {
+          category: string
+          created_at: string
+          description: string
+          fields: Json
+          icon: string
+          id: string
+          is_active: boolean
+          name: string
+          sort_order: number
+          updated_at: string
+          updated_by: string | null
+          version: number
+        }
+        Insert: {
+          category: string
+          created_at?: string
+          description?: string
+          fields?: Json
+          icon?: string
+          id: string
+          is_active?: boolean
+          name: string
+          sort_order?: number
+          updated_at?: string
+          updated_by?: string | null
+          version?: number
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          description?: string
+          fields?: Json
+          icon?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          sort_order?: number
+          updated_at?: string
+          updated_by?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "form_templates_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -1981,6 +2040,75 @@ export type Database = {
         }
         Relationships: []
       }
+      intake_rate: {
+        Row: {
+          bucket: string
+          count: number
+          window_start: string
+        }
+        Insert: {
+          bucket: string
+          count?: number
+          window_start: string
+        }
+        Update: {
+          bucket?: string
+          count?: number
+          window_start?: string
+        }
+        Relationships: []
+      }
+      intake_tokens: {
+        Row: {
+          building_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          label: string | null
+          last_used_at: string | null
+          submissions_count: number
+          token: string
+        }
+        Insert: {
+          building_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          label?: string | null
+          last_used_at?: string | null
+          submissions_count?: number
+          token: string
+        }
+        Update: {
+          building_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          label?: string | null
+          last_used_at?: string | null
+          submissions_count?: number
+          token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "intake_tokens_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "intake_tokens_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       issue_activity: {
         Row: {
           activity_type: string
@@ -2047,11 +2175,14 @@ export type Database = {
           id: string
           photo_urls: Json | null
           priority: string
+          reference: string | null
           reported_by: string
+          reporter: Json | null
           resolved_at: string | null
           responsibility: string | null
           sla_breached_at: string | null
           sla_target_hours: number | null
+          source: string
           status: string
           task_instance_id: string | null
           title: string
@@ -2071,11 +2202,14 @@ export type Database = {
           id?: string
           photo_urls?: Json | null
           priority?: string
+          reference?: string | null
           reported_by: string
+          reporter?: Json | null
           resolved_at?: string | null
           responsibility?: string | null
           sla_breached_at?: string | null
           sla_target_hours?: number | null
+          source?: string
           status?: string
           task_instance_id?: string | null
           title: string
@@ -2095,11 +2229,14 @@ export type Database = {
           id?: string
           photo_urls?: Json | null
           priority?: string
+          reference?: string | null
           reported_by?: string
+          reporter?: Json | null
           resolved_at?: string | null
           responsibility?: string | null
           sla_breached_at?: string | null
           sla_target_hours?: number | null
+          source?: string
           status?: string
           task_instance_id?: string | null
           title?: string
@@ -2834,6 +2971,84 @@ export type Database = {
           },
         ]
       }
+      report_distributions: {
+        Row: {
+          artifact_id: string | null
+          building_id: string | null
+          error: string | null
+          id: string
+          report_id: string | null
+          report_period: string
+          schedule_id: string
+          sent_at: string
+          sent_to: Json
+          share_id: string | null
+          status: string
+        }
+        Insert: {
+          artifact_id?: string | null
+          building_id?: string | null
+          error?: string | null
+          id?: string
+          report_id?: string | null
+          report_period: string
+          schedule_id: string
+          sent_at?: string
+          sent_to?: Json
+          share_id?: string | null
+          status: string
+        }
+        Update: {
+          artifact_id?: string | null
+          building_id?: string | null
+          error?: string | null
+          id?: string
+          report_id?: string | null
+          report_period?: string
+          schedule_id?: string
+          sent_at?: string
+          sent_to?: Json
+          share_id?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_distributions_artifact_id_fkey"
+            columns: ["artifact_id"]
+            isOneToOne: false
+            referencedRelation: "report_artifacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_distributions_building_id_fkey"
+            columns: ["building_id"]
+            isOneToOne: false
+            referencedRelation: "buildings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_distributions_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_distributions_schedule_id_fkey"
+            columns: ["schedule_id"]
+            isOneToOne: false
+            referencedRelation: "report_schedules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_distributions_share_id_fkey"
+            columns: ["share_id"]
+            isOneToOne: false
+            referencedRelation: "report_shares"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       report_narratives: {
         Row: {
           body: string | null
@@ -2891,6 +3106,132 @@ export type Database = {
           },
           {
             foreignKeyName: "report_narratives_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "reports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      report_schedules: {
+        Row: {
+          building_ids: string[] | null
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          last_result: Json | null
+          last_run_on: string | null
+          recipients: Json
+          remind_days_before: number
+          report_type: string
+          send_day: number
+          updated_at: string
+        }
+        Insert: {
+          building_ids?: string[] | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          last_result?: Json | null
+          last_run_on?: string | null
+          recipients?: Json
+          remind_days_before?: number
+          report_type: string
+          send_day?: number
+          updated_at?: string
+        }
+        Update: {
+          building_ids?: string[] | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          last_result?: Json | null
+          last_run_on?: string | null
+          recipients?: Json
+          remind_days_before?: number
+          report_type?: string
+          send_day?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_schedules_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      report_shares: {
+        Row: {
+          artifact_id: string
+          created_at: string
+          created_by: string
+          expires_at: string
+          failed_attempts: number
+          has_passcode: boolean | null
+          id: string
+          last_viewed_at: string | null
+          locked_until: string | null
+          passcode_hash: string | null
+          report_id: string
+          revoked_at: string | null
+          token: string
+          view_count: number
+        }
+        Insert: {
+          artifact_id: string
+          created_at?: string
+          created_by: string
+          expires_at: string
+          failed_attempts?: number
+          has_passcode?: boolean | null
+          id?: string
+          last_viewed_at?: string | null
+          locked_until?: string | null
+          passcode_hash?: string | null
+          report_id: string
+          revoked_at?: string | null
+          token: string
+          view_count?: number
+        }
+        Update: {
+          artifact_id?: string
+          created_at?: string
+          created_by?: string
+          expires_at?: string
+          failed_attempts?: number
+          has_passcode?: boolean | null
+          id?: string
+          last_viewed_at?: string | null
+          locked_until?: string | null
+          passcode_hash?: string | null
+          report_id?: string
+          revoked_at?: string | null
+          token?: string
+          view_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_shares_artifact_id_fkey"
+            columns: ["artifact_id"]
+            isOneToOne: false
+            referencedRelation: "report_artifacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_shares_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_shares_report_id_fkey"
             columns: ["report_id"]
             isOneToOne: false
             referencedRelation: "reports"
@@ -4421,6 +4762,11 @@ export type Database = {
         }
         Returns: number
       }
+      intake_rate_hit: {
+        Args: { p_bucket: string; p_limit: number }
+        Returns: boolean
+      }
+      intake_touch: { Args: { p_token: string }; Returns: undefined }
       is_active_user: { Args: never; Returns: boolean }
       is_admin: { Args: never; Returns: boolean }
       is_admin_or_manager: { Args: never; Returns: boolean }
@@ -4444,6 +4790,7 @@ export type Database = {
         Args: { p_building_id: string }
         Returns: Json
       }
+      report_recipients_valid: { Args: { p: Json }; Returns: boolean }
       reschedule_ppm_line: { Args: { p_line: string }; Returns: number }
       reschedule_template: {
         Args: { p_template: string }

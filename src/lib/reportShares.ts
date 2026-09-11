@@ -15,10 +15,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { mintToken } from '@/lib/calendarTokens';
 import { track } from '@/lib/analytics';
 
-// report_shares is not yet in the generated types; regenerate after 2026-09-14_02 ships.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const db = supabase as unknown as { from: (table: string) => any };
-
 export type ExpiryDays = 7 | 30 | 90;
 export const EXPIRY_OPTIONS: { value: ExpiryDays; label: string }[] = [
   { value: 7, label: '7 days' },
@@ -130,7 +126,7 @@ export async function createShare(
     return { id: created.id, token: created.token, expiresAt: created.expiresAt };
   }
   const expiresAt = new Date(Date.now() + input.expiresInDays * 86_400_000).toISOString();
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from('report_shares')
     .insert({ report_id: input.reportId, artifact_id: input.artifactId, token, created_by: userId, expires_at: expiresAt })
     .select('id, token, expires_at');
@@ -140,7 +136,7 @@ export async function createShare(
 }
 
 export async function listShares(reportId: string): Promise<ReportShareRow[]> {
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from('report_shares')
     .select(SHARE_COLUMNS)
     .eq('report_id', reportId)
@@ -151,7 +147,7 @@ export async function listShares(reportId: string): Promise<ReportShareRow[]> {
 
 /** Revocation is final: the update policy's `with check` refuses a row whose `revoked_at` is null again. */
 export async function revokeShare(id: string): Promise<void> {
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from('report_shares')
     .update({ revoked_at: new Date().toISOString() })
     .eq('id', id)

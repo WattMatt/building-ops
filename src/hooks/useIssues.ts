@@ -146,22 +146,10 @@ export function useIssues(
 
       if (fetchError) throw fetchError;
 
-      // issues.source / reporter / reference are not yet in the generated types — regenerate after
-      // 2026-09-14_03 ships and drop this row shape, which only restates what the select asks for.
-      type IssueRow = Omit<Issue, 'building_name' | 'priority' | 'status' | 'created_at' | 'photo_urls' | 'source' | 'reporter'> & {
-        priority: string;
-        status: string;
-        created_at: string | null;
-        photo_urls: unknown;
-        source: string | null;
-        reporter: unknown;
-        buildings: { name: string | null } | null;
-      };
-      const rows = (data ?? []) as unknown as IssueRow[];
-
-      // The generated Row types priority/status as plain text, created_at as nullable (it has a
-      // default) and photo_urls as Json; the DB check constraints make these narrowings safe.
-      const formattedIssues: Issue[] = rows.map((issue) => ({
+      // The generated Row types priority/status/source as plain text, created_at as nullable (it
+      // has a default) and photo_urls/reporter as Json; the DB check constraints make these
+      // narrowings safe, and `reporter` is parsed rather than asserted.
+      const formattedIssues: Issue[] = (data || []).map((issue) => ({
         id: issue.id,
         title: issue.title,
         description: issue.description,

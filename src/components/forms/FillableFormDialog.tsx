@@ -196,9 +196,8 @@ export function FillableFormDialog({
         }
       }
 
-      // template_version / fields_snapshot are not yet in the generated types — regenerate after
-      // 2026-09-14_03 ships. The snapshot is what makes an old submission still render (and print)
-      // against the fields it was actually filled against once the template is edited.
+      // The snapshot is what makes an old submission still render (and print) against the fields it
+      // was actually filled against once the template is edited.
       const row = {
         form_template_id: form.id,
         form_name: form.name,

@@ -39,12 +39,6 @@ interface ScheduleDialogProps {
   onSubmit: (input: ScheduleInput) => Promise<void>;
 }
 
-/** `buildings.report_types` (R4a) is not yet in the generated types; the column default is the two monthly types. */
-function reportTypesOf(b: unknown): string[] {
-  const rt = (b as { report_types?: unknown }).report_types;
-  return Array.isArray(rt) ? (rt as string[]) : ['ops_monthly', 'cm_monthly'];
-}
-
 const REPORT_TYPES = Object.keys(REPORT_TYPE_LABELS) as ReportType[];
 
 /**
@@ -85,7 +79,9 @@ export function ScheduleDialog({ open, onOpenChange, schedule, onSubmit }: Sched
     setIsActive(schedule?.is_active ?? true);
   }, [open, schedule, settings.report_due_day]);
 
-  const eligible = useMemo(() => buildings.filter((b) => reportTypesOf(b).includes(reportType)), [buildings, reportType]);
+  // `buildings.report_types` (R4a) is NOT NULL with the two monthly types as its default, so every
+  // building answers this without a fallback.
+  const eligible = useMemo(() => buildings.filter((b) => b.report_types.includes(reportType)), [buildings, reportType]);
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return q ? eligible.filter((b) => formatBuildingName(b.name).toLowerCase().includes(q)) : eligible;

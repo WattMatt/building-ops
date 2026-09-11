@@ -102,8 +102,8 @@ export function FormSubmissionsDialog({
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      // template_version / fields_snapshot are not yet in the generated types — regenerate after
-      // 2026-09-14_03 ships.
+      // The generated Row types form_data / photo_urls / fields_snapshot as Json; this view narrows
+      // them to the shapes the writers use.
       return data as unknown as SubmissionDetails[];
     },
     enabled: open && !!form,
