@@ -66,6 +66,11 @@ export interface CreateNotificationsInput extends InboxInput {
    */
   bodyLabel?: string;
   ctaText?: string;
+  /**
+   * Restrict the push (not the inbox row, not the email) to these recipients. `issue_reported`
+   * goes to every admin/manager plus the assignee, but only the assignee's phone should buzz.
+   */
+  pushTo?: string[];
 }
 
 export interface CreateNotificationsResult {
@@ -132,8 +137,13 @@ export async function createNotifications(
   // qualify, governed by the same profile flag as the email but not by the email master switch.
   // sendPush itself never throws for a single device; the guard here covers the subscription
   // read and anything unexpected, because a push problem must never cost anyone the email.
+  // `pushTo`, when the caller sets it, narrows the push to a subset of the same rows; the
+  // preference check still applies, so it can never turn a push on for someone who opted out.
+  const pushAllowed = input.pushTo ? new Set(input.pushTo) : null;
   const pushRecipients = rows
-    .filter((row) => shouldPush(input.kind, byId.get(row.recipient_id)!))
+    .filter((row) =>
+      (!pushAllowed || pushAllowed.has(row.recipient_id)) && shouldPush(input.kind, byId.get(row.recipient_id)!)
+    )
     .map((row) => row.recipient_id);
   let push: PushResult = NO_PUSH;
   if (pushRecipients.length) {

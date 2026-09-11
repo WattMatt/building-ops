@@ -51,6 +51,7 @@ describe('governingFlag', () => {
     issue_sla_breached: 'overdue_alerts',
     report_due_soon: 'issue_updates',
     report_export_needed: 'issue_updates',
+    issue_reported: 'issue_updates',
   };
 
   it('maps every kind to the flag the design says governs it', () => {
@@ -331,8 +332,8 @@ describe('senderName', () => {
 });
 
 describe('push', () => {
-  it('pushes only the four urgent kinds', () => {
-    expect([...PUSH_KINDS].sort()).toEqual(['issue_mention', 'signoff_requested', 'task_assigned', 'task_due_today']);
+  it('pushes only the five urgent kinds', () => {
+    expect([...PUSH_KINDS].sort()).toEqual(['issue_mention', 'issue_reported', 'signoff_requested', 'task_assigned', 'task_due_today']);
   });
   it('honours the governing flag and never pushes other kinds', () => {
     const on = { email_notifications: true, issue_updates: true, task_reminders: true, overdue_alerts: true, daily_digest: false };
@@ -367,6 +368,24 @@ describe('push', () => {
       expect(ORG_WIDE_KINDS.has(kind)).toBe(false);
       expect(parseNotifyBody({ ...input(), kind })).toEqual({ ok: false, reason: 'Unsupported notification kind' });
     }
+  });
+  it('issue_reported is server-only: the public intake function raises it, a browser never can', () => {
+    const on = { email_notifications: true, issue_updates: true, task_reminders: true, overdue_alerts: true, daily_digest: true };
+    expect(NOTIFICATION_KINDS).toContain('issue_reported');
+    expect(governingFlag('issue_reported')).toBe('issue_updates');
+    // It emails per item (it is not digest-only) and pushes, but only to the recipients the
+    // caller names in `pushTo` — a narrowing notify.ts applies on top of this flag.
+    expect(shouldEmail('issue_reported', on)).toBe(true);
+    expect(shouldEmail('issue_reported', { ...on, issue_updates: false })).toBe(false);
+    expect(shouldPush('issue_reported', on)).toBe(true);
+    expect(shouldPush('issue_reported', { ...on, issue_updates: false })).toBe(false);
+    expect(CLIENT_KINDS.has('issue_reported')).toBe(false);
+    expect(ORG_WIDE_KINDS.has('issue_reported')).toBe(false);
+    expect(parseNotifyBody({ ...input(), kind: 'issue_reported' })).toEqual({ ok: false, reason: 'Unsupported notification kind' });
+  });
+  it('never deep-links anyone to the public intake form', () => {
+    expect(isAllowedUrl('/intake/abc')).toBe(false);
+    expect(isAllowedUrl('/intake')).toBe(false);
   });
   it('never deep-links a signed-in user to the public share surface', () => {
     expect(isAllowedUrl('/share/abc')).toBe(false);

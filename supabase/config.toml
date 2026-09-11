@@ -68,3 +68,9 @@ verify_jwt = false
 # Public share-link endpoint (no user JWT): token looked up with the service role; unknown/expired/revoked → 404.
 [functions.report-share]
 verify_jwt = false
+
+# Public tenant intake (no user JWT — the tenant has no account). The per-building token from
+# the QR code is the credential, resolved with the service role; unknown/disabled/flag-off → 404;
+# rate-limited per token and per hashed IP (INTAKE_IP_SALT). Client: /intake/:token.
+[functions.tenant-intake]
+verify_jwt = false
