@@ -42,6 +42,16 @@ const toastMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning:
 vi.mock('sonner', () => ({ toast: toastMock }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u1', email: 'a@b.c' }, isAdminOrManager: true }) }));
 vi.mock('@/lib/notify', () => ({ notify: vi.fn(async () => {}) }));
+// Approving exports the final PDF (R4b): the hook reads the org for branding and hands the work to
+// reportApproval, which is mocked here so these cases stay about the transition itself.
+vi.mock('@/hooks/useOrganization', () => ({
+  useOrganization: () => ({ organization: { id: 'o1', name: 'Org', primary_color: '#2563eb', logo_url: null }, loading: false }),
+}));
+const approvalMock = vi.hoisted(() => ({ exportApprovedArtifact: vi.fn() }));
+vi.mock('@/lib/reportApproval', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/reportApproval')>('@/lib/reportApproval');
+  return { APPROVAL_EXPORT_FAILED: actual.APPROVAL_EXPORT_FAILED, exportApprovedArtifact: approvalMock.exportApprovedArtifact };
+});
 
 const seedMock = vi.hoisted(() => ({ seedPpmFromPlan: vi.fn(async () => ({ added: 2, linked: 0, skipped: 0 })) }));
 vi.mock('@/hooks/useReportPpm', async () => {
@@ -49,6 +59,7 @@ vi.mock('@/hooks/useReportPpm', async () => {
   return { describeSeed: actual.describeSeed, seedPpmFromPlan: seedMock.seedPpmFromPlan };
 });
 
+import { APPROVAL_EXPORT_FAILED } from '@/lib/reportApproval';
 import { useCreateReport, useCarryForwardReport, useDiscardDraft, useSetBuildingReportTypes, useReportLifecycle, discardErrorMessage, PPM_SEED_FAILED_MESSAGE } from './useFortressReports';
 
 let qc: QueryClient;
@@ -70,6 +81,8 @@ beforeEach(() => {
   state.rpc.mockClear();
   state.rpc.mockImplementation(async () => ({ error: null }));
   seedMock.seedPpmFromPlan.mockClear();
+  approvalMock.exportApprovedArtifact.mockClear();
+  approvalMock.exportApprovedArtifact.mockResolvedValue({ ok: true, artifactId: 'art1', reportType: 'ops_monthly' });
   seedMock.seedPpmFromPlan.mockImplementation(async () => ({ added: 2, linked: 0, skipped: 0 }));
   state.result = (table, calls) => {
     if (table === 'buildings') return { data: { organization_id: 'o1' }, error: null };
@@ -165,6 +178,27 @@ describe('useReportLifecycle', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['portfolio-compliance'] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['buildings-ohs-scores'] });
     expect(toastMock.success).toHaveBeenCalledWith('Report submitted for review.');
+  });
+  it('approving exports the final PDF, refreshes the issued versions and says both happened', async () => {
+    state.result = (table, calls) => table === 'reports' && has(calls, 'update')
+      ? { data: report({ status: 'approved' }), error: null }
+      : { data: [], error: null };
+    const invalidate = vi.spyOn(qc, 'invalidateQueries');
+    const { result } = renderHook(() => useReportLifecycle('rep1'), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ status: 'approved' }); });
+    expect(approvalMock.exportApprovedArtifact).toHaveBeenCalledWith(expect.objectContaining({ reportId: 'rep1', orgId: 'o1', userId: 'u1' }));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['report-artifacts', 'rep1'] });
+    expect(toastMock.success).toHaveBeenCalledWith('Report approved and the final PDF was saved.');
+  });
+  it('an approval whose export failed still stands, and the toast names what is missing', async () => {
+    approvalMock.exportApprovedArtifact.mockResolvedValue({ ok: false, error: 'Upload failed' });
+    state.result = (table, calls) => table === 'reports' && has(calls, 'update')
+      ? { data: report({ status: 'approved' }), error: null }
+      : { data: [], error: null };
+    const { result } = renderHook(() => useReportLifecycle('rep1'), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ status: 'approved' }); });
+    expect(toastMock.warning).toHaveBeenCalledWith(APPROVAL_EXPORT_FAILED);
+    expect(toastMock.success).not.toHaveBeenCalled();
   });
   it('a refused transition invalidates nothing and says so', async () => {
     state.result = (table) => table === 'reports' ? { data: null, error: { message: 'permission denied' } } : { data: [], error: null };

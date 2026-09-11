@@ -15,8 +15,11 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { fdb, type Report, type ReportType, type ReportStatus, type FTableName } from '@/integrations/supabase/fortress-db';
 import { useAuth } from '@/contexts/AuthContext';
+import { useOrganization } from '@/hooks/useOrganization';
 import { notify } from '@/lib/notify';
 import { describeSeed, seedPpmFromPlan } from '@/hooks/useReportPpm';
+import { APPROVAL_EXPORT_FAILED, exportApprovedArtifact, type ApprovalExportResult } from '@/lib/reportApproval';
+import { track } from '@/lib/analytics';
 
 const REPORTS_KEY = ['fortress-reports'];
 /** Keys of the readers that derive figures from report status (usePortfolioCompliance, useBuildingsScores). */
@@ -223,12 +226,23 @@ export function nextStatus(status: ReportStatus): ReportStatus | null {
   return FORWARD[status];
 }
 
+/**
+ * A lifecycle transition, plus the auto-export that follows an approval (spec §5.7): approving issues the
+ * final, unwatermarked PDF and saves it as the report's current artifact. `exported` is null for every
+ * other transition. The export is deliberately non-fatal — the approval itself already landed.
+ */
+export interface ReportTransitionResult {
+  report: Report;
+  exported: ApprovalExportResult | null;
+}
+
 export function useReportLifecycle(reportId: string) {
   const qc = useQueryClient();
   const { user } = useAuth();
+  const { organization } = useOrganization();
 
   return useMutation({
-    mutationFn: async (params: { status: ReportStatus; reviewNotes?: string }): Promise<Report> => {
+    mutationFn: async (params: { status: ReportStatus; reviewNotes?: string }): Promise<ReportTransitionResult> => {
       const patch: Record<string, unknown> = { status: params.status };
       if (params.status === 'reviewed' || params.status === 'approved' || params.status === 'rejected') {
         patch.reviewed_by = user?.id ?? null;
@@ -241,14 +255,30 @@ export function useReportLifecycle(reportId: string) {
         .select('*')
         .single();
       if (error) throw error;
-      return data;
+      // Export AFTER the status write, never before: the renderer reads `reports.status` itself, so the
+      // PDF only comes out unwatermarked once the row says approved.
+      const exported = params.status === 'approved'
+        ? await exportApprovedArtifact({
+            reportId,
+            orgId: organization?.id,
+            userId: user?.id,
+            branding: {
+              name: organization?.name ?? '',
+              primaryColor: organization?.primary_color ?? '#2563eb',
+              logoUrl: organization?.logo_url ?? null,
+            },
+          })
+        : null;
+      return { report: data, exported };
     },
-    onSuccess: (r) => {
+    onSuccess: ({ report: r, exported }) => {
       qc.invalidateQueries({ queryKey: REPORTS_KEY });
       // The portfolio compliance card and the building chips read the latest filed/approved ops report per
       // building; a transition changes what they show, so they must not wait out their stale time.
       qc.invalidateQueries({ queryKey: PORTFOLIO_COMPLIANCE_KEY });
       qc.invalidateQueries({ queryKey: BUILDINGS_OHS_SCORES_KEY });
+      // Approval may have just issued a new version; the editor's Issued PDFs card reads this key.
+      qc.invalidateQueries({ queryKey: ['report-artifacts', reportId] });
       const label = r.title ?? 'Building report';
       const url = `/reports/fortress/${r.id}`;
       if (r.status === 'submitted') {
@@ -259,6 +289,17 @@ export function useReportLifecycle(reportId: string) {
           recipients: [r.author_id], title: r.status === 'rejected' ? `Report returned: ${label}` : `Report approved: ${label}`,
           body: r.status === 'rejected' ? (r.review_notes ?? undefined) : undefined, url,
         });
+      }
+      if (exported?.ok) {
+        track('report_exported', { reportType: exported.reportType, reportStatus: 'approved' });
+        toast.success('Report approved and the final PDF was saved.');
+        return;
+      }
+      if (exported && !exported.ok) {
+        // The approval stands; only the PDF is missing. Say which half failed rather than a bare success.
+        if (import.meta.env.DEV) console.error('Approval export failed:', exported.error);
+        toast.warning(APPROVAL_EXPORT_FAILED);
+        return;
       }
       const verb: Record<string, string> = {
         submitted: 'submitted for review',

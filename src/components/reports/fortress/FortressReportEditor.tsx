@@ -1,13 +1,13 @@
 /** Report editor: section navigator + active section form + lifecycle actions. */
 import { useEffect, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, ClipboardCheck, FileDown, Loader2, Send, Trash2, Undo2, XCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ClipboardCheck, FileDown, Loader2, Send, Share2, Trash2, Undo2, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useOrganization } from '@/hooks/useOrganization';
 import { generateReportPdf } from '@/lib/fortressReportPdf';
-import { saveReportArtifact, type ReportArtifactKind } from '@/lib/reportArtifacts';
+import { listReportArtifactsForSource, saveReportArtifact, type ReportArtifactKind, type ReportArtifactRow } from '@/lib/reportArtifacts';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -22,11 +22,13 @@ import { useDiscardDraft, useFortressReport, useReportLifecycle } from '@/hooks/
 import { REPORT_SECTIONS, REPORT_STATUS_VARIANT, formatPeriodLabel, REQUIRED_SECTIONS, REQUIRED_SECTION_TABLE } from '@/lib/fortressReports';
 import { useReportSectionCounts } from '@/hooks/useReportSectionCounts';
 import { ReportSavedVersions } from '@/components/reports/fortress/ReportSavedVersions';
+import { ShareReportDialog } from '@/components/reports/fortress/ShareReportDialog';
 import { DiscardDraftDialog } from '@/components/reports/fortress/DiscardDraftDialog';
 import { fdb, REPORT_TYPE_LABELS, type ReportStatus, type ReportType } from '@/integrations/supabase/fortress-db';
 import { getSectionComponent } from './sections/registry';
 import { dirtySections, useDirtyCount } from './dirtySections';
 import { Hint } from '@/components/ui/hint';
+import { useFeature } from '@/hooks/useOrgSettings';
 import { track } from '@/lib/analytics';
 
 // REQUIRED_SECTION_TABLE names section tables as strings, so the count probe uses a narrow structural client
@@ -46,6 +48,19 @@ export default function FortressReportEditor() {
   const lifecycle = useReportLifecycle(id!);
   const discard = useDiscardDraft();
   const qc = useQueryClient();
+  const shareLinks = useFeature('share_links');
+
+  // Same key ReportSavedVersions reads, so the header button and the versions card never disagree
+  // about whether this report has a PDF to share.
+  const { data: artifacts } = useQuery({
+    queryKey: ['report-artifacts', id],
+    enabled: !!id,
+    queryFn: async (): Promise<ReportArtifactRow[]> => {
+      const { data: rows, error } = await listReportArtifactsForSource(id!);
+      if (error) throw new Error(error);
+      return rows;
+    },
+  });
 
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [preparedFor, setPreparedFor] = useState('');
@@ -54,6 +69,8 @@ export default function FortressReportEditor() {
   const [exporting, setExporting] = useState(false);
   const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareArtifactId, setShareArtifactId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Unsaved section edits (D1). Only the active section is mounted, so any dirty grid
@@ -203,11 +220,11 @@ export default function FortressReportEditor() {
           : 'Draft in progress — waiting on the author to complete and submit it.';
       case 'submitted':
         return isAdminOrManager
-          ? 'Look through the sections, then Mark reviewed, Approve, or Reject with a note for the author.'
+          ? 'Look through the sections, then Mark reviewed, Approve, or Reject with a note for the author. Approving also saves the final PDF.'
           : 'Locked while awaiting review. An admin or manager can reopen it as a draft.';
       case 'reviewed':
         return isAdminOrManager
-          ? 'Reviewed — Approve to finalise it, or Reject to return it to the author with a note.'
+          ? 'Reviewed — Approve to finalise it, or Reject to return it to the author with a note. Approving also saves the final PDF.'
           : 'Reviewed — waiting for a manager to approve.';
       case 'rejected':
         return isAuthor || isAdminOrManager
@@ -315,6 +332,18 @@ export default function FortressReportEditor() {
                 onConfirm={() => discard.mutate(report.id, { onSuccess: () => navigate(`/buildings/${report.building_id}?tab=reports`) })} />
             </>
           )}
+          {shareLinks && isAdminOrManager && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!artifacts?.length}
+              title={artifacts?.length ? undefined : 'Export a PDF first'}
+              onClick={() => { setShareArtifactId(null); setShareOpen(true); }}
+            >
+              <Share2 className="mr-2 h-4 w-4" />
+              Share
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting}>
             {exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileDown className="mr-2 h-4 w-4" />}
             Export PDF
@@ -421,7 +450,18 @@ export default function FortressReportEditor() {
         </div>
       </div>
 
-      <ReportSavedVersions reportId={report.id} />
+      <ReportSavedVersions
+        reportId={report.id}
+        onShare={shareLinks && isAdminOrManager ? (a) => { setShareArtifactId(a.id); setShareOpen(true); } : undefined}
+      />
+
+      <ShareReportDialog
+        reportId={report.id}
+        artifacts={artifacts ?? []}
+        initialArtifactId={shareArtifactId}
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+      />
 
       {/* Guardrail, not coaching — never routed through <Hint>. */}
       <Dialog open={exportConfirmOpen} onOpenChange={setExportConfirmOpen}>

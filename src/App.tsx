@@ -46,6 +46,7 @@ const UserManagement = lazy(() => import("./pages/UserManagement"));
 const Contractors = lazy(() => import("./pages/Contractors"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Profile = lazy(() => import("./pages/Profile"));
+const SharePage = lazy(() => import("./pages/SharePage"));
 
 const App = () => (
   <ErrorBoundary>
@@ -64,6 +65,8 @@ const App = () => (
               <Route path="/auth" element={<Auth />} />
               <Route path="/set-password" element={<SetPassword />} />
               <Route path="/reset" element={<ResetPassword />} />
+              {/* Public share page (spec §5.8): no session; the token is the credential. Never wrap in ProtectedRoute. */}
+              <Route path="/share/:token" element={<SharePage />} />
               {/* First-run gate target (needs a session; enforces its own
                   entry conditions — wrapping it in ProtectedRoute would loop) */}
               <Route path="/onboarding" element={<Onboarding />} />

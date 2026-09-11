@@ -129,7 +129,16 @@ export async function fetchPpmForPdf(
   return { ppm, ppmStatusNote };
 }
 
-export async function generateReportPdf(reportId: string, branding: ReportBranding): Promise<GeneratedFortressPdf> {
+/**
+ * Render the report. `opts.download` defaults to true (the user pressed Export PDF); approval's
+ * auto-export passes `download: false`, because nobody asked for a file — the blob is saved as
+ * the report's artifact instead.
+ */
+export async function generateReportPdf(
+  reportId: string,
+  branding: ReportBranding,
+  opts: { download?: boolean } = {},
+): Promise<GeneratedFortressPdf> {
   const color = /^#([a-f\d]{6})$/i.test(branding.primaryColor) ? branding.primaryColor : '#2563eb';
   // maybeSingle() responses go through a variable before unwrap(): passing the awaited
   // expression inline makes TypeScript infer the row type as `never`.
@@ -767,6 +776,6 @@ export async function generateReportPdf(reportId: string, branding: ReportBrandi
   const fileName = `${(report.title ?? 'report').replace(/[^\w]+/g, '_')}.pdf`;
   const pdf = pdfMake.createPdf(doc);
   const blob = await pdf.getBlob();
-  await pdf.download(fileName); // re-uses the buffered render; keeps current UX
+  if (opts.download !== false) await pdf.download(fileName); // re-uses the buffered render; keeps current UX
   return { blob, fileName, buildingId: report.building_id, reportType: report.report_type as ReportType, reportStatus: report.status };
 }

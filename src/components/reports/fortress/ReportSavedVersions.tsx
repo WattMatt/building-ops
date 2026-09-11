@@ -8,7 +8,7 @@
  */
 import { useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Download, FileText, Loader2 } from 'lucide-react';
+import { Download, FileText, Loader2, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,7 +24,13 @@ const fmtWhen = (iso: string | null) => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 };
 
-export function ReportSavedVersions({ reportId }: { reportId: string }) {
+interface ReportSavedVersionsProps {
+  reportId: string;
+  /** Given only when share links are on and the viewer may share: adds a per-version Share button. */
+  onShare?: (a: ReportArtifactRow) => void;
+}
+
+export function ReportSavedVersions({ reportId, onShare }: ReportSavedVersionsProps) {
   const [busy, setBusy] = useState<string | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -107,6 +113,12 @@ export function ReportSavedVersions({ reportId }: { reportId: string }) {
                 {/* Which PDF is safe to send a client: one exported before approval is not (E2). */}
                 {a.report_status && a.report_status !== 'approved' && (
                   <Badge variant="outline" className="text-xs">exported while {a.report_status}</Badge>
+                )}
+                {onShare && (
+                  <Button variant="outline" size="sm" onClick={() => onShare(a)}>
+                    <Share2 className="mr-2 h-4 w-4" />
+                    Share this version
+                  </Button>
                 )}
                 <Button variant="outline" size="sm" disabled={busy === a.id} onClick={() => download(a)}>
                   {busy === a.id
