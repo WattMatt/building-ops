@@ -18,7 +18,10 @@ const state = vi.hoisted(() => ({
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ isAdminOrManager: state.isAdminOrManager, user: { id: 'u1' } }) }));
 vi.mock('@/hooks/useHints', () => ({ useHints: () => ({ hintsEnabled: true, setHintsEnabled: vi.fn() }) }));
 vi.mock('@/lib/myWork', () => ({ todayInOperatingTz: () => '2026-09-10' }));
-vi.mock('@/lib/exportCsv', () => ({ exportCsv: state.exportCsv }));
+vi.mock('@/lib/exportCsv', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/exportCsv')>()),
+  exportCsv: state.exportCsv,
+}));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock('@/hooks/useBuildingPpm', () => ({
   useBuildingPpm: () => ({
@@ -120,7 +123,8 @@ describe('PpmTab — plan lines', () => {
     expect(columns[1].format!(rows[0].recurrence)).toBe('Monthly on the 1st');
     expect(columns[2].format!(null)).toBe('');
     expect(columns[3].format!(false)).toBe('No');
-    expect(filename).toBe('ppm-plan-b1.csv');
+    // The shared button owns the date suffix; no uuid goes into a user's Downloads folder.
+    expect(filename).toMatch(/^ppm-plan_\d{4}-\d{2}-\d{2}\.csv$/);
   });
 
   it('hides the write controls from site users', async () => {

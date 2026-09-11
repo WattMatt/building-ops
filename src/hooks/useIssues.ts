@@ -14,6 +14,8 @@ export interface Issue {
   description: string;
   priority: IssuePriority;
   status: IssueStatus;
+  /** The pinned category the issue was reported under; nullable on old rows. */
+  category: string | null;
   deadline: string | null;
   created_at: string;
   building_id: string;
@@ -95,6 +97,7 @@ export function useIssues(
           description,
           priority,
           status,
+          category,
           deadline,
           created_at,
           building_id,
@@ -127,6 +130,7 @@ export function useIssues(
         description: issue.description,
         priority: issue.priority as IssuePriority,
         status: issue.status as IssueStatus,
+        category: issue.category,
         deadline: issue.deadline,
         created_at: issue.created_at ?? '',
         building_id: issue.building_id,

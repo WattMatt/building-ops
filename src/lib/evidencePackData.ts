@@ -15,18 +15,38 @@ import { supabase } from '@/integrations/supabase/client';
 import { resolveStorageUrl } from '@/integrations/supabase/storage';
 import { slaState } from '@/lib/slaState';
 import type { EmbeddedPhoto } from '@/lib/fortressReportDoc';
-import type { AssetPack, EvidencePack, IssuePack, PackMeta, TaskPack } from '@/lib/evidencePack';
+import { PACK_PHOTO_CAP, type AssetPack, type EvidencePack, type IssuePack, type PackMeta, type TaskPack } from '@/lib/evidencePack';
 
 /** Same numbers as `fortressReportPdf`, so a photo looks identical in a report and in a pack. */
 const PHOTO_MAX_DIM = 1100;
 const PHOTO_QUALITY = 0.7;
 
+/**
+ * Photos in flight at once. Sequential fetching meant one round-trip per photo behind a bare
+ * spinner; unbounded parallelism would hold every blob at once on a phone. Four is the middle.
+ */
+const PHOTO_CONCURRENCY = 4;
+
 export const PHOTO_UNAVAILABLE_CAPTION = 'Photo unavailable';
+
+/** The manifest is a pack FILE, never a photo — the counts must not include it. */
+export const PACK_MANIFEST_NAME = 'photos/index.txt';
 
 /** One original photo as fetched, ready to be zipped alongside the PDF. */
 export interface PackOriginal {
   name: string;
   blob: Blob;
+}
+
+/** Called after each photo settles, so a caller can say "Fetching photo 3 of 12". */
+export type PackProgress = (done: number, total: number) => void;
+
+/** What one pack load returns: the document, the files to zip, and how many photos that is. */
+export interface LoadedPack<P extends EvidencePack = EvidencePack> {
+  pack: P;
+  originals: PackOriginal[];
+  /** Photos actually fetched — `originals` also carries the manifest. */
+  photoCount: number;
 }
 
 /** Fail loudly: an empty section in a compliance pack is indistinguishable from "nothing happened". */
@@ -82,39 +102,117 @@ async function downscaleToDataUrl(blob: Blob): Promise<string> {
   }
 }
 
-/** Collects originals as they are fetched, numbering them `photos/01.jpg…` in pack order. */
-class PhotoCollector {
+interface PhotoRequest {
+  storedUrl: string;
+  caption: string;
+  source: string;
+}
+
+interface FetchedPhoto {
+  blob: Blob;
+  dataUrl: string;
+  ext: 'png' | 'jpg';
+}
+
+/**
+ * Two phases, because the pack cannot report progress over a list it has not counted yet:
+ * every section calls `request()` (cheap, synchronous, reserves a slot), then `run()` fetches
+ * the whole set with a small concurrency limit and FILLS THE RESERVED SLOTS IN PLACE. The pack
+ * builders hold the same objects, so they see the finished photos.
+ *
+ * Exported for its own unit tests — the loaders are the only production callers.
+ */
+export class PhotoCollector {
   readonly originals: PackOriginal[] = [];
   private readonly index: string[] = [];
+  private readonly slots: { req: PhotoRequest; photo: EmbeddedPhoto }[] = [];
+  /** Photos past `PACK_PHOTO_CAP`: not fetched, not listed, counted on the document instead. */
+  omitted = 0;
 
-  async embed(storedUrl: string, caption: string, source: string): Promise<EmbeddedPhoto> {
+  /** Reserves one slot per URL, up to the cap. The returned objects are filled in by `run()`. */
+  request(urls: string[], captionFor: (i: number) => string, source: string): EmbeddedPhoto[] {
+    const out: EmbeddedPhoto[] = [];
+    for (let i = 0; i < urls.length; i++) {
+      if (this.slots.length >= PACK_PHOTO_CAP) {
+        this.omitted += urls.length - i;
+        break;
+      }
+      const photo: EmbeddedPhoto = { dataUrl: '', caption: captionFor(i) };
+      this.slots.push({ req: { storedUrl: urls[i], caption: photo.caption ?? '', source }, photo });
+      out.push(photo);
+    }
+    return out;
+  }
+
+  /** How many photos `run()` will fetch — the `n` in "photo i of n". */
+  get pending(): number {
+    return this.slots.length;
+  }
+
+  /**
+   * One photo, or null when it cannot be used. `fetch` only rejects on a NETWORK failure: a 403
+   * from an expired signed URL, a 404 or a 5xx all RESOLVE, and their JSON/XML error body would
+   * otherwise be zipped as `photos/01.jpg` and handed to pdfmake as an image. The status and the
+   * content type are therefore checked before the body is read at all.
+   */
+  private async fetchOne(req: PhotoRequest): Promise<FetchedPhoto | null> {
     try {
-      const signed = await resolveStorageUrl(storedUrl);
+      const signed = await resolveStorageUrl(req.storedUrl);
       if (!signed) throw new Error('could not sign');
-      const blob = await (await fetch(signed)).blob();
-      const n = String(this.originals.length + 1).padStart(2, '0');
-      const ext = blob.type === 'image/png' ? 'png' : 'jpg';
-      const name = `photos/${n}.${ext}`;
-      this.originals.push({ name, blob });
-      this.index.push(`${name}\t${source}\t${storedUrl}`);
-      return { dataUrl: await downscaleToDataUrl(blob), caption };
+      const res = await fetch(signed);
+      if (!res.ok) throw new Error(`unreadable (HTTP ${res.status})`);
+      const type = res.headers.get('content-type') ?? '';
+      if (!type.startsWith('image/')) throw new Error(`unreadable (content-type ${type || 'unknown'})`);
+      const blob = await res.blob();
+      return { blob, dataUrl: await downscaleToDataUrl(blob), ext: type.startsWith('image/png') ? 'png' : 'jpg' };
     } catch {
-      this.index.push(`(missing)\t${source}\t${storedUrl}`);
-      return { dataUrl: '', caption: `${caption} — ${PHOTO_UNAVAILABLE_CAPTION}` };
+      return null;
     }
   }
 
-  async embedAll(urls: string[], captionFor: (i: number) => string, source: string): Promise<EmbeddedPhoto[]> {
-    const out: EmbeddedPhoto[] = [];
-    for (let i = 0; i < urls.length; i++) out.push(await this.embed(urls[i], captionFor(i), source));
-    return out;
+  /** Fetches every requested photo, at most `PHOTO_CONCURRENCY` at a time, and fills the slots. */
+  async run(onProgress?: PackProgress): Promise<void> {
+    const total = this.slots.length;
+    const fetched: (FetchedPhoto | null)[] = new Array(total).fill(null);
+    let next = 0;
+    let done = 0;
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const i = next++;
+        if (i >= total) return;
+        fetched[i] = await this.fetchOne(this.slots[i].req);
+        done++;
+        onProgress?.(done, total);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(PHOTO_CONCURRENCY, total) }, worker));
+
+    // Numbered in PACK order, not in the order the fetches happened to finish.
+    for (let i = 0; i < total; i++) {
+      const { req, photo } = this.slots[i];
+      const got = fetched[i];
+      if (!got) {
+        this.index.push(`(missing)\t${req.source}\t${req.storedUrl}`);
+        photo.caption = `${req.caption} — ${PHOTO_UNAVAILABLE_CAPTION}`;
+        continue;
+      }
+      const name = `photos/${String(this.originals.length + 1).padStart(2, '0')}.${got.ext}`;
+      this.originals.push({ name, blob: got.blob });
+      this.index.push(`${name}\t${req.source}\t${req.storedUrl}`);
+      photo.dataUrl = got.dataUrl;
+    }
   }
 
   /** The originals plus a manifest saying where each file came from; empty when nothing was fetched. */
   finish(): PackOriginal[] {
     if (this.originals.length === 0) return [];
     const text = ['file\tsource\tstored_url', ...this.index].join('\n') + '\n';
-    return [...this.originals, { name: 'photos/index.txt', blob: new Blob([text], { type: 'text/plain' }) }];
+    return [...this.originals, { name: PACK_MANIFEST_NAME, blob: new Blob([text], { type: 'text/plain' }) }];
+  }
+
+  /** `meta` plus the omitted count, so the document can say what it left out. */
+  metaWith(meta: PackMeta): PackMeta {
+    return this.omitted > 0 ? { ...meta, photosOmitted: this.omitted } : meta;
   }
 }
 
@@ -141,7 +239,7 @@ function activityText(a: { activity_type: string; comment: string | null; old_va
   return `${label}${from}${to}`;
 }
 
-export async function loadIssuePack(issueId: string, meta: PackMeta): Promise<{ pack: IssuePack; originals: PackOriginal[] }> {
+export async function loadIssuePack(issueId: string, meta: PackMeta, onProgress?: PackProgress): Promise<LoadedPack<IssuePack>> {
   const issueRes = await supabase.from('issues').select('*').eq('id', issueId).maybeSingle();
   const issue = need(issueRes.data, issueRes.error, 'the issue');
   const activityRes = await supabase.from('issue_activity').select('*').eq('issue_id', issueId).order('created_at', { ascending: true });
@@ -161,8 +259,9 @@ export async function loadIssuePack(issueId: string, meta: PackMeta): Promise<{ 
   const names = await memberNames(issue.building_id);
   const nameOf = (id: string | null): string | null => (id ? names.get(id) ?? null : null);
 
+  // Phase 1: reserve every photo slot (cheap), so phase 2 knows the total and can report it.
   const photos = new PhotoCollector();
-  const issuePhotos = await photos.embedAll(
+  const issuePhotos = photos.request(
     photoUrlList(issue.photo_urls),
     (i) => `Reported photo ${i + 1}`,
     'issue',
@@ -177,9 +276,11 @@ export async function loadIssuePack(issueId: string, meta: PackMeta): Promise<{ 
       author,
       type: a.activity_type,
       text: activityText(a),
-      photos: await photos.embedAll(photoUrlList(a.photo_urls), (i) => `${at} · photo ${i + 1}`, 'comment'),
+      photos: photos.request(photoUrlList(a.photo_urls), (i) => `${at} · photo ${i + 1}`, 'comment'),
     });
   }
+  // Phase 2: fetch them all, filling the slots the pack above already holds.
+  await photos.run(onProgress);
 
   // The SLA fields are typed on `issues`; slaState needs created_at, which the DB always writes.
   const sla = slaState({
@@ -193,7 +294,7 @@ export async function loadIssuePack(issueId: string, meta: PackMeta): Promise<{ 
 
   const pack: IssuePack = {
     kind: 'issue',
-    meta,
+    meta: photos.metaWith(meta),
     issue: {
       id: issue.id,
       title: issue.title,
@@ -222,10 +323,10 @@ export async function loadIssuePack(issueId: string, meta: PackMeta): Promise<{ 
     timeline,
     rating: ratingRow ? { stars: ratingRow.rating, comment: ratingRow.comment } : null,
   };
-  return { pack, originals: photos.finish() };
+  return { pack, originals: photos.finish(), photoCount: photos.originals.length };
 }
 
-export async function loadTaskPack(taskId: string, meta: PackMeta): Promise<{ pack: TaskPack; originals: PackOriginal[] }> {
+export async function loadTaskPack(taskId: string, meta: PackMeta, onProgress?: PackProgress): Promise<LoadedPack<TaskPack>> {
   const taskRes = await supabase.from('task_instances').select('*').eq('id', taskId).maybeSingle();
   const task = need(taskRes.data, taskRes.error, 'the task');
   const completionsRes = await supabase
@@ -247,7 +348,7 @@ export async function loadTaskPack(taskId: string, meta: PackMeta): Promise<{ pa
       completedAt: instant(row.created_at) ?? '—',
       notes: row.notes,
       signatureConfirmed: !!row.signature_confirmed,
-      photos: await photos.embedAll(photoUrlList(row.photo_urls), (i) => `Completion photo ${i + 1}`, 'completion'),
+      photos: photos.request(photoUrlList(row.photo_urls), (i) => `Completion photo ${i + 1}`, 'completion'),
       source: 'task_completions',
     };
   } else if (task.completed_at) {
@@ -258,14 +359,15 @@ export async function loadTaskPack(taskId: string, meta: PackMeta): Promise<{ pa
       completedAt: instant(task.completed_at) ?? '—',
       notes: task.completion_notes,
       signatureConfirmed: !!task.signature_url,
-      photos: await photos.embedAll(photoUrlList(task.photo_urls), (i) => `Completion photo ${i + 1}`, 'task'),
+      photos: photos.request(photoUrlList(task.photo_urls), (i) => `Completion photo ${i + 1}`, 'task'),
       source: 'task_instances',
     };
   }
+  await photos.run(onProgress);
 
   const pack: TaskPack = {
     kind: 'task',
-    meta,
+    meta: photos.metaWith(meta),
     task: {
       id: task.id,
       name: task.task_name,
@@ -279,10 +381,10 @@ export async function loadTaskPack(taskId: string, meta: PackMeta): Promise<{ pa
     },
     completion,
   };
-  return { pack, originals: photos.finish() };
+  return { pack, originals: photos.finish(), photoCount: photos.originals.length };
 }
 
-export async function loadAssetPack(assetId: string, meta: PackMeta): Promise<{ pack: AssetPack; originals: PackOriginal[] }> {
+export async function loadAssetPack(assetId: string, meta: PackMeta): Promise<LoadedPack<AssetPack>> {
   const assetRes = await supabase.from('building_assets').select('*').eq('id', assetId).maybeSingle();
   const asset = need(assetRes.data, assetRes.error, 'the asset');
   const servicesRes = await supabase
@@ -326,19 +428,20 @@ export async function loadAssetPack(assetId: string, meta: PackMeta): Promise<{ 
     })),
   };
   // An asset pack embeds no photos; the zip option still resolves to just the PDF.
-  return { pack, originals: [] };
+  return { pack, originals: [], photoCount: 0 };
 }
 
 export async function loadEvidencePack(
   kind: 'issue' | 'task' | 'asset',
   id: string,
   meta: PackMeta,
-): Promise<{ pack: EvidencePack; originals: PackOriginal[] }> {
+  onProgress?: PackProgress,
+): Promise<LoadedPack> {
   switch (kind) {
     case 'issue':
-      return loadIssuePack(id, meta);
+      return loadIssuePack(id, meta, onProgress);
     case 'task':
-      return loadTaskPack(id, meta);
+      return loadTaskPack(id, meta, onProgress);
     case 'asset':
       return loadAssetPack(id, meta);
   }

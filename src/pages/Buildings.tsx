@@ -16,7 +16,6 @@ import {
   Trash2,
   Eye,
   Upload,
-  Download,
   Camera,
 } from 'lucide-react';
 import {
@@ -25,7 +24,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import { BuildingAvatar } from '@/components/building/BuildingAvatar';
 import { BuildingAvatarDialog } from '@/components/building/BuildingAvatarDialog';
@@ -33,18 +31,19 @@ import BuildingImportDialog from '@/components/building/BuildingImportDialog';
 import { BuildingScoreChips } from '@/components/building/BuildingScoreChips';
 import { chipValues, useBuildingsScores } from '@/hooks/useBuildingsScores';
 import { useBuildingsTrends } from '@/hooks/useBuildingTrend';
-import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
+import { csvText, type CsvColumn } from '@/lib/exportCsv';
 import type { Tables } from '@/integrations/supabase/types';
 
 type BuildingRow = Tables<'buildings'>;
 
-const BUILDING_CSV_COLUMNS: CsvColumn<BuildingRow>[] = [
+export const BUILDING_CSV_COLUMNS: CsvColumn<BuildingRow>[] = [
   { key: 'name', header: 'Name' },
-  { key: 'address', header: 'Address', format: (v) => (v ? String(v) : '') },
-  { key: 'city', header: 'City', format: (v) => (v ? String(v) : '') },
+  { key: 'address', header: 'Address', format: csvText },
+  { key: 'city', header: 'City', format: csvText },
   { key: 'latitude', header: 'Latitude', format: (v) => (v == null ? '' : String(v)) },
   { key: 'longitude', header: 'Longitude', format: (v) => (v == null ? '' : String(v)) },
-  { key: 'timezone', header: 'Timezone', format: (v) => (v ? String(v) : '') },
+  { key: 'timezone', header: 'Timezone', format: csvText },
   // Which reports the building owes; ";" so a spreadsheet keeps them in one cell.
   { key: 'report_types', header: 'Report types', format: (v) => (Array.isArray(v) ? v.join(';') : '') },
 ];
@@ -75,12 +74,6 @@ export default function Buildings() {
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to delete this building?')) return;
     await deleteBuilding(id);
-  };
-
-  // Exactly the rows on screen after the search, so the file matches what the user is looking at.
-  const handleExport = () => {
-    exportCsv(filteredBuildings, BUILDING_CSV_COLUMNS, `buildings_${new Date().toISOString().slice(0, 10)}.csv`);
-    toast.success(`Exported ${filteredBuildings.length} ${filteredBuildings.length === 1 ? 'row' : 'rows'}`);
   };
 
   if (loading) {
@@ -128,16 +121,8 @@ export default function Buildings() {
         </div>
         {isAdminOrManager && (
           <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="min-h-11"
-              onClick={handleExport}
-              disabled={filteredBuildings.length === 0}
-            >
-              <Download className="w-4 h-4 mr-2" />
-              Export CSV
-            </Button>
+            {/* Exactly the rows on screen after the search. */}
+            <ExportCsvButton rows={filteredBuildings} columns={BUILDING_CSV_COLUMNS} filename="buildings" />
             <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
               <Upload className="w-4 h-4 mr-2" />
               Import

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,7 +13,6 @@ import {
   Calendar,
   CalendarDays,
   AlertTriangle,
-  Download,
   Loader2,
   RefreshCw,
   Plus,
@@ -51,7 +50,8 @@ import { RoleAssignmentsPanel } from '@/components/building/RoleAssignmentsPanel
 import { UpcomingTasks, HORIZON_DAYS, groupUpcoming } from '@/components/building/UpcomingTasks';
 import { todayInOperatingTz } from '@/lib/myWork';
 import { ALL_FREQUENCIES } from '@/lib/taskSchedule';
-import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
+import { csvInstant, csvText, type CsvColumn } from '@/lib/exportCsv';
 
 /** Days ahead the on-demand generate buttons fill (the nightly job uses its own horizon). */
 const GENERATE_HORIZON_DAYS = 90;
@@ -153,7 +153,7 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<TaskInstance | null>(null);
 
-  const nameOf = (id: string | null) => (id && members.get(id) ? memberDisplayName(members.get(id)!) : null);
+  const nameOf = useCallback((id: string | null) => (id && members.get(id) ? memberDisplayName(members.get(id)!) : null), [members]);
 
   const assignTasks = async (taskIds: string[], assigned_to: string | null) => {
     if (!taskIds.length) return;
@@ -341,22 +341,20 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
     [activeView, tasks, filteredTasks],
   );
 
-  const handleExport = () => {
-    const columns: CsvColumn<TaskInstance>[] = [
-      { key: 'task_name', header: 'Task' },
-      { key: 'category', header: 'Category', format: (v) => (v ? String(v) : '') },
-      { key: 'frequency', header: 'Frequency' },
-      { key: 'responsible_role', header: 'Responsible role', format: (v) => (v ? String(v) : '') },
-      { key: 'assigned_to', header: 'Assignee', format: (v) => nameOf((v as string | null) ?? null) ?? '' },
-      { key: 'due_date', header: 'Due date' },
-      { key: 'status', header: 'Status' },
-      { key: 'id', header: 'Completed by', format: (_v, row) => (row.completion ? nameOf(row.completion.completed_by) ?? '' : '') },
-      { key: 'id', header: 'Completed at', format: (_v, row) => row.completion?.completed_at ?? '' },
-    ];
-    const label = activeView === 'upcoming' ? 'upcoming' : activeView;
-    exportCsv(exportableTasks, columns, `checklists-${label}_${todayInOperatingTz()}.csv`);
-    toast.success(`Exported ${exportableTasks.length} ${exportableTasks.length === 1 ? 'row' : 'rows'}`);
-  };
+  // `nameOf` closes over the loaded member list, so the columns are memoised rather than
+  // rebuilt on every render. "Completed at" is an instant and goes through the shared
+  // formatter — a raw ISO string lands in Excel as text, not a date.
+  const csvColumns = useMemo((): CsvColumn<TaskInstance>[] => [
+    { key: 'task_name', header: 'Task' },
+    { key: 'category', header: 'Category', format: csvText },
+    { key: 'frequency', header: 'Frequency' },
+    { key: 'responsible_role', header: 'Responsible role', format: csvText },
+    { key: 'assigned_to', header: 'Assignee', format: (v) => nameOf((v as string | null) ?? null) ?? '' },
+    { key: 'due_date', header: 'Due date' },
+    { key: 'status', header: 'Status' },
+    { header: 'Completed by', format: (_v, row) => (row.completion ? nameOf(row.completion.completed_by) ?? '' : '') },
+    { header: 'Completed at', format: (_v, row) => csvInstant(row.completion?.completed_at) },
+  ], [nameOf]);
 
   // Calculate progress
   const pendingTasks = filteredTasks.filter(t => t.status === 'pending');
@@ -388,16 +386,11 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="min-h-11"
-            onClick={handleExport}
-            disabled={exportableTasks.length === 0}
-          >
-            <Download className="h-4 w-4 mr-2" />
-            Export CSV
-          </Button>
+          <ExportCsvButton
+            rows={exportableTasks}
+            columns={csvColumns}
+            filename={`checklists-${activeView === 'upcoming' ? 'upcoming' : activeView}`}
+          />
           {isAdminOrManager && (
             <Button
               variant="outline"

@@ -23,7 +23,6 @@ import {
 } from '@/components/ui/select';
 import {
   AlertTriangle,
-  Download,
   Plus,
   Search,
   Building2,
@@ -35,10 +34,21 @@ import {
 import { Link, useSearchParams } from 'react-router-dom';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
+import { csvInstant, csvText, type CsvColumn } from '@/lib/exportCsv';
 import { formatSlaInstant, slaState } from '@/lib/slaState';
 import type { Issue } from '@/hooks/useIssues';
+import { isTenantIssue } from '@/lib/issueSource';
 import type { IssuePriority, IssueStatus } from '@/lib/constants';
+
+/**
+ * R4c: `source` / `reporter` / `reference` are server-set columns (only the tenant-intake function
+ * may write them). `useIssues` is owned by another slice and does not select them yet, so this page
+ * reads them through a widening shape rather than asserting they are always present — the Tenant
+ * chip lights up the moment that hook adds the three columns to its select and its `Issue`.
+ */
+type TenantFields = { source?: string | null; reference?: string | null; reporter?: { name?: string | null } | null };
+const tenantFields = (issue: Issue): TenantFields => issue as Issue & TenantFields;
 
 const priorityColors: Record<IssuePriority, string> = {
   low: 'bg-muted text-muted-foreground',
@@ -61,27 +71,27 @@ const statusLabels: Record<IssueStatus, string> = {
   resolved: 'Resolved',
 };
 
-const csvText = (v: unknown) => (v == null || v === '' ? '' : String(v));
-const csvInstant = (v: unknown) => (typeof v === 'string' && v ? formatSlaInstant(new Date(v)) : '');
-
 /**
  * The issue register as a spreadsheet: what is on screen after the filters, with the SLA clock
  * spelled out (target, due, state) so an export can answer "which of these breached?" without
  * the reader re-deriving it. `slaState` is the same function the chips use.
+ *
+ * No assignee column: the list spans buildings and returns ids only, and resolving them would
+ * mean one `building_members` RPC per building on this page. A uuid in a landlord's
+ * spreadsheet answers nothing, so the column is out rather than raw.
  */
-const ISSUE_CSV_COLUMNS: CsvColumn<Issue>[] = [
+export const ISSUE_CSV_COLUMNS: CsvColumn<Issue>[] = [
   { key: 'title', header: 'Title' },
   { key: 'building_name', header: 'Building', format: csvText },
   { key: 'priority', header: 'Priority' },
   { key: 'status', header: 'Status', format: (v) => statusLabels[v as IssueStatus] ?? String(v) },
+  { key: 'category', header: 'Category', format: csvText },
   { key: 'created_at', header: 'Reported', format: csvInstant },
   { key: 'deadline', header: 'Deadline', format: csvText },
-  // The list query returns ids only; resolving names would need a per-building member fetch.
-  { key: 'assigned_to', header: 'Assigned to (user id)', format: csvText },
   { key: 'resolved_at', header: 'Resolved at', format: csvInstant },
   { key: 'sla_target_hours', header: 'SLA target (hours)', format: csvText },
-  { key: 'sla_target_hours', header: 'SLA due', format: (_v, row) => { const d = slaState(row).due; return d ? formatSlaInstant(d) : ''; } },
-  { key: 'sla_target_hours', header: 'SLA state', format: (_v, row) => slaState(row).label },
+  { header: 'SLA due', format: (_v, row) => { const d = slaState(row).due; return d ? formatSlaInstant(d) : ''; } },
+  { header: 'SLA state', format: (_v, row) => slaState(row).label },
   { key: 'sla_breached_at', header: 'SLA breached at', format: csvInstant },
   { key: 'first_response_at', header: 'First response', format: csvInstant },
   { key: 'corrective_action', header: 'Corrective action', format: csvText },
@@ -150,10 +160,15 @@ export default function Issues() {
     description: string;
     status: IssueStatus;
     priority: IssuePriority;
+    reference?: string | null;
+    reporter?: { name: string } | null;
   }) => {
     const matchesSearch =
       issue.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      issue.description.toLowerCase().includes(searchQuery.toLowerCase());
+      issue.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      // A tenant quotes their reference number, and the team searches for the person who called.
+      (issue.reference ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (issue.reporter?.name ?? '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === 'all' || issue.status === statusFilter;
     const matchesPriority = priorityFilter === 'all' || issue.priority === priorityFilter;
     return matchesSearch && matchesStatus && matchesPriority;
@@ -168,12 +183,6 @@ export default function Issues() {
   // queue sheet (where it can be retried or discarded) is the tap target once it lands.
   const onQueuedRowClick = (row: QueuedIssueRow) => {
     toast(row.failed ? 'This issue could not sync yet' : 'This issue is waiting to sync');
-  };
-
-  // Server rows only: a queued issue has no server row, so it carries no SLA clock to export.
-  const handleExport = () => {
-    exportCsv(filteredIssues, ISSUE_CSV_COLUMNS, `issues_${new Date().toISOString().slice(0, 10)}.csv`);
-    toast.success(`Exported ${filteredIssues.length} ${filteredIssues.length === 1 ? 'row' : 'rows'}`);
   };
 
   // Guardrail: the error card must never hide a queued issue. A caretaker who reports an issue
@@ -229,10 +238,8 @@ export default function Issues() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" className="min-h-11" onClick={handleExport} disabled={filteredIssues.length === 0}>
-            <Download className="w-4 h-4 mr-2" />
-            Export CSV
-          </Button>
+          {/* Server rows only: a queued issue has no server row, so it carries no SLA clock. */}
+          <ExportCsvButton rows={filteredIssues} columns={ISSUE_CSV_COLUMNS} filename="issues" />
           <Button asChild>
             <Link to="/issues/new">
               <Plus className="w-4 h-4 mr-2" />
@@ -448,6 +455,11 @@ export default function Issues() {
                             <Clock className="h-3 w-3" />
                             Due: {format(new Date(issue.deadline), 'MMM d')}
                           </span>
+                        )}
+                        {isTenantIssue(tenantFields(issue)) && (
+                          <Badge variant="outline" className="border-info text-info" data-testid="tenant-chip">
+                            Tenant{tenantFields(issue).reference ? ` · ${tenantFields(issue).reference}` : ''}
+                          </Badge>
                         )}
                       </div>
                     </div>

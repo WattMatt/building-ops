@@ -5,22 +5,10 @@
  */
 import { zipSync } from 'fflate';
 import { buildEvidencePackDoc, packFileName, type PackMeta } from '@/lib/evidencePack';
-import { loadEvidencePack } from '@/lib/evidencePackData';
+import { loadEvidencePack, type PackProgress } from '@/lib/evidencePackData';
 import { renderPdfBlob } from '@/lib/pdfGenerator';
+import { downloadBlob } from '@/lib/exportCsv';
 import { track } from '@/lib/analytics';
-
-/** Object URL + anchor click, the same path exportCsv and the XLSX writers use inside the PWA sandbox. */
-function download(blob: Blob, name: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  a.style.display = 'none';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
 
 /** Builds the zip entries for a pack: the PDF at the root, then `photos/…` alongside it. */
 export async function packZipFiles(
@@ -37,19 +25,21 @@ export async function downloadEvidencePack(
   kind: 'issue' | 'task' | 'asset',
   id: string,
   meta: PackMeta,
-  opts: { withOriginals: boolean },
+  opts: { withOriginals: boolean; onProgress?: PackProgress },
 ): Promise<void> {
-  const { pack, originals } = await loadEvidencePack(kind, id, meta);
+  const { pack, originals, photoCount } = await loadEvidencePack(kind, id, meta, opts.onProgress);
   const pdf = await renderPdfBlob(buildEvidencePackDoc(pack));
   const name = packFileName(pack);
   if (!opts.withOriginals) {
-    download(pdf, name);
+    downloadBlob(pdf, name);
     track('evidence_pack', { kind, originals: false });
     return;
   }
   const files = await packZipFiles(pdf, name, originals);
   // JPEGs and PDFs are already compressed; storing them keeps the zip fast and the size the same.
   const zip = zipSync(files, { level: 0 });
-  download(new Blob([zip], { type: 'application/zip' }), name.replace(/\.pdf$/, '.zip'));
-  track('evidence_pack', { kind, originals: true, files: originals.length });
+  downloadBlob(new Blob([zip], { type: 'application/zip' }), name.replace(/\.pdf$/, '.zip'));
+  // `photoCount` is the photos, counted before `finish()` appends the manifest — `originals`
+  // carries `photos/index.txt` too, and a manifest is not a piece of evidence.
+  track('evidence_pack', { kind, originals: true, files: photoCount });
 }

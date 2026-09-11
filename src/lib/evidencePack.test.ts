@@ -5,11 +5,13 @@ import {
   buildIssuePackDoc,
   buildTaskPackDoc,
   packFileName,
+  photosOmittedCopy,
   serviceTotal,
   starLine,
   NOT_COMPLETED_COPY,
   NO_PHOTOS_COPY,
   SOURCE_COPY,
+  PACK_PHOTO_CAP,
   type AssetPack,
   type IssuePack,
   type PackMeta,
@@ -216,5 +218,28 @@ describe('buildEvidencePackDoc', () => {
     expect(text(buildEvidencePackDoc(issuePack()))).toBe(text(buildIssuePackDoc(issuePack())));
     expect(text(buildEvidencePackDoc(taskPack()))).toBe(text(buildTaskPackDoc(taskPack())));
     expect(text(buildEvidencePackDoc(assetPack()))).toBe(text(buildAssetPackDoc(assetPack())));
+  });
+});
+
+describe('the photo cap', () => {
+  it('says nothing when the pack embedded every photo', () => {
+    expect(text(buildIssuePackDoc(issuePack()))).not.toContain('not included');
+  });
+
+  it('prints how many photos were left out, on any kind', () => {
+    const capped = { ...meta, photosOmitted: 7 };
+    for (const doc of [
+      buildIssuePackDoc(issuePack({ meta: capped })),
+      buildTaskPackDoc(taskPack({ meta: capped })),
+      buildAssetPackDoc(assetPack({ meta: capped })),
+    ]) {
+      expect(text(doc)).toContain(photosOmittedCopy(7));
+    }
+  });
+
+  it('names the cap and gets the singular right', () => {
+    expect(photosOmittedCopy(1)).toContain('1 further photo is not included');
+    expect(photosOmittedCopy(2)).toContain('2 further photos are not included');
+    expect(photosOmittedCopy(1)).toContain(String(PACK_PHOTO_CAP));
   });
 });

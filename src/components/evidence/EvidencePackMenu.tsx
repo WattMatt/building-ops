@@ -20,7 +20,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useUserProfile } from '@/hooks/useUserProfile';
 import { FALLBACK_PRIMARY } from '@/lib/reportDocs';
-import { downloadEvidencePack } from '@/lib/evidencePackExport';
 import type { PackMeta } from '@/lib/evidencePack';
 
 export type EvidencePackKind = 'issue' | 'task' | 'asset';
@@ -55,10 +54,25 @@ function useEvidencePackRunner(kind: EvidencePackKind, id: string, buildingName:
       generatedBy: profile?.full_name?.trim() || profile?.email || user?.email || 'Unknown',
       buildingName,
     };
+    // A progress toast rather than a bare spinner: a pack can be dozens of serial-ish fetches,
+    // and "Fetching photo 7 of 23" is the difference between "working" and "frozen".
+    const toastId = toast.loading('Building the evidence pack…');
     try {
-      await downloadEvidencePack(kind, id, meta, { withOriginals });
+      // Loaded on demand: this module pulls in pdfmake + its embedded fonts (~1.8 MB, the
+      // largest chunk in the build). A static import would put that on the Issues route and
+      // the whole building-detail route — the two most-visited screens in a mobile-first PWA.
+      const { downloadEvidencePack } = await import('@/lib/evidencePackExport');
+      await downloadEvidencePack(kind, id, meta, {
+        withOriginals,
+        onProgress: (done, total) => {
+          if (total > 0) toast.loading(`Fetching photo ${done} of ${total}…`, { id: toastId });
+        },
+      });
+      toast.success('Evidence pack ready', { id: toastId });
     } catch (err) {
-      toast.error('Could not build the evidence pack. ' + (err instanceof Error ? err.message : 'Please try again.'));
+      toast.error('Could not build the evidence pack. ' + (err instanceof Error ? err.message : 'Please try again.'), {
+        id: toastId,
+      });
     } finally {
       setBusy(null);
     }

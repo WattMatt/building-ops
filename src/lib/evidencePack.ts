@@ -16,6 +16,14 @@ import type { EmbeddedPhoto } from '@/lib/fortressReportDoc';
 import { runningHeader, safePrimaryColor } from '@/lib/reportDocs';
 import { formatRand } from '@/lib/money';
 
+/**
+ * How many photos one pack fetches and embeds. A resolved issue with a photo on every comment
+ * can carry dozens; each is held three times at peak (blob, data URL, zip copy) and every one
+ * is a round-trip, so the pack stops here and SAYS how many it left out rather than locking
+ * the tab up on a phone. Raise it only with a measurement to back the new number.
+ */
+export const PACK_PHOTO_CAP = 40;
+
 export interface PackMeta {
   orgName: string;
   primaryColor: string;
@@ -23,6 +31,13 @@ export interface PackMeta {
   generatedAt: string;
   generatedBy: string;
   buildingName: string;
+  /** Photos beyond `PACK_PHOTO_CAP` that this pack did not fetch; printed on the document. */
+  photosOmitted?: number;
+}
+
+/** The line a capped pack prints, so nobody reads a short pack as "that is all there was". */
+export function photosOmittedCopy(n: number): string {
+  return `${n} further ${n === 1 ? 'photo is' : 'photos are'} not included — this pack embeds at most ${PACK_PHOTO_CAP}.`;
 }
 
 export interface IssuePack {
@@ -208,6 +223,8 @@ function docShell(pack: EvidencePack, body: Content[]): TDocumentDefinitions {
       { text: title, style: 'title' },
       { text: meta.buildingName, style: 'meta' },
       ...body,
+      // Last line of the document, whatever the kind: a capped pack must never look complete.
+      ...(meta.photosOmitted ? [{ text: photosOmittedCopy(meta.photosOmitted), style: 'muted' } as Content] : []),
     ],
     styles: {
       org: { color: primary, bold: true, fontSize: 12, margin: [0, 0, 0, 2] },

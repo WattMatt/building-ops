@@ -6,7 +6,7 @@
  */
 import { useRef, useState, type FormEvent } from 'react';
 import { differenceInCalendarDays, format, parseISO } from 'date-fns';
-import { Download, ExternalLink, FileText, Loader2, Trash2, Upload } from 'lucide-react';
+import { ExternalLink, FileText, Loader2, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -26,7 +26,8 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Hint } from '@/components/ui/hint';
 import { todayInOperatingTz } from '@/lib/myWork';
-import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
+import { csvInstant, csvText, type CsvColumn } from '@/lib/exportCsv';
 import {
   openContractorDocument,
   useContractorDocuments,
@@ -45,6 +46,17 @@ export const DOCUMENT_TYPES = [
 
 /** Amber inside this window, red once past. */
 export const EXPIRY_WARNING_DAYS = 30;
+
+/** Module scope: nothing here closes over the component, so it must not be rebuilt per render. */
+export const DOCUMENT_CSV_COLUMNS: CsvColumn<ContractorDocument>[] = [
+  { key: 'document_name', header: 'Document' },
+  { key: 'document_type', header: 'Type', format: csvText },
+  { key: 'expiry_date', header: 'Expiry date', format: csvText },
+  { key: 'is_verified', header: 'Verified', format: (v) => (v ? 'Yes' : 'No') },
+  // An instant, so it goes through the shared formatter rather than shipping a raw ISO string.
+  { key: 'uploaded_at', header: 'Uploaded at', format: csvInstant },
+  { key: 'notes', header: 'Notes', format: csvText },
+];
 
 export type ExpiryStatus =
   | { kind: 'none' }
@@ -95,21 +107,6 @@ export function ContractorDocuments({ contractorId, canEdit }: ContractorDocumen
   const [pendingRemove, setPendingRemove] = useState<ContractorDocument | null>(null);
   const today = todayInOperatingTz();
 
-  const docText = (v: unknown) => (v == null || v === '' ? '' : String(v));
-  const DOCUMENT_CSV_COLUMNS: CsvColumn<ContractorDocument>[] = [
-    { key: 'document_name', header: 'Document' },
-    { key: 'document_type', header: 'Type', format: docText },
-    { key: 'expiry_date', header: 'Expiry date', format: docText },
-    { key: 'is_verified', header: 'Verified', format: (v) => (v ? 'Yes' : 'No') },
-    { key: 'uploaded_at', header: 'Uploaded at', format: docText },
-    { key: 'notes', header: 'Notes', format: docText },
-  ];
-
-  const handleExport = () => {
-    exportCsv(documents, DOCUMENT_CSV_COLUMNS, `contractor-documents_${new Date().toISOString().slice(0, 10)}.csv`);
-    toast.success(`Exported ${documents.length} ${documents.length === 1 ? 'row' : 'rows'}`);
-  };
-
   const handleRemove = async () => {
     if (!pendingRemove) return;
     try {
@@ -128,10 +125,7 @@ export function ContractorDocuments({ contractorId, canEdit }: ContractorDocumen
         <h3 id="contractor-documents-heading" className="text-sm font-semibold">Documents</h3>
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground">{documents.length}</span>
-          <Button type="button" variant="outline" size="sm" className="min-h-11" onClick={handleExport} disabled={documents.length === 0}>
-            <Download className="mr-2 h-4 w-4" />
-            Export CSV
-          </Button>
+          <ExportCsvButton rows={documents} columns={DOCUMENT_CSV_COLUMNS} filename="contractor-documents" />
         </div>
       </div>
       <Hint>Upload insurance and certifications with their expiry dates. Anything due within {EXPIRY_WARNING_DAYS} days shows amber here; expired shows red.</Hint>

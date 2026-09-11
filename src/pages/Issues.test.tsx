@@ -49,6 +49,7 @@ const liveIssue: IssuesData['issues'][number] = {
   description: 'Water on the floor',
   priority: 'high',
   status: 'open',
+  category: 'plumbing',
   deadline: null,
   created_at: '2026-09-01T08:00:00Z',
   building_id: 'b1',

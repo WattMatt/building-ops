@@ -38,11 +38,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, MoreVertical, Edit, Trash2, Search, Wrench, AlertTriangle, CheckCircle, Clock, History, Upload, Download } from 'lucide-react';
+import { Plus, MoreVertical, Edit, Trash2, Search, Wrench, AlertTriangle, CheckCircle, Clock, History, Upload } from 'lucide-react';
 import { toast } from 'sonner';
-import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
+import { csvText, type CsvColumn } from '@/lib/exportCsv';
 import { EvidencePackItems } from '@/components/evidence/EvidencePackMenu';
-import { useBuildingNames } from '@/hooks/useBuildingNames';
 import { parseCost } from '@/lib/money';
 import { format } from 'date-fns';
 import AssetServiceHistoryDialog from './AssetServiceHistoryDialog';
@@ -52,6 +52,8 @@ type Asset = Tables<'building_assets'>;
 
 interface AssetsTabProps {
   buildingId: string;
+  /** Printed on the evidence-pack cover. Threaded from the building page like every other tab. */
+  buildingName: string;
 }
 
 const ASSET_CATEGORIES = [
@@ -72,6 +74,24 @@ const ASSET_STATUSES = [
   { value: 'out_of_service', label: 'Out of Service', color: 'destructive' },
 ];
 
+const assetCategoryLabel = (value: string | null) => ASSET_CATEGORIES.find((c) => c.value === value)?.label || value || '-';
+const assetStatusInfo = (value: string | null) => ASSET_STATUSES.find((s) => s.value === value) || ASSET_STATUSES[0];
+
+/** The register as a spreadsheet: the words on the chips, not the stored enum values. */
+export const ASSET_CSV_COLUMNS: CsvColumn<Asset>[] = [
+  { key: 'name', header: 'Name' },
+  { key: 'category', header: 'Category', format: (v) => assetCategoryLabel(v as string | null) },
+  { key: 'location', header: 'Location', format: csvText },
+  { key: 'manufacturer', header: 'Manufacturer', format: csvText },
+  { key: 'model', header: 'Model', format: csvText },
+  { key: 'serial_number', header: 'Serial Number', format: csvText },
+  { key: 'installation_date', header: 'Installation Date', format: csvText },
+  { key: 'last_service_date', header: 'Last Service Date', format: csvText },
+  { key: 'next_service_date', header: 'Next Service Date', format: csvText },
+  { key: 'status', header: 'Status', format: (v) => assetStatusInfo(v as string | null).label },
+  { key: 'notes', header: 'Notes', format: csvText },
+];
+
 /** '' → null; a non-negative whole number → number; anything else → undefined (rejected). */
 function parseYears(text: string): number | null | undefined {
   const t = text.trim();
@@ -80,12 +100,8 @@ function parseYears(text: string): number | null | undefined {
   return Number.isInteger(n) && n >= 0 ? n : undefined;
 }
 
-export default function AssetsTab({ buildingId }: AssetsTabProps) {
+export default function AssetsTab({ buildingId, buildingName }: AssetsTabProps) {
   const { isAdminOrManager } = useAuth();
-  // The evidence pack prints the building on its cover; this is the cached org-wide name list,
-  // not a second per-tab query.
-  const { data: buildingNames } = useBuildingNames();
-  const buildingName = buildingNames?.find((b) => b.id === buildingId)?.name ?? '';
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -271,32 +287,6 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
     }
   };
 
-  const handleExport = () => {
-    // Exactly the rows on screen after the search and the category filter.
-    const rows = filteredAssets;
-    if (rows.length === 0) {
-      toast.error('No assets to export');
-      return;
-    }
-
-    const columns: CsvColumn<Asset>[] = [
-      { key: 'name', header: 'Name' },
-      { key: 'category', header: 'Category', format: (v) => getCategoryLabel(String(v)) },
-      { key: 'location', header: 'Location', format: (v) => (v ? String(v) : '') },
-      { key: 'manufacturer', header: 'Manufacturer', format: (v) => (v ? String(v) : '') },
-      { key: 'model', header: 'Model', format: (v) => (v ? String(v) : '') },
-      { key: 'serial_number', header: 'Serial Number', format: (v) => (v ? String(v) : '') },
-      { key: 'installation_date', header: 'Installation Date', format: (v) => (v ? String(v) : '') },
-      { key: 'last_service_date', header: 'Last Service Date', format: (v) => (v ? String(v) : '') },
-      { key: 'next_service_date', header: 'Next Service Date', format: (v) => (v ? String(v) : '') },
-      { key: 'status', header: 'Status', format: (v) => getStatusInfo(String(v)).label },
-      { key: 'notes', header: 'Notes', format: (v) => (v ? String(v) : '') },
-    ];
-
-    exportCsv(rows, columns, `assets_${new Date().toISOString().slice(0, 10)}.csv`);
-    toast.success(`Exported ${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`);
-  };
-
   const filteredAssets = assets.filter((asset) => {
     const matchesSearch =
       asset.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -306,13 +296,8 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
     return matchesSearch && matchesCategory;
   });
 
-  const getCategoryLabel = (value: string | null) => {
-    return ASSET_CATEGORIES.find((c) => c.value === value)?.label || value || '-';
-  };
-
-  const getStatusInfo = (statusValue: string | null) => {
-    return ASSET_STATUSES.find((s) => s.value === statusValue) || ASSET_STATUSES[0];
-  };
+  const getCategoryLabel = assetCategoryLabel;
+  const getStatusInfo = assetStatusInfo;
 
   const getStatusIcon = (statusValue: string | null) => {
     switch (statusValue) {
@@ -367,10 +352,8 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
         </div>
         {isAdminOrManager && (
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="min-h-11" onClick={handleExport} disabled={filteredAssets.length === 0}>
-              <Download className="w-4 h-4 mr-2" />
-              Export CSV
-            </Button>
+            {/* Exactly the rows on screen after the search and the category filter. */}
+            <ExportCsvButton rows={filteredAssets} columns={ASSET_CSV_COLUMNS} filename="assets" />
             <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
               <Upload className="w-4 h-4 mr-2" />
               Import

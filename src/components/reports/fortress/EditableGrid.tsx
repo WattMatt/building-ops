@@ -9,11 +9,11 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Download, Loader2, Plus, Trash2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { Loader2, Plus, Trash2 } from 'lucide-react';
 import { SectionCard } from './SectionCard';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
 import { useReportSection } from '@/hooks/useReportSection';
-import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
+import type { CsvColumn } from '@/lib/exportCsv';
 import type { FTableName } from '@/integrations/supabase/fortress-db';
 
 export type GridColType = 'text' | 'number' | 'date' | 'select' | 'tristate' | 'bool';
@@ -29,9 +29,10 @@ export interface GridColumn {
   format?: (v: unknown) => string;
 }
 
-type Row = Record<string, unknown> & { id?: string };
+export type Row = Record<string, unknown> & { id?: string };
 
-const TRISTATE_DEFAULTS = [
+/** The tristate options when a column declares none — used by the SELECT and the CSV alike. */
+export const TRISTATE_DEFAULTS = [
   { value: 'yes', label: 'Yes' },
   { value: 'no', label: 'No' },
   { value: 'na', label: 'N/A' },
@@ -41,10 +42,19 @@ const TRISTATE_DEFAULTS = [
  * The cell text a CSV gets for one column: the same value the grid shows, not the raw column.
  * A `select` exports its option LABEL (what the author picked), a `bool` Yes/No and a
  * `tristate` Yes/No/N/A — a spreadsheet full of `na` and `true` is not evidence anyone reads.
+ *
+ * `format` applies to COMPUTED columns only, exactly as the cell renderer does: an editable
+ * column is an input showing the stored value, so running it through `format` here would
+ * export something the author never saw on screen.
  */
 export function gridCellText(c: GridColumn, row: Row): string {
-  const raw = c.compute ? c.compute(row) : row[c.key];
-  if (c.format) return c.format(raw);
+  if (c.compute) {
+    const computed = c.compute(row);
+    if (c.format) return c.format(computed);
+    // The cell shows "—" for an empty computed value; a spreadsheet wants an empty cell.
+    return computed === null || computed === undefined ? '' : String(computed);
+  }
+  const raw = row[c.key];
   if (raw === null || raw === undefined || raw === '') return '';
   if (c.type === 'bool') return raw === true ? 'Yes' : raw === false ? 'No' : '';
   if (c.type === 'tristate' || c.type === 'select') {
@@ -92,17 +102,16 @@ export function EditableGrid({ reportId, buildingId, readOnly, table, title, hin
   };
 
   const numericKeys = useMemo(() => new Set(columns.filter((c) => c.type === 'number').map((c) => c.key)), [columns]);
+  const csvColumns = useMemo(() => gridCsvColumns(columns), [columns]);
 
   // Exports the SAVED rows, never the draft — the same rule as the PDF. Handing someone a CSV
   // of edits the report itself does not have yet is how two versions of "the truth" start.
-  const handleExport = () => {
-    if (dirty) {
-      toast.error('Save your changes before exporting');
-      return;
-    }
-    exportCsv(rows, gridCsvColumns(columns), `${table}_${reportId.slice(0, 8)}.csv`);
-    toast.success(`Exported ${rows.length} ${rows.length === 1 ? 'row' : 'rows'}`);
-  };
+  // Both refusals name WHERE Save is: the button sits in this card's header, Save in its footer.
+  const blockedReason = dirty
+    ? 'Save your changes first — the Save button is at the bottom of this card.'
+    : rows.length === 0 && draft.length > 0
+      ? 'These rows have not been saved yet. Save them first — the Save button is at the bottom of this card.'
+      : null;
 
   return (
     <SectionCard
@@ -115,10 +124,7 @@ export function EditableGrid({ reportId, buildingId, readOnly, table, title, hin
       headerAccessory={
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted-foreground">{draft.length} {draft.length === 1 ? 'row' : 'rows'}</span>
-          <Button variant="outline" size="sm" className="min-h-11" onClick={handleExport} disabled={rows.length === 0}>
-            <Download className="mr-2 h-4 w-4" />
-            Export CSV
-          </Button>
+          <ExportCsvButton rows={rows} columns={csvColumns} filename={table} blockedReason={blockedReason} />
         </div>
       }
     >
@@ -163,7 +169,7 @@ export function EditableGrid({ reportId, buildingId, readOnly, table, title, hin
                           <Select value={(row[c.key] as string) ?? ''} onValueChange={(v) => setCell(i, c.key, v)} disabled={readOnly}>
                             <SelectTrigger className="h-8 min-w-24"><SelectValue placeholder="—" /></SelectTrigger>
                             <SelectContent>
-                              {(c.options ?? [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }, { value: 'na', label: 'N/A' }]).map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                              {(c.options ?? TRISTATE_DEFAULTS).map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
                             </SelectContent>
                           </Select>
                         ) : c.type === 'select' ? (

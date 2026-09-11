@@ -7,8 +7,8 @@
  * completed on the Checklists tab; the report section is where a manager can pin a cell
  * with a noted override. Admin/manager write the plan; everyone with access reads it.
  */
-import { useMemo, useState } from 'react';
-import { Plus, Pencil, Download, Play } from 'lucide-react';
+import { useCallback, useMemo, useState } from 'react';
+import { Plus, Pencil, Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,8 +24,8 @@ import { ContractorPicker } from '@/components/contractors/ContractorPicker';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBuildingPpm, type BuildingPpmLine } from '@/hooks/useBuildingPpm';
 import { useContractors } from '@/hooks/useContractors';
-import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
-import { toast } from 'sonner';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
+import { csvText, type CsvColumn } from '@/lib/exportCsv';
 import { describeRule, type RecurrenceRule } from '@/lib/recurrence';
 import { todayInOperatingTz } from '@/lib/myWork';
 import { PpmLegend } from '@/components/ppm/PpmLegend';
@@ -67,7 +67,7 @@ export default function PpmTab({ buildingId }: Props) {
     () => Object.fromEntries(contractors.map((c) => [c.id, c.company_name])) as Record<string, string>,
     [contractors],
   );
-  const contractorName = (id: string | null) => (id ? contractorNames[id] ?? '' : '');
+  const contractorName = useCallback((id: string | null) => (id ? contractorNames[id] ?? '' : ''), [contractorNames]);
 
   // ---- Add / edit sheet ----------------------------------------------------------------
   const [open, setOpen] = useState(false);
@@ -100,20 +100,14 @@ export default function PpmTab({ buildingId }: Props) {
     }
   };
 
-  const exportPlan = () => {
-    exportCsv(
-      lines,
-      [
-        { key: 'service_name', header: 'Service' },
-        { key: 'recurrence', header: 'Cadence', format: (v) => describeRule(v as RecurrenceRule) },
-        { key: 'contractor_id', header: 'Contractor', format: (v) => contractorName((v as string | null) ?? null) },
-        { key: 'is_active', header: 'Active', format: (v) => (v ? 'Yes' : 'No') },
-        { key: 'notes', header: 'Notes', format: (v) => (v as string | null) ?? '' },
-      ],
-      `ppm-plan-${buildingId}.csv`,
-    );
-    toast.success(`Exported ${lines.length} ${lines.length === 1 ? 'row' : 'rows'}`);
-  };
+  // Memoised because `contractorName` closes over the loaded contractor register.
+  const planColumns = useMemo((): CsvColumn<BuildingPpmLine>[] => [
+    { key: 'service_name', header: 'Service' },
+    { key: 'recurrence', header: 'Cadence', format: (v) => describeRule(v as RecurrenceRule) },
+    { key: 'contractor_id', header: 'Contractor', format: (v) => contractorName((v as string | null) ?? null) },
+    { key: 'is_active', header: 'Active', format: (v) => (v ? 'Yes' : 'No') },
+    { key: 'notes', header: 'Notes', format: csvText },
+  ], [contractorName]);
 
   // ---- Derived grid ----------------------------------------------------------------------
   const byService = useMemo(() => derivedByService(derived), [derived]);
@@ -128,22 +122,15 @@ export default function PpmTab({ buildingId }: Props) {
    * carrying the word the legend uses (`done`/`missed`/`due`/`na`) rather than the glyph.
    * A month with no occurrence stays "—", the same as the cell.
    */
-  const exportGrid = () => {
-    const columns: CsvColumn<BuildingPpmLine>[] = [
-      { key: 'service_name', header: 'Service' },
-      { key: 'contractor_id', header: 'Contractor', format: (v) => contractorName((v as string | null) ?? null) },
-      ...months.map((mk): CsvColumn<BuildingPpmLine> => {
-        const { mon, yr } = colHeader(mk);
-        return {
-          key: 'id',
-          header: `${mon} ${yr}`,
-          format: (_v, row) => grids.get(row.id)?.[mk]?.status ?? '—',
-        };
-      }),
-    ];
-    exportCsv(lines, columns, `ppm-grid-${buildingId}-${months[0].slice(0, 4)}.csv`);
-    toast.success(`Exported ${lines.length} ${lines.length === 1 ? 'row' : 'rows'}`);
-  };
+  const gridColumns = useMemo((): CsvColumn<BuildingPpmLine>[] => [
+    { key: 'service_name', header: 'Service' },
+    { key: 'contractor_id', header: 'Contractor', format: (v) => contractorName((v as string | null) ?? null) },
+    ...months.map((mk): CsvColumn<BuildingPpmLine> => {
+      const { mon, yr } = colHeader(mk);
+      // No `key`: a month column is derived from the whole row, not from one property.
+      return { header: `${mon} ${yr}`, format: (_v, row) => grids.get(row.id)?.[mk]?.status ?? '—' };
+    }),
+  ], [contractorName, months, grids]);
 
   return (
     <div className="space-y-6">
@@ -157,12 +144,14 @@ export default function PpmTab({ buildingId }: Props) {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" className="min-h-11" onClick={exportPlan} disabled={lines.length === 0}>
-              <Download className="mr-2 h-4 w-4" /> Export CSV
-            </Button>
-            <Button variant="outline" className="min-h-11" onClick={exportGrid} disabled={lines.length === 0 || derivedLoading}>
-              <Download className="mr-2 h-4 w-4" /> Export grid CSV
-            </Button>
+            <ExportCsvButton rows={lines} columns={planColumns} filename="ppm-plan" />
+            <ExportCsvButton
+              rows={lines}
+              columns={gridColumns}
+              filename={`ppm-grid-${months[0].slice(0, 4)}`}
+              label="Export grid CSV"
+              disabled={derivedLoading}
+            />
             {isAdminOrManager && (
               <>
                 <Button variant="outline" className="min-h-11" onClick={() => void generateNow().catch(() => {})}

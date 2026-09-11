@@ -15,7 +15,7 @@ import {
   type GroupBy,
 } from './documents/filterDocuments';
 import { resolveDocUrl } from './documents/resolveDocUrl';
-import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
+import { csvText, type CsvColumn } from '@/lib/exportCsv';
 import type { UnifiedDocument, BuildingDocumentRow } from './documents/types';
 import DocumentsToolbar from './DocumentsToolbar';
 import DocumentsTable from './DocumentsTable';
@@ -28,10 +28,10 @@ interface DocumentsTabProps {
 
 const METRIC = 'rounded-md bg-muted/50 px-4 py-3';
 
-const docText = (v: unknown) => (v == null || v === '' ? '' : String(v));
+const docText = csvText;
 
 /** The register as a spreadsheet: one row per document on screen, both sources together. */
-const DOCUMENT_CSV_COLUMNS: CsvColumn<UnifiedDocument>[] = [
+export const DOCUMENT_CSV_COLUMNS: CsvColumn<UnifiedDocument>[] = [
   { key: 'name', header: 'Name' },
   { key: 'type', header: 'Type' },
   { key: 'scope', header: 'Scope' },
@@ -111,12 +111,6 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
     for (const d of picked) {
       await download(d); // sequential, no zip
     }
-  };
-
-  // `flat` is the grouped view flattened: exactly the rows the table is rendering.
-  const handleExport = () => {
-    exportCsv(flat, DOCUMENT_CSV_COLUMNS, `documents_${new Date().toISOString().slice(0, 10)}.csv`);
-    toast.success(`Exported ${flat.length} ${flat.length === 1 ? 'row' : 'rows'}`);
   };
 
   const submitForm = async ({ values, files }: DocumentFormSubmit) => {
@@ -228,8 +222,8 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
           setEditing(null);
           setFormOpen(true);
         }}
-        onExport={handleExport}
-        exportDisabled={flat.length === 0}
+        exportRows={flat}
+        exportColumns={DOCUMENT_CSV_COLUMNS}
       />
 
       {isAdminOrManager && selected.size > 0 && (

@@ -360,7 +360,7 @@ export default function BuildingDetails() {
         </TabsContent>
 
         <TabsContent value="assets" className="mt-6">
-          <AssetsTab buildingId={building.id} />
+          <AssetsTab buildingId={building.id} buildingName={building.name} />
         </TabsContent>
 
         <TabsContent value="ppm" className="mt-6">

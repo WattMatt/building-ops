@@ -8,7 +8,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Download, HardHat, Loader2, Plus, Search, Shield } from 'lucide-react';
+import { HardHat, Loader2, Plus, Search, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -23,14 +23,15 @@ import { Hint } from '@/components/ui/hint';
 import { ContractorDialog } from '@/components/contractors/ContractorDialog';
 import { ContractorSheet, RatingStars } from '@/components/contractors/ContractorSheet';
 import { useContractors, type Contractor, type ContractorInput } from '@/hooks/useContractors';
-import { exportCsv, type CsvColumn } from '@/lib/exportCsv';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
+import { csvText, type CsvColumn } from '@/lib/exportCsv';
 
 const ALL_TRADES = '__all__';
 
-const text = (v: unknown) => (v == null || v === '' ? '' : String(v));
+const text = csvText;
 
 /** The register as a spreadsheet — the rows on screen after the search, trade and inactive filters. */
-const CONTRACTOR_CSV_COLUMNS: CsvColumn<Contractor>[] = [
+export const CONTRACTOR_CSV_COLUMNS: CsvColumn<Contractor>[] = [
   { key: 'company_name', header: 'Company' },
   { key: 'trade', header: 'Trade', format: text },
   { key: 'default_trade_role', header: 'Default trade role', format: text },
@@ -40,7 +41,9 @@ const CONTRACTOR_CSV_COLUMNS: CsvColumn<Contractor>[] = [
   { key: 'rating', header: 'Rating', format: text },
   { key: 'vat_number', header: 'VAT number', format: text },
   { key: 'address', header: 'Address', format: text },
-  { key: 'is_active', header: 'Active', format: (v) => (v === false ? 'No' : 'Yes') },
+  // Tri-state on purpose: `is_active` is nullable, and a row that never said either way must
+  // not be exported as a flat "Yes" — an inactive contractor on a call-out list is a real risk.
+  { key: 'is_active', header: 'Active', format: (v) => (v == null ? 'Unknown' : v ? 'Yes' : 'No') },
 ];
 
 /** Pure: the rows the list shows for a search + trade + inactive setting. */
@@ -120,11 +123,6 @@ export default function Contractors() {
     );
   }
 
-  const handleExport = () => {
-    exportCsv(visible, CONTRACTOR_CSV_COLUMNS, `contractors_${new Date().toISOString().slice(0, 10)}.csv`);
-    toast.success(`Exported ${visible.length} ${visible.length === 1 ? 'row' : 'rows'}`);
-  };
-
   const openNew = () => {
     setEditing(null);
     setDialogOpen(true);
@@ -168,10 +166,7 @@ export default function Contractors() {
           <p className="text-muted-foreground">The companies you call out for repairs, services and planned maintenance.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" className="min-h-11" onClick={handleExport} disabled={visible.length === 0}>
-            <Download className="mr-2 h-4 w-4" />
-            Export CSV
-          </Button>
+          <ExportCsvButton rows={visible} columns={CONTRACTOR_CSV_COLUMNS} filename="contractors" />
           <Button className="min-h-11" onClick={openNew}>
             <Plus className="mr-2 h-4 w-4" />
             New contractor
