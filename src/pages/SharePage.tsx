@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Lock, FileText } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { useOrganization } from '@/hooks/useOrganization';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -63,27 +63,49 @@ export async function openShare(token: string, passcode?: string): Promise<OpenR
   return { ok: false, reason: 'error' };
 }
 
+/** WCAG relative luminance of a `#rrggbb` colour: 0 for black, 1 for white. */
+function relativeLuminance(hex: string): number {
+  const channel = (byte: number) => {
+    const c = byte / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return (
+    0.2126 * channel(parseInt(hex.slice(1, 3), 16)) +
+    0.7152 * channel(parseInt(hex.slice(3, 5), 16)) +
+    0.0722 * channel(parseInt(hex.slice(5, 7), 16))
+  );
+}
+
+/**
+ * Black or white on the org's brand colour, whichever contrasts better. The colour is arbitrary
+ * (an admin types it), so fixed white text is a readability bug on every pale brand — yellow, cream,
+ * pale grey — and this page has no signed-in fallback to fall back to.
+ */
+export function headerTextColor(hex: string): '#000000' | '#ffffff' {
+  const l = relativeLuminance(hex);
+  // Contrast against white is 1.05 / (l + 0.05); against black it is (l + 0.05) / 0.05.
+  return (l + 0.05) / 0.05 > 1.05 / (l + 0.05) ? '#000000' : '#ffffff';
+}
+
 export default function SharePage() {
   const { token = '' } = useParams<{ token: string }>();
   const [passcode, setPasscode] = useState('');
   const [opening, setOpening] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
-  const branding = useQuery({
-    queryKey: ['organization-branding'],
-    staleTime: 300_000,
-    queryFn: async () => {
-      const { data } = await supabase.from('organization_branding').select('name, logo_url, primary_color').limit(1).maybeSingle();
-      return data ?? null;
-    },
-  });
+  // The same anon branding read the theme provider above this route already performs — going through
+  // the shared hook rather than a second query keeps the public page to one request for it.
+  const { organization } = useOrganization();
   const meta = useQuery({ queryKey: ['share-page', token], retry: false, queryFn: () => fetchShareMeta(token) });
 
   const open = async () => {
     setProblem(null);
     setOpening(true);
-    // Open the tab synchronously (popup blockers), then point it at the signed URL.
+    // Open the tab synchronously (popup blockers), then point it at the signed URL. The new tab keeps
+    // a live `window.opener` back to this page until it is nulled — the PDF viewer must not hold a
+    // handle that can navigate this page or read its origin.
     const tab = window.open('', '_blank');
+    if (tab) tab.opener = null;
     try {
       const r = await openShare(token, passcode || undefined);
       if (r.ok) {
@@ -106,16 +128,17 @@ export default function SharePage() {
     }
   };
 
-  const color = branding.data?.primary_color && /^#[0-9a-f]{6}$/i.test(branding.data.primary_color)
-    ? branding.data.primary_color
+  const color = organization?.primary_color && /^#[0-9a-f]{6}$/i.test(organization.primary_color)
+    ? organization.primary_color
     : '#2563eb';
+  const textColor = headerTextColor(color);
 
   return (
     <div className="min-h-screen bg-muted/30">
-      <header className="px-4 py-4" style={{ background: color }}>
+      <header className="px-4 py-4" style={{ background: color, color: textColor }}>
         <div className="mx-auto flex max-w-lg items-center gap-3">
-          {branding.data?.logo_url ? <img src={branding.data.logo_url} alt="" className="h-8 w-auto rounded bg-white p-1" /> : null}
-          <span className="text-base font-semibold text-white">{branding.data?.name ?? 'Building Ops'}</span>
+          {organization?.logo_url ? <img src={organization.logo_url} alt="" className="h-8 w-auto rounded bg-white p-1" /> : null}
+          <span className="text-base font-semibold">{organization?.name ?? 'Building Ops'}</span>
         </div>
       </header>
       <main className="mx-auto max-w-lg p-4">

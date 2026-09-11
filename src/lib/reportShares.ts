@@ -35,7 +35,7 @@ export const SHARE_PERMISSION_MESSAGE = "You don't have permission to share this
  * dashboard's — so every read names its columns and a bare `select('*')` would 403.
  */
 export const SHARE_COLUMNS =
-  'id, report_id, artifact_id, token, created_by, created_at, expires_at, view_count, last_viewed_at, revoked_at';
+  'id, report_id, artifact_id, token, created_by, created_at, expires_at, view_count, last_viewed_at, revoked_at, has_passcode';
 
 export interface ReportShareRow {
   id: string;
@@ -48,6 +48,12 @@ export interface ReportShareRow {
   view_count: number;
   last_viewed_at: string | null;
   revoked_at: string | null;
+  /**
+   * `passcode_hash is not null`, generated and granted at the column level — the hash itself stays
+   * revoked, so the list can say THAT a link is locked without ever reading what locks it. Read-only:
+   * no write path sets it.
+   */
+  has_passcode: boolean;
 }
 
 /** The public URL a recipient opens. Same shape the distribution email builds from APP_URL. */
@@ -71,10 +77,37 @@ export interface CreateShareInput {
   passcode?: string;
 }
 
+export const CREATE_FAILED_MESSAGE = 'Could not create the link.';
+/** A token collision is a 1-in-2^258 fluke, not a user error: a fresh token is minted on the retry. */
+export const TOKEN_TAKEN_MESSAGE = 'Could not create the link. Try again.';
+
+/**
+ * `supabase.functions.invoke` collapses every non-2xx into a FunctionsHttpError whose `message` is the
+ * generic "Edge Function returned a non-2xx status code" — the real reason is the `{error}` body hanging
+ * off `error.context` (a Response). Read it and map the codes report-share actually returns; anything
+ * unrecognised (or a body that will not parse) falls back to the generic line rather than leaking a code.
+ */
+async function createErrorMessage(error: unknown): Promise<string> {
+  const context = (error as { context?: { json?: () => Promise<unknown> } } | null)?.context;
+  let code = '';
+  if (typeof context?.json === 'function') {
+    try {
+      const body = (await context.json()) as { error?: unknown } | null;
+      if (typeof body?.error === 'string') code = body.error;
+    } catch { /* a non-JSON or already-read body tells us nothing */ }
+  }
+  if (code === 'forbidden' || code === 'unauthorized') return SHARE_PERMISSION_MESSAGE;
+  if (code === 'token taken') return TOKEN_TAKEN_MESSAGE;
+  return CREATE_FAILED_MESSAGE;
+}
+
 export async function createShare(
   input: CreateShareInput,
   userId: string,
 ): Promise<{ id: string; token: string; expiresAt: string }> {
+  // The dialog validates too, but a direct caller must not be answered with an opaque 400.
+  const problem = passcodeProblem(input.passcode ?? '');
+  if (problem) throw new Error(problem);
   const token = mintToken();
   if (input.passcode) {
     // Only the function can write passcode_hash: the hash is peppered with a server-side salt.
@@ -88,8 +121,13 @@ export async function createShare(
         passcode: input.passcode,
       },
     });
-    if (error) throw new Error(error.message ?? 'Could not create the link.');
-    return { id: data.id, token: data.token, expiresAt: data.expiresAt };
+    if (error) throw new Error(await createErrorMessage(error));
+    const created = data as { id?: unknown; token?: unknown; expiresAt?: unknown } | null;
+    // A 2xx with no body would otherwise throw a TypeError on `data.id` and surface as a crash.
+    if (typeof created?.id !== 'string' || typeof created.token !== 'string' || typeof created.expiresAt !== 'string') {
+      throw new Error(CREATE_FAILED_MESSAGE);
+    }
+    return { id: created.id, token: created.token, expiresAt: created.expiresAt };
   }
   const expiresAt = new Date(Date.now() + input.expiresInDays * 86_400_000).toISOString();
   const { data, error } = await db

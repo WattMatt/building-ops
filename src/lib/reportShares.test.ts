@@ -26,8 +26,10 @@ import {
   passcodeProblem,
   revokeShare,
   shareUrl,
+  CREATE_FAILED_MESSAGE,
   SHARE_COLUMNS,
   SHARE_PERMISSION_MESSAGE,
+  TOKEN_TAKEN_MESSAGE,
   PASSCODE_MAX,
   type ReportShareRow,
 } from './reportShares';
@@ -43,7 +45,15 @@ const row = (over: Partial<ReportShareRow> = {}): ReportShareRow => ({
   view_count: 0,
   last_viewed_at: null,
   revoked_at: null,
+  has_passcode: false,
   ...over,
+});
+
+/** What `supabase.functions.invoke` hands back for a non-2xx: a generic message plus the Response. */
+const httpError = (status: number, body: unknown) => ({
+  message: 'Edge Function returned a non-2xx status code',
+  name: 'FunctionsHttpError',
+  context: { status, json: () => Promise.resolve(body) },
 });
 
 /** insert(...).select(...) resolving to `result`. */
@@ -92,10 +102,47 @@ describe('createShare', () => {
       .rejects.toThrow(SHARE_PERMISSION_MESSAGE);
   });
 
-  it('surfaces a function error', async () => {
-    sb.invoke.mockResolvedValue({ data: null, error: { message: 'forbidden' } });
+  // invoke() reports every non-2xx as the same generic sentence; the real reason is in the body.
+  it.each([
+    ['a 403 forbidden becomes the share permission message', 403, { error: 'forbidden' }, SHARE_PERMISSION_MESSAGE],
+    ['a 401 unauthorized becomes the share permission message', 401, { error: 'unauthorized' }, SHARE_PERMISSION_MESSAGE],
+    ['a token collision asks for a retry', 400, { error: 'token taken' }, TOKEN_TAKEN_MESSAGE],
+    ['a bad artifact falls back to the generic line', 400, { error: 'bad artifact' }, CREATE_FAILED_MESSAGE],
+    ['an unknown code falls back to the generic line', 500, { error: 'unavailable' }, CREATE_FAILED_MESSAGE],
+  ])('%s', async (_name, status, body, expected) => {
+    sb.invoke.mockResolvedValue({ data: null, error: httpError(status as number, body) });
     await expect(createShare({ reportId: 'r1', artifactId: 'a1', expiresInDays: 30, passcode: '1234' }, 'u1'))
-      .rejects.toThrow('forbidden');
+      .rejects.toThrow(expected as string);
+    // Never the vendor sentence.
+    await expect(createShare({ reportId: 'r1', artifactId: 'a1', expiresInDays: 30, passcode: '1234' }, 'u1'))
+      .rejects.not.toThrow('non-2xx');
+  });
+
+  it('falls back to the generic line when the error body will not parse', async () => {
+    sb.invoke.mockResolvedValue({
+      data: null,
+      error: { message: 'Edge Function returned a non-2xx status code', context: { json: () => Promise.reject(new Error('not json')) } },
+    });
+    await expect(createShare({ reportId: 'r1', artifactId: 'a1', expiresInDays: 30, passcode: '1234' }, 'u1'))
+      .rejects.toThrow(CREATE_FAILED_MESSAGE);
+  });
+
+  it('a 2xx with no body is an error, not a TypeError', async () => {
+    sb.invoke.mockResolvedValue({ data: null, error: null });
+    await expect(createShare({ reportId: 'r1', artifactId: 'a1', expiresInDays: 30, passcode: '1234' }, 'u1'))
+      .rejects.toThrow(CREATE_FAILED_MESSAGE);
+    sb.invoke.mockResolvedValue({ data: { id: 's1' }, error: null }); // token/expiresAt missing
+    await expect(createShare({ reportId: 'r1', artifactId: 'a1', expiresInDays: 30, passcode: '1234' }, 'u1'))
+      .rejects.toThrow(CREATE_FAILED_MESSAGE);
+  });
+
+  it('validates the passcode itself, so a direct caller never gets an opaque 400', async () => {
+    await expect(createShare({ reportId: 'r1', artifactId: 'a1', expiresInDays: 30, passcode: 'ab' }, 'u1'))
+      .rejects.toThrow('at least 4');
+    await expect(createShare({ reportId: 'r1', artifactId: 'a1', expiresInDays: 30, passcode: 'a'.repeat(PASSCODE_MAX + 1) }, 'u1'))
+      .rejects.toThrow('at most 64');
+    expect(sb.invoke).not.toHaveBeenCalled();
+    expect(sb.insert).not.toHaveBeenCalled();
   });
 });
 
@@ -108,6 +155,9 @@ describe('listShares / revokeShare', () => {
     // SELECT is column-privileged: a bare '*' would 403 against the real table.
     expect(sb.select).toHaveBeenCalledWith(SHARE_COLUMNS);
     expect(SHARE_COLUMNS).not.toContain('passcode_hash');
+    // The generated boolean is readable; the hash behind it is not. That is what lets the list
+    // show a Passcode chip for links it did not create.
+    expect(SHARE_COLUMNS).toContain('has_passcode');
     expect(eq).toHaveBeenCalledWith('report_id', 'r1');
     expect(order).toHaveBeenCalledWith('created_at', { ascending: false });
   });

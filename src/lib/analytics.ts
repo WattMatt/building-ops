@@ -35,8 +35,28 @@ let sentry: typeof import('@sentry/react') | null = null;
  */
 let ready: Promise<void> = Promise.resolve();
 
-/** Query params worth stripping defensively, in case a link ever puts a token in the query. */
-const TOKEN_PARAMS = ['access_token', 'refresh_token', 'code'];
+/**
+ * Query params carrying credential material. `t` is the bearer token of both the ICS feed
+ * (`/functions/v1/ics-feed?t=…`) and the share function's GET (`/functions/v1/report-share?t=…`),
+ * which reaches Sentry as a fetch breadcrumb's `data.url`; no route of ours uses `t` for anything else.
+ */
+const TOKEN_PARAMS = ['access_token', 'refresh_token', 'code', 't'];
+
+/**
+ * Credentials embedded in the PATH rather than the query. `/share/:token` is a public page whose
+ * 43-char token IS the credential, and PostHog records `$current_url`/`$pathname` for every pageview,
+ * so the path has to be redacted as well as the query and the fragment.
+ */
+const TOKEN_PATHS: readonly (readonly [RegExp, string])[] = [
+  [/\/share\/[A-Za-z0-9_-]{43}/g, '/share/[token]'],
+];
+
+/** Replace every path-embedded token with a placeholder. Pure; safe on any string. */
+function redactPaths(url: string): string {
+  let out = url;
+  for (const [pattern, replacement] of TOKEN_PATHS) out = out.replace(pattern, replacement);
+  return out;
+}
 
 /**
  * PostHog properties that hold a URL and therefore need scrubbing. The `$initial_*`
@@ -58,7 +78,8 @@ const URL_PROPERTIES = [
  * The fragment goes entirely — invite/recovery links carry `access_token` and
  * `refresh_token` there, and no fragment we produce is worth the risk of keeping.
  * Known token query params are removed as well, belt-and-braces, in case a future link
- * shape puts them in the query string.
+ * shape puts them in the query string. The path is redacted on EVERY return, because
+ * `/share/:token` carries a live bearer credential in `location.pathname` itself.
  *
  * Pure and total: any string in, a string out, never throws, so it is safe to call from
  * inside a vendor hook where an exception would be swallowed or would break capture.
@@ -70,11 +91,11 @@ export function scrubUrl(url: string): string {
   const withoutFragment = hashAt === -1 ? url : url.slice(0, hashAt);
 
   const queryAt = withoutFragment.indexOf('?');
-  if (queryAt === -1) return withoutFragment;
+  if (queryAt === -1) return redactPaths(withoutFragment);
 
-  const base = withoutFragment.slice(0, queryAt);
+  const base = redactPaths(withoutFragment.slice(0, queryAt));
   const params = new URLSearchParams(withoutFragment.slice(queryAt + 1));
-  if (!TOKEN_PARAMS.some((name) => params.has(name))) return withoutFragment;
+  if (!TOKEN_PARAMS.some((name) => params.has(name))) return redactPaths(withoutFragment);
 
   for (const name of TOKEN_PARAMS) params.delete(name);
   const rest = params.toString();

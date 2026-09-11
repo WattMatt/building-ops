@@ -74,6 +74,41 @@ describe('analytics', () => {
         'https://app.example.com/cb?code=x&page=2#access_token=y',
         'https://app.example.com/cb?page=2',
       ],
+      // The public share page carries a 43-char bearer token in the PATH, so the fragment and
+      // query rules are not enough: `$current_url`, `$pathname` and Sentry's navigation crumbs
+      // would ship the credential itself.
+      [
+        'redacts the share token out of the pathname',
+        'https://app.example.com/share/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        'https://app.example.com/share/[token]',
+      ],
+      [
+        'redacts a share token on a bare path (the $pathname shape)',
+        '/share/bBcC-dEfG_hIjKlMnOpQrStUvWxYz0123456789abcd',
+        '/share/[token]',
+      ],
+      [
+        'redacts the share token when the URL also carries a query and a fragment',
+        'https://app.example.com/share/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA?ref=mail#x',
+        'https://app.example.com/share/[token]?ref=mail',
+      ],
+      [
+        'redacts the share token on the token-query branch too',
+        'https://app.example.com/share/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA?code=x&page=2',
+        'https://app.example.com/share/[token]?page=2',
+      ],
+      [
+        'leaves a /share path that is not a token alone',
+        'https://app.example.com/share/help',
+        'https://app.example.com/share/help',
+      ],
+      // `t` is the bearer token of the ICS feed and of the share function's GET; both reach
+      // Sentry as a fetch breadcrumb URL.
+      [
+        'strips the ics-feed / report-share `t` token from the query',
+        'https://x.supabase.co/functions/v1/ics-feed?t=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        'https://x.supabase.co/functions/v1/ics-feed',
+      ],
       [
         'leaves an ordinary URL untouched',
         'https://app.example.com/dashboard?building=42&tab=open',

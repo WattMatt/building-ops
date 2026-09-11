@@ -13,8 +13,11 @@ const shares = vi.hoisted(() => ({
   rows: [] as unknown[],
 }));
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
+// Hints are a user preference; the guardrail copy has to survive them being off.
+const hints = vi.hoisted(() => ({ enabled: true }));
 
 vi.mock('sonner', () => ({ toast }));
+vi.mock('@/hooks/useHints', () => ({ useHints: () => ({ hintsEnabled: hints.enabled, setHintsEnabled: () => {} }) }));
 vi.mock('@/lib/reportShares', async (orig) => ({
   ...(await orig<typeof import('@/lib/reportShares')>()),
   useReportShares: () => ({
@@ -58,6 +61,7 @@ const share = (over: Partial<ReportShareRow> = {}): ReportShareRow => ({
   view_count: 3,
   last_viewed_at: null,
   revoked_at: null,
+  has_passcode: false,
   ...over,
 });
 
@@ -72,6 +76,7 @@ beforeEach(() => {
   shares.rows = [];
   toast.success.mockReset();
   toast.error.mockReset();
+  hints.enabled = true;
 });
 
 describe('ShareReportDialog', () => {
@@ -136,9 +141,63 @@ describe('ShareReportDialog', () => {
     renderDialog([artifact()]);
     expect(screen.getByText(/3 views/)).toBeInTheDocument();
     expect(screen.getByText('1 older link is expired or revoked.')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke link for v2' }));
     expect(shares.revokeMutate).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole('button', { name: 'Confirm revoke' }));
+    // The confirm step announces itself rather than silently swapping the button.
+    expect(await screen.findByRole('status')).toHaveTextContent('Revoke this link?');
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm revoking the link for v2' }));
     expect(shares.revokeMutate.mock.calls[0][0]).toBe('s1');
+  });
+
+  it('names every row’s Revoke button by its version, so two rows never read alike', () => {
+    shares.rows = [share(), share({ id: 's2', artifact_id: 'a2' })];
+    renderDialog([artifact(), artifact({ id: 'a2', version: 1, status: 'superseded' })]);
+    expect(screen.getByRole('button', { name: 'Revoke link for v2' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Revoke link for v1' })).toBeInTheDocument();
+  });
+
+  it('lets a confirm be backed out of', async () => {
+    shares.rows = [share()];
+    renderDialog([artifact()]);
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke link for v2' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Keep the link for v2' }));
+    expect(shares.revokeMutate).not.toHaveBeenCalled();
+    expect(await screen.findByRole('button', { name: 'Revoke link for v2' })).toBeInTheDocument();
+  });
+
+  it('marks a listed link as passcode-protected from the generated column', () => {
+    shares.rows = [share({ has_passcode: true })];
+    renderDialog([artifact()]);
+    expect(screen.getByText('Passcode')).toBeInTheDocument();
+  });
+
+  it('shows no passcode chip for a link without one', () => {
+    shares.rows = [share()];
+    renderDialog([artifact()]);
+    expect(screen.queryByText('Passcode')).toBeNull();
+  });
+
+  it('keeps what the link grants visible with hints switched off', () => {
+    hints.enabled = false;
+    renderDialog([artifact()]);
+    expect(screen.getByText('Anyone with this link can open the PDF. No sign-in is required.')).toBeInTheDocument();
+    // Only the coaching half is a Hint.
+    expect(screen.queryByText(/Add a passcode for external recipients/)).toBeNull();
+  });
+
+  it('a refetch of the versions list does not wipe the created link or the typed passcode', async () => {
+    shares.createMutate.mockImplementation((_i, opts) =>
+      opts?.onSuccess?.({ id: 's9', token: 'Q'.repeat(43), expiresAt: '2026-10-10T08:00:00.000Z' }),
+    );
+    const { rerender } = renderDialog([artifact()]);
+    fireEvent.change(screen.getByLabelText('Passcode (optional)'), { target: { value: 'hunter2' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create link/ }));
+    expect(await screen.findByTestId('share-link')).toBeInTheDocument();
+    // A fresh array with identical contents is exactly what a TanStack refetch hands down.
+    rerender(
+      <ShareReportDialog reportId="r1" artifacts={[artifact()]} open onOpenChange={vi.fn()} />,
+    );
+    expect(screen.getByTestId('share-link')).toHaveTextContent(`/share/${'Q'.repeat(43)}`);
+    expect(screen.getByLabelText('Passcode (optional)')).toHaveValue('hunter2');
   });
 });

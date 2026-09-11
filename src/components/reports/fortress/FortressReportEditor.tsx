@@ -332,12 +332,13 @@ export default function FortressReportEditor() {
                 onConfirm={() => discard.mutate(report.id, { onSuccess: () => navigate(`/buildings/${report.building_id}?tab=reports`) })} />
             </>
           )}
+          {/* Share stays enabled with no saved PDF: a `title` on a disabled button is never announced
+              and never appears on touch, and the dialog already explains the empty case in plain copy. */}
           {shareLinks && isAdminOrManager && (
             <Button
               variant="outline"
               size="sm"
-              disabled={!artifacts?.length}
-              title={artifacts?.length ? undefined : 'Export a PDF first'}
+              className="min-h-11"
               onClick={() => { setShareArtifactId(null); setShareOpen(true); }}
             >
               <Share2 className="mr-2 h-4 w-4" />
@@ -367,6 +368,12 @@ export default function FortressReportEditor() {
       </div>
 
       {statusHint && <Hint className="-mt-2">{statusHint}</Hint>}
+
+      {/* The approval toast is gone on reload; this is the durable signal that the approval stands but
+          its final PDF does not exist. Plain text, never a Hint: it is a state warning, not coaching. */}
+      {status === 'approved' && artifacts?.length === 0 && (
+        <p className="-mt-2 text-sm">Approved, but no final PDF is saved yet — use Export PDF.</p>
+      )}
 
       {status === 'rejected' && (
         <Card className="border-destructive/40">

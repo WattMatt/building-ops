@@ -115,7 +115,7 @@ export function ReportSavedVersions({ reportId, onShare }: ReportSavedVersionsPr
                   <Badge variant="outline" className="text-xs">exported while {a.report_status}</Badge>
                 )}
                 {onShare && (
-                  <Button variant="outline" size="sm" onClick={() => onShare(a)}>
+                  <Button variant="outline" size="sm" className="min-h-11" onClick={() => onShare(a)}>
                     <Share2 className="mr-2 h-4 w-4" />
                     Share this version
                   </Button>

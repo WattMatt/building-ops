@@ -1,20 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-// The page is public: the only Supabase call is the anon branding view.
+// The page is public: the only Supabase call is the anon branding view, and it is made by
+// useOrganization (the hook the theme provider above this route already uses) — never twice.
+const brandingSelect = vi.hoisted(() => vi.fn());
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
     from: () => ({
-      select: () => ({
-        limit: () => ({ maybeSingle: () => Promise.resolve({ data: { name: 'Fortress', logo_url: null, primary_color: '#123456' }, error: null }) }),
-      }),
+      select: (...args: unknown[]) => {
+        brandingSelect(...args);
+        return {
+          limit: () => ({
+            maybeSingle: () =>
+              Promise.resolve({ data: { id: 'o1', name: 'Fortress', logo_url: null, primary_color: '#123456' }, error: null }),
+          }),
+        };
+      },
     }),
+    auth: {
+      getSession: () => Promise.resolve({ data: { session: null } }),
+      onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    },
+    channel: () => ({ on: () => ({ subscribe: () => ({}) }) }),
+    removeChannel: () => {},
   },
 }));
 
-import SharePage, { fetchShareMeta, openShare, type ShareMeta } from './SharePage';
+import SharePage, { fetchShareMeta, headerTextColor, openShare, type ShareMeta } from './SharePage';
 
 const TOKEN = 'A'.repeat(43);
 
@@ -48,7 +62,20 @@ function renderPage() {
 
 beforeEach(() => {
   fetchMock.mockReset();
+  brandingSelect.mockReset();
   vi.stubGlobal('fetch', fetchMock);
+});
+
+describe('headerTextColor', () => {
+  // The brand colour is whatever an admin typed, so fixed white text is unreadable on a pale one.
+  it('picks the colour with the better contrast against the brand colour', () => {
+    expect(headerTextColor('#2563eb')).toBe('#ffffff');
+    expect(headerTextColor('#000000')).toBe('#ffffff');
+    expect(headerTextColor('#7f1d1d')).toBe('#ffffff');
+    expect(headerTextColor('#ffffff')).toBe('#000000');
+    expect(headerTextColor('#ffff00')).toBe('#000000');
+    expect(headerTextColor('#f5f5dc')).toBe('#000000');
+  });
 });
 
 describe('fetchShareMeta', () => {
@@ -108,5 +135,23 @@ describe('SharePage', () => {
     expect(await screen.findByText(/carries a DRAFT watermark/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Passcode/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Open PDF/ })).toBeDisabled();
+  });
+
+  it('reads the branding once, through the shared hook', async () => {
+    fetchMock.mockResolvedValue(jsonResponse(200, meta()));
+    renderPage();
+    expect(await screen.findByText('Fortress')).toBeInTheDocument();
+    await waitFor(() => expect(brandingSelect).toHaveBeenCalledTimes(1));
+  });
+
+  it('hands the PDF tab no opener back to this page', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, meta()));
+    fetchMock.mockResolvedValue(jsonResponse(200, { url: 'https://signed.example/report.pdf' }));
+    const tab = { opener: {} as unknown, location: { href: '' }, close: vi.fn() };
+    vi.stubGlobal('open', vi.fn(() => tab));
+    renderPage();
+    fireEvent.click(await screen.findByRole('button', { name: /Open PDF/ }));
+    await waitFor(() => expect(tab.location.href).toBe('https://signed.example/report.pdf'));
+    expect(tab.opener).toBeNull();
   });
 });

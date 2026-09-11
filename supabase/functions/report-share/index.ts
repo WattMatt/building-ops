@@ -155,6 +155,12 @@ serve(async (req: Request): Promise<Response> => {
       const uid = await callerId(req);
       if (!uid) return json(cors, { error: "unauthorized" }, 401);
       if (!(await isAdminOrManager(admin, uid))) return json(cors, { error: "forbidden" }, 403);
+      // The flag gates every public path inside loadLiveShare; without this, create would still mint a
+      // link while share_links is off — one that answers 404 to everyone it is sent to.
+      if (!(await shareLinksEnabled(admin))) {
+        console.log("report-share: create", { ok: false, reason: "feature off" });
+        return json(cors, { error: "forbidden" }, 403);
+      }
       const { reportId, artifactId, token, expiresInDays, passcode } = body;
       if (typeof reportId !== "string" || typeof artifactId !== "string" || typeof token !== "string" || !TOKEN_RE.test(token)) {
         return json(cors, { error: "bad body" }, 400);

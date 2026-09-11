@@ -190,6 +190,33 @@ describe('useReportLifecycle', () => {
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['report-artifacts', 'rep1'] });
     expect(toastMock.success).toHaveBeenCalledWith('Report approved and the final PDF was saved.');
   });
+  // The no-DRAFT-watermark invariant rests entirely on this order: the renderer reads reports.status
+  // itself, so an export that ran first would stamp DRAFT on the approved PDF.
+  it('exports only AFTER the status write has landed', async () => {
+    const order: string[] = [];
+    state.result = (table, calls) => {
+      if (table === 'reports' && has(calls, 'update')) {
+        order.push('status-write');
+        return { data: report({ status: 'approved' }), error: null };
+      }
+      return { data: [], error: null };
+    };
+    approvalMock.exportApprovedArtifact.mockImplementation(async () => {
+      order.push('export');
+      return { ok: true, artifactId: 'art1', reportType: 'ops_monthly' };
+    });
+    const { result } = renderHook(() => useReportLifecycle('rep1'), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ status: 'approved' }); });
+    expect(order).toEqual(['status-write', 'export']);
+  });
+  it('a transition that is not an approval exports nothing', async () => {
+    state.result = (table, calls) => table === 'reports' && has(calls, 'update')
+      ? { data: report({ status: 'submitted' }), error: null }
+      : { data: [], error: null };
+    const { result } = renderHook(() => useReportLifecycle('rep1'), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ status: 'submitted' }); });
+    expect(approvalMock.exportApprovedArtifact).not.toHaveBeenCalled();
+  });
   it('an approval whose export failed still stands, and the toast names what is missing', async () => {
     approvalMock.exportApprovedArtifact.mockResolvedValue({ ok: false, error: 'Upload failed' });
     state.result = (table, calls) => table === 'reports' && has(calls, 'update')

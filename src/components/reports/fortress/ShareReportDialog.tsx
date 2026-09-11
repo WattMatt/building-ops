@@ -7,7 +7,7 @@
  * never through <Hint>). Links expire; a passcode is optional and is hashed server-side, which is
  * why that path goes through the report-share function instead of a direct insert.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Copy, Link2, Loader2, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -69,17 +69,22 @@ export function ShareReportDialog({ reportId, artifacts, initialArtifactId, open
   const [created, setCreated] = useState<{ token: string; expiresAt: string; passcode: boolean } | null>(null);
   const [copied, setCopied] = useState(false);
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
+  // The current list, readable from the reset effect without being one of its dependencies.
+  const artifactsRef = useRef(artifacts);
+  artifactsRef.current = artifacts;
 
   // Each open starts a fresh link: leaving the previous one on screen invites sending a stale URL.
+  // Deliberately NOT keyed on `artifacts`: the array identity changes on every refetch, and re-running
+  // this while the dialog is open would wipe the link just created and the passcode being typed.
   useEffect(() => {
     if (!open) return;
-    const fallback = artifacts.find((a) => a.status === 'issued') ?? artifacts[0];
+    const fallback = artifactsRef.current.find((a) => a.status === 'issued') ?? artifactsRef.current[0];
     setArtifactId(initialArtifactId ?? fallback?.id ?? '');
     setPasscode('');
     setCreated(null);
     setCopied(false);
     setConfirmRevoke(null);
-  }, [open, initialArtifactId, artifacts]);
+  }, [open, initialArtifactId]);
 
   const selected = artifacts.find((a) => a.id === artifactId) ?? null;
   const problem = passcodeProblem(passcode);
@@ -187,9 +192,9 @@ export function ShareReportDialog({ reportId, artifacts, initialArtifactId, open
                 {problem && <p className="text-sm text-destructive" role="alert">{problem}</p>}
               </div>
 
-              <Hint>
-                Anyone with the link can open this PDF until it expires. Add a passcode for external recipients.
-              </Hint>
+              {/* What the link actually grants is a guardrail: it must survive hints being switched off. */}
+              <p className="text-sm">Anyone with this link can open the PDF. No sign-in is required.</p>
+              <Hint>Add a passcode for external recipients.</Hint>
 
               <Button className="min-h-11 w-full" disabled={!artifactId || !!problem || create.isPending} onClick={onCreate}>
                 {create.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Link2 className="mr-2 h-4 w-4" />}
@@ -226,6 +231,7 @@ export function ShareReportDialog({ reportId, artifacts, initialArtifactId, open
               <ul className="divide-y">
                 {active.map((s) => {
                   const version = artifacts.find((a) => a.id === s.artifact_id)?.version;
+                  const versionLabel = version ? `v${version}` : 'a removed version';
                   return (
                     <li key={s.id} className="flex flex-wrap items-center gap-2 py-2 first:pt-0 last:pb-0">
                       <div className="min-w-0 flex-1">
@@ -237,20 +243,46 @@ export function ShareReportDialog({ reportId, artifacts, initialArtifactId, open
                           {s.last_viewed_at ? ` · last opened ${fmtWhen(s.last_viewed_at)}` : ''}
                         </p>
                       </div>
-                      {/* No passcode chip here: `passcode_hash` is column-revoked, so a listed link
-                          cannot say whether it carries one. Only the link just created knows. */}
+                      {/* `has_passcode` is a generated boolean granted at the column level: the list can
+                          say THAT a link is locked without the hash ever leaving the server. */}
+                      {s.has_passcode && (
+                        <Badge variant="outline" className="text-xs">
+                          <Lock className="mr-1 h-3 w-3" /> Passcode
+                        </Badge>
+                      )}
+                      {/* Every row's buttons read the same to a screen reader unless the version is named,
+                          and a two-step confirm that cannot be backed out of is a trap. */}
                       {confirmRevoke === s.id ? (
+                        <div className="flex flex-wrap items-center gap-2" role="status">
+                          <span className="text-sm">Revoke this link? It stops working immediately.</span>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            className="min-h-11"
+                            disabled={revoke.isPending}
+                            aria-label={`Confirm revoking the link for ${versionLabel}`}
+                            onClick={() => onRevoke(s)}
+                          >
+                            Confirm revoke
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="min-h-11"
+                            aria-label={`Keep the link for ${versionLabel}`}
+                            onClick={() => setConfirmRevoke(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : (
                         <Button
-                          variant="destructive"
+                          variant="outline"
                           size="sm"
                           className="min-h-11"
-                          disabled={revoke.isPending}
-                          onClick={() => onRevoke(s)}
+                          aria-label={`Revoke link for ${versionLabel}`}
+                          onClick={() => setConfirmRevoke(s.id)}
                         >
-                          Confirm revoke
-                        </Button>
-                      ) : (
-                        <Button variant="outline" size="sm" className="min-h-11" onClick={() => setConfirmRevoke(s.id)}>
                           Revoke
                         </Button>
                       )}
