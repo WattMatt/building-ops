@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { IssuePriority, IssueStatus } from '@/lib/constants';
+import { parseReporter, type IssueReporter, type IssueSource } from '@/lib/issueSource';
 
 export interface Issue {
   id: string;
@@ -29,6 +30,12 @@ export interface Issue {
   sla_breached_at: string | null;
   first_response_at: string | null;
   resolved_at: string | null;
+  /** R4c: where the issue came from — 'app' for everything the app creates, 'tenant_intake' for a QR report. */
+  source: IssueSource;
+  /** The tenant who reported through the public form (no account); null on every app-created issue. */
+  reporter: IssueReporter | null;
+  /** The human-readable reference the intake function stamps on a tenant report, e.g. "TR-2609-0142". */
+  reference: string | null;
 }
 
 interface IssueStats {
@@ -39,9 +46,23 @@ interface IssueStats {
   resolved: number;
 }
 
+/**
+ * `source` / `reporter` / `reference` are server-set alongside the DB-stamped columns: only the
+ * tenant-intake function (service role) may write them, and a trigger refuses them from any
+ * signed-in session — so they are not part of a create or an update from the app.
+ */
 export type NewIssueInput = Omit<
   Issue,
-  'id' | 'created_at' | 'building_name' | 'sla_target_hours' | 'sla_breached_at' | 'first_response_at' | 'resolved_at'
+  | 'id'
+  | 'created_at'
+  | 'building_name'
+  | 'sla_target_hours'
+  | 'sla_breached_at'
+  | 'first_response_at'
+  | 'resolved_at'
+  | 'source'
+  | 'reporter'
+  | 'reference'
 >;
 
 interface UseIssuesOptions {
@@ -110,6 +131,9 @@ export function useIssues(
           sla_breached_at,
           first_response_at,
           resolved_at,
+          source,
+          reporter,
+          reference,
           buildings (name)
         `)
         .order('created_at', { ascending: false });
@@ -122,9 +146,22 @@ export function useIssues(
 
       if (fetchError) throw fetchError;
 
+      // issues.source / reporter / reference are not yet in the generated types — regenerate after
+      // 2026-09-14_03 ships and drop this row shape, which only restates what the select asks for.
+      type IssueRow = Omit<Issue, 'building_name' | 'priority' | 'status' | 'created_at' | 'photo_urls' | 'source' | 'reporter'> & {
+        priority: string;
+        status: string;
+        created_at: string | null;
+        photo_urls: unknown;
+        source: string | null;
+        reporter: unknown;
+        buildings: { name: string | null } | null;
+      };
+      const rows = (data ?? []) as unknown as IssueRow[];
+
       // The generated Row types priority/status as plain text, created_at as nullable (it has a
       // default) and photo_urls as Json; the DB check constraints make these narrowings safe.
-      const formattedIssues: Issue[] = (data || []).map((issue) => ({
+      const formattedIssues: Issue[] = rows.map((issue) => ({
         id: issue.id,
         title: issue.title,
         description: issue.description,
@@ -144,6 +181,11 @@ export function useIssues(
         sla_breached_at: issue.sla_breached_at,
         first_response_at: issue.first_response_at,
         resolved_at: issue.resolved_at,
+        // `source` has a 'app' default and a check constraint; `reporter` is jsonb the intake
+        // function writes, so it is parsed rather than asserted.
+        source: (issue.source as IssueSource) ?? 'app',
+        reporter: parseReporter(issue.reporter),
+        reference: issue.reference ?? null,
       }));
 
       setIssues(formattedIssues);

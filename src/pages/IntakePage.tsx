@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { PhotoCapture, type PhotoFile } from '@/components/ui/photo-capture';
-import { headerTextColor } from '@/pages/SharePage';
+import { headerTextColor } from '@/lib/headerTextColor';
 import {
   EMPTY_INTAKE, INTAKE_LIMITS, SUBMIT_ERROR_COPY, buildIntakeFormData, fetchIntakeInfo, serverFieldError,
   submitIntake, validateIntake, type IntakeErrors, type IntakeInfo, type IntakeValues,

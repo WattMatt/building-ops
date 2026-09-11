@@ -56,8 +56,8 @@ interface Issue {
   corrective_action: string | null;
   photo_urls: string[] | null;
   task_instance_id: string | null;
-  // Optional: MyDay passes its own shape, and `useIssues` does not select the R4c intake columns
-  // yet — an issue without them simply is not a tenant report.
+  // Optional: `useIssues` always supplies the R4c intake columns, but MyDay and older fixtures pass
+  // their own shape — an issue without them simply is not a tenant report.
   source?: IssueSource;
   reporter?: IssueReporter | null;
   reference?: string | null;

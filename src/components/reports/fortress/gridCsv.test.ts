@@ -101,6 +101,9 @@ const issue = (over: Partial<Issue> = {}): Issue => ({
   sla_breached_at: null,
   first_response_at: null,
   resolved_at: null,
+  source: 'app',
+  reporter: null,
+  reference: null,
   ...over,
 });
 

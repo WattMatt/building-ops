@@ -63,6 +63,9 @@ const liveIssue: IssuesData['issues'][number] = {
   sla_breached_at: null,
   first_response_at: null,
   resolved_at: null,
+  source: 'app',
+  reporter: null,
+  reference: null,
 };
 
 const queuedIssueOp = (status: QueuedOp['status'] = 'pending', buildingId = 'b1'): QueuedOp => ({
@@ -127,6 +130,36 @@ describe('Issues', () => {
     expect(screen.queryByText('Queued')).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Leaking pipe'));
     expect(screen.getByText('IssueDetailDialog open=true issue=Leaking pipe')).toBeInTheDocument();
+  });
+
+  it('flags a tenant-reported issue with the Tenant chip and its reference, and leaves app-reported rows plain', () => {
+    // The chip is the only place the list says an issue came from outside the app, so it has to
+    // read the hook's own `source` — this is the regression that kept it dark.
+    state.data = baseData({
+      issues: [
+        liveIssue,
+        {
+          ...liveIssue,
+          id: 'i3',
+          title: 'Blocked drain at the shop',
+          source: 'tenant_intake',
+          reference: 'TR-2609-0142',
+          reporter: { name: 'Thandi Tenant', shop_number: '12', shop: 'Kool Kids', unit: null, phone: null, email: null },
+        },
+      ],
+    });
+    renderPage();
+
+    // Both rows are on screen; only the tenant one carries a chip, and it carries the reference.
+    expect(screen.getByText('Leaking pipe')).toBeInTheDocument();
+    const chips = screen.getAllByTestId('tenant-chip');
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).toHaveTextContent('Tenant · TR-2609-0142');
+  });
+
+  it('leaves the Tenant chip off a list with no tenant reports at all', () => {
+    renderPage();
+    expect(screen.queryByTestId('tenant-chip')).toBeNull();
   });
 
   it('shows the SLA clock on an issue that has a target', () => {

@@ -41,15 +41,6 @@ import type { Issue } from '@/hooks/useIssues';
 import { isTenantIssue } from '@/lib/issueSource';
 import type { IssuePriority, IssueStatus } from '@/lib/constants';
 
-/**
- * R4c: `source` / `reporter` / `reference` are server-set columns (only the tenant-intake function
- * may write them). `useIssues` is owned by another slice and does not select them yet, so this page
- * reads them through a widening shape rather than asserting they are always present — the Tenant
- * chip lights up the moment that hook adds the three columns to its select and its `Issue`.
- */
-type TenantFields = { source?: string | null; reference?: string | null; reporter?: { name?: string | null } | null };
-const tenantFields = (issue: Issue): TenantFields => issue as Issue & TenantFields;
-
 const priorityColors: Record<IssuePriority, string> = {
   low: 'bg-muted text-muted-foreground',
   medium: 'bg-warning text-warning-foreground',
@@ -456,9 +447,9 @@ export default function Issues() {
                             Due: {format(new Date(issue.deadline), 'MMM d')}
                           </span>
                         )}
-                        {isTenantIssue(tenantFields(issue)) && (
+                        {isTenantIssue(issue) && (
                           <Badge variant="outline" className="border-info text-info" data-testid="tenant-chip">
-                            Tenant{tenantFields(issue).reference ? ` · ${tenantFields(issue).reference}` : ''}
+                            Tenant{issue.reference ? ` · ${issue.reference}` : ''}
                           </Badge>
                         )}
                       </div>
