@@ -18,6 +18,7 @@
     "smoke:snapshot": "node scripts/snapshot-smoke.mjs",
     "smoke:offline": "VITE_SUPABASE_URL=$SUPABASE_URL VITE_SUPABASE_PUBLISHABLE_KEY=$SUPABASE_ANON_KEY npx vite-node scripts/offline-smoke.ts",
     "smoke:calendar": "node scripts/calendar-smoke.mjs",
+    "smoke:intake": "node scripts/intake-smoke.mjs",
     "smoke:distribution": "node scripts/distribution-smoke.mjs"
   },
   "dependencies": {
@@ -71,6 +72,7 @@
     "papaparse": "^5.5.3",
     "pdfmake": "^0.3.3",
     "posthog-js": "1.429.2",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",
     "react-dom": "^18.3.1",
@@ -93,6 +95,7 @@
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
     "@types/node": "^22.16.5",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
     "@types/react-signature-canvas": "^1.0.7",

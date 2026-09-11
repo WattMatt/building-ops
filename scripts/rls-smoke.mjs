@@ -43,6 +43,12 @@
  *                    generated has_passcode bit is), so the report_shares probes name the granted columns
  *                    rather than select=*; report_distributions read-only for admin/manager; none of the
  *                    three nor report_recipients_valid reachable by anon
+ *   R4c "Intake"   → intake_tokens select/insert/update admin+manager by building access (insert:
+ *                    created_by = caller), no delete, never anon; intake_rate + intake_rate_hit /
+ *                    intake_touch service-role only; issues.source/reporter/reference refused for
+ *                    signed-in writers; form_templates select any active user, write admin, version
+ *                    bumps on content only; form_submissions snapshot columns follow fs_insert;
+ *                    storage intake/<building> read by access, never written by a session
  *
  * Personas: admin, manager, userA (user role, assigned building A only),
  * userB (user role, assigned building B only). userA probing building B
@@ -969,6 +975,76 @@ try {
     console.log('  R4b distribute (report_schedules, report_shares, report_distributions, report_recipients_valid): done');
   }
 
+  // ── R4c "Intake & Forms": intake_tokens, intake_rate + RPCs, issues intake guard, form_templates, snapshot columns, storage intake/ ──
+  const IT = 'intake_tokens';
+  const mintIntake = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+  const itA = (await svcInsert(IT, { building_id: A, token: mintIntake(), created_by: personas.admin.id, label: `ZZTEST-RLS-${RUN}` })).id;
+  cleanup.push([IT, itA]);
+  await probeMatrix(`${IT}(A) select`, adminMgr(), (jwt) => canSelect(jwt, IT, itA));
+  await probeMatrix(`${IT}(A) insert own`, adminMgr(), (jwt, who) => canInsert(jwt, IT, { building_id: A, token: mintIntake(), created_by: personas[who].id }));
+  assert(`${IT} insert with a foreign created_by as admin`, (await canInsert(personas.admin.jwt, IT, { building_id: A, token: mintIntake(), created_by: personas.manager.id })) === false, 'created_by must be the caller');
+  assert(`${IT} insert a 10-char token as admin`, (await canInsert(personas.admin.jwt, IT, { building_id: A, token: 'tooshort', created_by: personas.admin.id })) === false, 'the token format check did not hold');
+  await probeMatrix(`${IT}(A) disable`, adminMgr(), (jwt) => canUpdate(jwt, IT, itA, { is_active: false }));
+  await probeMatrix(`${IT}(A) delete`, nobody(), (jwt) => canDelete(jwt, IT, itA));
+  {
+    const anonRes = await fetch(`${URL_BASE}/rest/v1/${IT}?select=id&limit=1`, { headers: { apikey: ANON } });
+    assert(`${IT} not readable by anon`, !anonRes.ok, `HTTP ${anonRes.status}`);
+    const rateRes = await fetch(`${URL_BASE}/rest/v1/intake_rate?select=bucket&limit=1`, { headers: authed(personas.admin.jwt) });
+    assert('intake_rate not readable by authenticated (admin)', !rateRes.ok, `HTTP ${rateRes.status}`);
+    for (const [fn, args] of [['intake_rate_hit', { p_bucket: `zz:${RUN}`, p_limit: 1 }], ['intake_touch', { p_token: itA }]]) {
+      const anonR = await rpcCall(null, fn, args);
+      assert(`${fn} not executable by anon`, anonR.status === 401 || anonR.status === 403, `HTTP ${anonR.status}`);
+      const authR = await rpcCall(personas.admin.jwt, fn, args);
+      assert(`${fn} not executable by authenticated (admin)`, authR.status === 403, `HTTP ${authR.status}`);
+    }
+  }
+  // The Tenant chip cannot be forged: a session may not write source/reporter/reference, nor change them.
+  assert('issues insert with source tenant_intake as admin', (await canInsert(personas.admin.jwt, 'issues', { building_id: A, title: `ZZTEST-RLS-${RUN}`, description: 'x', reported_by: personas.admin.id, source: 'tenant_intake' })) === false, 'a signed-in writer forged a tenant-reported issue');
+  assert('issues insert with a reference as admin', (await canInsert(personas.admin.jwt, 'issues', { building_id: A, title: `ZZTEST-RLS-${RUN}`, description: 'x', reported_by: personas.admin.id, reference: 'FO-ABC234' })) === false, 'a signed-in writer set a reference');
+  {
+    const intakeIssue = (await svcInsert('issues', { building_id: A, title: `ZZTEST-RLS-${RUN}`, description: 'x', reported_by: personas.admin.id, source: 'tenant_intake', reporter: { name: 'T' }, reference: `FO-${RUN.toUpperCase().replace(/[^A-Z2-7]/g, 'A').slice(0, 6).padEnd(6, 'A')}` })).id;
+    cleanup.push(['issues', intakeIssue]);
+    assert('issues: admin may still change status on a tenant-reported issue', (await canUpdate(personas.admin.jwt, 'issues', intakeIssue, { status: 'in_progress' })) === true, 'the guard blocked an ordinary update');
+    assert('issues: admin may not clear the reference', (await canUpdate(personas.admin.jwt, 'issues', intakeIssue, { reference: null })) === false, 'the guard let the reference change');
+    assert('issues: admin may not flip source back to app', (await canUpdate(personas.admin.jwt, 'issues', intakeIssue, { source: 'app' })) === false, 'the guard let source change');
+  }
+  const FT = 'form_templates';
+  const ftId = `zztest-rls-${RUN}`;
+  await svcInsert(FT, { id: ftId, name: `ZZTEST-RLS-${RUN}`, category: 'Test', fields: [{ label: 'A', type: 'text' }] });
+  cleanup.push([FT, ftId]);
+  await probeMatrix(`${FT} select`, anyAuth(), (jwt) => canSelect(jwt, FT, ftId));
+  await probeMatrix(`${FT} insert`, adminOnly(), (jwt, who) => canInsert(jwt, FT, { id: `zztest-rls-ins-${RUN}-${who}`, name: 'x', category: 'Test' }));
+  await probeMatrix(`${FT} update (description)`, adminOnly(), (jwt) => canUpdate(jwt, FT, ftId, { description: 'changed' }));
+  {
+    const after = await (await fetch(`${URL_BASE}/rest/v1/${FT}?id=eq.${ftId}&select=version`, { headers: SVC })).json();
+    assert(`${FT} version bumped by the admin's description edit`, after[0]?.version === 2, `version=${after[0]?.version}`);
+    await canUpdate(personas.admin.jwt, FT, ftId, { is_active: false });
+    const after2 = await (await fetch(`${URL_BASE}/rest/v1/${FT}?id=eq.${ftId}&select=version`, { headers: SVC })).json();
+    assert(`${FT} version NOT bumped by an is_active toggle`, after2[0]?.version === 2, `version=${after2[0]?.version}`);
+    await canUpdate(personas.admin.jwt, FT, ftId, { version: 99 });
+    const after3 = await (await fetch(`${URL_BASE}/rest/v1/${FT}?id=eq.${ftId}&select=version`, { headers: SVC })).json();
+    assert(`${FT} client-sent version ignored`, after3[0]?.version === 2, `version=${after3[0]?.version}`);
+    const anonFt = await fetch(`${URL_BASE}/rest/v1/${FT}?select=id&limit=1`, { headers: { apikey: ANON } });
+    assert(`${FT} not readable by anon`, !anonFt.ok, `HTTP ${anonFt.status}`);
+  }
+  await probeMatrix(`${FT} delete`, adminOnly(), (jwt) => canDelete(jwt, FT, ftId));
+  // Snapshot columns ride the existing fs_insert policy.
+  await probeMatrix('form_submissions insert with template_version + fields_snapshot (A)', byAccess('A'), (jwt, who) =>
+    canInsert(jwt, 'form_submissions', { building_id: A, form_name: `ZZTEST-RLS-${RUN}`, form_template_id: '1', submitted_by: personas[who].id, template_version: 1, fields_snapshot: [{ label: 'A', type: 'text' }] }));
+  // Storage: intake/<building>/… is written only by the service role; read follows building access.
+  await probeMatrix('storage intake/<A> write', nobody(), (jwt) => storagePut(jwt, 'tenant-documents', `intake/${A}/zztest-${RUN}.txt`));
+  {
+    const path = `intake/${A}/zztest-svc-${RUN}.txt`;
+    const up = await fetch(`${URL_BASE}/storage/v1/object/tenant-documents/${path}`, { method: 'POST', headers: { ...SVC, 'Content-Type': 'text/plain' }, body: 'rls-smoke' });
+    if (up.ok) {
+      storageCleanup.push(['tenant-documents', path]);
+      await probeMatrix('storage intake/<A> read', byAccess('A'), (jwt) => storageGet(jwt, 'tenant-documents', path));
+    } else {
+      skip('storage intake/<A> read', `service-role upload failed: HTTP ${up.status}`);
+    }
+  }
+  console.log('  R4c intake & forms (intake_tokens, intake_rate + RPCs, issues guard, form_templates, snapshot columns, storage intake/): done');
+
 } catch (e) {
   fail('smoke run', e.message);
 } finally {
@@ -982,6 +1058,8 @@ try {
   if (A || B) {
     await fetch(`${URL_BASE}/rest/v1/task_instances?building_id=in.(${[A, B].filter(Boolean).join(',')})&or=(template_item_id.not.is.null,source_ppm_id.not.is.null)`, { method: 'DELETE', headers: SVC });
   }
+  // the R4c rate-limit probe hit a bucket of its own (zz:<run>); no fixture row names it
+  await fetch(`${URL_BASE}/rest/v1/intake_rate?bucket=like.zz:${RUN}*`, { method: 'DELETE', headers: SVC });
   for (const [table, id, filter] of cleanup.reverse()) await svcDelete(table, id, filter);
   for (const uid of createdUsers) {
     await fetch(`${URL_BASE}/auth/v1/admin/users/${uid}`, { method: 'DELETE', headers: SVC });
