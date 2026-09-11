@@ -7,8 +7,10 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { fdb } from '@/integrations/supabase/fortress-db';
+import { supabase } from '@/integrations/supabase/client';
 import { classify, ratioPct, waterDeltaPct, THRESHOLDS, type KpiStatus } from '@/lib/fortressKpis';
-import { ppmCompletion, type PpmServiceLike } from '@/lib/ppmStatus';
+import { fiscalWindow, gridHasData, ppmCompletionFromGrid } from '@/lib/ppmGrid';
+import { fetchMergedPpmGrids } from '@/lib/ppmGridFetch';
 
 export type KpiFormat = 'pct' | 'zar' | 'count' | 'number';
 export interface Kpi {
@@ -29,9 +31,15 @@ export interface OhsAction {
 }
 export interface SectionScore { section_no: string; section_title: string | null; section_pct: number | null }
 
-async function latestApproved(buildingId: string, type: string) {
+/**
+ * The newest APPROVED report of a type for a building. Dashboards and KPI cards
+ * read from this, so a half-filled draft or a rejected report can never become the
+ * building's headline numbers (finding K1). Exported for the unit test and for
+ * other readers of approved reports.
+ */
+export async function latestApprovedReport(buildingId: string, type: string) {
   const rows = await fdb.from('reports').select('*')
-    .eq('building_id', buildingId).eq('report_type', type)
+    .eq('building_id', buildingId).eq('report_type', type).eq('status', 'approved')
     .order('report_period', { ascending: false }).limit(1);
   return rows.data?.[0] ?? null;
 }
@@ -43,9 +51,9 @@ export function useBuildingKpis(buildingId: string | undefined) {
     queryFn: async () => {
       const bid = buildingId!;
       const [ops, cm, annual] = await Promise.all([
-        latestApproved(bid, 'ops_monthly'),
-        latestApproved(bid, 'cm_monthly'),
-        latestApproved(bid, 'annual_inspection'),
+        latestApprovedReport(bid, 'ops_monthly'),
+        latestApprovedReport(bid, 'cm_monthly'),
+        latestApprovedReport(bid, 'annual_inspection'),
       ]);
 
       const kpis: Kpi[] = [];
@@ -87,7 +95,7 @@ export function useBuildingKpis(buildingId: string | undefined) {
         const o2 = critRows.data?.[0]?.critical_pct ?? null;
         kpis.push({ id: 'O2', label: 'Critical Equipment', value: num(o2), format: 'pct', status: classify(num(o2), THRESHOLDS.critical) });
 
-        const resp = (respRows.data ?? []) as any[];
+        const resp = respRows.data ?? [];
         const noCount = resp.filter((r) => r.response === 'no').length;
         const naCount = resp.filter((r) => r.response === 'na').length;
         kpis.push({ id: 'O3', label: 'Open Non-Compliances', value: noCount, format: 'count', status: classify(noCount, THRESHOLDS.openNonCompliance) });
@@ -161,7 +169,7 @@ export function useBuildingKpis(buildingId: string | undefined) {
       }
 
       // trend across all approved ops reports
-      const allOps = await fdb.from('reports').select('id,report_period').eq('building_id', bid).eq('report_type', 'ops_monthly').order('report_period');
+      const allOps = await fdb.from('reports').select('id,report_period').eq('building_id', bid).eq('report_type', 'ops_monthly').eq('status', 'approved').order('report_period');
       const trendRows = await Promise.all((allOps.data ?? []).map(async (r) => {
         const s = await fdb.from('compliance_scores').select('compliance_pct').eq('report_id', r.id);
         return { period: r.report_period as string, pct: num(s.data?.[0]?.compliance_pct ?? null) };
@@ -229,7 +237,7 @@ export function useBuildingKpis(buildingId: string | undefined) {
         // reports. Needs ≥2 periods → null for a single report. See totalFootfall() for how the mix of
         // per-entrance and roll-up rows is collapsed to one non-double-counted total.
         const cmReports = await fdb.from('reports').select('id,report_period')
-          .eq('building_id', bid).eq('report_type', 'cm_monthly').order('report_period');
+          .eq('building_id', bid).eq('report_type', 'cm_monthly').eq('status', 'approved').order('report_period');
         const footfallByPeriod = await Promise.all((cmReports.data ?? []).map(async (r) => {
           const ff = await fdb.from('footfall_counts').select('entrance,month_count').eq('report_id', r.id);
           const rows = (ff.data ?? []) as { entrance: string | null; month_count: number | null }[];
@@ -272,20 +280,7 @@ export function useBuildingKpis(buildingId: string | undefined) {
         kpis.push({ id: 'O6', label: 'Equipment Overdue', value: overdue, format: 'count', status: classify(overdue, THRESHOLDS.equipmentOverdue) });
       }
 
-      // K11 PPM Serviced — ppm_services on the latest approved ops report: the share of
-      // services that have been serviced at least once (any 'done' month cell) over the
-      // report's 12-month window. null when there are no services (honest empty-state), and
-      // likewise when the register exists but not one month cell has been filled in yet —
-      // an uncaptured matrix is "no data", not a measured 0%.
-      let k11: number | null = null; let k11Sub: string | undefined;
-      if (ops) {
-        const ppm = await fdb.from('ppm_services').select('months').eq('report_id', ops.id);
-        const ppmRows = (ppm.data ?? []) as PpmServiceLike[];
-        const ppmCaptured = ppmRows.some((s) => Object.keys(s.months ?? {}).length > 0);
-        const { doneCount, total, pct } = ppmCompletion(ppmRows);
-        k11 = ppmCaptured ? pct : null;
-        if (total > 0) k11Sub = ppmCaptured ? `${doneCount}/${total}` : 'Not captured';
-      }
+      const { value: k11, sub: k11Sub } = ops ? await ppmServicedKpi(ops) : { value: null, sub: undefined };
       kpis.push({ id: 'K11', label: 'PPM Serviced', value: k11, format: 'pct', status: classify(k11, THRESHOLDS.ppm), sub: k11Sub });
 
       // O7 Days Since Evac Drill — days since the most recent COMPLETED evacuation-drill task for the building.
@@ -303,6 +298,28 @@ export function useBuildingKpis(buildingId: string | undefined) {
       return { ops, cm, annual, kpis, sectionScores, actions, trend };
     },
   });
+}
+
+/**
+ * K11 PPM Serviced — ppm_services on the latest approved ops report: the share of services
+ * that have been serviced at least once (any 'done' cell) over the report's fiscal window.
+ * Cells come from the MERGED grid (override > derived execution > legacy `months`), so a
+ * plan-backed row whose `months` is empty still counts once an occurrence was completed.
+ * null when there are no services (honest empty-state), and likewise when the register
+ * exists but not one cell has been filled by any layer — an uncaptured matrix is "no data",
+ * not a measured 0%. Exported for the unit test.
+ */
+export async function ppmServicedKpi(
+  ops: { id: string; report_period: string | null },
+): Promise<{ value: number | null; sub: string | undefined }> {
+  const ppm = await supabase.from('ppm_services').select('id, building_id, plan_service_id, overrides, months').eq('report_id', ops.id);
+  const rows = ppm.data ?? [];
+  if (rows.length === 0) return { value: null, sub: undefined };
+  const grids = await fetchMergedPpmGrids(rows, fiscalWindow(ops.report_period));
+  const gridList = rows.map((r) => grids.get(r.id) ?? {});
+  const captured = gridList.some(gridHasData);
+  const { doneCount, total, pct } = ppmCompletionFromGrid(gridList);
+  return { value: captured ? pct : null, sub: captured ? `${doneCount}/${total}` : 'Not captured' };
 }
 
 function num(v: unknown): number | null {

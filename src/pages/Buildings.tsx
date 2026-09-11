@@ -16,7 +16,6 @@ import {
   Trash2,
   Eye,
   Upload,
-  Download,
   Camera,
 } from 'lucide-react';
 import {
@@ -30,13 +29,32 @@ import { BuildingAvatar } from '@/components/building/BuildingAvatar';
 import { BuildingAvatarDialog } from '@/components/building/BuildingAvatarDialog';
 import BuildingImportDialog from '@/components/building/BuildingImportDialog';
 import { BuildingScoreChips } from '@/components/building/BuildingScoreChips';
-import { useBuildingsScores } from '@/hooks/useBuildingsScores';
-import * as XLSX from 'xlsx';
+import { chipValues, useBuildingsScores } from '@/hooks/useBuildingsScores';
+import { useBuildingsTrends } from '@/hooks/useBuildingTrend';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
+import { csvText, type CsvColumn } from '@/lib/exportCsv';
+import type { Tables } from '@/integrations/supabase/types';
+
+type BuildingRow = Tables<'buildings'>;
+
+export const BUILDING_CSV_COLUMNS: CsvColumn<BuildingRow>[] = [
+  { key: 'name', header: 'Name' },
+  { key: 'address', header: 'Address', format: csvText },
+  { key: 'city', header: 'City', format: csvText },
+  { key: 'latitude', header: 'Latitude', format: (v) => (v == null ? '' : String(v)) },
+  { key: 'longitude', header: 'Longitude', format: (v) => (v == null ? '' : String(v)) },
+  { key: 'timezone', header: 'Timezone', format: csvText },
+  // Which reports the building owes; ";" so a spreadsheet keeps them in one cell.
+  { key: 'report_types', header: 'Report types', format: (v) => (Array.isArray(v) ? v.join(';') : '') },
+];
 
 export default function Buildings() {
   const { isAdminOrManager } = useAuth();
   const { buildings, loading, error, refetch, deleteBuilding } = useBuildings();
+  // One snapshot read for the grid (sparklines AND chip values, from each building's latest fresh row);
+  // the live scores are only the fallback for buildings the snapshot does not cover yet.
   const { scores } = useBuildingsScores();
+  const trends = useBuildingsTrends(30);
   const [searchQuery, setSearchQuery] = useState('');
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [avatarDialogBuilding, setAvatarDialogBuilding] = useState<{
@@ -46,32 +64,11 @@ export default function Buildings() {
     avatar_color: string | null;
   } | null>(null);
 
-  const handleExport = (format: 'csv' | 'xlsx') => {
-    const exportData = buildings.map((building) => ({
-      Name: building.name,
-      Address: building.address,
-      City: building.city,
-      Latitude: building.latitude || '',
-      Longitude: building.longitude || '',
-      Timezone: building.timezone,
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Buildings');
-
-    if (format === 'csv') {
-      XLSX.writeFile(wb, 'buildings_export.csv', { bookType: 'csv' });
-    } else {
-      XLSX.writeFile(wb, 'buildings_export.xlsx');
-    }
-  };
-
   const filteredBuildings = buildings.filter(
     (building) =>
       building.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      building.address.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      building.city.toLowerCase().includes(searchQuery.toLowerCase())
+      (building.address ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (building.city ?? '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleDelete = async (id: string) => {
@@ -124,22 +121,8 @@ export default function Buildings() {
         </div>
         {isAdminOrManager && (
           <div className="flex gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" disabled={buildings.length === 0}>
-                  <Download className="w-4 h-4 mr-2" />
-                  Export
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem onClick={() => handleExport('xlsx')}>
-                  Export as Excel (.xlsx)
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleExport('csv')}>
-                  Export as CSV
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {/* Exactly the rows on screen after the search. */}
+            <ExportCsvButton rows={filteredBuildings} columns={BUILDING_CSV_COLUMNS} filename="buildings" />
             <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
               <Upload className="w-4 h-4 mr-2" />
               Import
@@ -190,6 +173,7 @@ export default function Buildings() {
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredBuildings.map((building) => {
             const position = building.logo_position || 'top-left';
+            const chips = chipValues(trends.latest[building.id], scores[building.id]);
 
             return (
               <Card key={building.id} className="group hover:shadow-md transition-shadow relative overflow-hidden">
@@ -322,8 +306,11 @@ export default function Buildings() {
                   </p>
                   <div className="mb-4">
                     <BuildingScoreChips
-                      ohsPct={scores[building.id]?.ohsPct ?? null}
-                      taskPct={scores[building.id]?.taskPct ?? null}
+                      ohsPct={chips.ohsPct}
+                      taskPct={chips.taskPct}
+                      ohsTrend={trends.byBuilding[building.id]?.compliance}
+                      taskTrend={trends.byBuilding[building.id]?.tasks}
+                      asOf={chips.asOf}
                     />
                   </div>
                   <div className="flex items-center justify-between">

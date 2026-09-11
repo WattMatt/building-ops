@@ -1,23 +1,53 @@
 import { describe, it, expect } from 'vitest';
 import { buildReportDoc, type ReportData } from './fortressReportDoc';
+import { watermarkFor } from './fortressReports';
+
+/** `watermark` on TDocumentDefinitions may be a plain string or a { text, ... } object. */
+function watermarkText(doc: { watermark?: string | { text: string } }): string | undefined {
+  return typeof doc.watermark === 'object' ? doc.watermark.text : doc.watermark;
+}
+
+// pdfmake's doc-definition is a loosely-typed tree; the walkers below read it structurally.
+type PdfNode = { [key: string]: unknown; image?: unknown; text?: unknown; columns?: unknown; stack?: unknown; content?: unknown; table?: { body?: unknown; widths?: unknown[] } };
+const asNode = (n: unknown): PdfNode | null => (n != null && typeof n === 'object' && !Array.isArray(n) ? (n as PdfNode) : null);
 
 // Walk a pdfmake doc-definition tree collecting every image data-URL and text string.
-function walk(node: any, images: string[], texts: string[]): void {
+function walk(node: unknown, images: string[], texts: string[]): void {
   if (node == null) return;
   if (Array.isArray(node)) { for (const n of node) walk(n, images, texts); return; }
-  if (typeof node !== 'object') return;
-  if (typeof node.image === 'string') images.push(node.image);
-  if (typeof node.text === 'string') texts.push(node.text);
-  else if (Array.isArray(node.text)) for (const t of node.text) texts.push(typeof t === 'string' ? t : (t?.text ?? ''));
-  if (node.columns) walk(node.columns, images, texts);
-  if (node.stack) walk(node.stack, images, texts);
-  if (node.content) walk(node.content, images, texts);
-  if (node.table?.body) walk(node.table.body, images, texts);
+  const o = asNode(node);
+  if (!o) return;
+  if (typeof o.image === 'string') images.push(o.image);
+  if (typeof o.text === 'string') texts.push(o.text);
+  else if (Array.isArray(o.text)) for (const t of o.text) texts.push(typeof t === 'string' ? t : (asNode(t)?.text as string | undefined) ?? '');
+  if (o.columns) walk(o.columns, images, texts);
+  if (o.stack) walk(o.stack, images, texts);
+  if (o.content) walk(o.content, images, texts);
+  if (o.table?.body) walk(o.table.body, images, texts);
 }
-function collect(doc: any): { images: string[]; text: string } {
+function collect(doc: { content: unknown }): { images: string[]; text: string } {
   const images: string[] = []; const texts: string[] = [];
   walk(doc.content, images, texts);
   return { images, text: texts.join(' | ') };
+}
+
+/** Every table whose fixed widths plus 4pt gutters overflow the 515pt text block, as "N cols / Wpt". */
+function overWideTables(root: unknown): string[] {
+  const over: string[] = [];
+  const visit = (n: unknown): void => {
+    if (n == null) return;
+    if (Array.isArray(n)) { n.forEach(visit); return; }
+    const o = asNode(n);
+    if (!o) return;
+    const widths = o.table?.widths;
+    if (Array.isArray(widths)) {
+      const fixed = widths.reduce<number>((a, w) => a + (typeof w === 'number' ? w : 0), 0);
+      if (fixed + widths.length * 4 > 515) over.push(`${widths.length} cols / ${fixed}pt`);
+    }
+    Object.values(o).forEach(visit);
+  };
+  visit(root);
+  return over;
 }
 
 const PHOTO = 'data:image/jpeg;base64,AAAA';
@@ -72,6 +102,18 @@ describe('buildReportDoc — annual_inspection', () => {
   it('renders the Capex Register table', () => {
     expect(text).toContain('Capex Register');
     expect(text).toContain('Roof replacement');
+  });
+});
+
+describe('buildReportDoc — prepared for', () => {
+  it('prints the "Prepared for" client on the cover when set', () => {
+    // The field was captured and saved in the editor but never reached the PDF.
+    const doc = buildReportDoc(
+      { title: 'OPS', report_period: '2026-06-01', report_type: 'ops_monthly', managers: ['A'], prepared_for: 'Capital Propfund' },
+      { compliancePct: 90 },
+      { color: '#123456', orgName: 'Acme' },
+    );
+    expect(collect(doc).text).toContain('Prepared for Capital Propfund');
   });
 });
 
@@ -137,5 +179,407 @@ describe('buildReportDoc — ops_monthly + branding', () => {
     const { images, text } = collect(doc);
     expect(images).toHaveLength(0);
     expect(text).toContain('Acme Holdings');
+  });
+});
+
+/*
+ * Export completeness (added when the export was rebuilt).
+ *
+ * Each of these corresponds to a way the export was previously wrong: CM reports exported
+ * as a bare cover page, OPS reports claimed a 0% compliance score nobody had measured, and
+ * a report missing eleven sections looked identical to a complete one.
+ */
+const OPTS = { color: '#0b5f5e', orgName: 'Building Ops' };
+const opsDoc = (data: ReportData) =>
+  buildReportDoc({ title: 'X — Operations', report_period: '2026-06-01', report_type: 'ops_monthly', managers: [] }, data, OPTS);
+const cmDoc = (data: ReportData) =>
+  buildReportDoc({ title: 'X — CM', report_period: '2026-06-01', report_type: 'cm_monthly', managers: [] }, data, OPTS);
+
+/** Every string anywhere in the definition, including cells `collect` does not descend into. */
+function allText(doc: unknown): string {
+  const out: string[] = [];
+  const visit = (n: unknown): void => {
+    if (n == null) return;
+    if (typeof n === 'string' || typeof n === 'number') { out.push(String(n)); return; }
+    if (Array.isArray(n)) { n.forEach(visit); return; }
+    if (typeof n === 'object') Object.values(n as Record<string, unknown>).forEach(visit);
+  };
+  visit(doc);
+  return out.join('\n');
+}
+
+describe('buildReportDoc — export completeness', () => {
+  it('does not claim a compliance score when the OHS section was never completed', () => {
+    const t = allText(opsDoc({ compliancePct: null, compliance: [] }));
+    expect(t).not.toContain('Building Compliance');
+  });
+
+  it('exports utilities, masterfile and the inspection checklist', () => {
+    const t = allText(opsDoc({
+      utilities: [{ utility: 'water', meter: 'Bulk Check', reading: 1166, unit: 'KL', category: 'bulk', pctOfBulk: null, comment: null }],
+      masterfile: [{ document: 'Zoning certificate', onFile: 'yes', comment: null }],
+      checklist: [{ section: 'Building Inspection', items: [{ item: 'STRUCTURE / Basement', response: 'yes', value: null, comment: null }] }],
+    }));
+    expect(t).toContain('Utilities');
+    expect(t).toContain('Bulk Check');
+    expect(t).toContain('Masterfile');
+    expect(t).toContain('Zoning certificate');
+    expect(t).toContain('STRUCTURE / Basement');
+  });
+
+  it('counts documents on file in the masterfile note', () => {
+    const t = allText(opsDoc({
+      masterfile: [
+        { document: 'A', onFile: 'yes', comment: null },
+        { document: 'B', onFile: 'no', comment: null },
+        { document: 'C', onFile: 'unassessed', comment: null },
+      ],
+    }));
+    expect(t).toContain('1 of 3 documents on file.');
+  });
+
+  it('says the PPM status is unrecorded rather than printing an empty schedule', () => {
+    const t = allText(opsDoc({
+      ppm: [{ service: 'Aircon minor', frequency: 'Monthly', servicedMonths: [] }],
+      ppmStatusNote: 'Service status is recorded in the source workbook as a cell colour with no legend.',
+    }));
+    expect(t).toContain('Aircon minor');
+    expect(t).toContain('no legend');
+    expect(t).toContain('not recorded');
+  });
+
+  it('exports every captured CM tenant column, grouped so each table fits the page', () => {
+    const t = allText(cmDoc({
+      tenantCompliance: [{
+        shop: '2', tenant: 'ACKERMANS', gla: 704,
+        occupancyCert: '2023/74', cocNumber: 'M0247625', cocDate: '2023-09-27', leaseClause: '7.7',
+        hvacResponsibility: 'LL', hvacRecords: 'yes', hvacHandover: '12/2024',
+        generatorResponsibility: 'll', generatorRecords: 'yes',
+        sprinklerDedicated: 'yes', sprinklerWeekly: 'yes', sprinklerAnnual: 'na', sprinkler3yr: 'no',
+        smokeExtractionDedicated: 'yes', smokeExtractionService: 'yes',
+        smokeDetectionDedicated: 'yes', smokeDetectionService: 'na', handheldFire: 'yes',
+        ohsRisks: 'Y', evacPlan: 'na', foodExtraction: 'yes',
+        greaseTrap: 'yes', fireBlanket: 'no', gasCoc: 'na', flammableLiquid: 'yes',
+      }],
+      shopSpec: [{
+        shop: '2', tenant: 'ACKERMANS', phase: '3 - Three phase', actualAmps: '160A', leaseAmps: '160A',
+        generator: 'yes', hvac: 'DP', hvacBtu: '4x 7500', hvacGas: 'R410A',
+        lighting: 'L-LED', shopfront: 'DD- Double door', rollerShutter: 'G',
+      }],
+    }));
+    // the four compliance groups and the two shop-spec groups all render
+    expect(t).toContain('Tenant OHS & Housekeeping');
+    expect(t).toContain('Certificates and occupancy.');
+    expect(t).toContain('HVAC and generators.');
+    expect(t).toContain('Fire equipment.');
+    expect(t).toContain('OHS act risks and food tenants.');
+    expect(t).toContain('Shop Specification');
+    // values from every group, i.e. nothing is dropped on the way to the page
+    expect(t).toContain('M0247625');      // certificates
+    expect(t).toContain('12/2024');       // hvac handover
+    expect(t).toContain('4x 7500');       // hvac btu — was dropped entirely
+    expect(t).toContain('DD- Double door'); // shopfront — was dropped entirely
+    expect(t).toContain('7.7');           // lease clause — was dropped entirely
+  });
+
+  it('keeps every table inside the printable width', () => {
+    const doc = cmDoc({
+      tenantCompliance: [{
+        shop: '1', tenant: 'B', gla: 1, occupancyCert: 'a', cocNumber: 'b', cocDate: 'c', leaseClause: 'd',
+        hvacResponsibility: 'e', hvacRecords: 'f', hvacHandover: 'g', generatorResponsibility: 'h',
+        generatorRecords: 'i', sprinklerDedicated: 'j', sprinklerWeekly: 'k', sprinklerAnnual: 'l',
+        sprinkler3yr: 'm', smokeExtractionDedicated: 'n', smokeExtractionService: 'o',
+        smokeDetectionDedicated: 'p', smokeDetectionService: 'q', handheldFire: 'r', ohsRisks: 's',
+        evacPlan: 't', foodExtraction: 'u', greaseTrap: 'v', fireBlanket: 'w', gasCoc: 'x', flammableLiquid: 'y',
+      }],
+      shopSpec: [{ shop: '1', tenant: 'B', phase: 'a', actualAmps: 'b', leaseAmps: 'c', generator: 'd',
+        hvac: 'e', hvacBtu: 'f', hvacGas: 'g', lighting: 'h', shopfront: 'i', rollerShutter: 'j' }],
+    });
+    // pdfmake draws overflow off the paper rather than wrapping, so fixed widths plus
+    // gutters must fit the 515pt text block. This is the guard the review found missing.
+    expect(overWideTables(doc.content)).toEqual([]);
+  });
+
+  it('names the sections that carry nothing, and omits the block when none do', () => {
+    expect(allText(cmDoc({ emptySections: ['Building Turnover', 'Leasing'] }))).toContain('Not captured this period');
+    expect(allText(cmDoc({ emptySections: ['Building Turnover', 'Leasing'] }))).toContain('Leasing');
+    expect(allText(cmDoc({ emptySections: [] }))).not.toContain('Not captured this period');
+  });
+});
+
+/*
+ * The Page 2 / Page 3 blocks.
+ *
+ * These were ingested from the June drop and then had no route into the PDF: a CM report
+ * printed its tenant tables and silently omitted head counts, leasing, trading hours,
+ * arrears and utilities. Each assertion below corresponds to one such omission.
+ */
+describe('buildReportDoc — CM Page 2 / Page 3 sections', () => {
+  const full = cmDoc({
+    footfall: [{ entrance: 'BUS RANK', month: '73,832', ytd: '143,870', prevYtd: '141,550', variance: '2%' }],
+    toiletFund: [{ label: 'Issued (bales)', value: '122' }],
+    vacancies: [{ shop: 'Shop 12', area: '250', budgetRelet: '95', grossMandate: '110', comment: 'agent mandated' }],
+    waitlist: [{ tradingAs: 'Sportscene', contact: '082', category: 'Fashion', size: '300m²', comment: '' }],
+    movements: [{ tradingAs: 'KFC', type: 'new', vacateDate: '2025-09-22', prelim: '', takeOn: '', firstTrade: '2025-11-01', comment: '' }],
+    tradingBreaches: [{ tenant: 'Bargain Books', date: '2026-06-04', time: '17:30', letterTo: 'Head office', comment: 'closed early' }],
+    arrears: [{ tradingAs: 'Nizams', deposit: '361,088.52', balance: '100,000.00', contact: '083' }],
+    loadshedding: [{ day: '2026-06-22', week: '4', stage: 'Power failure', hours: '4', litres: '470', dieselDate: '2026-06-22' }],
+    interruptions: [{ date: '2026-06-20', type: 'Power failure', start: '23:00', end: '02:30', hours: '3.5', ref: 'No Ref.', comment: 'main supply' }],
+    incidentsTotal: 33,
+    incidentsByMonth: [{ month: '2025-07', count: 33 }],
+    incidentsByType: [{ type: 'Public indecency', count: 14 }],
+  });
+  const t = allText(full);
+
+  it('prints head counts and the toilet fund', () => {
+    expect(t).toContain('Head Counts');
+    expect(t).toContain('BUS RANK');
+    expect(t).toContain('Toilet Fund');
+    expect(t).toContain('Issued (bales)');
+  });
+
+  it('prints all three leasing blocks under one heading', () => {
+    expect(t).toContain('Leasing');
+    expect(t).toContain('Shop 12');        // vacancies
+    expect(t).toContain('Sportscene');     // waiting list
+    expect(t).toContain('KFC');            // movements
+  });
+
+  it('prints trading-hour breaches and arrears', () => {
+    expect(t).toContain('Tenant Trading Hours');
+    expect(t).toContain('Bargain Books');
+    expect(t).toContain('Arrears');
+    expect(t).toContain('Nizams');
+  });
+
+  it('prints loadshedding and municipal interruptions', () => {
+    expect(t).toContain('Utility Management');
+    expect(t).toContain('Power failure');
+    expect(t).toContain('No Ref.');
+  });
+
+  it('breaks the incident matrix down by month and by type, not just a total', () => {
+    expect(t).toContain('Total incidents: 33');
+    expect(t).toContain('2025-07');
+    expect(t).toContain('Public indecency');
+  });
+
+  it('omits every block that carries no rows, rather than printing empty tables', () => {
+    const bare = allText(cmDoc({ turnover: [] }));
+    for (const heading of ['Head Counts', 'Toilet Fund', 'Tenant Trading Hours', 'Arrears', 'Utility Management'])
+      expect(bare).not.toContain(heading);
+  });
+
+  it('keeps every new table inside the 515pt text block', () => {
+    expect(overWideTables(full.content)).toEqual([]);
+  });
+});
+
+/*
+ * Electrical compliance: the four states insight-linker can be in.
+ *
+ * Previously the PDF rendered a table only when rows existed, and coerced every null to
+ * ''. So "not linked", "linked but the site has no shops", and "the live read failed"
+ * were one indistinguishable silence, and a table whose CoC columns were entirely blank
+ * (781 of 1,265 shops portfolio-wide) printed as though it were complete data.
+ */
+describe('buildReportDoc — electrical compliance states', () => {
+  const annual = (data: ReportData) =>
+    buildReportDoc({ title: 'X', report_period: '2026-06-01', report_type: 'annual_inspection', managers: [] }, data, OPTS);
+
+  it('says the building is not linked, rather than printing nothing', () => {
+    const t = allText(annual({ electricalLinked: false }));
+    expect(t).toContain('Electrical Compliance');
+    expect(t).toContain('not linked to an insight-linker site');
+  });
+
+  it('distinguishes "linked but no shops recorded" from "not linked"', () => {
+    const t = allText(annual({ electricalLinked: true, electricalCompliance: [] }));
+    expect(t).toContain('no shops are recorded');
+    expect(t).not.toContain('not linked to an insight-linker site');
+  });
+
+  it('reports a failed live read as a failure, never as absent data', () => {
+    const t = allText(annual({ electricalError: 'statement timeout' }));
+    expect(t).toContain('could not be read');
+    expect(t).toContain('statement timeout');
+    expect(t).not.toContain('no shops are recorded');
+  });
+
+  it('renders an em-dash for every missing CoC field instead of a blank cell', () => {
+    const t = allText(annual({
+      electricalLinked: true,
+      electricalCompliance: [{
+        shop_number: 'S1', tenant_name: 'Acme',
+        coc_number: null, coc_type: null, coc_status: null,
+        coc_issue_date: null, coc_expiry_date: null,
+        certificate_url: '', certificate_name: '',
+      }],
+    }));
+    expect(t).toContain('Acme');
+    expect(t).toContain('—');
+  });
+
+  it('still prints real values when they are present', () => {
+    const t = allText(annual({
+      electricalLinked: true,
+      electricalCompliance: [{
+        shop_number: 'S1', tenant_name: 'Acme',
+        coc_number: 'COC-99', coc_type: 'Electrical', coc_status: 'Pass',
+        coc_issue_date: '2026-01-15', coc_expiry_date: null,
+        certificate_url: 'https://example.test/c.pdf', certificate_name: 'c.pdf',
+      }],
+    }));
+    expect(t).toContain('COC-99');
+    expect(t).toContain('Pass');
+    expect(t).toContain('2026-01-15');
+  });
+
+  it('renders electrical compliance for OPS and CM reports, not only annual', () => {
+    // REPORT_SECTIONS expects this section on every report type; rendering it only in
+    // the annual branch silently dropped live CoC data from 69 of 72 production reports.
+    const row = {
+      shop_number: 'S1', tenant_name: 'Acme', coc_number: 'COC-1', coc_type: 'Electrical',
+      coc_status: 'Pass', coc_issue_date: '2026-01-01', coc_expiry_date: null,
+      certificate_url: '', certificate_name: '',
+    };
+    for (const make of [opsDoc, cmDoc]) {
+      const t = allText(make({ electricalLinked: true, electricalCompliance: [row] }));
+      expect(t).toContain('Electrical Compliance');
+      expect(t).toContain('COC-1');
+    }
+  });
+});
+
+/*
+ * Sections that previously had a route into the app but none into the PDF: they were
+ * captured, counted as "filled" (so never listed under Not captured), and then omitted.
+ */
+describe('buildReportDoc — sections previously captured but never exported', () => {
+  it('renders the OPS hazard log, monthly building inspection, and borehole/solar yields', () => {
+    const t = allText(opsDoc({
+      hazards: [{ hazard: 'Loose paving at north entrance', correctiveAction: 'Re-lay pavers', status: 'in progress' }],
+      buildingInspection: [{ section: 'STRUCTURE', items: [{ label: 'Basement', acceptable: 'Yes', action: 'None', comment: null }] }],
+      utilityYields: [{ source: 'Borehole', predicted: '100 KL', actual: '80 KL', pctAchieved: '80%', comment: '' }],
+    }));
+    expect(t).toContain('Hazard Log');
+    expect(t).toContain('Loose paving at north entrance');
+    expect(t).toContain('Building Inspection');
+    expect(t).toContain('Basement');
+    expect(t).toContain('Borehole');
+    expect(t).toContain('80%');
+  });
+
+  it('renders CM building turnover, top categories, local resources and the general checklist', () => {
+    const t = allText(cmDoc({
+      buildingTurnover: [{ label: 'Current month total', value: '1,234.00' }],
+      categoryTurnover: [{ category: 'Fashion', monthly: '100.00', density: '50.00', rank: '1', comment: '' }],
+      localResources: [{ type: 'CPF', name: 'Ward 3 CPF', lastMeeting: '2026-05-12', frequency: 'Monthly', contact: 'S Dlamini', number: '082 000 0000' }],
+      checklist: [{ section: 'General', items: [{ item: 'Roof inspection', response: 'yes', value: '2026-06-14', comment: null }] }],
+    }));
+    expect(t).toContain('Building Turnover');
+    expect(t).toContain('Top Categories');
+    expect(t).toContain('Ward 3 CPF');
+    expect(t).toContain('General Checklist');
+    expect(t).toContain('Roof inspection');
+    expect(t).toContain('2026-06-14'); // a date answer (value_date) must survive to the page
+  });
+
+  it('renders incident narratives beside the axis summaries', () => {
+    const t = allText(cmDoc({
+      incidentsTotal: 2,
+      incidentNarratives: [{ period: '2026-06', type: 'Theft', narrative: 'Two laptops taken from storeroom.' }],
+    }));
+    expect(t).toContain('Two laptops taken from storeroom.');
+  });
+
+  it('says when photos on file are not embedded, instead of truncating silently', () => {
+    const annualDoc = buildReportDoc(
+      { title: 'X', report_period: '2026-06-01', report_type: 'annual_inspection', managers: [] },
+      { annualSections: [], annualPhotosTotal: 121, annualPhotosOmitted: 1 },
+      OPTS,
+    );
+    expect(allText(annualDoc)).toContain('1 of 121 photos');
+  });
+
+  it('extends the capex register with year, priority and status', () => {
+    const t = allText(buildReportDoc(
+      { title: 'X', report_period: '2026-06-01', report_type: 'annual_inspection', managers: [] },
+      { capex: [{ description: 'Roof replacement', estimate: 100, year: '2027', priority: 'High', status: 'Planned' }] },
+      OPTS,
+    ));
+    expect(t).toContain('2027');
+    expect(t).toContain('High');
+    expect(t).toContain('Planned');
+  });
+});
+
+describe('buildReportDoc — trend (R4a)', () => {
+  it('renders the Trend section as a table plus a 12-rect bar strip, blank for missing months', () => {
+    const trend = Array.from({ length: 12 }, (_, i) => ({ month: `2026-${String(i + 1).padStart(2, '0')}`, compliancePct: i < 3 ? null : 50 + i, taskPct: null, issuesOpen: i, tasksOverdue: 0 }));
+    const doc = buildReportDoc({ report_type: 'ops_monthly', title: 'T', report_period: '2026-12-01' }, { trend }, { color: '#2563eb', orgName: 'Org' });
+    const text = JSON.stringify(doc.content);
+    expect(text).toContain('Trend (12 months)');
+    const canvas = (doc.content as { canvas?: unknown[] }[]).find((c) => Array.isArray(c.canvas) && c.canvas.length === 12);
+    expect(canvas).toBeTruthy();
+    expect((canvas!.canvas as { color: string }[]).filter((r) => r.color === '#e5e7eb')).toHaveLength(3);
+  });
+
+  it('renders the Trend section when overdue tasks are the only figure any month carries', () => {
+    const trend = Array.from({ length: 12 }, (_, i) => ({ month: `2026-${String(i + 1).padStart(2, '0')}`, compliancePct: null, taskPct: null, issuesOpen: null, tasksOverdue: i === 11 ? 4 : null }));
+    const doc = buildReportDoc({ report_type: 'ops_monthly', title: 'T', report_period: '2026-12-01' }, { trend }, { color: '#2563eb', orgName: 'Org' });
+    const text = JSON.stringify(doc.content);
+    expect(text).toContain('Trend (12 months)');
+    // The note names the placeholder the cells actually print (the quotes are JSON-escaped in `text`).
+    expect(text).toContain('\\"—\\" means no snapshot existed for that month');
+    // Every bar is a 1pt grey stub, none is a zero-height rect.
+    const canvas = (doc.content as { canvas?: { h: number; color: string }[] }[]).find((c) => Array.isArray(c.canvas) && c.canvas.length === 12);
+    expect(canvas!.canvas!.every((r) => r.h === 1 && r.color === '#e5e7eb')).toBe(true);
+  });
+
+  it('keeps the bar strip inside the text block whatever the month count', () => {
+    const trend = Array.from({ length: 24 }, (_, i) => ({ month: `20${25 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`, compliancePct: 50, taskPct: null, issuesOpen: null, tasksOverdue: null }));
+    const doc = buildReportDoc({ report_type: 'ops_monthly', title: 'T', report_period: '2026-12-01' }, { trend }, { color: '#2563eb', orgName: 'Org' });
+    const canvas = (doc.content as { canvas?: { x: number; w: number }[] }[]).find((c) => Array.isArray(c.canvas) && c.canvas.length === 24);
+    const last = canvas!.canvas![23];
+    expect(last.x + last.w).toBeLessThanOrEqual(515);
+  });
+
+  it('omits the Trend section when every month is blank', () => {
+    const trend = Array.from({ length: 12 }, (_, i) => ({ month: `2026-${String(i + 1).padStart(2, '0')}`, compliancePct: null, taskPct: null, issuesOpen: null, tasksOverdue: null }));
+    const doc = buildReportDoc({ report_type: 'ops_monthly', title: 'T', report_period: '2026-12-01' }, { trend }, { color: '#2563eb', orgName: 'Org' });
+    expect(JSON.stringify(doc.content)).not.toContain('Trend (12 months)');
+  });
+});
+
+describe('buildReportDoc — provenance', () => {
+  it('watermarks the document when a watermark is requested', () => {
+    const doc = buildReportDoc(
+      { title: 'X', report_period: '2026-06-01', report_type: 'ops_monthly' },
+      {},
+      { color: '#2563eb', orgName: 'Org', watermark: 'DRAFT' },
+    );
+    expect(watermarkText(doc)).toBe('DRAFT');
+  });
+
+  it('has no watermark by default', () => {
+    const doc = buildReportDoc(
+      { title: 'X', report_period: '2026-06-01', report_type: 'ops_monthly' },
+      {},
+      { color: '#2563eb', orgName: 'Org' },
+    );
+    expect(doc.watermark).toBeUndefined();
+  });
+});
+
+describe('watermarkFor', () => {
+  it('is null once a report is approved', () => {
+    expect(watermarkFor('approved')).toBeNull();
+  });
+
+  it('is DRAFT for every other status, including missing', () => {
+    for (const status of ['draft', 'submitted', 'reviewed', 'rejected', undefined, null]) {
+      expect(watermarkFor(status)).toBe('DRAFT');
+    }
   });
 });

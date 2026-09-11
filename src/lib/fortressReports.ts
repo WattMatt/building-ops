@@ -26,6 +26,7 @@ export const REPORT_SECTIONS: Record<ReportType, SectionMeta[]> = {
     { key: 'utilities', label: 'Utilities', hint: 'Meter readings + borehole/solar yields.' },
     { key: 'ppm', label: 'PPM', hint: 'Planned maintenance status (read-only roll-up).' },
     { key: 'masterfile', label: 'Masterfile', hint: 'Document completeness register.' },
+    { key: 'electrical_compliance', label: 'Electrical Compliance', hint: 'Live per-shop Certificate of Compliance data from insight-linker.' },
   ],
   cm_monthly: [
     { key: 'building_overview', label: 'Building Overview', hint: 'Narrative.' },
@@ -41,6 +42,7 @@ export const REPORT_SECTIONS: Record<ReportType, SectionMeta[]> = {
     { key: 'tenant_compliance', label: 'Tenant OHS & HK', hint: 'Per-tenant compliance matrix.' },
     { key: 'shop_spec', label: 'Shop Spec', hint: 'Per-tenant shop specification (versioned).' },
     { key: 'security_incidents', label: 'Security Incidents', hint: 'Monthly incident counts by type.' },
+    { key: 'electrical_compliance', label: 'Electrical Compliance', hint: 'Live per-shop Certificate of Compliance data from insight-linker.' },
   ],
   annual_inspection: [
     { key: 'building_profile', label: 'Building Profile', hint: 'Property profile (§3) — feeds the building KPIs.' },
@@ -62,6 +64,63 @@ export const REQUIRED_SECTION_TABLE: Record<string, string> = {
   ohs_compliance: 'compliance_assessments',
   turnover: 'tenant_turnover',
   condition_inspection: 'building_inspections',
+};
+
+/**
+ * Where each section's CONTENT lives, so we can tell a filled section from an empty one
+ * without opening it. Deliberately points at the table holding the user's answers, not at
+ * a parent/header row: `compliance_assessments` and `building_inspections` are created
+ * automatically the first time a tab is opened, so counting those would report every
+ * section as filled. `via` means the rows hang off that parent by report_id.
+ *
+ * `key: 'building'` marks a section whose rows are scoped to the building rather than the
+ * report (shop specs are versioned per tenant, not per month).
+ */
+export interface SectionSource {
+  /** Table to count rows in. Omitted for sections fed by a live RPC. */
+  table?: string;
+  /** Building-scoped RPC returning `{ rows: [...] }`; counted instead of a table. */
+  rpc?: string;
+  key: 'report' | 'building';
+  /** Parent table to resolve first; rows are then matched on `parentFk`. */
+  via?: { table: string; parentFk: string };
+  /** Only count rows matching this section_key (several sections share one table). */
+  sectionKey?: string;
+}
+
+export const SECTION_SOURCE: Record<string, SectionSource> = {
+  // OPS
+  operational_overview: { table: 'report_narratives', key: 'report' },
+  report_checklist: { table: 'report_checklist_items', key: 'report' },
+  ohs_compliance: { table: 'compliance_responses', key: 'report', via: { table: 'compliance_assessments', parentFk: 'assessment_id' } },
+  hazard_log: { table: 'hazard_log', key: 'report', via: { table: 'compliance_assessments', parentFk: 'assessment_id' } },
+  building_inspection: { table: 'inspection_responses', key: 'report', via: { table: 'building_inspections', parentFk: 'inspection_id' } },
+  expense_recoveries: { table: 'expense_recoveries', key: 'report' },
+  utilities: { table: 'utility_readings', key: 'report' },
+  ppm: { table: 'ppm_services', key: 'report' },
+  masterfile: { table: 'masterfile_items', key: 'report' },
+  // CM
+  building_overview: { table: 'report_narratives', key: 'report', sectionKey: 'building_overview' },
+  local_resources: { table: 'report_narratives', key: 'report', sectionKey: 'local_resources' },
+  building_turnover: { table: 'building_turnover', key: 'report' },
+  turnover: { table: 'tenant_turnover', key: 'report' },
+  category_turnover: { table: 'category_turnover', key: 'report' },
+  footfall_toilet: { table: 'footfall_counts', key: 'report' },
+  leasing: { table: 'vacancies', key: 'report' },
+  trading_arrears: { table: 'tenant_arrears', key: 'report' },
+  utility_management: { table: 'loadshedding_log', key: 'report' },
+  tenant_compliance: { table: 'tenant_compliance', key: 'report' },
+  shop_spec: { table: 'tenant_shop_spec', key: 'building' },
+  security_incidents: { table: 'security_incidents', key: 'report' },
+  // Live from insight-linker via RPC, not a report-scoped table. `rpc` tells the count
+  // hook to call report_electrical_compliance rather than counting rows — without an
+  // entry here the hook short-circuits to null and the section can never read as filled,
+  // which is why annual reports were permanently stuck at "3 of 4 sections have content".
+  electrical_compliance: { rpc: 'report_electrical_compliance', key: 'building' },
+  // Annual
+  building_profile: { table: 'report_narratives', key: 'report', sectionKey: 'building_profile' },
+  condition_inspection: { table: 'inspection_responses', key: 'report', via: { table: 'building_inspections', parentFk: 'inspection_id' } },
+  capex: { table: 'capex_items', key: 'report' },
 };
 
 /**
@@ -134,6 +193,11 @@ export function formatPeriodLabel(period: string | null | undefined): string {
   const d = new Date(`${period.slice(0, 10)}T00:00:00`);
   if (Number.isNaN(d.getTime())) return period;
   return d.toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
+}
+
+/** Anything not yet approved is visibly a draft in the client's hands (E2). */
+export function watermarkFor(status: string | null | undefined): string | null {
+  return status === 'approved' ? null : 'DRAFT';
 }
 
 export const REPORT_STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {

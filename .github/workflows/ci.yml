@@ -19,11 +19,16 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
+
+      # The service worker is typechecked against the WebWorker lib (no DOM), so it has
+      # its own tsconfig. It is new code with no error backlog: a hard fail, not a ratchet.
+      - name: Typecheck service worker
+        run: npx tsc --noEmit -p tsconfig.sw.json
 
       # Ratchet, not a pass/fail gate. The project carries a backlog of real type
       # errors (TS2345 / TS2339 / TS7053), so demanding zero would keep CI red

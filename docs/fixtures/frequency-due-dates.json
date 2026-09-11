@@ -1,0 +1,11 @@
+[
+  { "frequency": "daily",     "today": "2026-09-10", "expected": "2026-09-10" },
+  { "frequency": "weekly",    "today": "2026-09-10", "expected": "2026-09-13" },
+  { "frequency": "weekly",    "today": "2026-09-13", "expected": "2026-09-13" },
+  { "frequency": "weekly",    "today": "2026-09-14", "expected": "2026-09-20" },
+  { "frequency": "monthly",   "today": "2026-09-10", "expected": "2026-10-01" },
+  { "frequency": "monthly",   "today": "2026-12-31", "expected": "2027-01-01" },
+  { "frequency": "quarterly", "today": "2026-09-10", "expected": "2026-10-01" },
+  { "frequency": "quarterly", "today": "2026-11-15", "expected": "2027-01-01" },
+  { "frequency": "annually",  "today": "2026-09-10", "expected": "2027-01-01" }
+]

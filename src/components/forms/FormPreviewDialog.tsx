@@ -9,18 +9,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Download, Printer, FileText, Maximize2, Minimize2, FileDown, Loader2, Camera } from 'lucide-react';
-import { defaultFormFields, FormField } from '@/lib/formFields';
+import { downloadBlob } from '@/lib/exportCsv';
+import { FormField } from '@/lib/formFields';
 import { generateFormPdf } from '@/lib/pdfGenerator';
 import { useOrganization } from '@/hooks/useOrganization';
 import { toast } from 'sonner';
-
-interface FormTemplate {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  icon: React.ReactNode;
-}
+import { FormIcon } from '@/components/forms/FormIcon';
+import type { FormTemplate } from '@/hooks/useFormTemplates';
 
 interface FormPreviewDialogProps {
   form: FormTemplate | null;
@@ -35,7 +30,7 @@ export function FormPreviewDialog({ form, open, onOpenChange }: FormPreviewDialo
 
   if (!form) return null;
 
-  const fields = defaultFormFields[form.id] || [];
+  const fields = form.fields;
 
   const handlePrint = () => {
     window.print();
@@ -68,14 +63,7 @@ export function FormPreviewDialog({ form, open, onOpenChange }: FormPreviewDialo
   const handleDownloadHtml = () => {
     const formHtml = generateFormHtml(form, fields);
     const blob = new Blob([formHtml], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${form.name.replace(/\s+/g, '_')}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${form.name.replace(/\s+/g, '_')}.html`);
   };
 
   const generateFormHtml = (form: FormTemplate, fields: FormField[]) => {
@@ -190,7 +178,7 @@ export function FormPreviewDialog({ form, open, onOpenChange }: FormPreviewDialo
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-3 min-w-0">
               <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary flex-shrink-0">
-                {form.icon}
+                <FormIcon name={form.icon} />
               </div>
               <div className="min-w-0">
                 <DialogTitle className="text-xl truncate">{form.name}</DialogTitle>

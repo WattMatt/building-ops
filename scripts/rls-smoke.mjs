@@ -11,13 +11,49 @@
  * Matrix encoded from production pg_policies as of 2026-06-12:
  *   admin/manager  → all buildings; manager lacks admin-only ops
  *                    (user_roles/user_buildings writes, profile/org deletes)
- *   user/reviewer  → restricted to user_buildings assignments
+ *   user           → restricted to user_buildings assignments
  *   storage        → prefix-scoped paths in tenant-documents; deletes
  *                    admin/manager only; avatars self-scoped
+ *   R1 "Mine"      → task_instances.assigned_to writes follow building access;
+ *                    building_members() only answers callers who can access the
+ *                    building; notifications recipient-only, never client-inserted
+ *   R3a "Schedule" → building_role_assignments select by access, write admin/manager;
+ *                    recurrence_occurrences / reschedule_template never anon; the reviewer
+ *                    role is gone (user_roles rejects it even for the service role)
+ *   R3b "Calendar" → calendar_tokens owner-only (a building token also needs building
+ *                    access); user_can_access_building(p_user, p_building) is service-role
+ *                    only — never anon, never authenticated
+ *   R3c "PPM"      → building_ppm_services select by access, write admin/manager, month/year
+ *                    rules only; contractor_ratings: insert own (rated_by = caller) on an
+ *                    accessible, resolved issue that names that contractor, select any
+ *                    authenticated, no update, delete admin only; generate_ppm_tasks never
+ *                    anon, admin/manager only, building required; ppm_monthly_status and
+ *                    building_month_costs never anon; ppm_services.overrides admin/manager only
+ *   R4a "Snapshots"→ organizations: anon cannot read the table, can read organization_branding; settings
+ *                    readable by any signed-in user, writable admin/manager; building_metrics_daily select by
+ *                    access, no client writes; snapshot_building_metrics / mark_sla_breaches / delete_empty_report /
+ *                    expiring_items never anon; delete_empty_report admin only; media_attachments admin only;
+ *                    a user with two user_roles rows still passes is_admin_or_manager (21000 fix)
+ *   R4b "Distribute"→ report_schedules admin/manager CRUD, insert only as oneself, recipients shape CHECKed,
+ *                    run bookkeeping (last_run_on / last_result) service-role only by column privilege on
+ *                    INSERT as well as UPDATE; report_shares admin/manager with building access: create only
+ *                    without a passcode, with zero counters, ≤90 days and on an artifact of that very report
+ *                    (trigger); revoke only and one-way (revoked_at cannot go back to null); never delete;
+ *                    passcode_hash / failed_attempts / locked_until unreadable even by an admin (only the
+ *                    generated has_passcode bit is), so the report_shares probes name the granted columns
+ *                    rather than select=*; report_distributions read-only for admin/manager; none of the
+ *                    three nor report_recipients_valid reachable by anon
+ *   R4c "Intake"   → intake_tokens select/insert/update admin+manager by building access (insert:
+ *                    created_by = caller), no delete, never anon; intake_rate + intake_rate_hit /
+ *                    intake_touch service-role only; issues.source/reporter/reference refused for
+ *                    signed-in writers; form_templates select any active user, write admin, version
+ *                    bumps on content only; form_submissions snapshot columns follow fs_insert;
+ *                    storage intake/<building> read by access, never written by a session
  *
  * Personas: admin, manager, userA (user role, assigned building A only),
- * reviewerB (reviewer role, assigned building B only). userA probing
- * building B (and vice versa) is the cross-client leak test.
+ * userB (user role, assigned building B only). userA probing building B
+ * (and vice versa) is the cross-client leak test. (userB was a reviewer
+ * until R3a removed that role.)
  */
 
 const URL_BASE = process.env.SUPABASE_URL;
@@ -47,8 +83,9 @@ async function svcInsert(table, row) {
   if (!res.ok) throw new Error(`fixture insert ${table}: HTTP ${res.status} ${await res.text()}`);
   return (await res.json())[0];
 }
-async function svcDelete(table, id) {
-  await fetch(`${URL_BASE}/rest/v1/${table}?id=eq.${id}`, { method: 'DELETE', headers: SVC });
+// `filter` overrides the default id match for tables without an id column (user_roles is keyed by user_id).
+async function svcDelete(table, id, filter = `id=eq.${id}`) {
+  await fetch(`${URL_BASE}/rest/v1/${table}?${filter}`, { method: 'DELETE', headers: SVC });
 }
 
 // ── persona-scoped REST probes ──
@@ -79,13 +116,32 @@ async function canUpdateF(jwt, table, filter, patch) {
   return (await res.json()).length > 0; // 0 rows = filtered by USING = denied
 }
 const canUpdate = (jwt, table, id, patch) => canUpdateF(jwt, table, `id=eq.${id}`, patch);
-async function canDelete(jwt, table, id) {
-  const res = await fetch(`${URL_BASE}/rest/v1/${table}?id=eq.${id}`, {
+async function canDeleteF(jwt, table, filter) {
+  const res = await fetch(`${URL_BASE}/rest/v1/${table}?${filter}`, {
     method: 'DELETE', headers: { ...authed(jwt), Prefer: 'return=representation' },
   });
   if (!res.ok) return false;
   return (await res.json()).length > 0;
 }
+const canDelete = (jwt, table, id) => canDeleteF(jwt, table, `id=eq.${id}`);
+// SECURITY DEFINER RPCs: a denied caller is either an HTTP error (no EXECUTE
+// grant) or an empty row set (the function's own access test failed), so report
+// both rather than collapsing them into a boolean. A void function answers a
+// 2xx with an empty body (never JSON), and a refusal raised with a custom
+// SQLSTATE (PR001…) comes back as HTTP 400 with the code in the JSON body —
+// callers assert `.ok` / `.code`, not a bare status.
+async function rpcCall(jwt, fn, args) {
+  const headers = jwt ? authed(jwt) : { apikey: ANON, 'Content-Type': 'application/json' };
+  const res = await fetch(`${URL_BASE}/rest/v1/rpc/${fn}`, {
+    method: 'POST', headers, body: JSON.stringify(args),
+  });
+  const text = await res.text();
+  let body = null;
+  try { body = text ? JSON.parse(text) : null; } catch { body = text; } // a non-JSON error page stays readable
+  const rows = !res.ok || body == null ? [] : Array.isArray(body) ? body : [body];
+  return { ok: res.ok, status: res.status, body, code: body?.code ?? null, rows };
+}
+
 async function storagePut(jwt, bucket, path) {
   const res = await fetch(`${URL_BASE}/storage/v1/object/${bucket}/${path}`, {
     method: 'POST', headers: { apikey: ANON, Authorization: `Bearer ${jwt}`, 'Content-Type': 'text/plain' },
@@ -109,7 +165,7 @@ async function storageDel(jwt, bucket, path) {
 // ── lifecycle state ──
 const personas = {};            // key → {id, jwt, email}
 const createdUsers = [];        // auth user ids, tracked the moment they exist
-const cleanup = [];             // [table, id] service-side teardown, LIFO
+const cleanup = [];             // [table, id] or [table, null, filter] service-side teardown, LIFO
 const storageCleanup = [];      // [bucket, path]
 let A = null, B = null;         // building ids
 
@@ -143,12 +199,12 @@ async function createPersona(key, role, buildingId) {
 }
 
 // expectation helpers: which personas may act on a row in building X
-const ALL = ['admin', 'manager', 'userA', 'reviewerB'];
-const adminMgr = () => ({ admin: true, manager: true, userA: false, reviewerB: false });
-const adminOnly = () => ({ admin: true, manager: false, userA: false, reviewerB: false });
-const anyAuth = () => ({ admin: true, manager: true, userA: true, reviewerB: true });
-const nobody = () => ({ admin: false, manager: false, userA: false, reviewerB: false });
-const byAccess = (bldg) => ({ admin: true, manager: true, userA: bldg === 'A', reviewerB: bldg === 'B' });
+const ALL = ['admin', 'manager', 'userA', 'userB'];
+const adminMgr = () => ({ admin: true, manager: true, userA: false, userB: false });
+const adminOnly = () => ({ admin: true, manager: false, userA: false, userB: false });
+const anyAuth = () => ({ admin: true, manager: true, userA: true, userB: true });
+const nobody = () => ({ admin: false, manager: false, userA: false, userB: false });
+const byAccess = (bldg) => ({ admin: true, manager: true, userA: bldg === 'A', userB: bldg === 'B' });
 
 async function probeMatrix(label, expected, fn) {
   for (const who of ALL) {
@@ -172,7 +228,7 @@ try {
   await createPersona('admin', 'admin');
   await createPersona('manager', 'manager');
   await createPersona('userA', 'user', A);
-  await createPersona('reviewerB', 'reviewer', B);
+  await createPersona('userB', 'user', B);
   await createPersona('norole', null); // write-probe target only, never a client
   console.log('  setup: 2 buildings, 5 personas');
 
@@ -268,12 +324,10 @@ try {
     ['contractor_documents', cdoc, () => ({ contractor_id: contractor, document_type: 'other', document_name: 'x' }), { document_name: 'ZZTEST-RLS-upd' }, adminMgr()],
     ['checklist_templates', template, () => ({ name: `ZZTEST-RLS-${RUN}`, is_active: false }), { description: 'ZZTEST-RLS-upd' }, adminMgr()],
     ['template_items', titem, () => ({ template_id: template, task_name: 'x' }), { task_name: `ZZTEST-RLS-${RUN}` }, adminMgr()],
-    ['media_attachments', media, (who) => ({ record_type: 'issue', record_id: issueA, storage_path: `photos/${who}/x.txt` }), { record_type: 'issue' }, adminMgr()],
   ];
   for (const [table, id, make, patch, writeExp] of globals) {
     await probeMatrix(`${table} select`, anyAuth(), (jwt) => canSelect(jwt, table, id));
-    const insExp = table === 'media_attachments' ? anyAuth() : writeExp;
-    await probeMatrix(`${table} insert`, insExp, (jwt, who) => canInsert(jwt, table, make(personas[who].id)));
+    await probeMatrix(`${table} insert`, writeExp, (jwt, who) => canInsert(jwt, table, make(personas[who].id)));
     await probeMatrix(`${table} update`, writeExp, (jwt) => canUpdate(jwt, table, id, patch));
     assert(`${table} delete as userA`, (await canDelete(personas.userA.jwt, table, id)) === false, 'site user deleted global row');
   }
@@ -281,7 +335,7 @@ try {
 
   // ════ Phase 5: identity tables ════
   // profiles: own row + admin/manager read; own update or admin
-  await probeMatrix('profiles(userA) select', { admin: true, manager: true, userA: true, reviewerB: false }, (jwt) => canSelect(jwt, 'profiles', personas.userA.id));
+  await probeMatrix('profiles(userA) select', { admin: true, manager: true, userA: true, userB: false }, (jwt) => canSelect(jwt, 'profiles', personas.userA.id));
   assert('profiles own update as userA', (await canUpdate(personas.userA.jwt, 'profiles', personas.userA.id, { full_name: 'ZZTEST RLS' })) === true, 'own-profile update failed');
   assert("profiles foreign update as manager (admin-only)", (await canUpdate(personas.manager.jwt, 'profiles', personas.userA.id, { full_name: 'X' })) === false, "manager updated someone else's profile");
   assert('profiles foreign update as admin', (await canUpdate(personas.admin.jwt, 'profiles', personas.userA.id, { full_name: 'ZZTEST RLS' })) === true, 'admin profile update failed');
@@ -292,14 +346,14 @@ try {
   // user_roles / user_buildings: select own or admin/manager; writes admin-only
   // (user_roles is keyed by user_id — no id column)
   const urF = `user_id=eq.${personas.userA.id}`;
-  await probeMatrix('user_roles(userA) select', { admin: true, manager: true, userA: true, reviewerB: false }, (jwt) => canSelectF(jwt, 'user_roles', urF));
+  await probeMatrix('user_roles(userA) select', { admin: true, manager: true, userA: true, userB: false }, (jwt) => canSelectF(jwt, 'user_roles', urF));
   assert('user_roles insert as manager (admin-only)', (await canInsert(personas.manager.jwt, 'user_roles', { user_id: personas.norole.id, role: 'user' })) === false, 'manager wrote a role');
   assert('user_roles insert as admin', (await canInsert(personas.admin.jwt, 'user_roles', { user_id: personas.norole.id, role: 'user' })) === true, 'admin role insert failed');
   await fetch(`${URL_BASE}/rest/v1/user_roles?user_id=eq.${personas.norole.id}`, { method: 'DELETE', headers: SVC });
   assert('user_roles update as userA (own row!)', (await canUpdateF(personas.userA.jwt, 'user_roles', urF, { role: 'admin' })) === false, 'PRIVILEGE ESCALATION: user changed own role');
 
   const userAUB = await (await fetch(`${URL_BASE}/rest/v1/user_buildings?user_id=eq.${personas.userA.id}&select=id`, { headers: SVC })).json();
-  await probeMatrix('user_buildings(userA) select', { admin: true, manager: true, userA: true, reviewerB: false }, (jwt) => canSelect(jwt, 'user_buildings', userAUB[0].id));
+  await probeMatrix('user_buildings(userA) select', { admin: true, manager: true, userA: true, userB: false }, (jwt) => canSelect(jwt, 'user_buildings', userAUB[0].id));
   assert('user_buildings insert as manager (admin-only)', (await canInsert(personas.manager.jwt, 'user_buildings', { user_id: personas.norole.id, building_id: A })) === false, 'manager wrote an assignment');
   assert('user_buildings self-grant as userA', (await canInsert(personas.userA.jwt, 'user_buildings', { user_id: personas.userA.id, building_id: B })) === false, 'PRIVILEGE ESCALATION: user granted self building B');
   assert('user_buildings insert as admin', (await canInsert(personas.admin.jwt, 'user_buildings', { user_id: personas.norole.id, building_id: A })) === true, 'admin assignment insert failed');
@@ -307,15 +361,21 @@ try {
   // audit_logs: insert self-attributed only; read own or admin/manager; immutable
   const alOwn = (await svcInsert('audit_logs', { action: `zztest-rls-${RUN}`, user_id: personas.userA.id })).id;
   cleanup.push(['audit_logs', alOwn]);
-  await probeMatrix('audit_logs(userA row) select', { admin: true, manager: true, userA: true, reviewerB: false }, (jwt) => canSelect(jwt, 'audit_logs', alOwn));
+  await probeMatrix('audit_logs(userA row) select', { admin: true, manager: true, userA: true, userB: false }, (jwt) => canSelect(jwt, 'audit_logs', alOwn));
   assert('audit_logs self insert as userA', (await canInsert(personas.userA.jwt, 'audit_logs', { action: `zztest-rls-${RUN}`, user_id: personas.userA.id })) === true, 'self-attributed audit insert failed');
   assert('audit_logs spoofed insert as userA', (await canInsert(personas.userA.jwt, 'audit_logs', { action: `zztest-rls-${RUN}`, user_id: personas.admin.id })) === false, 'AUDIT SPOOF: wrote a log as another user');
   await probeMatrix('audit_logs update (immutable)', nobody(), (jwt) => canUpdate(jwt, 'audit_logs', alOwn, { action: `zztest-rls-${RUN}` }));
   assert('audit_logs delete as manager (admin-only)', (await canDelete(personas.manager.jwt, 'audit_logs', alOwn)) === false, 'manager deleted an audit row');
 
-  // organizations: anon-readable; update admin/manager; insert/delete admin (allow-probe skipped: apps assume a single org row)
+  // organizations: since R4a anon reads only the organization_branding view; update admin/manager; insert/delete admin (allow-probe skipped: apps assume a single org row)
   const anonOrg = await fetch(`${URL_BASE}/rest/v1/organizations?select=id&limit=1`, { headers: { apikey: ANON } });
-  assert('organizations anon read', anonOrg.ok, `HTTP ${anonOrg.status}`);
+  const anonOrgRows = anonOrg.ok ? await anonOrg.json().catch(() => []) : [];
+  assert('organizations anon read denied (R4a: branding view only)', !anonOrg.ok || anonOrgRows.length === 0, `HTTP ${anonOrg.status} rows ${anonOrgRows.length}`);
+  // TemplateDialog's "file under the first organisation" fallback reads this row as the signed-in
+  // manager; a 200 with zero rows would silently make "New template" fail for them.
+  const mgrOrg = await fetch(`${URL_BASE}/rest/v1/organizations?select=id&limit=1`, { headers: authed(personas.manager.jwt) });
+  const mgrOrgRows = mgrOrg.ok ? await mgrOrg.json() : [];
+  assert('manager can read the organisation row', mgrOrg.ok && mgrOrgRows.length >= 1, mgrOrg.ok ? 'HTTP 200 but zero rows (RLS filtered)' : `HTTP ${mgrOrg.status}`);
   const orgRows = await (await fetch(`${URL_BASE}/rest/v1/organizations?select=id,name&limit=1`, { headers: SVC })).json();
   if (orgRows.length) {
     await probeMatrix('organizations update', adminMgr(), (jwt) => canUpdate(jwt, 'organizations', orgRows[0].id, { name: orgRows[0].name }));
@@ -341,7 +401,7 @@ try {
   await probeMatrix('storage documents/<A> read', byAccess('A'), (jwt) => storageGet(jwt, TD, `documents/${A}/zztest-rls-${RUN}.txt`));
   await probeMatrix('storage documents/<B> read', byAccess('B'), (jwt) => storageGet(jwt, TD, `documents/${B}/zztest-rls-${RUN}.txt`));
   await probeMatrix('storage tenant-docs/<tenantA> read', byAccess('A'), (jwt) => storageGet(jwt, TD, `tenant-docs/${tenantA}/zztest-rls-${RUN}.txt`));
-  await probeMatrix('storage contractor-docs read', anyAuth(), (jwt) => storageGet(jwt, TD, `contractor-docs/zztest-rls-${RUN}.txt`));
+  await probeMatrix('storage contractor-docs read (admin/mgr-only since 2026-08-04_07)', adminMgr(), (jwt) => storageGet(jwt, TD, `contractor-docs/zztest-rls-${RUN}.txt`));
 
   for (const who of ALL) {
     const expA = byAccess('A')[who];
@@ -373,6 +433,618 @@ try {
   assert('storage avatars self-delete as userA', (await storageDel(personas.userA.jwt, 'avatars', avatar)) === true, 'own avatar delete failed');
   assert('storage building-logos write as userA (admin/mgr-only)', (await storagePut(personas.userA.jwt, 'building-logos', `zztest-rls-${RUN}.txt`)) === false, 'site user wrote building logo');
   console.log('  storage: done');
+
+  // ════ Phase 7: R1 "Mine" — assignee, member directory, inbox ════
+  // Phase 2 deleted the building-B row of every scoped table (admin delete probe),
+  // so the cross-building assign probe needs a fresh task in B.
+  const taskB = (await svcInsert('task_instances', { building_id: B, task_name: `ZZTEST-RLS-r1-${RUN}`, due_date: '2030-01-03' })).id;
+  cleanup.push(['task_instances', taskB]);
+  await probeMatrix('task_instances[A] assign', byAccess('A'), (jwt, who) => canUpdate(jwt, 'task_instances', rows.task_instances.A, { assigned_to: personas[who].id }));
+  await probeMatrix('task_instances[B] assign', byAccess('B'), (jwt, who) => canUpdate(jwt, 'task_instances', taskB, { assigned_to: personas[who].id }));
+
+  // building_members(b): SECURITY DEFINER, so its own can_access_building(b) gate
+  // is the whole boundary — a non-member must get an empty list, not a roster.
+  const membersA = await rpcCall(personas.userA.jwt, 'building_members', { b: A });
+  assert('building_members(A) callable by member userA', membersA.ok, `HTTP ${membersA.status}`);
+  assert('building_members(A) lists the caller', membersA.rows.some((m) => m.id === personas.userA.id), 'member missing from own building roster');
+  assert('building_members(A) lists admin and manager', membersA.rows.some((m) => m.id === personas.admin.id) && membersA.rows.some((m) => m.id === personas.manager.id), 'admin/manager missing from roster');
+  assert('building_members(A) excludes userB (building B only)', !membersA.rows.some((m) => m.id === personas.userB.id), 'LEAK: unassigned user listed as a building A member');
+  // norole has no user_buildings row by default, so excluding them proves nothing about
+  // the exists(user_roles) guard on its own — give them a real user_buildings(A) row
+  // (so the membership test itself would pass) and confirm they are STILL excluded.
+  const noroleUB = await svcInsert('user_buildings', { user_id: personas.norole.id, building_id: A });
+  cleanup.push(['user_buildings', noroleUB.id]);
+  const membersAWithNorole = await rpcCall(personas.userA.jwt, 'building_members', { b: A });
+  assert('building_members(A) excludes the role-less persona', !membersAWithNorole.rows.some((m) => m.id === personas.norole.id), 'user with no role row listed as a member despite a user_buildings row (exists(user_roles) guard broken)');
+  await svcDelete('user_buildings', noroleUB.id);
+  cleanup.splice(cleanup.findIndex(([t, id]) => t === 'user_buildings' && id === noroleUB.id), 1);
+  assert('building_members(A) returns one row per person', new Set(membersA.rows.map((m) => m.id)).size === membersA.rows.length, 'duplicate people (multi-row user_roles joined, not EXISTS-tested)');
+  assert('building_members(A) resolves a role for everyone', membersA.rows.every((m) => typeof m.role === 'string' && m.role.length > 0), 'null role returned');
+  const membersB = await rpcCall(personas.userA.jwt, 'building_members', { b: B });
+  assert('building_members(B) empty for non-member userA', (membersB.rows ?? []).length === 0, 'LEAK: non-member read a foreign building roster');
+  const membersRev = await rpcCall(personas.userB.jwt, 'building_members', { b: B });
+  assert('building_members(B) callable by userB', membersRev.ok && membersRev.rows.some((m) => m.id === personas.userB.id), 'userB missing from own building roster');
+  const membersAnon = await rpcCall(null, 'building_members', { b: A });
+  // An empty 200 (function ran, returned no rows) does NOT prove the EXECUTE revoke —
+  // only a real HTTP denial does. Assert the status itself is not 200.
+  assert('building_members not executable by anon', membersAnon.status === 401 || membersAnon.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${membersAnon.status}`);
+
+  // notifications: recipient-only select/update, no client insert policy at all.
+  await probeMatrix('notifications insert (no client policy)', nobody(), (jwt, who) => canInsert(jwt, 'notifications', {
+    recipient_id: personas[who].id, kind: 'task_assigned', entity_type: 'task', title: `ZZTEST-RLS-${RUN}`, url: '/tasks',
+  }));
+  const notifA = (await svcInsert('notifications', {
+    recipient_id: personas.userA.id, kind: 'task_assigned', entity_type: 'task',
+    entity_id: rows.task_instances.A, building_id: A, title: `ZZTEST-RLS-${RUN}`, url: '/tasks',
+  })).id;
+  cleanup.push(['notifications', notifA]);
+  // Recipient-only, so admin/manager see nothing here — deliberately unlike every other table.
+  await probeMatrix('notifications(userA row) select', { admin: false, manager: false, userA: true, userB: false }, (jwt) => canSelect(jwt, 'notifications', notifA));
+  assert('notifications own update (mark read) as userA', (await canUpdate(personas.userA.jwt, 'notifications', notifA, { read_at: new Date().toISOString() })) === true, 'recipient could not mark own notification read');
+  assert('notifications foreign update as admin', (await canUpdate(personas.admin.jwt, 'notifications', notifA, { read_at: null })) === false, "admin updated another recipient's notification");
+  assert('notifications recipient reassign as userA', (await canUpdate(personas.userA.jwt, 'notifications', notifA, { recipient_id: personas.admin.id })) === false, 'recipient handed their notification to someone else');
+  assert('notifications delete as userA (no delete policy)', (await canDelete(personas.userA.jwt, 'notifications', notifA)) === false, 'recipient deleted a notification row');
+  assert('notifications delete as admin (no delete policy)', (await canDelete(personas.admin.jwt, 'notifications', notifA)) === false, 'admin deleted a notification row');
+
+  // ── R2a: RPC executability + push_subscriptions ownership ──
+  // An empty 200 never proves a revoked grant — only a real HTTP denial does.
+  for (const [fn, args] of [
+    ['generate_scheduled_tasks', {}],
+    ['complete_task', { p_completion_id: crypto.randomUUID(), p_task_instance_id: rows.task_instances.A }],
+    ['search_entities', { q: 'zz' }],
+    ['mark_overdue_tasks', {}],
+  ]) {
+    const r = await rpcCall(null, fn, args);
+    assert(`${fn} not executable by anon`, r.status === 401 || r.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${r.status}`);
+  }
+  // 403 exactly: PostgREST maps a revoked EXECUTE (42501) to 403 for a signed-in caller, and a
+  // looser `!== 200` would let a 404 from a missing function pass.
+  {
+    const r = await rpcCall(personas.admin.jwt, 'mark_overdue_tasks', {});
+    assert('mark_overdue_tasks not executable by authenticated', r.status === 403, `expected HTTP 403 (revoked grant), got HTTP ${r.status}`);
+  }
+  {
+    const r = await rpcCall(personas.userA.jwt, 'generate_scheduled_tasks', { p_building: A });
+    assert('generate_scheduled_tasks refused for a site user', r.status === 403, `expected HTTP 403 (raised 42501), got HTTP ${r.status}`);
+  }
+  // Only the nightly cron (null uid) may generate for every building at once; a signed-in
+  // manager omitting p_building would otherwise fan out across buildings they cannot access.
+  {
+    const r = await rpcCall(personas.manager.jwt, 'generate_scheduled_tasks', {});
+    assert('generate_scheduled_tasks refused without a building for a signed-in manager', r.status === 403, `expected HTTP 403 (raised 42501), got HTTP ${r.status}`);
+  }
+  // Inserts real task_instances for building A from every active unscoped template on the
+  // project; the teardown deletes generated rows for A/B before the buildings themselves.
+  assert('generate_scheduled_tasks runs for admin', (await rpcCall(personas.admin.jwt, 'generate_scheduled_tasks', { p_building: A })).status === 200, 'admin generate failed');
+  assert('search_entities runs for a site user', (await rpcCall(personas.userA.jwt, 'search_entities', { q: 'ZZTEST' })).status === 200, 'search failed');
+  const psA = (await svcInsert('push_subscriptions', { user_id: personas.userA.id, endpoint: `https://push.example/${RUN}-a`, p256dh: 'x', auth: 'y' })).id;
+  cleanup.push(['push_subscriptions', psA]);
+  // Owner-only, like notifications: admin/manager see nothing here.
+  await probeMatrix('push_subscriptions(userA row) select', { admin: false, manager: false, userA: true, userB: false }, (jwt) => canSelect(jwt, 'push_subscriptions', psA));
+  // canInsert deletes what it creates, so the -b row needs no cleanup entry.
+  assert('push_subscriptions insert own as userA', (await canInsert(personas.userA.jwt, 'push_subscriptions', { user_id: personas.userA.id, endpoint: `https://push.example/${RUN}-b`, p256dh: 'x', auth: 'y' })) === true, 'user could not register their device');
+  assert('push_subscriptions insert for someone else as userA', (await canInsert(personas.userA.jwt, 'push_subscriptions', { user_id: personas.admin.id, endpoint: `https://push.example/${RUN}-c`, p256dh: 'x', auth: 'y' })) === false, 'user registered a device for another user');
+  // R2c: the client touches last_seen_at on every app open (and the sender clears/stamps
+  // failed_at server-side). ps_update_own must scope both USING and WITH CHECK to the owner.
+  assert('push_subscriptions update own (last_seen_at) as userA', (await canUpdate(personas.userA.jwt, 'push_subscriptions', psA, { last_seen_at: new Date().toISOString() })) === true, 'user could not touch their own subscription');
+  const psAdmin = (await svcInsert('push_subscriptions', { user_id: personas.admin.id, endpoint: `https://push.example/${RUN}-d`, p256dh: 'x', auth: 'y' })).id;
+  cleanup.push(['push_subscriptions', psAdmin]);
+  assert("push_subscriptions foreign update as userA", (await canUpdate(personas.userA.jwt, 'push_subscriptions', psAdmin, { last_seen_at: new Date().toISOString() })) === false, "user updated another user's subscription");
+  assert('push_subscriptions delete own as userA', (await canDelete(personas.userA.jwt, 'push_subscriptions', psA)) === true, 'user could not remove their device');
+  console.log('  R1 mine (assignee, building_members, notifications): done');
+
+  // ── R3a "Schedule": building_role_assignments, recurrence RPCs, reviewer gone ──
+  // building_role_assignments is keyed (building_id, role) — no id column — so the probes
+  // filter by building/role instead of the id-based helpers.
+  const BRA = 'building_role_assignments';
+  const braDel = (bid, role) => fetch(`${URL_BASE}/rest/v1/${BRA}?building_id=eq.${bid}&role=eq.${encodeURIComponent(role)}`, { method: 'DELETE', headers: SVC });
+  await svcInsert(BRA, { building_id: A, role: 'Maintenance', user_id: personas.userA.id });
+  await svcInsert(BRA, { building_id: B, role: 'Maintenance', user_id: personas.userB.id });
+  // (rows cascade away with the buildings at teardown)
+  await probeMatrix(`${BRA}[A] select`, byAccess('A'), (jwt) => canSelectF(jwt, BRA, `building_id=eq.${A}`));
+  await probeMatrix(`${BRA}[B] select`, byAccess('B'), (jwt) => canSelectF(jwt, BRA, `building_id=eq.${B}`));
+  await probeMatrix(`${BRA}[A] insert`, adminMgr(), async (jwt, who) => {
+    const res = await fetch(`${URL_BASE}/rest/v1/${BRA}`, {
+      method: 'POST', headers: authed(jwt), body: JSON.stringify({ building_id: A, role: `probe-${who}`, user_id: personas[who].id }),
+    });
+    if (res.status === 201) await braDel(A, `probe-${who}`);
+    return res.status === 201;
+  });
+  await probeMatrix(`${BRA}[A] update`, adminMgr(), (jwt) => canUpdateF(jwt, BRA, `building_id=eq.${A}&role=eq.Maintenance`, { user_id: personas.userA.id }));
+  {
+    const res = await fetch(`${URL_BASE}/rest/v1/${BRA}?building_id=eq.${A}&role=eq.Maintenance`, { method: 'DELETE', headers: { ...authed(personas.userA.jwt), Prefer: 'return=representation' } });
+    assert(`${BRA}[A] delete as userA`, !res.ok || (await res.json()).length === 0, 'site user deleted a role assignment');
+  }
+
+  // Execute grants: an empty 200 never proves a revoked grant — only a real HTTP denial does.
+  const row8 = { r: { every: 6, unit: 'month', monthDay: 1 }, p_from: '2026-09-10', p_to: '2027-12-31' };
+  for (const [fn, args] of [
+    ['recurrence_occurrences', row8],
+    ['reschedule_template', { p_template: template }],
+    ['generate_scheduled_tasks', { p_horizon_days: 90 }],
+  ]) {
+    const r = await rpcCall(null, fn, args);
+    assert(`${fn} not executable by anon`, r.status === 401 || r.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${r.status}`);
+  }
+  {
+    // Fixture row 8 of docs/fixtures/recurrence-occurrences.json, straight from the live function.
+    const r = await rpcCall(personas.userA.jwt, 'recurrence_occurrences', row8);
+    const dates = r.rows.map((x) => (typeof x === 'string' ? x : x.recurrence_occurrences));
+    assert('recurrence_occurrences runs for a signed-in user and matches fixture row 8',
+      r.status === 200 && JSON.stringify(dates) === JSON.stringify(['2026-10-01', '2027-04-01', '2027-10-01']), `HTTP ${r.status} ${JSON.stringify(dates)}`);
+  }
+  // PostgREST fills defaults, so a 3-named-arg call cannot prove the old signature is gone; the
+  // 4-arg form working for an admin (with p_horizon_days) is the assertion the plan asks for.
+  assert('generate_scheduled_tasks(p_building, p_horizon_days) runs for admin',
+    (await rpcCall(personas.admin.jwt, 'generate_scheduled_tasks', { p_building: A, p_horizon_days: 7 })).status === 200, 'admin 4-arg generate failed');
+  {
+    const r = await rpcCall(personas.admin.jwt, 'reschedule_template', { p_template: template });
+    assert('reschedule_template runs for admin (inactive fixture template: 0 deleted, 0 generated)',
+      r.status === 200 && r.rows[0]?.deleted === 0 && r.rows[0]?.generated === 0, `HTTP ${r.status} ${JSON.stringify(r.rows)}`);
+    const u = await rpcCall(personas.userA.jwt, 'reschedule_template', { p_template: template });
+    assert('reschedule_template refused for a site user', u.status === 403, `expected HTTP 403 (raised 42501), got HTTP ${u.status}`);
+  }
+  // checklist_templates.recurrence is validated by a CHECK, whoever writes it.
+  assert('checklist_templates insert with an invalid recurrence rejected (admin)',
+    (await canInsert(personas.admin.jwt, 'checklist_templates', { name: `ZZTEST-RLS-bad-${RUN}`, frequency: 'daily', is_active: false, recurrence: { unit: 'day' } })) === false, 'CHECK let a rule without `every` through');
+  assert('checklist_templates insert with a valid recurrence as admin',
+    (await canInsert(personas.admin.jwt, 'checklist_templates', { name: `ZZTEST-RLS-ok-${RUN}`, frequency: 'daily', is_active: false, recurrence: { every: 1, unit: 'week', weekdays: [1] } })) === true, 'valid rule rejected');
+
+  // Reviewer role removed: even the service role cannot write it.
+  {
+    const res = await fetch(`${URL_BASE}/rest/v1/user_roles?on_conflict=user_id`, {
+      method: 'POST', headers: { ...SVC, Prefer: 'resolution=merge-duplicates,return=representation' },
+      body: JSON.stringify({ user_id: personas.norole.id, role: 'reviewer' }),
+    });
+    const text = await res.text();
+    assert('user_roles rejects role=reviewer even for the service role', !res.ok && /23514|user_roles_role_check/.test(text), `HTTP ${res.status} ${text.slice(0, 160)}`);
+    await fetch(`${URL_BASE}/rest/v1/user_roles?user_id=eq.${personas.norole.id}`, { method: 'DELETE', headers: SVC });
+  }
+  console.log('  R3a schedule (role assignments, recurrence RPCs, reviewer gone): done');
+
+  // ── R3b "Calendar": calendar_tokens owner-only, feed access helper service-role only ──
+  // Tokens are minted client-side (32 random bytes, base64url) and stored plain; the boundary
+  // is owner-only RLS, so admin/manager see nothing here — like push_subscriptions. A building
+  // token additionally needs the owner to pass can_access_building at mint time.
+  const CT = 'calendar_tokens';
+  const mintToken = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+  // canInsert deletes what it creates, so these probe rows need no cleanup entry.
+  assert(`${CT} insert own (my feed) as userA`, (await canInsert(personas.userA.jwt, CT, { user_id: personas.userA.id, token: mintToken() })) === true, 'user could not mint their own feed token');
+  assert(`${CT} insert for someone else as userA`, (await canInsert(personas.userA.jwt, CT, { user_id: personas.admin.id, token: mintToken() })) === false, 'user minted a feed token for another user');
+  assert(`${CT} building token for building A (member) as userA`, (await canInsert(personas.userA.jwt, CT, { user_id: personas.userA.id, building_id: A, token: mintToken() })) === true, 'member could not mint a building feed token');
+  assert(`${CT} building token for building B (no access) as userA`, (await canInsert(personas.userA.jwt, CT, { user_id: personas.userA.id, building_id: B, token: mintToken() })) === false, 'LEAK: user minted a feed token for a building they cannot access');
+  const ctA = (await svcInsert(CT, { user_id: personas.userA.id, token: mintToken(), label: `ZZTEST-RLS-${RUN}` })).id;
+  cleanup.push([CT, ctA]);
+  await probeMatrix(`${CT}(userA row) select`, { admin: false, manager: false, userA: true, userB: false }, (jwt) => canSelect(jwt, CT, ctA));
+  // Revoke = update revoked_at on your own row; nobody else's row is even visible to USING.
+  assert(`${CT} revoke own (revoked_at) as userA`, (await canUpdate(personas.userA.jwt, CT, ctA, { revoked_at: new Date().toISOString() })) === true, 'user could not revoke their own token');
+  assert(`${CT} foreign update as admin`, (await canUpdate(personas.admin.jwt, CT, ctA, { revoked_at: null })) === false, "admin updated another user's token");
+  // user_can_access_building(p_user, p_building) takes the user id as an argument — the feed
+  // function calls it with the service role on the token OWNER's behalf — so a signed-in caller
+  // must never be able to run it. An empty 200 never proves a revoked grant — only a real HTTP
+  // denial does; 403 exactly for authenticated, since a looser `!== 200` would let a 404 from a
+  // missing function pass.
+  {
+    const args = { p_user: personas.userA.id, p_building: A };
+    const anonR = await rpcCall(null, 'user_can_access_building', args);
+    assert('user_can_access_building not executable by anon', anonR.status === 401 || anonR.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${anonR.status}`);
+    const authR = await rpcCall(personas.admin.jwt, 'user_can_access_building', args);
+    assert('user_can_access_building not executable by authenticated (admin)', authR.status === 403, `expected HTTP 403 (revoked grant), got HTTP ${authR.status}`);
+  }
+  console.log('  R3b calendar (calendar_tokens, user_can_access_building): done');
+
+  // ── R3c "PPM": building_ppm_services by access / write admin-manager, contractor_ratings own insert, generate_ppm_tasks grants ──
+  const BPS = 'building_ppm_services';
+  const monthly = { every: 1, unit: 'month', monthDay: 1 };
+  const bpsA = (await svcInsert(BPS, { building_id: A, service_name: `ZZTEST-RLS-${RUN}`, recurrence: monthly })).id;
+  const bpsB = (await svcInsert(BPS, { building_id: B, service_name: `ZZTEST-RLS-${RUN}`, recurrence: monthly })).id;
+  cleanup.push([BPS, bpsA], [BPS, bpsB]);
+  await probeMatrix(`${BPS}[A] select`, byAccess('A'), (jwt) => canSelect(jwt, BPS, bpsA));
+  await probeMatrix(`${BPS}[B] select`, byAccess('B'), (jwt) => canSelect(jwt, BPS, bpsB));
+  // canInsert deletes what it creates; (building_id, service_name) is unique, so name the probe row per persona.
+  await probeMatrix(`${BPS}[A] insert`, adminMgr(), (jwt, who) => canInsert(jwt, BPS, { building_id: A, service_name: `ZZTEST-RLS-${who}-${RUN}`, recurrence: monthly }));
+  await probeMatrix(`${BPS}[A] update`, adminMgr(), (jwt) => canUpdate(jwt, BPS, bpsA, { notes: 'ZZTEST-RLS-upd' }));
+  assert(`${BPS} delete as userA (own bldg)`, (await canDelete(personas.userA.jwt, BPS, bpsA)) === false, 'site user deleted a PPM plan line');
+  assert(`${BPS} delete as admin`, (await canDelete(personas.admin.jwt, BPS, bpsB)) === true, 'admin delete failed');
+  // The CHECK admits month/year rules only, whoever writes it.
+  assert(`${BPS} insert with a weekly rule rejected (admin)`,
+    (await canInsert(personas.admin.jwt, BPS, { building_id: A, service_name: `ZZTEST-RLS-week-${RUN}`, recurrence: { every: 1, unit: 'week', weekdays: [1] } })) === false, 'CHECK let a week rule through');
+
+  // contractor_ratings (2026-09-13_05 §1–2): rated_by must be the caller, and the issue must be
+  // resolved, name that contractor and sit in an accessible building; select any authenticated;
+  // no update policy; delete admin only.
+  const CR = 'contractor_ratings';
+  // issueA (Phase 3) is the building-A issue; the admin delete probe took only the B row. The
+  // fixture is open with no contractor, so first make it what the offline handler leaves behind
+  // before its rating write: a resolved issue attributed to the contractor.
+  {
+    const res = await fetch(`${URL_BASE}/rest/v1/issues?id=eq.${issueA}`, {
+      method: 'PATCH', headers: { ...SVC, Prefer: 'return=representation' },
+      body: JSON.stringify({ contractor_id: contractor, status: 'resolved' }),
+    });
+    if (!res.ok) throw new Error(`fixture issues[A] resolve: HTTP ${res.status} ${await res.text()}`);
+  }
+  const otherContractor = (await svcInsert('contractors', { company_name: `ZZTEST-RLS-other-${RUN}` })).id;
+  cleanup.push(['contractors', otherContractor]);
+  const openIssueA = (await svcInsert('issues', { building_id: A, title: `ZZTEST-RLS-open-${RUN}`, description: 'rls smoke', reported_by: personas.admin.id, contractor_id: contractor })).id;
+  cleanup.push(['issues', openIssueA]);
+  assert(`${CR} insert own on resolved issue A as userA`, (await canInsert(personas.userA.jwt, CR, { contractor_id: contractor, issue_id: issueA, rating: 4, rated_by: personas.userA.id })) === true, 'member could not rate a contractor on a resolved issue in their building');
+  assert(`${CR} insert with a foreign rated_by as userA`, (await canInsert(personas.userA.jwt, CR, { contractor_id: contractor, issue_id: issueA, rating: 4, rated_by: personas.admin.id })) === false, 'user recorded a rating as someone else');
+  assert(`${CR} insert on issue A as userB (no access)`, (await canInsert(personas.userB.jwt, CR, { contractor_id: contractor, issue_id: issueA, rating: 4, rated_by: personas.userB.id })) === false, 'LEAK: user rated a contractor on an issue in a building they cannot access');
+  assert(`${CR} insert naming a contractor the issue does not (userA)`, (await canInsert(personas.userA.jwt, CR, { contractor_id: otherContractor, issue_id: issueA, rating: 4, rated_by: personas.userA.id })) === false, 'rated a contractor the issue was not attributed to');
+  assert(`${CR} insert on an unresolved issue (userA)`, (await canInsert(personas.userA.jwt, CR, { contractor_id: contractor, issue_id: openIssueA, rating: 4, rated_by: personas.userA.id })) === false, 'rated a contractor on an issue that is not resolved');
+  const crA = (await svcInsert(CR, { contractor_id: contractor, issue_id: issueA, rating: 3, rated_by: personas.admin.id })).id;
+  cleanup.push([CR, crA]);
+  await probeMatrix(`${CR} select`, anyAuth(), (jwt) => canSelect(jwt, CR, crA));
+  assert(`${CR} update as admin (no update policy)`, (await canUpdate(personas.admin.jwt, CR, crA, { rating: 1 })) === false, 'admin edited a rating row');
+  assert(`${CR} delete as userA (admin only)`, (await canDelete(personas.userA.jwt, CR, crA)) === false, 'site user deleted a rating row');
+  assert(`${CR} delete as manager (admin only)`, (await canDelete(personas.manager.jwt, CR, crA)) === false, 'manager deleted a rating row');
+  {
+    const c = await (await fetch(`${URL_BASE}/rest/v1/contractors?id=eq.${contractor}&select=rating`, { headers: SVC })).json();
+    assert('contractors.rating refreshed by the ratings trigger (3 after the probe rows came and went)', Number(c[0]?.rating) === 3, JSON.stringify(c[0]));
+  }
+  assert(`${CR} delete as admin`, (await canDelete(personas.admin.jwt, CR, crA)) === true, 'admin could not delete a rating row');
+  {
+    const c = await (await fetch(`${URL_BASE}/rest/v1/contractors?id=eq.${contractor}&select=rating`, { headers: SVC })).json();
+    assert('contractors.rating cleared by the ratings trigger once the last rating is deleted', c[0]?.rating === null, JSON.stringify(c[0]));
+  }
+
+  // generate_ppm_tasks: same gate as generate_scheduled_tasks. An empty 200 never proves a revoked
+  // grant — only a real HTTP denial does; 403 exactly for a signed-in caller (a 404 must not pass).
+  {
+    const anonR = await rpcCall(null, 'generate_ppm_tasks', { p_building: A, p_horizon_days: 30 });
+    assert('generate_ppm_tasks not executable by anon', anonR.status === 401 || anonR.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${anonR.status}`);
+    const siteR = await rpcCall(personas.userA.jwt, 'generate_ppm_tasks', { p_building: A, p_horizon_days: 30 });
+    assert('generate_ppm_tasks refused for a site user', siteR.status === 403, `expected HTTP 403 (raised 42501), got HTTP ${siteR.status}`);
+    const mgrR = await rpcCall(personas.manager.jwt, 'generate_ppm_tasks', { p_horizon_days: 30 });
+    assert('generate_ppm_tasks refused without a building for a signed-in manager', mgrR.status === 403, `expected HTTP 403 (raised 42501), got HTTP ${mgrR.status}`);
+    // Inserts PPM-backed task_instances for building A (bpsA, monthly); the teardown deletes
+    // source_ppm_id rows for A/B before the plan lines and buildings go.
+    const adminR = await rpcCall(personas.admin.jwt, 'generate_ppm_tasks', { p_building: A, p_horizon_days: 30 });
+    assert('generate_ppm_tasks runs for admin', adminR.status === 200, `HTTP ${adminR.status}`);
+  }
+
+  // Derived views: never anon. A replaced or re-created view would pick SELECT back up from the
+  // default privileges unless the migration restates the revoke — only a real HTTP denial proves it.
+  for (const view of ['ppm_monthly_status', 'building_month_costs']) {
+    const res = await fetch(`${URL_BASE}/rest/v1/${view}?limit=1`, { headers: { apikey: ANON } });
+    assert(`${view} not readable by anon`, !res.ok, `expected a non-2xx, got HTTP ${res.status}`);
+  }
+
+  // ppm_services.overrides (2026-09-13_05 §9): the row's own update policy admits any member of
+  // the building; the before-update guard raises 42501 (→ HTTP 403) unless an admin/manager is
+  // the one changing the noted-override layer. Other columns stay editable by the member.
+  const ppmRowA = (await svcInsert('ppm_services', { building_id: A, service_name: `ZZTEST-RLS-${RUN}`, months: {} })).id;
+  cleanup.push(['ppm_services', ppmRowA]);
+  const override = { '2026-09': { status: 'done', note: 'ZZTEST-RLS' } };
+  assert('ppm_services.overrides change as userA (member of A) refused', (await canUpdate(personas.userA.jwt, 'ppm_services', ppmRowA, { overrides: override })) === false, 'site user changed the noted-override layer');
+  assert('ppm_services non-overrides update as userA still allowed', (await canUpdate(personas.userA.jwt, 'ppm_services', ppmRowA, { comment: 'ZZTEST-RLS-upd' })) === true, 'member could not edit the report row itself');
+  assert('ppm_services.overrides change as manager allowed', (await canUpdate(personas.manager.jwt, 'ppm_services', ppmRowA, { overrides: override })) === true, 'manager could not set an override');
+  console.log('  R3c ppm (building_ppm_services, contractor_ratings, generate_ppm_tasks, derived views, ppm_services.overrides): done');
+  // ════ R4a: organizations, branding view, snapshots, SLA sweep, discard, media_attachments, two-role user ════
+  {
+    const anonOrg = await fetch(`${URL_BASE}/rest/v1/organizations?select=id&limit=1`, { headers: { apikey: ANON } });
+    assert('organizations not readable by anon', !anonOrg.ok, `expected a non-2xx, got HTTP ${anonOrg.status}`);
+    const anonBranding = await fetch(`${URL_BASE}/rest/v1/organization_branding?select=id,name,logo_url,primary_color&limit=1`, { headers: { apikey: ANON } });
+    assert('organization_branding readable by anon', anonBranding.ok, `HTTP ${anonBranding.status}`);
+    const brandingRow = anonBranding.ok ? (await anonBranding.json())[0] : null;
+    if (brandingRow) {
+      const brandingCols = Object.keys(brandingRow).sort();
+      assert('organization_branding exposes only id/name/logo_url/primary_color', brandingCols.join(',') === 'id,logo_url,name,primary_color', brandingCols.join(','));
+    } else {
+      skip('organization_branding column shape', 'no organizations row on this project');
+    }
+    await probeMatrix('organizations select (settings included)', anyAuth(), (jwt) => canSelectF(jwt, 'organizations', 'settings=not.is.null'));
+    const org = (await (await fetch(`${URL_BASE}/rest/v1/organizations?select=id,settings&limit=1`, { headers: SVC })).json())[0];
+    if (org?.id) {
+      // Write the settings the org already has back to it: the probe proves the policy without changing anything.
+      await probeMatrix('organizations.settings update', adminMgr(), (jwt) => canUpdate(jwt, 'organizations', org.id, { settings: org.settings ?? {} }));
+    } else {
+      skip('organizations.settings update', 'no organizations row on this project');
+    }
+    for (const view of ['building_metrics_daily', 'portfolio_metrics_daily']) {
+      const res = await fetch(`${URL_BASE}/rest/v1/${view}?limit=1`, { headers: { apikey: ANON } });
+      assert(`${view} not readable by anon`, !res.ok, `expected a non-2xx, got HTTP ${res.status}`);
+    }
+    // One snapshot row per fixture building (service role runs the function as cron would).
+    for (const bid of [A, B]) {
+      const r = await fetch(`${URL_BASE}/rest/v1/rpc/snapshot_building_metrics`, { method: 'POST', headers: SVC, body: JSON.stringify({ p_building: bid }) });
+      if (!r.ok) fail(`snapshot fixture for ${bid === A ? 'A' : 'B'}`, `HTTP ${r.status} ${await r.text()}`);
+    }
+    await probeMatrix('building_metrics_daily[A] select', byAccess('A'), (jwt) => canSelectF(jwt, 'building_metrics_daily', `building_id=eq.${A}`));
+    await probeMatrix('building_metrics_daily[B] select', byAccess('B'), (jwt) => canSelectF(jwt, 'building_metrics_daily', `building_id=eq.${B}`));
+    await probeMatrix('building_metrics_daily insert', nobody(), (jwt) => canInsert(jwt, 'building_metrics_daily', { building_id: A, day: '2030-01-01' }));
+    await probeMatrix('building_metrics_daily update', nobody(), (jwt) => canUpdateF(jwt, 'building_metrics_daily', `building_id=eq.${A}`, { issues_open: 99 }));
+    await probeMatrix('building_metrics_daily delete', nobody(), (jwt) => canDeleteF(jwt, 'building_metrics_daily', `building_id=eq.${A}`));
+    for (const fn of ['snapshot_building_metrics', 'mark_sla_breaches', 'delete_empty_report', 'expiring_items']) {
+      const args = fn === 'delete_empty_report' ? { p_report: A } : fn === 'expiring_items' ? { p_days: 30 } : {};
+      const anonR = await rpcCall(null, fn, args);
+      assert(`${fn} not executable by anon`, anonR.status === 401 || anonR.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${anonR.status}`);
+    }
+    assert('snapshot_building_metrics refused for a site user', (await rpcCall(personas.userA.jwt, 'snapshot_building_metrics', { p_building: A })).status === 403, 'site user ran the snapshot');
+    assert('mark_sla_breaches refused for a site user', (await rpcCall(personas.userA.jwt, 'mark_sla_breaches', {})).status === 403, 'site user ran the sweep');
+    assert('mark_sla_breaches runs for a manager', (await rpcCall(personas.manager.jwt, 'mark_sla_breaches', {})).ok, 'manager could not run the sweep');
+    // expiring_items is invoker: the site user on A sees A's document, not B's.
+    const docA = (await svcInsert('building_documents', { building_id: A, name: `ZZTEST-RLS-exp-A-${RUN}`, expiry_date: '2030-01-01' })).id;
+    cleanup.push(['building_documents', docA]);
+    const docB = (await svcInsert('building_documents', { building_id: B, name: `ZZTEST-RLS-exp-B-${RUN}`, expiry_date: '2030-01-01' })).id;
+    cleanup.push(['building_documents', docB]);
+    {
+      const r = await rpcCall(personas.userA.jwt, 'expiring_items', { p_days: 5000 });
+      const names = r.rows.map((x) => x.name);
+      assert('expiring_items as userA includes building A', r.ok && names.includes(`ZZTEST-RLS-exp-A-${RUN}`), JSON.stringify(names.filter((n) => String(n).startsWith('ZZTEST-RLS'))));
+      assert('expiring_items as userA excludes building B', r.ok && !names.includes(`ZZTEST-RLS-exp-B-${RUN}`), JSON.stringify(names.filter((n) => String(n).startsWith('ZZTEST-RLS'))));
+    }
+    // delete_empty_report: admin only (42501 → HTTP 403); the refusals carry distinct SQLSTATEs the client maps
+    // (PR001 not a draft, PR002 has PDF versions, PR003 has saved rows — PostgREST answers HTTP 400 for those);
+    // an empty draft goes (void function: 2xx with an empty body).
+    const emptyDraft = (await svcInsert('reports', { building_id: A, report_type: 'cm_monthly', report_period: '2029-01-01', status: 'draft', title: `ZZTEST-RLS-${RUN}` })).id;
+    cleanup.push(['reports', emptyDraft]);
+    {
+      const mgr = await rpcCall(personas.manager.jwt, 'delete_empty_report', { p_report: emptyDraft });
+      assert('delete_empty_report refused for a manager', mgr.status === 403 && mgr.code === '42501', `manager discarded a draft: HTTP ${mgr.status} ${mgr.code}`);
+      const site = await rpcCall(personas.userA.jwt, 'delete_empty_report', { p_report: emptyDraft });
+      assert('delete_empty_report refused for a site user', site.status === 403 && site.code === '42501', `site user discarded a draft: HTTP ${site.status} ${site.code}`);
+      const svc = await fetch(`${URL_BASE}/rest/v1/rpc/delete_empty_report`, { method: 'POST', headers: SVC, body: JSON.stringify({ p_report: emptyDraft }) });
+      assert('delete_empty_report refused for the service role (client-only by design)', svc.status === 403, `service role discarded a draft: HTTP ${svc.status}`);
+      const missing = await rpcCall(personas.admin.jwt, 'delete_empty_report', { p_report: '00000000-0000-0000-0000-000000000000' });
+      assert('delete_empty_report on an unknown report → P0002', !missing.ok && missing.code === 'P0002', `HTTP ${missing.status} ${missing.code}`);
+    }
+    const fullDraft = (await svcInsert('reports', { building_id: A, report_type: 'cm_monthly', report_period: '2029-02-01', status: 'draft', title: `ZZTEST-RLS-full-${RUN}` })).id;
+    cleanup.push(['reports', fullDraft]);
+    const narr = (await svcInsert('report_narratives', { report_id: fullDraft, building_id: A, section_key: 'building_overview', heading: 'x', body: 'ZZTEST-RLS content' })).id;
+    cleanup.push(['report_narratives', narr]);
+    {
+      const r = await rpcCall(personas.admin.jwt, 'delete_empty_report', { p_report: fullDraft });
+      assert('delete_empty_report refuses a draft with content (PR003)', !r.ok && r.code === 'PR003', `HTTP ${r.status} ${r.code} ${JSON.stringify(r.body).slice(0, 120)}`);
+      if (org?.id) {
+        const art = (await svcInsert('report_artifacts', {
+          org_id: org.id, kind: 'cm_pdf', source_id: fullDraft, building_id: A, version: 1,
+          file_path: `zztest-rls/${RUN}/full.pdf`, file_name: `ZZTEST-RLS-${RUN}.pdf`, size_bytes: 0, generated_by: personas.admin.id,
+        })).id;
+        cleanup.push(['report_artifacts', art]);
+        const withPdf = await rpcCall(personas.admin.jwt, 'delete_empty_report', { p_report: fullDraft });
+        assert('delete_empty_report refuses a draft with PDF versions (PR002)', !withPdf.ok && withPdf.code === 'PR002', `HTTP ${withPdf.status} ${withPdf.code}`);
+      } else {
+        skip('delete_empty_report PR002 (PDF versions)', 'no organizations row to own a report_artifacts fixture');
+      }
+      await fetch(`${URL_BASE}/rest/v1/reports?id=eq.${fullDraft}`, { method: 'PATCH', headers: SVC, body: JSON.stringify({ status: 'submitted' }) });
+      const notDraft = await rpcCall(personas.admin.jwt, 'delete_empty_report', { p_report: fullDraft });
+      assert('delete_empty_report refuses a non-draft (PR001)', !notDraft.ok && notDraft.code === 'PR001', `HTTP ${notDraft.status} ${notDraft.code}`);
+    }
+    {
+      const r = await rpcCall(personas.admin.jwt, 'delete_empty_report', { p_report: emptyDraft });
+      assert('delete_empty_report deletes an empty draft for admin', r.ok, `admin could not discard an empty draft: HTTP ${r.status} ${r.code} ${JSON.stringify(r.body).slice(0, 120)}`);
+    }
+    assert('empty draft is gone', (await (await fetch(`${URL_BASE}/rest/v1/reports?id=eq.${emptyDraft}&select=id`, { headers: SVC })).json()).length === 0, 'row still present');
+    // media_attachments: admin only, every verb (0 rows on every project; the insert probe deletes its own row).
+    await probeMatrix('media_attachments insert', adminOnly(), (jwt) => canInsert(jwt, 'media_attachments', { record_type: 'issue', record_id: A, storage_path: `zztest-rls-${RUN}` }));
+    // A second user_roles row (building-scoped manager) must not break the helpers (was 21000). On projects where
+    // user_roles is keyed by user_id alone (PRIMARY KEY (user_id)) a second row cannot exist, so the probe is skipped.
+    const secondRole = await fetch(`${URL_BASE}/rest/v1/user_roles`, {
+      method: 'POST', headers: { ...SVC, Prefer: 'return=representation' },
+      body: JSON.stringify({ user_id: personas.manager.id, role: 'manager', building_id: A }),
+    });
+    if (secondRole.ok) {
+      cleanup.push(['user_roles', null, `user_id=eq.${personas.manager.id}&building_id=eq.${A}`]);   // teardown also removes it if the next line throws
+      assert('manager with two role rows still reads building B', await canSelect(personas.manager.jwt, 'buildings', B), 'two-role manager lost access (21000 regression)');
+      await fetch(`${URL_BASE}/rest/v1/user_roles?user_id=eq.${personas.manager.id}&building_id=eq.${A}`, { method: 'DELETE', headers: SVC });
+    } else if (secondRole.status === 409) {
+      skip('manager with two role rows still reads building B', 'user_roles is keyed by user_id on this project; a second row cannot exist');
+    } else {
+      throw new Error(`fixture insert user_roles: HTTP ${secondRole.status} ${await secondRole.text()}`);
+    }
+    console.log('  R4a (organizations, branding view, building_metrics_daily, SLA sweep, delete_empty_report, expiring_items, media_attachments, two-role user): done');
+  }
+
+  // ════ R4b "Distribute": report_schedules, report_shares, report_distributions, report_recipients_valid ════
+  {
+    const mintToken = () => { const b = new Uint8Array(32); crypto.getRandomValues(b); return Buffer.from(b).toString('base64url'); };
+    const inDays = (n) => new Date(Date.now() + n * 86_400_000).toISOString();
+    const in30d = () => inDays(30);
+    // report_shares is the one table whose SELECT grant is per column: passcode_hash (a brute-forceable
+    // verifier) and the lockout state are not granted to `authenticated` at all. That makes PostgREST's
+    // `select=*` — which canSelect/canUpdate/canInsert hardcode, and which a bare `Prefer:
+    // return=representation` implies — a 403 for every persona, so these probes name the granted columns
+    // instead. A separate DENY probe below proves passcode_hash itself is still refused.
+    const SHARE_COLS = 'id,report_id,artifact_id,token,created_by,created_at,expires_at,view_count,last_viewed_at,revoked_at,has_passcode';
+    const shareSelect = async (jwt, id) => {
+      const res = await fetch(`${URL_BASE}/rest/v1/report_shares?id=eq.${id}&select=${SHARE_COLS}&limit=1`, { headers: authed(jwt) });
+      if (!res.ok) return false;
+      return (await res.json()).length > 0;
+    };
+    const shareInsert = async (jwt, row) => {
+      const res = await fetch(`${URL_BASE}/rest/v1/report_shares?select=id`, {
+        method: 'POST', headers: { ...authed(jwt), Prefer: 'return=representation' }, body: JSON.stringify(row),
+      });
+      if (res.status !== 201) return false;
+      const created = (await res.json())[0];
+      if (created?.id) await svcDelete('report_shares', created.id); // keep probes side-effect free
+      return true;
+    };
+    const shareUpdate = async (jwt, id, patch) => {
+      const res = await fetch(`${URL_BASE}/rest/v1/report_shares?id=eq.${id}&select=id`, {
+        method: 'PATCH', headers: { ...authed(jwt), Prefer: 'return=representation' }, body: JSON.stringify(patch),
+      });
+      if (!res.ok) return false;            // 403 = column privilege or with_check violation
+      return (await res.json()).length > 0; // 0 rows = filtered by USING = denied
+    };
+    const shareDelete = async (jwt, id) => {
+      const res = await fetch(`${URL_BASE}/rest/v1/report_shares?id=eq.${id}&select=id`, {
+        method: 'DELETE', headers: { ...authed(jwt), Prefer: 'return=representation' },
+      });
+      if (!res.ok) return false;
+      return (await res.json()).length > 0;
+    };
+    const recipients = [{ email: `zztest-rls-${RUN}@example.invalid` }];
+    // Fixtures (service role): a schedule owned by the admin persona; an approved report on A with an issued
+    // artifact row, plus a report on B with its own artifact for the cross-report trigger probe.
+    const sched = (await svcInsert('report_schedules', { report_type: 'ops_monthly', building_ids: [A], recipients, created_by: personas.admin.id })).id;
+    cleanup.push(['report_schedules', sched]);
+    // schedules
+    await probeMatrix('report_schedules select', adminMgr(), (jwt) => canSelect(jwt, 'report_schedules', sched));
+    await probeMatrix('report_schedules insert (created_by = caller)', adminMgr(), (jwt, who) => canInsert(jwt, 'report_schedules', { report_type: 'cm_monthly', building_ids: [A], recipients, created_by: personas[who].id }));
+    await probeMatrix('report_schedules insert with a foreign created_by', nobody(), (jwt, who) => canInsert(jwt, 'report_schedules', { report_type: 'cm_monthly', building_ids: [A], recipients, created_by: who === 'admin' ? personas.manager.id : personas.admin.id }));
+    await probeMatrix('report_schedules insert with an invalid recipient (CHECK)', nobody(), (jwt, who) => canInsert(jwt, 'report_schedules', { report_type: 'cm_monthly', building_ids: [A], recipients: [{ email: 'nope' }], created_by: personas[who].id }));
+    await probeMatrix('report_schedules update send_day', adminMgr(), (jwt) => canUpdate(jwt, 'report_schedules', sched, { send_day: 9 }));
+    await probeMatrix('report_schedules update last_run_on (column privilege)', nobody(), (jwt) => canUpdate(jwt, 'report_schedules', sched, { last_run_on: '2030-01-01' }));
+    {
+      // A denied column privilege must be a real HTTP refusal (42501 → 4xx), not a 200 with zero rows.
+      const res = await fetch(`${URL_BASE}/rest/v1/report_schedules?id=eq.${sched}`, { method: 'PATCH', headers: { ...authed(personas.admin.jwt), Prefer: 'return=representation' }, body: JSON.stringify({ last_result: { ok: true } }) });
+      assert('report_schedules update last_result as admin is an HTTP refusal', res.status >= 400 && res.status < 500, `HTTP ${res.status}`);
+    }
+    // Bookkeeping is column-revoked on INSERT too: without that, a schedule could be created already stamped
+    // last_run_on = today, which silently suppresses that day's cron run.
+    await probeMatrix('report_schedules insert carrying last_run_on', nobody(), (jwt, who) => canInsert(jwt, 'report_schedules', { report_type: 'cm_monthly', building_ids: [A], recipients, created_by: personas[who].id, last_run_on: new Date().toISOString().slice(0, 10) }));
+    await probeMatrix('report_schedules insert carrying last_result', nobody(), (jwt, who) => canInsert(jwt, 'report_schedules', { report_type: 'cm_monthly', building_ids: [A], recipients, created_by: personas[who].id, last_result: { ok: true } }));
+    {
+      const res = await fetch(`${URL_BASE}/rest/v1/report_schedules`, { method: 'POST', headers: { ...authed(personas.admin.jwt), Prefer: 'return=representation' }, body: JSON.stringify({ report_type: 'cm_monthly', building_ids: [A], recipients, created_by: personas.admin.id, last_run_on: new Date().toISOString().slice(0, 10) }) });
+      assert('report_schedules insert with last_run_on as admin is an HTTP refusal', res.status >= 400 && res.status < 500, `HTTP ${res.status} — a schedule could be born already "run" today`);
+      if (res.status === 201) { const row = (await res.json())[0]; if (row?.id) await svcDelete('report_schedules', row.id); }
+    }
+    await probeMatrix('report_schedules delete', adminMgr(), async (jwt) => {
+      const row = (await svcInsert('report_schedules', { report_type: 'annual_inspection', building_ids: [B], recipients, created_by: personas.admin.id })).id;
+      const got = await canDelete(jwt, 'report_schedules', row);
+      if (!got) await svcDelete('report_schedules', row);
+      return got;
+    });
+    // shares + distributions need an artifact row, which needs an organizations row to own it.
+    const orgRow = (await (await fetch(`${URL_BASE}/rest/v1/organizations?select=id&limit=1`, { headers: SVC })).json())[0];
+    if (orgRow?.id) {
+      const repA = (await svcInsert('reports', { building_id: A, report_type: 'ops_monthly', report_period: '2029-03-01', status: 'approved', title: `ZZTEST-RLS-share-A-${RUN}` })).id;
+      cleanup.push(['reports', repA]);
+      const repB = (await svcInsert('reports', { building_id: B, report_type: 'ops_monthly', report_period: '2029-03-01', status: 'approved', title: `ZZTEST-RLS-share-B-${RUN}` })).id;
+      cleanup.push(['reports', repB]);
+      const mkArtifact = async (reportId, bid, tag) => (await svcInsert('report_artifacts', {
+        org_id: orgRow.id, kind: 'fortress_ops_monthly', source_id: reportId, building_id: bid, version: 1,
+        file_path: `zztest-rls/${RUN}/${tag}.pdf`, file_name: `ZZTEST-RLS-${tag}-${RUN}.pdf`, size_bytes: 0, generated_by: personas.admin.id, status: 'issued', report_status: 'approved',
+      })).id;
+      const artA = await mkArtifact(repA, A, 'a');
+      cleanup.push(['report_artifacts', artA]);
+      const artB = await mkArtifact(repB, B, 'b');
+      cleanup.push(['report_artifacts', artB]);
+      const shareA = (await svcInsert('report_shares', { report_id: repA, artifact_id: artA, token: mintToken(), created_by: personas.admin.id, expires_at: in30d() })).id;
+      cleanup.push(['report_shares', shareA]);
+      const shareRow = (who, extra = {}) => ({ report_id: repA, artifact_id: artA, token: mintToken(), created_by: personas[who].id, expires_at: in30d(), ...extra });
+      await probeMatrix('report_shares[A] insert (own, no passcode)', adminMgr(), (jwt, who) => shareInsert(jwt, shareRow(who)));
+      await probeMatrix('report_shares[A] insert with a passcode_hash', nobody(), (jwt, who) => shareInsert(jwt, shareRow(who, { passcode_hash: 'x' })));
+      await probeMatrix('report_shares[A] insert with a non-zero view_count', nobody(), (jwt, who) => shareInsert(jwt, shareRow(who, { view_count: 1 })));
+      await probeMatrix('report_shares[A] insert as someone else', nobody(), (jwt, who) => shareInsert(jwt, shareRow(who, { created_by: who === 'admin' ? personas.manager.id : personas.admin.id })));
+      await probeMatrix("report_shares[A] insert with another report's artifact (trigger 23514)", nobody(), (jwt, who) => shareInsert(jwt, shareRow(who, { artifact_id: artB })));
+      // rsh_insert caps the client path at 90 days even though the table CHECK allows 366.
+      await probeMatrix('report_shares[A] insert expiring in 200 days', nobody(), (jwt, who) => shareInsert(jwt, shareRow(who, { expires_at: inDays(200) })));
+      await probeMatrix('report_shares[A] insert expiring in 89 days', adminMgr(), (jwt, who) => shareInsert(jwt, shareRow(who, { expires_at: inDays(89) })));
+      await probeMatrix('report_shares[A] select (granted columns)', adminMgr(), (jwt) => shareSelect(jwt, shareA));
+      // The verifier and the lockout state are not in the grant list at all: `select=*` and a bare
+      // `Prefer: return=representation` are 4xx for everyone, and naming passcode_hash is refused outright.
+      for (const [label, cols] of [['passcode_hash', 'passcode_hash'], ['failed_attempts', 'failed_attempts'], ['locked_until', 'locked_until'], ['*', '*']]) {
+        const res = await fetch(`${URL_BASE}/rest/v1/report_shares?id=eq.${shareA}&select=${encodeURIComponent(cols)}&limit=1`, { headers: authed(personas.admin.jwt) });
+        assert(`report_shares select=${label} as admin is an HTTP refusal`, res.status >= 400 && res.status < 500, `HTTP ${res.status} — the passcode verifier is readable`);
+      }
+      {
+        const res = await fetch(`${URL_BASE}/rest/v1/report_shares?id=eq.${shareA}&select=id,has_passcode&limit=1`, { headers: authed(personas.admin.jwt) });
+        const rows = res.ok ? await res.json() : [];
+        assert('report_shares has_passcode readable (the UI Passcode chip)', res.ok && rows[0]?.has_passcode === false, `HTTP ${res.status} ${JSON.stringify(rows[0] ?? null)}`);
+      }
+      await probeMatrix('report_shares[A] update revoked_at (a real timestamp)', adminMgr(), (jwt) => shareUpdate(jwt, shareA, { revoked_at: new Date().toISOString() }));
+      // Revocation is one-way: rsh_update's with check re-tests revoked_at is not null.
+      await probeMatrix('report_shares[A] un-revoke (revoked_at = null)', nobody(), (jwt) => shareUpdate(jwt, shareA, { revoked_at: null }));
+      await probeMatrix('report_shares[A] update view_count (column privilege)', nobody(), (jwt) => shareUpdate(jwt, shareA, { view_count: 5 }));
+      await probeMatrix('report_shares[A] update expires_at (column privilege)', nobody(), (jwt) => shareUpdate(jwt, shareA, { expires_at: in30d() }));
+      await probeMatrix('report_shares[A] delete', nobody(), (jwt) => shareDelete(jwt, shareA));
+      const dist = (await svcInsert('report_distributions', { schedule_id: sched, report_id: repA, building_id: A, report_period: '2029-03-01', artifact_id: artA, share_id: shareA, status: 'sent', sent_to: [] })).id;
+      cleanup.push(['report_distributions', dist]);
+      await probeMatrix('report_distributions select', adminMgr(), (jwt) => canSelect(jwt, 'report_distributions', dist));
+      await probeMatrix('report_distributions insert', nobody(), (jwt) => canInsert(jwt, 'report_distributions', { schedule_id: sched, report_period: '2029-03-01', status: 'sent' }));
+      await probeMatrix('report_distributions update', nobody(), (jwt) => canUpdate(jwt, 'report_distributions', dist, { status: 'failed' }));
+      await probeMatrix('report_distributions delete', nobody(), (jwt) => canDelete(jwt, 'report_distributions', dist));
+    } else {
+      skip('report_shares / report_distributions probes', 'no organizations row to own a report_artifacts fixture');
+    }
+    // anon: apikey only, no JWT — every one of the three tables and the recipients function is refused.
+    for (const table of ['report_schedules', 'report_shares', 'report_distributions']) {
+      const res = await fetch(`${URL_BASE}/rest/v1/${table}?select=id&limit=1`, { headers: { apikey: ANON } });
+      assert(`${table} not readable by anon`, !res.ok, `expected a non-2xx, got HTTP ${res.status}`);
+    }
+    {
+      const anonFn = await rpcCall(null, 'report_recipients_valid', { p: [] });
+      assert('report_recipients_valid not executable by anon', anonFn.status === 401 || anonFn.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${anonFn.status}`);
+      const authFn = await rpcCall(personas.userA.jwt, 'report_recipients_valid', { p: [{ email: 'nope' }] });
+      assert('report_recipients_valid answers a signed-in user (false for a bad address)', authFn.ok && authFn.body === false, `HTTP ${authFn.status} ${JSON.stringify(authFn.body)}`);
+    }
+    console.log('  R4b distribute (report_schedules, report_shares, report_distributions, report_recipients_valid): done');
+  }
+
+  // ── R4c "Intake & Forms": intake_tokens, intake_rate + RPCs, issues intake guard, form_templates, snapshot columns, storage intake/ ──
+  const IT = 'intake_tokens';
+  const mintIntake = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+  const itA = (await svcInsert(IT, { building_id: A, token: mintIntake(), created_by: personas.admin.id, label: `ZZTEST-RLS-${RUN}` })).id;
+  cleanup.push([IT, itA]);
+  await probeMatrix(`${IT}(A) select`, adminMgr(), (jwt) => canSelect(jwt, IT, itA));
+  await probeMatrix(`${IT}(A) insert own`, adminMgr(), (jwt, who) => canInsert(jwt, IT, { building_id: A, token: mintIntake(), created_by: personas[who].id }));
+  assert(`${IT} insert with a foreign created_by as admin`, (await canInsert(personas.admin.jwt, IT, { building_id: A, token: mintIntake(), created_by: personas.manager.id })) === false, 'created_by must be the caller');
+  assert(`${IT} insert a 10-char token as admin`, (await canInsert(personas.admin.jwt, IT, { building_id: A, token: 'tooshort', created_by: personas.admin.id })) === false, 'the token format check did not hold');
+  await probeMatrix(`${IT}(A) disable`, adminMgr(), (jwt) => canUpdate(jwt, IT, itA, { is_active: false }));
+  await probeMatrix(`${IT}(A) delete`, nobody(), (jwt) => canDelete(jwt, IT, itA));
+  {
+    const anonRes = await fetch(`${URL_BASE}/rest/v1/${IT}?select=id&limit=1`, { headers: { apikey: ANON } });
+    assert(`${IT} not readable by anon`, !anonRes.ok, `HTTP ${anonRes.status}`);
+    const rateRes = await fetch(`${URL_BASE}/rest/v1/intake_rate?select=bucket&limit=1`, { headers: authed(personas.admin.jwt) });
+    assert('intake_rate not readable by authenticated (admin)', !rateRes.ok, `HTTP ${rateRes.status}`);
+    for (const [fn, args] of [['intake_rate_hit', { p_bucket: `zz:${RUN}`, p_limit: 1 }], ['intake_touch', { p_token: itA }]]) {
+      const anonR = await rpcCall(null, fn, args);
+      assert(`${fn} not executable by anon`, anonR.status === 401 || anonR.status === 403, `HTTP ${anonR.status}`);
+      const authR = await rpcCall(personas.admin.jwt, fn, args);
+      assert(`${fn} not executable by authenticated (admin)`, authR.status === 403, `HTTP ${authR.status}`);
+    }
+  }
+  // The Tenant chip cannot be forged: a session may not write source/reporter/reference, nor change them.
+  assert('issues insert with source tenant_intake as admin', (await canInsert(personas.admin.jwt, 'issues', { building_id: A, title: `ZZTEST-RLS-${RUN}`, description: 'x', reported_by: personas.admin.id, source: 'tenant_intake' })) === false, 'a signed-in writer forged a tenant-reported issue');
+  assert('issues insert with a reference as admin', (await canInsert(personas.admin.jwt, 'issues', { building_id: A, title: `ZZTEST-RLS-${RUN}`, description: 'x', reported_by: personas.admin.id, reference: 'FO-ABC234' })) === false, 'a signed-in writer set a reference');
+  {
+    const intakeIssue = (await svcInsert('issues', { building_id: A, title: `ZZTEST-RLS-${RUN}`, description: 'x', reported_by: personas.admin.id, source: 'tenant_intake', reporter: { name: 'T' }, reference: `FO-${RUN.toUpperCase().replace(/[^A-Z2-7]/g, 'A').slice(0, 6).padEnd(6, 'A')}` })).id;
+    cleanup.push(['issues', intakeIssue]);
+    assert('issues: admin may still change status on a tenant-reported issue', (await canUpdate(personas.admin.jwt, 'issues', intakeIssue, { status: 'in_progress' })) === true, 'the guard blocked an ordinary update');
+    assert('issues: admin may not clear the reference', (await canUpdate(personas.admin.jwt, 'issues', intakeIssue, { reference: null })) === false, 'the guard let the reference change');
+    assert('issues: admin may not flip source back to app', (await canUpdate(personas.admin.jwt, 'issues', intakeIssue, { source: 'app' })) === false, 'the guard let source change');
+  }
+  const FT = 'form_templates';
+  const ftId = `zztest-rls-${RUN}`;
+  await svcInsert(FT, { id: ftId, name: `ZZTEST-RLS-${RUN}`, category: 'Test', fields: [{ label: 'A', type: 'text' }] });
+  cleanup.push([FT, ftId]);
+  await probeMatrix(`${FT} select`, anyAuth(), (jwt) => canSelect(jwt, FT, ftId));
+  await probeMatrix(`${FT} insert`, adminOnly(), (jwt, who) => canInsert(jwt, FT, { id: `zztest-rls-ins-${RUN}-${who}`, name: 'x', category: 'Test' }));
+  await probeMatrix(`${FT} update (description)`, adminOnly(), (jwt) => canUpdate(jwt, FT, ftId, { description: 'changed' }));
+  {
+    const after = await (await fetch(`${URL_BASE}/rest/v1/${FT}?id=eq.${ftId}&select=version`, { headers: SVC })).json();
+    assert(`${FT} version bumped by the admin's description edit`, after[0]?.version === 2, `version=${after[0]?.version}`);
+    await canUpdate(personas.admin.jwt, FT, ftId, { is_active: false });
+    const after2 = await (await fetch(`${URL_BASE}/rest/v1/${FT}?id=eq.${ftId}&select=version`, { headers: SVC })).json();
+    assert(`${FT} version NOT bumped by an is_active toggle`, after2[0]?.version === 2, `version=${after2[0]?.version}`);
+    await canUpdate(personas.admin.jwt, FT, ftId, { version: 99 });
+    const after3 = await (await fetch(`${URL_BASE}/rest/v1/${FT}?id=eq.${ftId}&select=version`, { headers: SVC })).json();
+    assert(`${FT} client-sent version ignored`, after3[0]?.version === 2, `version=${after3[0]?.version}`);
+    const anonFt = await fetch(`${URL_BASE}/rest/v1/${FT}?select=id&limit=1`, { headers: { apikey: ANON } });
+    assert(`${FT} not readable by anon`, !anonFt.ok, `HTTP ${anonFt.status}`);
+  }
+  await probeMatrix(`${FT} delete`, adminOnly(), (jwt) => canDelete(jwt, FT, ftId));
+  // Snapshot columns ride the existing fs_insert policy.
+  await probeMatrix('form_submissions insert with template_version + fields_snapshot (A)', byAccess('A'), (jwt, who) =>
+    canInsert(jwt, 'form_submissions', { building_id: A, form_name: `ZZTEST-RLS-${RUN}`, form_template_id: '1', submitted_by: personas[who].id, template_version: 1, fields_snapshot: [{ label: 'A', type: 'text' }] }));
+  // Storage: intake/<building>/… is written only by the service role; read follows building access.
+  await probeMatrix('storage intake/<A> write', nobody(), (jwt) => storagePut(jwt, 'tenant-documents', `intake/${A}/zztest-${RUN}.txt`));
+  {
+    const path = `intake/${A}/zztest-svc-${RUN}.txt`;
+    const up = await fetch(`${URL_BASE}/storage/v1/object/tenant-documents/${path}`, { method: 'POST', headers: { ...SVC, 'Content-Type': 'text/plain' }, body: 'rls-smoke' });
+    if (up.ok) {
+      storageCleanup.push(['tenant-documents', path]);
+      await probeMatrix('storage intake/<A> read', byAccess('A'), (jwt) => storageGet(jwt, 'tenant-documents', path));
+    } else {
+      skip('storage intake/<A> read', `service-role upload failed: HTTP ${up.status}`);
+    }
+  }
+  console.log('  R4c intake & forms (intake_tokens, intake_rate + RPCs, issues guard, form_templates, snapshot columns, storage intake/): done');
+
 } catch (e) {
   fail('smoke run', e.message);
 } finally {
@@ -380,7 +1052,15 @@ try {
   for (const [bucket, path] of storageCleanup) {
     await fetch(`${URL_BASE}/storage/v1/object/${bucket}/${path}`, { method: 'DELETE', headers: SVC });
   }
-  for (const [table, id] of cleanup.reverse()) await svcDelete(table, id);
+  // generate_scheduled_tasks (R2a probe) and generate_ppm_tasks (R3c probe) inserted template-
+  // and plan-backed task_instances for A/B that no cleanup entry names — remove them before the
+  // plan lines (source_ppm_id would be nulled, hiding them) and the buildings are deleted.
+  if (A || B) {
+    await fetch(`${URL_BASE}/rest/v1/task_instances?building_id=in.(${[A, B].filter(Boolean).join(',')})&or=(template_item_id.not.is.null,source_ppm_id.not.is.null)`, { method: 'DELETE', headers: SVC });
+  }
+  // the R4c rate-limit probe hit a bucket of its own (zz:<run>); no fixture row names it
+  await fetch(`${URL_BASE}/rest/v1/intake_rate?bucket=like.zz:${RUN}*`, { method: 'DELETE', headers: SVC });
+  for (const [table, id, filter] of cleanup.reverse()) await svcDelete(table, id, filter);
   for (const uid of createdUsers) {
     await fetch(`${URL_BASE}/auth/v1/admin/users/${uid}`, { method: 'DELETE', headers: SVC });
   }

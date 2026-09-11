@@ -15,7 +15,7 @@ import { NewReportDialog } from '@/components/reports/fortress/NewReportDialog';
 import { OhsComplianceTab } from '@/components/reports/fortress/OhsComplianceTab';
 import { KpiCard } from '@/components/reports/fortress/KpiCard';
 import { REPORT_STATUS_VARIANT, formatPeriodLabel } from '@/lib/fortressReports';
-import { REPORT_TYPE_LABELS } from '@/integrations/supabase/fortress-db';
+import { REPORT_TYPE_LABELS, type ReportType } from '@/integrations/supabase/fortress-db';
 import { useState } from 'react';
 import { format, subDays } from 'date-fns';
 import { Button } from '@/components/ui/button';
@@ -32,6 +32,11 @@ export default function ReportsTab({ buildingId, buildingName }: { buildingId: s
   const { data: reports, isLoading } = useFortressReports(buildingId);
   const { data: kpiData } = useBuildingKpis(buildingId);
   const hasApproved = !!kpiData?.ops || !!kpiData?.cm;
+  const sources = [
+    kpiData?.ops ? `Monthly OPS Report — ${formatPeriodLabel(kpiData.ops.report_period)} · approved` : null,
+    kpiData?.cm ? `Monthly CM Report — ${formatPeriodLabel(kpiData.cm.report_period)} · approved` : null,
+    kpiData?.annual ? `Annual Inspection — ${formatPeriodLabel(kpiData.annual.report_period)} · approved` : null,
+  ].filter(Boolean).join(' · ');
   const { organization } = useOrganization();
   const [hsOpen, setHsOpen] = useState(false);
   const [hsStart, setHsStart] = useState(format(subDays(new Date(), 90), 'yyyy-MM-dd'));
@@ -111,7 +116,7 @@ export default function ReportsTab({ buildingId, buildingName }: { buildingId: s
                 {reports.map((r) => (
                   <TableRow key={r.id} className="cursor-pointer" onClick={() => navigate(`/reports/fortress/${r.id}`)}>
                     <TableCell className="font-medium">{r.title}</TableCell>
-                    <TableCell>{REPORT_TYPE_LABELS[r.report_type]}</TableCell>
+                    <TableCell>{REPORT_TYPE_LABELS[r.report_type as ReportType]}</TableCell>
                     <TableCell>{formatPeriodLabel(r.report_period)}</TableCell>
                     <TableCell><Badge variant={REPORT_STATUS_VARIANT[r.status] ?? 'outline'} className="capitalize">{r.status}</Badge></TableCell>
                   </TableRow>
@@ -122,7 +127,7 @@ export default function ReportsTab({ buildingId, buildingName }: { buildingId: s
         </CardContent>
       </Card>
 
-      {hasApproved && (
+      {hasApproved ? (
         <Tabs defaultValue="kpis">
           <TabsList>
             <TabsTrigger value="kpis">KPIs</TabsTrigger>
@@ -138,11 +143,14 @@ export default function ReportsTab({ buildingId, buildingName }: { buildingId: s
             />
           </TabsContent>
           <TabsContent value="kpis" className="mt-4">
+            {sources && <p className="mb-2 text-xs text-muted-foreground">From {sources}</p>}
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {(kpiData?.kpis ?? []).map((k) => <KpiCard key={k.id} kpi={k} />)}
             </div>
           </TabsContent>
         </Tabs>
+      ) : (
+        <p className="text-sm text-muted-foreground">KPIs appear once a monthly report is approved.</p>
       )}
 
       <Dialog open={hsOpen} onOpenChange={setHsOpen}>

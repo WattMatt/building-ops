@@ -16,7 +16,7 @@ const ACTIONS = [
 ];
 
 export default function BuildingInspectionSection({ reportId, buildingId, readOnly }: SectionProps) {
-  const { items, responses, isLoading, setResponse } = useInspectionSection(reportId, buildingId, 'monthly');
+  const { items, responses, isLoading, setResponse } = useInspectionSection(reportId, buildingId, 'monthly', readOnly);
 
   const grouped = useMemo(() => {
     const map = new Map<string, InspectionTemplateItem[]>();
@@ -35,7 +35,7 @@ export default function BuildingInspectionSection({ reportId, buildingId, readOn
   return (
     <SectionCard
       title="Building Inspection"
-      hint="Monthly walk-through. Mark each point acceptable and flag any action required."
+      hint="Monthly walk-through. Mark each point acceptable and flag any action required. Answers save automatically as you go."
       headerAccessory={<span className="text-sm text-muted-foreground">{acceptableCount}/{answered || 0} acceptable</span>}
     >
       {isLoading ? (

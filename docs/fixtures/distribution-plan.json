@@ -1,0 +1,18 @@
+{
+  "_comment": "Pinned cases for supabase/functions/_shared/distribution.ts (planFor, nextRunDates); run by src/lib/distributionPlan.test.ts. Dates are SAST calendar days; period is the report month (YYYY-MM-01).",
+  "planFor": [
+    { "today": "2026-10-07", "send_day": 7, "remind_days_before": 3, "expect": { "action": "send", "period": "2026-09-01" } },
+    { "today": "2026-10-04", "send_day": 7, "remind_days_before": 3, "expect": { "action": "remind", "period": "2026-09-01" } },
+    { "today": "2026-10-05", "send_day": 7, "remind_days_before": 3, "expect": { "action": "none" } },
+    { "today": "2026-09-29", "send_day": 2, "remind_days_before": 3, "expect": { "action": "remind", "period": "2026-09-01" } },
+    { "today": "2026-01-07", "send_day": 7, "remind_days_before": 0, "expect": { "action": "send", "period": "2025-12-01" } },
+    { "today": "2026-03-01", "send_day": 1, "remind_days_before": 3, "expect": { "action": "send", "period": "2026-02-01" } },
+    { "today": "2026-02-26", "send_day": 1, "remind_days_before": 3, "expect": { "action": "remind", "period": "2026-02-01" } },
+    { "today": "2026-12-31", "send_day": 3, "remind_days_before": 3, "expect": { "action": "remind", "period": "2026-12-01" } }
+  ],
+  "nextRunDates": [
+    { "today": "2026-10-08", "send_day": 7, "remind_days_before": 3, "expect": { "nextSend": "2026-11-07", "nextReminder": "2026-11-04", "period": "2026-10-01" } },
+    { "today": "2026-10-07", "send_day": 7, "remind_days_before": 3, "expect": { "nextSend": "2026-10-07", "nextReminder": "2026-10-04", "period": "2026-09-01" } },
+    { "today": "2026-12-31", "send_day": 1, "remind_days_before": 0, "expect": { "nextSend": "2027-01-01", "nextReminder": "2027-01-01", "period": "2026-12-01" } }
+  ]
+}

@@ -12,7 +12,7 @@ import type { SectionProps } from './types';
 
 export default function ComplianceSection({ reportId, buildingId, readOnly }: SectionProps) {
   const { items, responses, responseMap, isLoading, setResponse, liveBuildingPct, answered, scoredTotal } =
-    useComplianceSection(reportId, buildingId);
+    useComplianceSection(reportId, buildingId, readOnly);
 
   const grouped = useMemo(() => {
     const map = new Map<string, ComplianceTemplateItem[]>();
@@ -28,7 +28,7 @@ export default function ComplianceSection({ reportId, buildingId, readOnly }: Se
   return (
     <SectionCard
       title="OHS Act Compliance"
-      hint="Weighted compliance scored live from the active template. N/A counts as compliant."
+      hint="Weighted compliance scored live from the active template. N/A counts as compliant. Answers save automatically as you click — there is no Save button here."
       headerAccessory={
         <div className="text-right">
           <Badge variant={liveBuildingPct != null && liveBuildingPct >= 90 ? 'default' : 'secondary'} className="text-sm">

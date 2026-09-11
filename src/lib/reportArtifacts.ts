@@ -12,12 +12,14 @@
  * Persistence failing is NON-fatal to the download itself — callers download
  * first, then report both outcomes (degradation ladder, standard D2/D4).
  *
- * The `report_artifacts` table is not in the generated `types.ts` yet, so the
- * runtime client is re-typed through a narrow structural interface (same
- * pattern as `fortress-db.ts`), which also makes the module unit-testable with
- * a mocked client.
+ * `report_artifacts` IS in the generated `types.ts` (regenerated from production
+ * after R4a), so every query here type-checks against the real table rather than
+ * a hand-rolled structural interface. The client is still a parameter — narrowed
+ * to the two surfaces this module touches — so the module stays unit-testable
+ * with a mocked client.
  */
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables, TablesInsert } from '@/integrations/supabase/types';
 
 export const GENERATED_REPORTS_BUCKET = 'generated-reports';
 export const ARTIFACT_SIGNED_URL_TTL_SECONDS = 600;
@@ -37,71 +39,13 @@ export const REPORT_KIND_LABELS: Record<ReportArtifactKind, string> = {
   fortress_annual_inspection: 'Annual Inspection Report',
 };
 
-export interface ReportArtifactRow {
-  id: string;
-  org_id: string;
-  kind: string;
-  source_id: string | null;
-  building_id: string | null;
-  version: number;
-  file_path: string;
-  file_name: string;
-  size_bytes: number;
-  generated_by: string;
-  created_at: string;
-  status: string;
-  superseded_by: string | null;
-}
+export type ReportArtifactRow = Tables<'report_artifacts'>;
+export type ReportArtifactInsert = TablesInsert<'report_artifacts'>;
 
-export type ReportArtifactInsert = Omit<ReportArtifactRow, 'id' | 'created_at' | 'superseded_by'>;
+/** The two surfaces this module touches, typed straight off the generated client (injectable for tests). */
+export type ReportArtifactsClient = Pick<typeof supabase, 'from' | 'storage'>;
 
-interface PgErr {
-  message: string;
-}
-
-interface ArtifactSelectBuilder extends PromiseLike<{ data: ReportArtifactRow[] | null; error: PgErr | null }> {
-  eq(column: string, value: string): ArtifactSelectBuilder;
-  is(column: string, value: null): ArtifactSelectBuilder;
-  order(column: string, opts: { ascending: boolean }): ArtifactSelectBuilder;
-  limit(count: number): ArtifactSelectBuilder;
-}
-
-interface ArtifactUpdateBuilder extends PromiseLike<{ error: PgErr | null }> {
-  eq(column: string, value: string): ArtifactUpdateBuilder;
-  is(column: string, value: null): ArtifactUpdateBuilder;
-  neq(column: string, value: string): ArtifactUpdateBuilder;
-}
-
-interface ArtifactTable {
-  select(columns: string): ArtifactSelectBuilder;
-  insert(row: ReportArtifactInsert): {
-    select(): { single(): Promise<{ data: ReportArtifactRow | null; error: PgErr | null }> };
-  };
-  update(patch: { status: string; superseded_by: string }): ArtifactUpdateBuilder;
-}
-
-interface ArtifactBucket {
-  upload(
-    path: string,
-    body: Blob,
-    opts: { contentType: string; upsert: boolean }
-  ): Promise<{ data: { path: string } | null; error: PgErr | null }>;
-  remove(paths: string[]): Promise<{ data: unknown; error: PgErr | null }>;
-  createSignedUrl(
-    path: string,
-    expiresIn: number,
-    opts?: { download?: string | boolean }
-  ): Promise<{ data: { signedUrl: string } | null; error: PgErr | null }>;
-}
-
-export interface ReportArtifactsClient {
-  from(table: 'report_artifacts'): ArtifactTable;
-  storage: { from(bucket: string): ArtifactBucket };
-}
-
-// Same runtime client, re-typed to the narrow surface this module uses
-// (fortress-db.ts pattern; report_artifacts is not in the generated types yet).
-const defaultClient = supabase as unknown as ReportArtifactsClient;
+const defaultClient: ReportArtifactsClient = supabase;
 
 /** Filesystem/storage-safe file name stem: keeps letters, digits, `._-`. */
 export function sanitizeReportFileName(name: string): string {
@@ -124,6 +68,8 @@ export interface SaveReportArtifactInput {
   sourceId?: string | null;
   /** Building scope; null for portfolio-level reports. */
   buildingId?: string | null;
+  /** Lifecycle status of the source report at export time; omit for ad-hoc kinds. */
+  reportStatus?: string | null;
 }
 
 export type SaveReportArtifactResult =
@@ -138,9 +84,18 @@ export async function saveReportArtifact(
   const sourceId = input.sourceId ?? null;
   const buildingId = input.buildingId ?? null;
 
-  // 1) Next version in the (org, kind, source) chain.
+  // 1) Next version in the (org, kind, source) chain — or (org, kind, building) for a
+  //    kind that has no source row. The H&S report is per BUILDING and carries no
+  //    source_id, so keying on source_id alone put every building in one chain:
+  //    generating building B's pack marked building A's as superseded, and versions
+  //    counted up across unrelated buildings. Scope by building when there is no source.
   let versionQuery = client.from('report_artifacts').select('version').eq('org_id', orgId).eq('kind', kind);
-  versionQuery = sourceId ? versionQuery.eq('source_id', sourceId) : versionQuery.is('source_id', null);
+  if (sourceId) {
+    versionQuery = versionQuery.eq('source_id', sourceId);
+  } else {
+    versionQuery = versionQuery.is('source_id', null);
+    versionQuery = buildingId ? versionQuery.eq('building_id', buildingId) : versionQuery.is('building_id', null);
+  }
   const { data: prior, error: versionError } = await versionQuery.order('version', { ascending: false }).limit(1);
   if (versionError) {
     return { ok: false, error: `Could not read report history: ${versionError.message}` };
@@ -172,6 +127,7 @@ export async function saveReportArtifact(
       size_bytes: blob.size,
       generated_by: generatedBy,
       status: 'issued',
+      report_status: input.reportStatus ?? null,
     })
     .select()
     .single();
@@ -181,7 +137,7 @@ export async function saveReportArtifact(
     return { ok: false, error: `Could not record the report: ${insertError?.message ?? 'no row returned'}${orphanNote}` };
   }
 
-  // 4) Supersede prior issued versions of the same (kind, source). Best-effort:
+  // 4) Supersede prior issued versions of the same chain. Best-effort:
   //    the new artifact is already safely issued; a failure here only leaves an
   //    older row still marked issued.
   let supersede = client
@@ -189,7 +145,13 @@ export async function saveReportArtifact(
     .update({ status: 'superseded', superseded_by: artifact.id })
     .eq('org_id', orgId)
     .eq('kind', kind);
-  supersede = sourceId ? supersede.eq('source_id', sourceId) : supersede.is('source_id', null);
+  if (sourceId) {
+    supersede = supersede.eq('source_id', sourceId);
+  } else {
+    supersede = supersede.is('source_id', null);
+    // Must mirror the version scope above, or one building's pack supersedes another's.
+    supersede = buildingId ? supersede.eq('building_id', buildingId) : supersede.is('building_id', null);
+  }
   const { error: supersedeError } = await supersede.eq('status', 'issued').neq('id', artifact.id);
   if (supersedeError) {
     return { ok: true, artifact, supersedeWarning: `Prior versions were not marked superseded: ${supersedeError.message}` };
@@ -206,6 +168,30 @@ export async function listReportArtifacts(
   const { data, error } = await client
     .from('report_artifacts')
     .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) return { data: [], error: error.message };
+  return { data: data ?? [], error: null };
+}
+
+/**
+ * The saved PDFs for ONE source report, newest first.
+ *
+ * Separate from listReportArtifacts rather than an extra parameter on it, so the existing
+ * positional (limit, client) signature and its callers stay untouched. Used by the report
+ * editor to show a report its own issued versions — without this, a generated PDF is only
+ * findable on the portfolio-wide Saved Reports card, with no route back from the report
+ * that produced it.
+ */
+export async function listReportArtifactsForSource(
+  sourceId: string,
+  limit = 20,
+  client: ReportArtifactsClient = defaultClient
+): Promise<{ data: ReportArtifactRow[]; error: string | null }> {
+  const { data, error } = await client
+    .from('report_artifacts')
+    .select('*')
+    .eq('source_id', sourceId)
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) return { data: [], error: error.message };

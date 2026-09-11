@@ -3,7 +3,6 @@ import { formatBuildingName } from '@/lib/buildingName';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBuildings } from '@/hooks/useBuildings';
-import { useIssues } from '@/hooks/useIssues';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,15 +20,16 @@ import { PRIORITY_OPTIONS } from '@/lib/constants';
 import type { IssuePriority } from '@/lib/constants';
 import { PageLoading } from '@/components/ui/loading-spinner';
 import { PhotoCapture, type PhotoFile } from '@/components/ui/photo-capture';
-import { supabase } from '@/integrations/supabase/client';
+import { enqueueAndRun } from '@/lib/offline/enqueueAndRun';
+import { toastForOutcome } from '@/lib/offline/outcomeToast';
 import { toast } from 'sonner';
+import { parseCost } from '@/lib/money';
 
 export default function NewIssue() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, isAdminOrManager } = useAuth();
   const { buildings, loading: buildingsLoading } = useBuildings();
-  const { createIssue } = useIssues({ autoFetch: false });
 
   // Form state
   const [title, setTitle] = useState('');
@@ -39,6 +39,9 @@ export default function NewIssue() {
   const [deadline, setDeadline] = useState('');
   const [correctiveAction, setCorrectiveAction] = useState('');
   const [photos, setPhotos] = useState<PhotoFile[]>([]);
+  // Admin/manager only (spec §8): a rough estimate at logging time; the actual cost is
+  // entered on the issue when the work is done.
+  const [estimatedCost, setEstimatedCost] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   // Set default building if only one exists
@@ -71,52 +74,43 @@ export default function NewIssue() {
       return;
     }
 
+    const estimate = isAdminOrManager ? parseCost(estimatedCost) : null;
+    if (estimate === undefined) {
+      toast.error('Estimated cost must be an amount of R 0 or more');
+      return;
+    }
+
     setSubmitting(true);
 
     try {
-      // Upload photos to Supabase Storage if any
-      let photoUrls: string[] = [];
-      
-      if (photos.length > 0) {
-        for (const photo of photos) {
-          // photos/<uid>/… in the private tenant-documents bucket — the only
-          // prefix a non-admin may write. (Previously building-logos, an
-          // admin-write-only PUBLIC bucket, so site users were denied and
-          // evidence leaked public when they weren't.)
-          const fileName = `photos/${user.id}/${Date.now()}-${crypto.randomUUID()}.jpg`;
-          const { error: uploadError } = await supabase.storage
-            .from('tenant-documents')
-            .upload(fileName, photo.file, { contentType: photo.file.type });
-
-          if (uploadError) {
-            throw new Error(`Photo upload failed: ${uploadError.message}`);
-          }
-
-          const { data: urlData } = supabase.storage
-            .from('tenant-documents')
-            .getPublicUrl(fileName);
-
-          if (urlData) {
-            photoUrls.push(urlData.publicUrl);
-          }
-        }
-      }
-
-      const issueId = await createIssue({
-        title: title.trim(),
-        description: description.trim(),
-        building_id: buildingId,
-        priority,
-        status: 'open',
-        deadline: deadline || null,
-        corrective_action: correctiveAction.trim() || null,
-        photo_urls: photoUrls.length > 0 ? photoUrls : null,
-        reported_by: user.id,
-        assigned_to: null,
-        task_instance_id: null,
+      // The insert and its photo upload run in the offline queue handler, now (online) or on
+      // replay (offline); photos land under photos/<uid>/… (see src/lib/photos.ts). The
+      // client-generated issue id makes a retry collide rather than duplicate.
+      const outcome = await enqueueAndRun(user.id, {
+        kind: 'issue_create',
+        issueId: crypto.randomUUID(),
+        row: {
+          title: title.trim(),
+          description: description.trim(),
+          priority,
+          status: 'open',
+          building_id: buildingId,
+          deadline: deadline || null,
+          corrective_action: correctiveAction.trim() || null,
+          reported_by: user.id,
+          assigned_to: null,
+          task_instance_id: null,
+          // Only admin/manager may write a cost; everyone else's row omits the column.
+          ...(isAdminOrManager ? { estimated_cost: estimate } : {}),
+        },
+        markTaskIssueLogged: null,
+      }, photos.map((p) => ({ file: p.file })));
+      toastForOutcome(outcome, {
+        synced: 'Issue reported successfully',
+        queued: "Issue saved on this device — it will be reported when you're back online",
       });
-
-      if (issueId) {
+      // A queued issue already shows on the list with a "Queued" chip, so leave the form either way.
+      if (outcome.status !== 'failed') {
         navigate('/issues');
       }
     } catch (error) {
@@ -242,6 +236,25 @@ export default function NewIssue() {
                 disabled={submitting}
               />
             </div>
+
+            {/* Estimated cost (admin/manager) */}
+            {isAdminOrManager && (
+              <div className="space-y-2">
+                <Label htmlFor="estimated-cost">Estimated cost (R) (Optional)</Label>
+                <Input
+                  id="estimated-cost"
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step="0.01"
+                  placeholder="0"
+                  className="h-11"
+                  value={estimatedCost}
+                  onChange={(e) => setEstimatedCost(e.target.value)}
+                  disabled={submitting}
+                />
+              </div>
+            )}
 
             {/* Photos */}
             <div className="space-y-2">

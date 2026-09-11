@@ -1,61 +1,90 @@
+import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { queryClient } from "@/lib/queryClient";
+import { PersistedQueryProvider } from "@/components/PersistedQueryProvider";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { HintsProvider } from "@/hooks/useHints";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { OrganizationThemeProvider } from "@/components/OrganizationThemeProvider";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import RouteFallback from "@/components/RouteFallback";
 
-// Pages
+// Pages. Public/auth pages, the role-shaped home and 404 are small and on the
+// first-paint path, so they stay in the shell chunk. Everything else is loaded on
+// demand: each `lazy()` becomes its own route chunk, which keeps the PWA's first
+// install small and lets heavy vendors (xlsx, pdfmake, mapbox-gl, recharts,
+// heic2any) download only when a page that needs them is opened.
 import Auth from "./pages/Auth";
 import SetPassword from "./pages/SetPassword";
 import ResetPassword from "./pages/ResetPassword";
 import Onboarding from "./pages/Onboarding";
-import Dashboard from "./pages/Dashboard";
-import Buildings from "./pages/Buildings";
-import BuildingForm from "./pages/BuildingForm";
-import BuildingDetails from "./pages/BuildingDetails";
-import Checklists from "./pages/Checklists";
-import Issues from "./pages/Issues";
-import NewIssue from "./pages/NewIssue";
-import MapView from "./pages/MapView";
-import Reports from "./pages/Reports";
-import FortressReportEditor from "./components/reports/fortress/FortressReportEditor";
-import FormsLibrary from "./pages/FormsLibrary";
-import MySignoffs from "./pages/MySignoffs";
-import UserManagement from "./pages/UserManagement";
-import Settings from "./pages/Settings";
-import Profile from "./pages/Profile";
+import RoleHome from "./pages/RoleHome";
 import NotFound from "./pages/NotFound";
+
+// MyDay is lazy because its task/issue dialogs pull PhotoCapture (heic2any).
+const MyDay = lazy(() => import("./pages/MyDay"));
+const Buildings = lazy(() => import("./pages/Buildings"));
+const BuildingForm = lazy(() => import("./pages/BuildingForm"));
+const BuildingDetails = lazy(() => import("./pages/BuildingDetails"));
+const Checklists = lazy(() => import("./pages/Checklists"));
+const CalendarPage = lazy(() => import("./pages/CalendarPage"));
+const Issues = lazy(() => import("./pages/Issues"));
+const NewIssue = lazy(() => import("./pages/NewIssue"));
+const MapView = lazy(() => import("./pages/MapView"));
+const Reports = lazy(() => import("./pages/Reports"));
+const FortressReportEditor = lazy(() => import("./components/reports/fortress/FortressReportEditor"));
+const FortressReports = lazy(() => import("./pages/FortressReports"));
+const Trends = lazy(() => import("./pages/Trends"));
+const FormsLibrary = lazy(() => import("./pages/FormsLibrary"));
+const MySignoffs = lazy(() => import("./pages/MySignoffs"));
+const Inbox = lazy(() => import("./pages/Inbox"));
+const UserManagement = lazy(() => import("./pages/UserManagement"));
+const Contractors = lazy(() => import("./pages/Contractors"));
+const Settings = lazy(() => import("./pages/Settings"));
+const Profile = lazy(() => import("./pages/Profile"));
+const SharePage = lazy(() => import("./pages/SharePage"));
+const IntakePage = lazy(() => import("./pages/IntakePage"));
 
 const App = () => (
   <ErrorBoundary>
-  <QueryClientProvider client={queryClient}>
+  <PersistedQueryProvider>
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
       <TooltipProvider>
         <Toaster />
         <Sonner />
         <BrowserRouter>
           <AuthProvider>
+            <HintsProvider>
             <OrganizationThemeProvider>
+            <Suspense fallback={<RouteFallback />}>
             <Routes>
               {/* Public routes (outside ProtectedRoute) */}
               <Route path="/auth" element={<Auth />} />
               <Route path="/set-password" element={<SetPassword />} />
               <Route path="/reset" element={<ResetPassword />} />
+              {/* Public share page (spec §5.8): no session; the token is the credential. Never wrap in ProtectedRoute. */}
+              <Route path="/share/:token" element={<SharePage />} />
+              {/* Tenant intake (R4c): public by design — the token in the URL is the credential and
+                  the tenant has no account. Never add /intake/ to the notification/push URL allowlists. */}
+              <Route path="/intake/:token" element={<IntakePage />} />
               {/* First-run gate target (needs a session; enforces its own
                   entry conditions — wrapping it in ProtectedRoute would loop) */}
               <Route path="/onboarding" element={<Onboarding />} />
 
             {/* Protected Routes with Dashboard Layout */}
+            {/* `/` is role-shaped: site roles land on My Day, managers on the dashboard. */}
             <Route path="/" element={
               <ProtectedRoute>
-                <DashboardLayout><Dashboard /></DashboardLayout>
+                <DashboardLayout><RoleHome /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/my-day" element={
+              <ProtectedRoute>
+                <DashboardLayout><MyDay /></DashboardLayout>
               </ProtectedRoute>
             } />
             <Route path="/buildings" element={
@@ -83,6 +112,12 @@ const App = () => (
                 <DashboardLayout><Checklists /></DashboardLayout>
               </ProtectedRoute>
             } />
+            {/* Every role: RLS scopes the events to the buildings the viewer can see. */}
+            <Route path="/calendar" element={
+              <ProtectedRoute>
+                <DashboardLayout><CalendarPage /></DashboardLayout>
+              </ProtectedRoute>
+            } />
             <Route path="/issues" element={
               <ProtectedRoute>
                 <DashboardLayout><Issues /></DashboardLayout>
@@ -103,9 +138,20 @@ const App = () => (
                 <DashboardLayout><Reports /></DashboardLayout>
               </ProtectedRoute>
             } />
+            {/* Static path first so it is never captured by the :id route below. */}
+            <Route path="/reports/fortress" element={
+              <ProtectedRoute>
+                <DashboardLayout><FortressReports /></DashboardLayout>
+              </ProtectedRoute>
+            } />
             <Route path="/reports/fortress/:id" element={
               <ProtectedRoute>
                 <DashboardLayout><FortressReportEditor /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            <Route path="/trends" element={
+              <ProtectedRoute allowedRoles={['admin', 'manager']}>
+                <DashboardLayout><Trends /></DashboardLayout>
               </ProtectedRoute>
             } />
             <Route path="/forms" element={
@@ -118,9 +164,21 @@ const App = () => (
                 <DashboardLayout><MySignoffs /></DashboardLayout>
               </ProtectedRoute>
             } />
+            <Route path="/inbox" element={
+              <ProtectedRoute>
+                <DashboardLayout><Inbox /></DashboardLayout>
+              </ProtectedRoute>
+            } />
             <Route path="/users" element={
               <ProtectedRoute allowedRoles={['admin']}>
                 <DashboardLayout><UserManagement /></DashboardLayout>
+              </ProtectedRoute>
+            } />
+            {/* The contractor register: reads are org-wide under RLS, but the page is a
+                management surface, so it is gated like Settings. */}
+            <Route path="/contractors" element={
+              <ProtectedRoute allowedRoles={['admin', 'manager']}>
+                <DashboardLayout><Contractors /></DashboardLayout>
               </ProtectedRoute>
             } />
             <Route path="/settings" element={
@@ -136,12 +194,14 @@ const App = () => (
             
             <Route path="*" element={<NotFound />} />
             </Routes>
+            </Suspense>
             </OrganizationThemeProvider>
+            </HintsProvider>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>
     </ThemeProvider>
-  </QueryClientProvider>
+  </PersistedQueryProvider>
   </ErrorBoundary>
 );
 

@@ -30,8 +30,6 @@ const ROLE_DESCRIPTIONS: Record<AppRole, string> = {
     'You can manage buildings, run compliance reports, and oversee checklists and issues across the portfolio.',
   user:
     'You can complete checklists, log and track issues, and view the buildings assigned to you.',
-  reviewer:
-    'You can review and sign off submitted forms and inspections for your assigned buildings.',
 };
 
 /**

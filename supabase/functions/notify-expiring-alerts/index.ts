@@ -1,3 +1,14 @@
+// Expiry alerts across four tables in one read: `expiring_items(30)` (R4a §5.6) returns building,
+// tenant and contractor documents, asset warranties and asset service dates that expire within
+// 30 days, expired rows included. The summary email lists everything in that window on every
+// run: expired and expiring documents/warranties, overdue service dates and service dates due
+// within 30 days. Inbox rows are narrower: `document_expiring` for the four document-shaped
+// kinds (a warranty row carries entity_type `asset`), `asset_service_due` for OVERDUE service
+// dates only (a due-soon service is email-only), and only on a milestone day —
+// `isNotifyMilestone` in ../_shared/expiry.ts: 30 / 14 / 7 / 1 / 0 days left, then every
+// seventh day after expiry — on top of the once-per-entity-per-SAST-day dedupe, so nobody gets
+// the same row every morning for a month.
+//
 // DEPLOY PREREQUISITES — this function is not on production yet, and the cron
 // path stays unauthorized until both of these are done:
 //   1. supabase secrets set EXPIRING_ALERTS_SECRET=<random> --project-ref qdzgkttiosahdfqresvz
@@ -10,8 +21,13 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import { Resend } from "https://esm.sh/resend@2.0.0";
 import { Branding, loadBranding, renderEmail } from "../_shared/email.ts";
 import { corsHeaders } from "../_shared/cors.ts";
+import { adminAndManagerIds, createNotifications } from "../_shared/notify.ts";
+import { KIND_LABELS, expiryPhrase, isNotifyMilestone, itemUrl, type ExpiringItem } from "../_shared/expiry.ts";
 
-const resend = new Resend(Deno.env.get("RESEND_API_KEY"));
+// Lazy: the Resend constructor throws without a key, which used to crash the whole function
+// at module load on projects that have no RESEND_API_KEY (staging). Inbox rows never need it.
+const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 const APP_URL = (Deno.env.get("APP_URL") ?? "https://buildingops.app").replace(/\/+$/, "");
 const ALERTS_SECRET = Deno.env.get("EXPIRING_ALERTS_SECRET");
 
@@ -40,30 +56,53 @@ function escapeHtml(s: unknown): string {
     .replace(/"/g, "&quot;");
 }
 
-interface ExpiringDocument {
-  id: string;
-  name: string;
-  document_type: string;
-  expiry_date: string;
-  building_name: string;
-  building_id: string;
-  days_until_expiry: number;
+/** Today in the operating timezone as `YYYY-MM-DD` ('en-CA' formats exactly that way). */
+function todayInJohannesburg(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Johannesburg",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
-interface OverdueMaintenance {
-  id: string;
-  name: string;
-  category: string;
-  next_service_date: string;
-  building_name: string;
-  building_id: string;
-  days_overdue: number;
+/**
+ * Midnight at the start of `today` (a `YYYY-MM-DD` from todayInJohannesburg) as an ISO instant,
+ * for the "already in the inbox today" check. South Africa has no daylight saving, so the
+ * offset is a constant +02:00 rather than a timezone lookup. Same helper as daily-digest.
+ */
+function startOfDayJohannesburgIso(today: string): string {
+  return new Date(`${today}T00:00:00+02:00`).toISOString();
 }
 
+/** Inbox title and body for any row: "<name> expires in 3 days", "<name> service overdue by 2 days". */
+function itemTitle(item: ExpiringItem): string {
+  return `${item.name} ${expiryPhrase(item)}`;
+}
+function itemBody(item: ExpiringItem): string {
+  return `${KIND_LABELS[item.kind]}${item.detail ? ` · ${item.detail}` : ""}`;
+}
+
+/**
+ * The email's "Where" column. A contractor document has no building (`building_id` and
+ * `building_name` are null) — its `detail` carries the company name, so that is shown instead.
+ */
+function whereOf(item: ExpiringItem): string {
+  if (item.building_name) return item.building_name;
+  if (item.kind === "contractor_document") return item.detail ?? "Contractor";
+  return "—";
+}
+
+/** The `expiring_items(30)` rows split the way the email and the inbox pass consume them. */
 interface AlertSummary {
-  expiringDocuments: ExpiringDocument[];
-  expiredDocuments: ExpiringDocument[];
-  overdueMaintenance: OverdueMaintenance[];
+  /** Documents and warranties with 0..30 days left. */
+  expiringDocuments: ExpiringItem[];
+  /** Documents and warranties past their date. */
+  expiredDocuments: ExpiringItem[];
+  /** Service dates past due — inbox rows and the email. */
+  overdueMaintenance: ExpiringItem[];
+  /** Service dates due within 30 days (today included) — email only, never an inbox row. */
+  dueSoonMaintenance: ExpiringItem[];
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -126,124 +165,158 @@ const handler = async (req: Request): Promise<Response> => {
       // No body or invalid JSON, use defaults
     }
 
-    const today = new Date();
-    const thirtyDaysFromNow = new Date(today);
-    thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+    console.log("Checking for expiring documents, warranties and overdue maintenance...");
 
-    console.log("Checking for expiring documents and overdue maintenance...");
-    console.log(`Today: ${today.toISOString()}`);
-    console.log(`30 days from now: ${thirtyDaysFromNow.toISOString()}`);
-
-    // Fetch expiring documents (expiring within 30 days or already expired)
-    const { data: documents, error: docError } = await supabase
-      .from("building_documents")
-      .select(`
-        id,
-        name,
-        document_type,
-        expiry_date,
-        buildings!inner(id, name)
-      `)
-      .not("expiry_date", "is", null)
-      .lte("expiry_date", thirtyDaysFromNow.toISOString().split("T")[0])
-      .order("expiry_date", { ascending: true });
-
-    if (docError) {
-      console.error("Error fetching documents:", docError);
-      throw docError;
+    // One read for every expiry source (building/tenant/contractor documents, asset warranties, service
+    // dates): expiring_items(30) is security invoker, and the service role sees every row. Asset service
+    // dates split on days_left: negative is overdue (inbox rows + email), zero or positive is "due soon",
+    // which the email lists (the same 30-day window the digest counts) but the inbox does not — the
+    // inbox keeps its old meaning: overdue service.
+    const { data: expiring, error: expErr } = await supabase.rpc("expiring_items", { p_days: 30 });
+    if (expErr) {
+      console.error("Error reading expiring items:", expErr);
+      throw expErr;
     }
+    const items = (expiring ?? []) as ExpiringItem[];
+    console.log(`Found ${items.length} expiring items within 30 days (incl. expired)`);
 
-    console.log(`Found ${documents?.length || 0} documents expiring soon or expired`);
-
-    // Fetch overdue maintenance (assets with next_service_date in the past)
-    const { data: assets, error: assetError } = await supabase
-      .from("building_assets")
-      .select(`
-        id,
-        name,
-        category,
-        next_service_date,
-        buildings!inner(id, name)
-      `)
-      .not("next_service_date", "is", null)
-      .lt("next_service_date", today.toISOString().split("T")[0])
-      .order("next_service_date", { ascending: true });
-
-    if (assetError) {
-      console.error("Error fetching assets:", assetError);
-      throw assetError;
-    }
-
-    console.log(`Found ${assets?.length || 0} assets with overdue maintenance`);
-
-    // Process documents
-    const expiringDocuments: ExpiringDocument[] = [];
-    const expiredDocuments: ExpiringDocument[] = [];
-
-    for (const doc of documents || []) {
-      const expiryDate = new Date(doc.expiry_date);
-      const diffTime = expiryDate.getTime() - today.getTime();
-      const daysUntilExpiry = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      
-      const building = (doc.buildings as unknown) as { id: string; name: string };
-      
-      const docInfo: ExpiringDocument = {
-        id: doc.id,
-        name: doc.name,
-        document_type: doc.document_type,
-        expiry_date: doc.expiry_date,
-        building_name: building.name,
-        building_id: building.id,
-        days_until_expiry: daysUntilExpiry,
-      };
-
-      if (daysUntilExpiry < 0) {
-        expiredDocuments.push(docInfo);
-      } else {
-        expiringDocuments.push(docInfo);
-      }
-    }
-
-    // Process overdue maintenance
-    const overdueMaintenance: OverdueMaintenance[] = [];
-
-    for (const asset of assets || []) {
-      const serviceDate = new Date(asset.next_service_date);
-      const diffTime = today.getTime() - serviceDate.getTime();
-      const daysOverdue = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      
-      const building = (asset.buildings as unknown) as { id: string; name: string };
-      
-      overdueMaintenance.push({
-        id: asset.id,
-        name: asset.name,
-        category: asset.category,
-        next_service_date: asset.next_service_date,
-        building_name: building.name,
-        building_id: building.id,
-        days_overdue: daysOverdue,
-      });
+    const expiringDocuments: ExpiringItem[] = [];
+    const expiredDocuments: ExpiringItem[] = [];
+    const overdueMaintenance: ExpiringItem[] = [];
+    const dueSoonMaintenance: ExpiringItem[] = [];
+    for (const it of items) {
+      if (it.kind === "asset_service") (it.days_left < 0 ? overdueMaintenance : dueSoonMaintenance).push(it);
+      else (it.days_left < 0 ? expiredDocuments : expiringDocuments).push(it);
     }
 
     const alertSummary: AlertSummary = {
       expiringDocuments,
       expiredDocuments,
       overdueMaintenance,
+      dueSoonMaintenance,
     };
 
-    const totalAlerts = expiringDocuments.length + expiredDocuments.length + overdueMaintenance.length;
+    const totalAlerts = expiringDocuments.length + expiredDocuments.length + overdueMaintenance.length + dueSoonMaintenance.length;
     console.log(`Total alerts: ${totalAlerts}`);
 
     // If no alerts, return early. The summary itself is never returned to any
     // caller — it is portfolio-wide confidential data.
     if (totalAlerts === 0) {
       console.log("No alerts to send");
-      return json({ success: true, totalAlerts: 0, recipientCount: 0 });
+      return json({
+        success: true,
+        dryRun,
+        totalAlerts: 0,
+        recipientCount: 0,
+        inboxRows: 0,
+        inboxAlreadyToday: 0,
+        inboxOffMilestone: 0,
+        inboxFailed: 0,
+      });
     }
 
+    // ---- Inbox pass ---------------------------------------------------------------------
+    // One `document_expiring` / `asset_service_due` row per admin and manager per item per day,
+    // so the same alerts the summary email lists are also in the in-app inbox (R3a Task 6).
+    // `document_expiring` covers all four document-shaped kinds; the row's entity_type and url
+    // follow the kind (a warranty is an `asset` row deep-linking to the assets tab, a contractor
+    // document has no building and opens the contractor register).
+    // Both kinds are DIGEST_ONLY in notifyRules.ts, so createNotifications writes the row and
+    // sends no per-item email — the summary email below stays the only email this function
+    // sends. `notifyAdmins` governs that email only; inbox rows are written regardless of it,
+    // because the inbox is the ledger. Only `dryRun` skips this pass.
+    // Cadence: an item only gets a row on a milestone day (isNotifyMilestone — 30/14/7/1/0 days
+    // left, then every seventh day past expiry); the rest of the window it is email-only. That
+    // is deterministic on days_left, so a missed cron day simply skips that milestone.
+    // Idempotent per entity per day: a cron re-run (or a manual retry from the app) must not
+    // duplicate rows, so an item is skipped when a row of that kind for that entity already
+    // exists since midnight in Johannesburg. Per-item failures are logged and counted, never
+    // thrown, so one bad row cannot cost anyone the summary email.
+    let inboxRows = 0;
+    let inboxAlreadyToday = 0;
+    let inboxOffMilestone = 0;
+    let inboxFailed = 0;
+
+    if (!dryRun) {
+      const inboxRecipients = await adminAndManagerIds(supabase);
+      if (inboxRecipients.length === 0) {
+        console.warn("No admin/manager recipients for inbox rows");
+      } else {
+        const sinceMidnight = startOfDayJohannesburgIso(todayInJohannesburg());
+        // Branding is only used for the (never sent) email `from` line here, but loading it
+        // once keeps createNotifications from re-reading it for every item.
+        const inboxBranding = await loadBranding(supabase);
+
+        type InboxItem = {
+          kind: "document_expiring" | "asset_service_due";
+          entityType: "document" | "asset";
+          entityId: string;
+          buildingId: string | null;
+          title: string;
+          body: string | null;
+          url: string;
+        };
+        const toInbox = (it: ExpiringItem): InboxItem => ({
+          kind: it.kind === "asset_service" ? "asset_service_due" : "document_expiring",
+          entityType: it.entity_type,
+          entityId: it.entity_id,
+          buildingId: it.building_id,
+          title: itemTitle(it),
+          body: itemBody(it),
+          url: itemUrl(it),
+        });
+        const inboxCandidates = [...expiredDocuments, ...expiringDocuments, ...overdueMaintenance];
+        const inboxItems: InboxItem[] = [];
+        for (const it of inboxCandidates) {
+          if (isNotifyMilestone(it.days_left)) inboxItems.push(toInbox(it));
+          else inboxOffMilestone++;
+        }
+
+        for (const item of inboxItems) {
+          try {
+            const { count: alreadyToday, error: dupErr } = await supabase
+              .from("notifications")
+              .select("id", { count: "exact", head: true })
+              .eq("kind", item.kind)
+              .eq("entity_id", item.entityId)
+              .gte("created_at", sinceMidnight);
+            if (dupErr) throw new Error(`Could not check today's notifications: ${dupErr.message}`);
+            if ((alreadyToday ?? 0) > 0) { inboxAlreadyToday++; continue; }
+
+            const result = await createNotifications(supabase, {
+              recipients: inboxRecipients,
+              actorId: null,
+              actorName: null,
+              kind: item.kind,
+              entityType: item.entityType,
+              entityId: item.entityId,
+              buildingId: item.buildingId,
+              title: item.title,
+              body: item.body,
+              url: item.url,
+            }, inboxBranding);
+            inboxRows += result.inserted;
+          } catch (e) {
+            console.error("notify-expiring-alerts: inbox row failed", item.kind, item.entityId, e);
+            inboxFailed++;
+          }
+        }
+      }
+      console.log(`Inbox rows: ${inboxRows} written, ${inboxAlreadyToday} already today, ${inboxOffMilestone} off-milestone (email only), ${inboxFailed} failed`);
+    }
+
+    // ---- Email pass ---------------------------------------------------------------------
+    // `recipientCount` is the number of people an email actually went out to (or would go
+    // out to on a dry run). Without a Resend key nothing can be sent, so the whole block is
+    // skipped and the count stays 0 — checking inside the recipient loop used to report N
+    // recipients after zero sends.
     let recipientCount = 0;
 
-    if (notifyAdmins) {
+    if (!notifyAdmins) {
+      // Caller asked for inbox rows only.
+    } else if (!resend) {
+      console.warn("RESEND_API_KEY not set; alert email skipped");
+    } else {
       const { data: roleRows, error: roleError } = await supabase
         .from("user_roles")
         .select("user_id")
@@ -314,6 +387,10 @@ const handler = async (req: Request): Promise<Response> => {
       dryRun,
       totalAlerts,
       recipientCount,
+      inboxRows,
+      inboxAlreadyToday,
+      inboxOffMilestone,
+      inboxFailed,
     });
   } catch (error) {
     console.error("Error in notify-expiring-alerts:", error);
@@ -322,7 +399,9 @@ const handler = async (req: Request): Promise<Response> => {
 };
 
 function generateAlertEmailHtml(branding: Branding, recipientName: string, alerts: AlertSummary): string {
-  const { expiringDocuments, expiredDocuments, overdueMaintenance } = alerts;
+  const { expiringDocuments, expiredDocuments, overdueMaintenance, dueSoonMaintenance } = alerts;
+  const nameCell = (it: ExpiringItem) =>
+    `${escapeHtml(it.name)}<br><span style="font-size: 12px; color: #9ca3af;">${escapeHtml(itemBody(it))}</span>`;
 
   let html = `
               <p style="margin: 0 0 24px; color: #6b7280; font-size: 14px;">
@@ -339,16 +418,16 @@ function generateAlertEmailHtml(branding: Branding, recipientName: string, alert
                 <table width="100%" cellpadding="0" cellspacing="0" style="border: 1px solid #fecaca; border-radius: 8px; overflow: hidden;">
                   <tr style="background-color: #fef2f2;">
                     <th style="padding: 12px; text-align: left; font-size: 12px; color: #991b1b; font-weight: 600;">Document</th>
-                    <th style="padding: 12px; text-align: left; font-size: 12px; color: #991b1b; font-weight: 600;">Building</th>
+                    <th style="padding: 12px; text-align: left; font-size: 12px; color: #991b1b; font-weight: 600;">Where</th>
                     <th style="padding: 12px; text-align: left; font-size: 12px; color: #991b1b; font-weight: 600;">Expired</th>
                   </tr>`;
     
     for (const doc of expiredDocuments) {
       html += `
                   <tr style="border-top: 1px solid #fecaca;">
-                    <td style="padding: 12px; font-size: 14px; color: #374151;">${escapeHtml(doc.name)}</td>
-                    <td style="padding: 12px; font-size: 14px; color: #6b7280;">${escapeHtml(doc.building_name)}</td>
-                    <td style="padding: 12px; font-size: 14px; color: #dc2626; font-weight: 500;">${Math.abs(doc.days_until_expiry)} days ago</td>
+                    <td style="padding: 12px; font-size: 14px; color: #374151;">${nameCell(doc)}</td>
+                    <td style="padding: 12px; font-size: 14px; color: #6b7280;">${escapeHtml(whereOf(doc))}</td>
+                    <td style="padding: 12px; font-size: 14px; color: #dc2626; font-weight: 500;">${-doc.days_left} days ago</td>
                   </tr>`;
     }
     
@@ -367,16 +446,16 @@ function generateAlertEmailHtml(branding: Branding, recipientName: string, alert
                 <table width="100%" cellpadding="0" cellspacing="0" style="border: 1px solid #fde68a; border-radius: 8px; overflow: hidden;">
                   <tr style="background-color: #fffbeb;">
                     <th style="padding: 12px; text-align: left; font-size: 12px; color: #92400e; font-weight: 600;">Document</th>
-                    <th style="padding: 12px; text-align: left; font-size: 12px; color: #92400e; font-weight: 600;">Building</th>
+                    <th style="padding: 12px; text-align: left; font-size: 12px; color: #92400e; font-weight: 600;">Where</th>
                     <th style="padding: 12px; text-align: left; font-size: 12px; color: #92400e; font-weight: 600;">Expires In</th>
                   </tr>`;
     
     for (const doc of expiringDocuments) {
       html += `
                   <tr style="border-top: 1px solid #fde68a;">
-                    <td style="padding: 12px; font-size: 14px; color: #374151;">${escapeHtml(doc.name)}</td>
-                    <td style="padding: 12px; font-size: 14px; color: #6b7280;">${escapeHtml(doc.building_name)}</td>
-                    <td style="padding: 12px; font-size: 14px; color: #d97706; font-weight: 500;">${doc.days_until_expiry} days</td>
+                    <td style="padding: 12px; font-size: 14px; color: #374151;">${nameCell(doc)}</td>
+                    <td style="padding: 12px; font-size: 14px; color: #6b7280;">${escapeHtml(whereOf(doc))}</td>
+                    <td style="padding: 12px; font-size: 14px; color: #d97706; font-weight: 500;">${doc.days_left === 0 ? "today" : `${doc.days_left} days`}</td>
                   </tr>`;
     }
     
@@ -395,19 +474,47 @@ function generateAlertEmailHtml(branding: Branding, recipientName: string, alert
                 <table width="100%" cellpadding="0" cellspacing="0" style="border: 1px solid #c4b5fd; border-radius: 8px; overflow: hidden;">
                   <tr style="background-color: #f5f3ff;">
                     <th style="padding: 12px; text-align: left; font-size: 12px; color: #5b21b6; font-weight: 600;">Asset</th>
-                    <th style="padding: 12px; text-align: left; font-size: 12px; color: #5b21b6; font-weight: 600;">Building</th>
+                    <th style="padding: 12px; text-align: left; font-size: 12px; color: #5b21b6; font-weight: 600;">Where</th>
                     <th style="padding: 12px; text-align: left; font-size: 12px; color: #5b21b6; font-weight: 600;">Overdue</th>
                   </tr>`;
     
     for (const asset of overdueMaintenance) {
       html += `
                   <tr style="border-top: 1px solid #c4b5fd;">
-                    <td style="padding: 12px; font-size: 14px; color: #374151;">${escapeHtml(asset.name)}</td>
-                    <td style="padding: 12px; font-size: 14px; color: #6b7280;">${escapeHtml(asset.building_name)}</td>
-                    <td style="padding: 12px; font-size: 14px; color: #7c3aed; font-weight: 500;">${asset.days_overdue} days</td>
+                    <td style="padding: 12px; font-size: 14px; color: #374151;">${nameCell(asset)}</td>
+                    <td style="padding: 12px; font-size: 14px; color: #6b7280;">${escapeHtml(whereOf(asset))}</td>
+                    <td style="padding: 12px; font-size: 14px; color: #7c3aed; font-weight: 500;">${-asset.days_left} days</td>
                   </tr>`;
     }
     
+    html += `
+                </table>
+              </div>`;
+  }
+
+  // Service Due Soon Section (email only — no inbox rows for these)
+  if (dueSoonMaintenance.length > 0) {
+    html += `
+              <div style="margin-bottom: 24px;">
+                <h2 style="margin: 0 0 16px; color: #2563eb; font-size: 16px; font-weight: 600;">
+                  🗓️ Service Due Soon (${dueSoonMaintenance.length})
+                </h2>
+                <table width="100%" cellpadding="0" cellspacing="0" style="border: 1px solid #bfdbfe; border-radius: 8px; overflow: hidden;">
+                  <tr style="background-color: #eff6ff;">
+                    <th style="padding: 12px; text-align: left; font-size: 12px; color: #1e40af; font-weight: 600;">Asset</th>
+                    <th style="padding: 12px; text-align: left; font-size: 12px; color: #1e40af; font-weight: 600;">Where</th>
+                    <th style="padding: 12px; text-align: left; font-size: 12px; color: #1e40af; font-weight: 600;">Due In</th>
+                  </tr>`;
+
+    for (const asset of dueSoonMaintenance) {
+      html += `
+                  <tr style="border-top: 1px solid #bfdbfe;">
+                    <td style="padding: 12px; font-size: 14px; color: #374151;">${nameCell(asset)}</td>
+                    <td style="padding: 12px; font-size: 14px; color: #6b7280;">${escapeHtml(whereOf(asset))}</td>
+                    <td style="padding: 12px; font-size: 14px; color: #2563eb; font-weight: 500;">${asset.days_left === 0 ? "today" : `${asset.days_left} days`}</td>
+                  </tr>`;
+    }
+
     html += `
                 </table>
               </div>`;

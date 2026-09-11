@@ -41,6 +41,8 @@ export interface ElecComplianceRow {
   coc_number: string | null; coc_type: string | null; coc_status: string | null;
   coc_issue_date: string | null; coc_expiry_date: string | null;
   certificate_url: string | null; certificate_name: string | null;
+  /** 'document' | 'shop' — which source supplied the CoC block (see sql/2026-08-31_02). */
+  coc_source?: string | null;
 }
 export interface ElecCompliance { linked: boolean; fetched_at: string; rows: ElecComplianceRow[]; }
 

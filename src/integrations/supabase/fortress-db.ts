@@ -79,8 +79,10 @@ export type YesNoNa = 'yes' | 'no' | 'na';
 export type ConditionRating = 'good' | 'fair' | 'poor' | 'critical';
 export type ActionRequired = 'none' | 'within_3_months' | 'immediate';
 
-export const REPORT_TYPE_LABELS: Record<ReportType, string> = {
-  ops_monthly: 'Monthly OPS Report',
-  cm_monthly: 'Monthly CM Report',
-  annual_inspection: 'Annual Inspection',
-};
+/**
+ * One label map for the whole product. It lives in `_shared/distribution.ts` because the
+ * `report-distribution` edge function writes these names into email subjects and reminder
+ * notifications; the app must show the same words, so this is a re-export, never a second copy
+ * (`src/lib/reportSchedule.ts` re-exports the same module for the Settings card).
+ */
+export { REPORT_TYPE_LABELS } from '../../../supabase/functions/_shared/distribution';

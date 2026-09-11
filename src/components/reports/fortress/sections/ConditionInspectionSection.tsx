@@ -12,7 +12,8 @@ import { cn } from '@/lib/utils';
 import { SectionCard } from '../SectionCard';
 import { SignedImage } from '@/components/ui/signed-image';
 import { openStorageFile } from '@/integrations/supabase/storage';
-import { supabase } from '@/integrations/supabase/client';
+import { PhotoCapture, type PhotoFile } from '@/components/ui/photo-capture';
+import { uploadPhotoPaths, inspectionPhotoPrefix } from '@/lib/photos';
 import { toast } from 'sonner';
 import { useInspectionSection, type PhotoRef } from '@/hooks/useInspectionSection';
 import type { ConditionRating, InspectionTemplateItem } from '@/integrations/supabase/fortress-db';
@@ -30,13 +31,24 @@ const detailStr = (v: unknown): string => (v == null ? '' : String(v));
 const isFlagged = (c: unknown) => c === 'poor' || c === 'critical';
 
 export default function ConditionInspectionSection({ reportId, buildingId, readOnly }: SectionProps) {
-  const { items, responses, isLoading, setResponse } = useInspectionSection(reportId, buildingId, 'annual');
+  const { items, responses, isLoading, setResponse } = useInspectionSection(reportId, buildingId, 'annual', readOnly);
   const [active, setActive] = useState<string | null>(null);
 
-  const addPhoto = async (it: InspectionTemplateItem, file: File) => {
-    const path = `documents/${buildingId}/annual/${it.section_no}/${crypto.randomUUID()}.jpg`;
-    const { error } = await supabase.storage.from('tenant-documents').upload(path, file, { contentType: file.type || 'image/jpeg', upsert: true });
-    if (error) { if (import.meta.env.DEV) console.error('photo upload:', error); toast.error('Photo upload failed.'); return; }
+  // Inspection photos store storage PATHS (not URLs) under documents/<building>/annual/<section>/
+  // — written by admins/managers, see src/lib/photos.ts. Upload failures toast rather than throw
+  // because this is an auto-saving field, not a submit.
+  const addPhoto = async (it: InspectionTemplateItem, photo: PhotoFile) => {
+    let path: string;
+    try {
+      // String(): section_no is nullable in the type; the old path interpolated it the same way.
+      [path] = await uploadPhotoPaths([photo], { prefix: inspectionPhotoPrefix(buildingId, String(it.section_no)) });
+    } catch (error) {
+      if (import.meta.env.DEV) console.error('photo upload:', error);
+      toast.error('Photo upload failed.');
+      return;
+    } finally {
+      URL.revokeObjectURL(photo.preview);
+    }
     const existing = (responses[it.id]?.photo_urls as unknown as PhotoRef[] | undefined) ?? [];
     await setResponse(it.id, { photo_urls: [...existing, { ref: `${it.section_no}.${existing.length + 1}`, caption: it.item_label, path }] });
   };
@@ -183,10 +195,15 @@ export default function ConditionInspectionSection({ reportId, buildingId, readO
                 </button>
               ))}
               {!readOnly && (
-                <label className="flex h-16 w-16 cursor-pointer items-center justify-center rounded border border-dashed text-xs text-muted-foreground hover:bg-muted">
-                  + Photo
-                  <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) addPhoto(it, f); e.currentTarget.value = ''; }} />
-                </label>
+                // photos stays [] so the control resets after each pick; the picked photo is
+                // uploaded straight away and rendered from the saved response above.
+                <PhotoCapture
+                  photos={[]}
+                  maxPhotos={1}
+                  size="sm"
+                  showCount={false}
+                  onPhotosChange={(ps) => { if (ps[0]) void addPhoto(it, ps[0]); }}
+                />
               )}
             </div>
           </div>
@@ -198,7 +215,7 @@ export default function ConditionInspectionSection({ reportId, buildingId, readO
   return (
     <SectionCard
       title="Condition Inspection"
-      hint="Annual inspection across 33 sections. Pick a section; each item shows its own field set plus condition, recommendation and capex."
+      hint="Annual inspection across 33 sections. Pick a section; each item shows its own field set plus condition, recommendation and capex. Changes save automatically, and photos you attach print in the exported PDF."
       headerAccessory={totalFlagged > 0 ? <Badge variant="destructive">{totalFlagged} flagged</Badge> : undefined}
     >
       {isLoading ? (

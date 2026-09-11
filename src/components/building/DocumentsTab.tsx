@@ -15,6 +15,7 @@ import {
   type GroupBy,
 } from './documents/filterDocuments';
 import { resolveDocUrl } from './documents/resolveDocUrl';
+import { csvText, type CsvColumn } from '@/lib/exportCsv';
 import type { UnifiedDocument, BuildingDocumentRow } from './documents/types';
 import DocumentsToolbar from './DocumentsToolbar';
 import DocumentsTable from './DocumentsTable';
@@ -26,6 +27,21 @@ interface DocumentsTabProps {
 }
 
 const METRIC = 'rounded-md bg-muted/50 px-4 py-3';
+
+const docText = csvText;
+
+/** The register as a spreadsheet: one row per document on screen, both sources together. */
+export const DOCUMENT_CSV_COLUMNS: CsvColumn<UnifiedDocument>[] = [
+  { key: 'name', header: 'Name' },
+  { key: 'type', header: 'Type' },
+  { key: 'scope', header: 'Scope' },
+  { key: 'shopNumber', header: 'Shop number', format: docText },
+  { key: 'tenantName', header: 'Tenant', format: docText },
+  { key: 'issueDate', header: 'Issue date', format: docText },
+  { key: 'expiryDate', header: 'Expiry date', format: docText },
+  { key: 'status', header: 'Status', format: (_v, row) => row.status.label },
+  { key: 'source', header: 'Source' },
+];
 
 export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
   const { isAdminOrManager, user } = useAuth();
@@ -39,6 +55,11 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<UnifiedDocument | null>(null);
+
+  // An insight-linker failure must never be reported as "0 documents". unifyDocuments
+  // optional-chains every field, so an errored query silently contributes zero rows and
+  // the tiles — including "Need attention" — render a confident, wrong zero.
+  const ilFailed = il.isError;
 
   const managedRows = (list.data ?? []) as BuildingDocumentRow[];
   const all = useMemo(() => unifyDocuments(managedRows, il.data), [managedRows, il.data]);
@@ -156,10 +177,20 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
 
   return (
     <div className="space-y-4">
+      {ilFailed && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm">
+          <p className="font-medium text-destructive">Insight-linker documents could not be loaded.</p>
+          <p className="mt-1 text-muted-foreground">
+            The counts below cover only documents managed here. {(il.error as Error)?.message ?? 'Please try again.'}
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className={METRIC}>
           <div className="text-xs text-muted-foreground">All documents</div>
-          <div className="text-2xl font-medium">{all.length}</div>
+          {/* A count that silently excludes a failed source is a wrong count, not a partial one. */}
+          <div className="text-2xl font-medium">{ilFailed ? '—' : all.length}</div>
         </div>
         <div className={METRIC}>
           <div className="text-xs text-muted-foreground">Managed here</div>
@@ -168,13 +199,13 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
         <div className={METRIC}>
           <div className="text-xs text-muted-foreground">Insight-linker</div>
           <div className="text-2xl font-medium">
-            {ilCount}
+            {ilFailed ? <span className="text-destructive">—</span> : ilCount}
             {il.isLoading ? '…' : ''}
           </div>
         </div>
         <div className={METRIC}>
           <div className="text-xs text-muted-foreground">Need attention</div>
-          <div className="text-2xl font-medium text-destructive">{needAttentionCount(all)}</div>
+          <div className="text-2xl font-medium text-destructive">{ilFailed ? '—' : needAttentionCount(all)}</div>
         </div>
       </div>
 
@@ -191,6 +222,8 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
           setEditing(null);
           setFormOpen(true);
         }}
+        exportRows={flat}
+        exportColumns={DOCUMENT_CSV_COLUMNS}
       />
 
       {isAdminOrManager && selected.size > 0 && (

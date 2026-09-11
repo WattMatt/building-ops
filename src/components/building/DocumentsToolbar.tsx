@@ -2,6 +2,8 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Search, Plus } from 'lucide-react';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
+import type { CsvColumn } from '@/lib/exportCsv';
 import type { DocFilters, GroupBy } from './documents/filterDocuments';
 import type { UnifiedDocument } from './documents/types';
 
@@ -15,6 +17,9 @@ interface Props {
   docs: UnifiedDocument[]; // unfiltered, for building filter option lists
   canAdd: boolean;
   onAdd: () => void;
+  /** The documents currently on screen (after search + filters) — exactly what the CSV gets. */
+  exportRows: UnifiedDocument[];
+  exportColumns: CsvColumn<UnifiedDocument>[];
 }
 
 const STATUS_OPTIONS = [
@@ -35,6 +40,8 @@ export default function DocumentsToolbar({
   docs,
   canAdd,
   onAdd,
+  exportRows,
+  exportColumns,
 }: Props) {
   const types = Array.from(new Map(docs.map((d) => [d.typeValue, d.type])).entries()).sort((a, b) =>
     a[1].localeCompare(b[1]),
@@ -130,6 +137,8 @@ export default function DocumentsToolbar({
           </SelectContent>
         </Select>
       </div>
+
+      <ExportCsvButton rows={exportRows} columns={exportColumns} filename="documents" />
 
       {canAdd && (
         <Button onClick={onAdd}>

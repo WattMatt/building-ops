@@ -29,12 +29,14 @@ type Row = { id?: string; hazard?: string | null; corrective_action?: string | n
 
 export default function HazardLogSection({ reportId, buildingId, readOnly }: SectionProps) {
   const qc = useQueryClient();
-  const key = ['fortress-hazard-log', reportId];
+  // readOnly is part of the key: the read-only result deliberately has no assessment row,
+  // so reopening the report as a draft must refetch rather than reuse it.
+  const key = ['fortress-hazard-log', reportId, readOnly];
 
   const query = useQuery({
     queryKey: key,
     enabled: !!reportId && !!buildingId,
-    queryFn: async (): Promise<{ assessmentId: string; rows: Row[] }> => {
+    queryFn: async (): Promise<{ assessmentId: string | null; rows: Row[] }> => {
       // Ensure one assessment per report (same contract as useComplianceSection).
       let { data: assessment } = await fdb
         .from('compliance_assessments')
@@ -42,6 +44,8 @@ export default function HazardLogSection({ reportId, buildingId, readOnly }: Sec
         .eq('report_id', reportId)
         .maybeSingle();
       if (!assessment) {
+        // Reading a report must never write to it (same contract as useComplianceSection).
+        if (readOnly) return { assessmentId: null, rows: [] };
         const { data: tpl, error: tErr } = await fdb
           .from('compliance_templates')
           .select('id')

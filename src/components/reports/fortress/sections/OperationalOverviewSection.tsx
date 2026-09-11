@@ -8,6 +8,11 @@ import { useReportSection } from '@/hooks/useReportSection';
 import type { ReportNarrative } from '@/integrations/supabase/fortress-db';
 import type { SectionProps } from './types';
 
+// This list is not just what the section renders — saveAll() deletes any report_narratives
+// row whose id is absent from the payload, and the payload is built from these keys alone.
+// So a narrative stored under a key that is missing here is destroyed the first time anyone
+// saves this section, silently. Adding a key here is therefore how you make ingested data
+// both visible AND safe; never leave a key in the database that is not in this list.
 const CATEGORIES: { key: string; label: string }[] = [
   { key: 'structural', label: 'Structural' },
   { key: 'cosmetic', label: 'Cosmetic' },
@@ -19,6 +24,7 @@ const CATEGORIES: { key: string; label: string }[] = [
   { key: 'fire', label: 'Fire' },
   { key: 'tenant_movements', label: 'Tenant Movements' },
   { key: 'hvac', label: 'HVAC' },
+  { key: 'lifts_escalators', label: 'Lifts, Hoists & Escalators' },
   { key: 'signage', label: 'Signage' },
   { key: 'project_items', label: 'Project / Maintenance Items' },
   { key: 'building_overview', label: 'Building Overview' },

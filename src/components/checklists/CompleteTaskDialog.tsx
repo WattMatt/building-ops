@@ -1,13 +1,15 @@
 import { useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { enqueueAndRun } from '@/lib/offline/enqueueAndRun';
+import { toastForOutcome } from '@/lib/offline/outcomeToast';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Textarea } from '@/components/ui/textarea';
@@ -76,83 +78,30 @@ export default function CompleteTaskDialog({
     setLoading(true);
 
     try {
-      // Upload photos if any. Path MUST be photos/<uid>/… — the only
-      // tenant-documents prefix a non-admin may write (storage policy
-      // "td write own photos"). A failed upload throws rather than silently
-      // dropping compliance evidence the user believes they attached.
-      const photoUrls: string[] = [];
-      for (const photo of photos) {
-        const fileName = `photos/${user.id}/${Date.now()}-${photo.file.name}`;
-        const { error: uploadError } = await supabase.storage
-          .from('tenant-documents')
-          .upload(fileName, photo.file);
-
-        if (uploadError) {
-          throw new Error(`Photo upload failed: ${uploadError.message}`);
-        }
-
-        // Stored as a public-style URL; resolveStorageUrl re-signs it for the
-        // private bucket at display time (mirrors the forms/reports pattern).
-        const { data: urlData } = supabase.storage
-          .from('tenant-documents')
-          .getPublicUrl(fileName);
-
-        if (urlData) {
-          photoUrls.push(urlData.publicUrl);
-        }
-      }
-
-      // Create task completion record. task_completions has a unique index on
-      // task_instance_id, so a double-click or a retry after a flaky network
-      // must be treated as already-done (23505 / DO NOTHING) rather than a
-      // failure — otherwise the status update below never runs and the
-      // instance is stranded at 'pending'.
-      const { data: inserted, error: completionError } = await supabase
-        .from('task_completions')
-        .upsert(
-          {
-            task_instance_id: taskId,
-            completed_by: user.id,
-            notes: notes.trim() || null,
-            signature_confirmed: signatureConfirmed,
-            photo_urls: photoUrls,
-          },
-          { onConflict: 'task_instance_id', ignoreDuplicates: true }
-        )
-        .select('id');
-
-      if (completionError) throw completionError;
-
-      // Zero rows back means the conflict target already had a completion, so
-      // this submission was ignored. Say so rather than implying the notes and
-      // photos just captured were saved, and leave the existing completer's
-      // stamp on the instance intact.
-      if (!inserted || inserted.length === 0) {
+      // Every completion goes through the offline queue, on- and offline: the op (photos
+      // included) is persisted first, then replayed at once when the browser is online. The
+      // complete_task RPC does the completion insert and the instance status flip in one
+      // statement, keyed on a client-generated completion id so a retry after a flaky network
+      // is a no-op the server reports as already_completed. An RLS denial arrives as a failed
+      // outcome carrying the server's message.
+      const outcome = await enqueueAndRun(user.id, {
+        kind: 'task_complete', completionId: crypto.randomUUID(), taskInstanceId: taskId, taskName,
+        notes: notes.trim() || null, signatureConfirmed,
+      }, photos.map((p) => ({ file: p.file })));
+      if (outcome.status === 'synced' && (outcome.result as { already_completed?: boolean } | null)?.already_completed) {
+        // Someone else got there first, so this submission's notes and photos were not saved.
         toast.info('This task was already completed by someone else — your notes were not saved.');
+      } else {
+        toastForOutcome(outcome, {
+          synced: 'Task completed successfully',
+          queued: "Task saved on this device — it will complete when you're back online",
+        });
+      }
+      if (outcome.status !== 'failed') {
         resetForm();
         onOpenChange(false);
         onSuccess?.();
-        return;
       }
-
-      // Update task status to completed. Stamp completed_at/completed_by on the
-      // instance too — Reports and the dashboard "completed today" KPI key off
-      // task_instances.completed_at, which was previously left null on web.
-      const { data: updated, error: updateError } = await supabase
-        .from('task_instances')
-        .update({ status: 'completed', completed_at: new Date().toISOString(), completed_by: user.id })
-        .eq('id', taskId)
-        .select('id');
-
-      if (updateError) throw updateError;
-      if (!updated || updated.length === 0) {
-        throw new Error('Task status was not updated — your role does not permit it.');
-      }
-
-      toast.success('Task completed successfully');
-      resetForm();
-      onOpenChange(false);
-      onSuccess?.();
     } catch (error: any) {
       console.error('Error completing task:', error);
       toast.error(error.message || 'Failed to complete task');
@@ -162,20 +111,20 @@ export default function CompleteTaskDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+    <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
+      <ResponsiveDialogContent className="max-w-md">
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle className="flex items-center gap-2">
             <CheckCircle2 className="h-5 w-5 text-success" />
             Complete Task
-          </DialogTitle>
-          <DialogDescription>
+          </ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
             {taskName}
             {taskDescription && (
               <span className="block text-xs mt-1">{taskDescription}</span>
             )}
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {requiresPhoto && (
@@ -221,7 +170,7 @@ export default function CompleteTaskDialog({
             </div>
           )}
 
-          <div className="flex justify-end gap-3 pt-2">
+          <ResponsiveDialogFooter className="gap-3 pt-2">
             <Button
               type="button"
               variant="outline"
@@ -234,9 +183,9 @@ export default function CompleteTaskDialog({
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
               Complete Task
             </Button>
-          </div>
+          </ResponsiveDialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 }

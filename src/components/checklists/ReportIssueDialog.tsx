@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { formatBuildingName } from '@/lib/buildingName';
-import { supabase } from '@/integrations/supabase/client';
+import { enqueueAndRun } from '@/lib/offline/enqueueAndRun';
+import { toastForOutcome } from '@/lib/offline/outcomeToast';
 import { useAuth } from '@/contexts/AuthContext';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+  ResponsiveDialog,
+  ResponsiveDialogContent,
+  ResponsiveDialogDescription,
+  ResponsiveDialogFooter,
+  ResponsiveDialogHeader,
+  ResponsiveDialogTitle,
+} from '@/components/ui/responsive-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -88,55 +90,35 @@ export default function ReportIssueDialog({
     setLoading(true);
 
     try {
-      // Upload photos if any. Path MUST be photos/<uid>/… — the only
-      // tenant-documents prefix a non-admin may write (storage policy
-      // "td write own photos"). Throw on failure rather than silently
-      // dropping the evidence the user attached.
-      const photoUrls: string[] = [];
-      for (const photo of photos) {
-        const fileName = `photos/${user.id}/${Date.now()}-${photo.file.name}`;
-        const { error: uploadError } = await supabase.storage
-          .from('tenant-documents')
-          .upload(fileName, photo.file);
-
-        if (uploadError) {
-          throw new Error(`Photo upload failed: ${uploadError.message}`);
-        }
-
-        const { data: urlData } = supabase.storage
-          .from('tenant-documents')
-          .getPublicUrl(fileName);
-
-        if (urlData) {
-          photoUrls.push(urlData.publicUrl);
-        }
-      }
-
-      // Create the issue
-      const { error: issueError } = await supabase.from('issues').insert({
-        title: title.trim(),
-        description: description.trim(),
-        priority,
-        status: 'open',
-        building_id: buildingId,
-        task_instance_id: taskId,
-        reported_by: user.id,
-        corrective_action: correctiveAction.trim() || null,
-        photo_urls: photoUrls.length > 0 ? photoUrls : [],
+      // The issue insert, its photo upload and the task's flip to issue_logged all run in the
+      // queue handler, now (online) or on replay (offline). The client-generated issue id makes
+      // a second attempt collide on the primary key, which the replay engine treats as applied.
+      const outcome = await enqueueAndRun(user.id, {
+        kind: 'issue_create',
+        issueId: crypto.randomUUID(),
+        row: {
+          title: title.trim(),
+          description: description.trim(),
+          priority,
+          status: 'open',
+          building_id: buildingId,
+          deadline: null,
+          corrective_action: correctiveAction.trim() || null,
+          reported_by: user.id,
+          assigned_to: null,
+          task_instance_id: taskId,
+        },
+        markTaskIssueLogged: taskId,
+      }, photos.map((p) => ({ file: p.file })));
+      toastForOutcome(outcome, {
+        synced: 'Issue reported successfully',
+        queued: "Issue saved on this device — it will be reported when you're back online",
       });
-
-      if (issueError) throw issueError;
-
-      // Update task status to issue_logged
-      await supabase
-        .from('task_instances')
-        .update({ status: 'issue_logged' })
-        .eq('id', taskId);
-
-      toast.success('Issue reported successfully');
-      resetForm();
-      onOpenChange(false);
-      onSuccess?.();
+      if (outcome.status !== 'failed') {
+        resetForm();
+        onOpenChange(false);
+        onSuccess?.();
+      }
     } catch (error: any) {
       console.error('Error reporting issue:', error);
       toast.error(error.message || 'Failed to report issue');
@@ -146,19 +128,19 @@ export default function ReportIssueDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+    <ResponsiveDialog open={open} onOpenChange={onOpenChange}>
+      <ResponsiveDialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <ResponsiveDialogHeader>
+          <ResponsiveDialogTitle className="flex items-center gap-2">
             <AlertTriangle className="h-5 w-5 text-warning" />
             Report Issue
-          </DialogTitle>
-          <DialogDescription>
+          </ResponsiveDialogTitle>
+          <ResponsiveDialogDescription>
             Report an issue found during: <strong>{taskName}</strong>
             <br />
             Building: <strong>{formatBuildingName(buildingName)}</strong>
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveDialogDescription>
+        </ResponsiveDialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -220,7 +202,7 @@ export default function ReportIssueDialog({
             size="md"
           />
 
-          <div className="flex justify-end gap-3 pt-4">
+          <ResponsiveDialogFooter className="gap-3 pt-4">
             <Button
               type="button"
               variant="outline"
@@ -233,9 +215,9 @@ export default function ReportIssueDialog({
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
               Report Issue
             </Button>
-          </div>
+          </ResponsiveDialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+      </ResponsiveDialogContent>
+    </ResponsiveDialog>
   );
 }

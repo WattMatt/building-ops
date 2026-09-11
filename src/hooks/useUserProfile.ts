@@ -1,13 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 
-interface UserProfile {
-  full_name: string | null;
-  avatar_url: string | null;
-  phone: string | null;
-  email: string;
-}
+type UserProfile = Pick<Tables<'profiles'>, 'full_name' | 'avatar_url' | 'phone' | 'email' | 'geotag_photos'>;
 
 export function useUserProfile() {
   const { user } = useAuth();
@@ -25,7 +21,7 @@ export function useUserProfile() {
       try {
         const { data, error } = await supabase
           .from('profiles')
-          .select('full_name, avatar_url, phone, email')
+          .select('full_name, avatar_url, phone, email, geotag_photos')
           .eq('id', user.id)
           .maybeSingle();
 

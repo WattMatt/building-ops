@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,29 +29,22 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
+import { Badge, type BadgeProps } from '@/components/ui/badge';
+import { ContractorPicker } from '@/components/contractors/ContractorPicker';
+import { useContractors } from '@/hooks/useContractors';
 import { Plus, Wrench, Trash2, Calendar } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
+import { parseCost, formatRand } from '@/lib/money';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
+import { csvText, type CsvColumn } from '@/lib/exportCsv';
 
-interface Asset {
-  id: string;
-  name: string;
-  category: string;
-}
+type Asset = Pick<Tables<'building_assets'>, 'id' | 'name' | 'category'>;
 
-interface ServiceRecord {
-  id: string;
-  asset_id: string;
-  service_date: string;
-  service_type: string;
-  description: string | null;
-  performed_by: string | null;
-  cost: number | null;
-  next_service_date: string | null;
-  notes: string | null;
-  created_at: string;
-}
+type ServiceRecord = Tables<'asset_service_history'> & {
+  /** Joined `contractors(company_name)`; null when no contractor is linked. */
+  contractors: Pick<Tables<'contractors'>, 'company_name'> | null;
+};
 
 interface AssetServiceHistoryDialogProps {
   asset: Asset;
@@ -78,6 +72,7 @@ export default function AssetServiceHistoryDialog({
   onServiceAdded,
 }: AssetServiceHistoryDialogProps) {
   const { isAdminOrManager, user } = useAuth();
+  const { contractors } = useContractors();
   const [records, setRecords] = useState<ServiceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -88,21 +83,18 @@ export default function AssetServiceHistoryDialog({
   const [serviceType, setServiceType] = useState('');
   const [description, setDescription] = useState('');
   const [performedBy, setPerformedBy] = useState('');
+  const [contractorId, setContractorId] = useState<string | null>(null);
+  // The company name the picker last wrote into "Performed by" — the only text it may overwrite.
+  const [prefilledPerformedBy, setPrefilledPerformedBy] = useState<string | null>(null);
   const [cost, setCost] = useState('');
   const [nextServiceDate, setNextServiceDate] = useState('');
   const [notes, setNotes] = useState('');
 
-  useEffect(() => {
-    if (open) {
-      fetchRecords();
-    }
-  }, [open, asset.id]);
-
-  const fetchRecords = async () => {
+  const fetchRecords = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('asset_service_history')
-        .select('*')
+        .select('*, contractors(company_name)')
         .eq('asset_id', asset.id)
         .order('service_date', { ascending: false });
 
@@ -114,13 +106,21 @@ export default function AssetServiceHistoryDialog({
     } finally {
       setLoading(false);
     }
-  };
+  }, [asset.id]);
+
+  useEffect(() => {
+    if (open) {
+      fetchRecords();
+    }
+  }, [open, fetchRecords]);
 
   const resetForm = () => {
     setServiceDate(format(new Date(), 'yyyy-MM-dd'));
     setServiceType('');
     setDescription('');
     setPerformedBy('');
+    setContractorId(null);
+    setPrefilledPerformedBy(null);
     setCost('');
     setNextServiceDate('');
     setNotes('');
@@ -135,6 +135,13 @@ export default function AssetServiceHistoryDialog({
       return;
     }
 
+    // Blank → null (nothing recorded); an unparseable or negative amount is refused, not coerced.
+    const parsedCost = parseCost(cost);
+    if (parsedCost === undefined) {
+      toast.error('Cost must be an amount of R 0 or more');
+      return;
+    }
+
     setSaving(true);
 
     try {
@@ -144,7 +151,8 @@ export default function AssetServiceHistoryDialog({
         service_type: serviceType,
         description: description.trim() || null,
         performed_by: performedBy.trim() || null,
-        cost: cost ? parseFloat(cost) : null,
+        contractor_id: contractorId,
+        cost: parsedCost,
         next_service_date: nextServiceDate || null,
         notes: notes.trim() || null,
         created_by: user?.id || null,
@@ -173,12 +181,24 @@ export default function AssetServiceHistoryDialog({
       resetForm();
       fetchRecords();
       onServiceAdded?.();
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error saving service record:', error);
-      toast.error(error.message || 'Failed to save service record');
+      toast.error((error instanceof Error && error.message) || 'Failed to save service record');
     } finally {
       setSaving(false);
     }
+  };
+
+  // Picking a contractor fills "Performed by" with the company name when the field is empty or
+  // still holds the name a previous pick put there (A → B swaps A for B; A → none clears it).
+  // Anything the user typed is left alone.
+  const chooseContractor = (id: string | null) => {
+    setContractorId(id);
+    const typed = performedBy.trim();
+    if (typed && typed !== prefilledPerformedBy) return;
+    const company = (id && contractors.find((c) => c.id === id)?.company_name) || null;
+    setPerformedBy(company ?? '');
+    setPrefilledPerformedBy(company);
   };
 
   const handleDelete = async (record: ServiceRecord) => {
@@ -199,11 +219,31 @@ export default function AssetServiceHistoryDialog({
     }
   };
 
-  const getServiceTypeLabel = (value: string) => {
-    return SERVICE_TYPES.find((t) => t.value === value)?.label || value;
+  const getServiceTypeLabel = (value: string | null) => {
+    return SERVICE_TYPES.find((t) => t.value === value)?.label || value || '-';
   };
 
-  const getServiceTypeBadgeVariant = (value: string) => {
+  // The contractor name comes from the joined row; the register is the fallback for rows the
+  // join could not resolve (a contractor that is no longer readable keeps its id, not a blank).
+  const contractorName = useCallback(
+    (record: ServiceRecord): string =>
+      record.contractors?.company_name ?? contractors.find((c) => c.id === record.contractor_id)?.company_name ?? '',
+    [contractors],
+  );
+
+  // Memoised: `contractorName` closes over the loaded register.
+  const csvColumns = useMemo((): CsvColumn<ServiceRecord>[] => [
+    { key: 'service_date', header: 'Service date' },
+    { key: 'service_type', header: 'Service type', format: (v) => getServiceTypeLabel(v as string | null) },
+    { key: 'description', header: 'Description', format: csvText },
+    { key: 'performed_by', header: 'Performed by', format: csvText },
+    { key: 'contractor_id', header: 'Contractor', format: (_v, row) => contractorName(row) },
+    { key: 'cost', header: 'Cost', format: (v) => (v == null ? '' : String(v)) },
+    { key: 'next_service_date', header: 'Next service date', format: csvText },
+    { key: 'notes', header: 'Notes', format: csvText },
+  ], [contractorName]);
+
+  const getServiceTypeBadgeVariant = (value: string | null): BadgeProps['variant'] => {
     switch (value) {
       case 'emergency_repair':
         return 'destructive';
@@ -229,6 +269,10 @@ export default function AssetServiceHistoryDialog({
           <DialogDescription>
             View and manage maintenance records and repairs for this asset
           </DialogDescription>
+          <div className="flex justify-end">
+            {/* The asset NAME, never its uuid: the file has to mean something in a Downloads folder. */}
+            <ExportCsvButton rows={records} columns={csvColumns} filename={`service-history-${asset.name}`} />
+          </div>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -256,7 +300,7 @@ export default function AssetServiceHistoryDialog({
                     <div className="space-y-2">
                       <Label htmlFor="service-type">Service Type *</Label>
                       <Select value={serviceType} onValueChange={setServiceType} required>
-                        <SelectTrigger>
+                        <SelectTrigger id="service-type">
                           <SelectValue placeholder="Select type" />
                         </SelectTrigger>
                         <SelectContent>
@@ -281,7 +325,11 @@ export default function AssetServiceHistoryDialog({
                     />
                   </div>
 
-                  <div className="grid grid-cols-3 gap-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="service-contractor">Contractor</Label>
+                      <ContractorPicker id="service-contractor" value={contractorId} onChange={chooseContractor} aria-label="Contractor" />
+                    </div>
                     <div className="space-y-2">
                       <Label htmlFor="performed-by">Performed By</Label>
                       <Input
@@ -291,6 +339,9 @@ export default function AssetServiceHistoryDialog({
                         onChange={(e) => setPerformedBy(e.target.value)}
                       />
                     </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="cost">Cost (R)</Label>
                       <Input
@@ -371,7 +422,7 @@ export default function AssetServiceHistoryDialog({
                         {format(new Date(record.service_date), 'dd MMM yyyy')}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={getServiceTypeBadgeVariant(record.service_type) as any}>
+                        <Badge variant={getServiceTypeBadgeVariant(record.service_type)}>
                           {getServiceTypeLabel(record.service_type)}
                         </Badge>
                       </TableCell>
@@ -381,9 +432,14 @@ export default function AssetServiceHistoryDialog({
                           <p className="text-xs text-muted-foreground truncate">{record.notes}</p>
                         )}
                       </TableCell>
-                      <TableCell>{record.performed_by || '-'}</TableCell>
                       <TableCell>
-                        {record.cost ? `R ${record.cost.toLocaleString()}` : '-'}
+                        {record.performed_by || record.contractors?.company_name || '-'}
+                        {record.contractors && record.performed_by && record.performed_by !== record.contractors.company_name && (
+                          <p className="text-xs text-muted-foreground">{record.contractors.company_name}</p>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {record.cost != null ? formatRand(record.cost) : '-'}
                       </TableCell>
                       {isAdminOrManager && (
                         <TableCell>

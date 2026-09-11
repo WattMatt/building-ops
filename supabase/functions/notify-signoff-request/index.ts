@@ -1,46 +1,48 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { loadBranding, renderEmail } from "../_shared/email.ts";
-
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-const APP_URL = (Deno.env.get("APP_URL") ?? "https://building-ops-clone.vercel.app").replace(/\/+$/, "");
-
-async function sendEmail(from: string, to: string[], subject: string, html: string) {
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${RESEND_API_KEY}` },
-    body: JSON.stringify({ from, to, subject, html }),
-  });
-  if (!res.ok) throw new Error(`Resend API error: ${await res.text()}`);
-  return res.json();
-}
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { escapeText } from "../_shared/email.ts";
+import { corsHeaders } from "../_shared/cors.ts";
+import { createNotifications } from "../_shared/notify.ts";
 
 interface SignoffRequestNotification {
   requestId: string;
-  reminder?: boolean;
 }
 
 serve(async (req: Request): Promise<Response> => {
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const cors = corsHeaders(req);
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
+  if (req.method === "OPTIONS") return new Response(null, { headers: cors });
   try {
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
-    const { requestId, reminder }: SignoffRequestNotification = await req.json();
-    if (!requestId) throw new Error("Missing requestId");
+    // Authorize the caller: this function had NO internal auth — any holder of a project
+    // JWT could spam sign-off request emails for any requestId. Identify the caller, then
+    // require they be the request's requester (assigned_by) or an admin/manager.
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader) return json({ error: "No authorization header" }, 401);
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: { user: caller }, error: callerErr } = await userClient.auth.getUser();
+    if (callerErr || !caller) return json({ error: "Invalid or expired token" }, 401);
+
+    const supabase = createClient(supabaseUrl, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const { requestId }: SignoffRequestNotification = await req.json();
+    if (!requestId) return json({ error: "Missing requestId" }, 400);
 
     const { data: request, error: reqErr } = await supabase
       .from("form_signoff_requests")
       .select("id, submission_id, assigned_to, assigned_by, due_at, instructions")
       .eq("id", requestId)
       .single();
-    if (reqErr || !request) throw new Error("Sign-off request not found");
+    if (reqErr || !request) return json({ error: "Sign-off request not found" }, 404);
+
+    const { data: callerRoles } = await supabase
+      .from("user_roles").select("role").eq("user_id", caller.id);
+    const isManager = (callerRoles ?? []).some((r) => r.role === "admin" || r.role === "manager");
+    if (!isManager && request.assigned_by !== caller.id) {
+      return json({ error: "Forbidden: you did not raise this sign-off request" }, 403);
+    }
 
     const { data: submission } = await supabase
       .from("form_submissions")
@@ -54,18 +56,6 @@ serve(async (req: Request): Promise<Response> => {
       buildingName = b?.name ?? "";
     }
 
-    const { data: signer } = await supabase
-      .from("profiles")
-      .select("email, full_name")
-      .eq("id", request.assigned_to)
-      .single();
-    if (!signer?.email) {
-      return new Response(JSON.stringify({ success: true, notified: 0, message: "Signer has no email" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json", ...corsHeaders },
-      });
-    }
-
     let requesterName = "A manager";
     if (request.assigned_by) {
       const { data: by } = await supabase.from("profiles").select("full_name, email").eq("id", request.assigned_by).single();
@@ -76,36 +66,34 @@ serve(async (req: Request): Promise<Response> => {
     const due = request.due_at
       ? new Date(request.due_at).toLocaleString("en-ZA", { dateStyle: "medium", timeZone: "Africa/Johannesburg" })
       : null;
-    const heading = reminder ? "Sign-off reminder" : "Sign-off requested";
+    const heading = "Sign-off requested";
+    const instructions = request.instructions ? String(request.instructions) : null;
 
-    const branding = await loadBranding(supabase);
-
-    await sendEmail(
-      `${branding.appName} <notifications@buildingops.app>`,
-      [signer.email],
-      `${heading}: ${formName}`,
-      renderEmail({
-        branding,
-        heading,
-        greeting: `Hi ${signer.full_name || "there"},`,
-        bodyHtml: `
-          <p style="margin:0 0 16px;">${requesterName} has asked you to sign off on <strong>${formName}</strong>${buildingName ? ` for ${buildingName}` : ""}.</p>
-          ${due ? `<p style="margin:0 0 16px;">Please sign by <strong>${due}</strong>.</p>` : ""}
-          ${request.instructions ? `<div style="background:#f9fafb;border-left:4px solid ${branding.color};padding:16px;border-radius:4px;margin:0 0 16px;color:#374151;">${request.instructions}</div>` : ""}`,
-        ctaText: "Review & sign",
-        ctaUrl: `${APP_URL}/my-signoffs`,
-      }),
-    );
-
-    return new Response(JSON.stringify({ success: true, notified: 1 }), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
+    const result = await createNotifications(supabase, {
+      recipients: [request.assigned_to as string],
+      actorId: (request.assigned_by as string | null) ?? null,
+      actorName: requesterName,
+      kind: "signoff_requested",
+      entityType: "signoff_request",
+      entityId: request.id as string,
+      buildingId: (submission?.building_id as string | null) ?? null,
+      title: `${heading}: ${formName}`,
+      // The requester's instructions are the one thing the signer needs in the inbox row.
+      body: instructions,
+      // Named in the email so the requester's words are not mistaken for app boilerplate.
+      bodyLabel: instructions ? "Instructions" : undefined,
+      url: "/my-signoffs",
+      subject: `${heading}: ${formName}`,
+      detailHtml: `
+          <p style="margin:0 0 16px;">${escapeText(requesterName)} has asked you to sign off on <strong>${escapeText(formName)}</strong>${buildingName ? ` for ${escapeText(buildingName)}` : ""}.</p>
+          ${due ? `<p style="margin:0 0 16px;">Please sign by <strong>${escapeText(due)}</strong>.</p>` : ""}`,
+      ctaText: "Review & sign",
     });
+
+    return json({ success: true, ...result });
   } catch (error) {
     console.error("notify-signoff-request error:", error);
-    return new Response(JSON.stringify({ error: (error as Error).message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
-    });
+    // The detail stays in the log: an internal message must not reach the caller.
+    return json({ error: "An unexpected error occurred" }, 500);
   }
 });

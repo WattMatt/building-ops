@@ -7,13 +7,16 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { IssuePriority, IssueStatus } from '@/lib/constants';
+import { parseReporter, type IssueReporter, type IssueSource } from '@/lib/issueSource';
 
-interface Issue {
+export interface Issue {
   id: string;
   title: string;
   description: string;
   priority: IssuePriority;
   status: IssueStatus;
+  /** The pinned category the issue was reported under; nullable on old rows. */
+  category: string | null;
   deadline: string | null;
   created_at: string;
   building_id: string;
@@ -23,6 +26,16 @@ interface Issue {
   corrective_action: string | null;
   photo_urls: string[] | null;
   task_instance_id: string | null;
+  sla_target_hours: number | null;
+  sla_breached_at: string | null;
+  first_response_at: string | null;
+  resolved_at: string | null;
+  /** R4c: where the issue came from — 'app' for everything the app creates, 'tenant_intake' for a QR report. */
+  source: IssueSource;
+  /** The tenant who reported through the public form (no account); null on every app-created issue. */
+  reporter: IssueReporter | null;
+  /** The human-readable reference the intake function stamps on a tenant report, e.g. "FO-K7QZ2M". */
+  reference: string | null;
 }
 
 interface IssueStats {
@@ -32,6 +45,25 @@ interface IssueStats {
   escalated: number;
   resolved: number;
 }
+
+/**
+ * `source` / `reporter` / `reference` are server-set alongside the DB-stamped columns: only the
+ * tenant-intake function (service role) may write them, and a trigger refuses them from any
+ * signed-in session — so they are not part of a create or an update from the app.
+ */
+export type NewIssueInput = Omit<
+  Issue,
+  | 'id'
+  | 'created_at'
+  | 'building_name'
+  | 'sla_target_hours'
+  | 'sla_breached_at'
+  | 'first_response_at'
+  | 'resolved_at'
+  | 'source'
+  | 'reporter'
+  | 'reference'
+>;
 
 interface UseIssuesOptions {
   autoFetch?: boolean;
@@ -44,8 +76,10 @@ interface UseIssuesReturn {
   loading: boolean;
   error: Error | null;
   refetch: () => Promise<void>;
-  createIssue: (issue: Omit<Issue, 'id' | 'created_at' | 'building_name'>) => Promise<string | null>;
-  updateIssue: (id: string, updates: Partial<Issue>) => Promise<boolean>;
+  /** The DB fills the SLA columns (trigger) and resolved_at, so they are not part of a new issue. */
+  createIssue: (issue: NewIssueInput) => Promise<string | null>;
+  /** Same column set as create: the DB-stamped columns and the joined building_name are not writable. */
+  updateIssue: (id: string, updates: Partial<NewIssueInput>) => Promise<boolean>;
 }
 
 export function useIssues(
@@ -84,6 +118,7 @@ export function useIssues(
           description,
           priority,
           status,
+          category,
           deadline,
           created_at,
           building_id,
@@ -92,6 +127,13 @@ export function useIssues(
           corrective_action,
           photo_urls,
           task_instance_id,
+          sla_target_hours,
+          sla_breached_at,
+          first_response_at,
+          resolved_at,
+          source,
+          reporter,
+          reference,
           buildings (name)
         `)
         .order('created_at', { ascending: false });
@@ -104,21 +146,34 @@ export function useIssues(
 
       if (fetchError) throw fetchError;
 
+      // The generated Row types priority/status/source as plain text, created_at as nullable (it
+      // has a default) and photo_urls/reporter as Json; the DB check constraints make these
+      // narrowings safe, and `reporter` is parsed rather than asserted.
       const formattedIssues: Issue[] = (data || []).map((issue) => ({
         id: issue.id,
         title: issue.title,
         description: issue.description,
-        priority: issue.priority,
-        status: issue.status,
+        priority: issue.priority as IssuePriority,
+        status: issue.status as IssueStatus,
+        category: issue.category,
         deadline: issue.deadline,
-        created_at: issue.created_at,
+        created_at: issue.created_at ?? '',
         building_id: issue.building_id,
-        building_name: (issue.buildings as any)?.name || 'Unknown',
+        building_name: (issue.buildings as { name: string | null } | null)?.name || 'Unknown',
         reported_by: issue.reported_by,
         assigned_to: issue.assigned_to,
         corrective_action: issue.corrective_action,
-        photo_urls: issue.photo_urls,
+        photo_urls: issue.photo_urls as string[] | null,
         task_instance_id: issue.task_instance_id,
+        sla_target_hours: issue.sla_target_hours,
+        sla_breached_at: issue.sla_breached_at,
+        first_response_at: issue.first_response_at,
+        resolved_at: issue.resolved_at,
+        // `source` has a 'app' default and a check constraint; `reporter` is jsonb the intake
+        // function writes, so it is parsed rather than asserted.
+        source: (issue.source as IssueSource) ?? 'app',
+        reporter: parseReporter(issue.reporter),
+        reference: issue.reference ?? null,
       }));
 
       setIssues(formattedIssues);
@@ -134,7 +189,7 @@ export function useIssues(
   }, [options.buildingId, calculateStats]);
 
   const createIssue = useCallback(
-    async (issue: Omit<Issue, 'id' | 'created_at' | 'building_name'>): Promise<string | null> => {
+    async (issue: NewIssueInput): Promise<string | null> => {
       try {
         const { data, error: createError } = await supabase
           .from('issues')
@@ -157,7 +212,7 @@ export function useIssues(
   );
 
   const updateIssue = useCallback(
-    async (id: string, updates: Partial<Issue>): Promise<boolean> => {
+    async (id: string, updates: Partial<NewIssueInput>): Promise<boolean> => {
       try {
         const { error: updateError } = await supabase
           .from('issues')
