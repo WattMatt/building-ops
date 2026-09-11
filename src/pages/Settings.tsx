@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 import {
   Building2,
+  FileText,
   Palette,
   SlidersHorizontal,
   Upload,
@@ -22,6 +23,7 @@ import { SlaSettingsCard } from '@/components/settings/SlaSettingsCard';
 import { ReportDueDayCard } from '@/components/settings/ReportDueDayCard';
 import { FeatureFlagsCard } from '@/components/settings/FeatureFlagsCard';
 import { ReportDistributionCard } from '@/components/settings/ReportDistributionCard';
+import { FormsAdminCard } from '@/components/settings/FormsAdminCard';
 import { useFeature } from '@/hooks/useOrgSettings';
 
 export default function Settings() {
@@ -198,6 +200,12 @@ export default function Settings() {
               Report distribution
             </TabsTrigger>
           )}
+          {isAdmin && (
+            <TabsTrigger value="forms">
+              <FileText className="h-4 w-4 mr-2" />
+              Forms
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="organization">
@@ -360,6 +368,12 @@ export default function Settings() {
         {isAdminOrManager && schedulesOn && (
           <TabsContent value="distribution">
             <ReportDistributionCard />
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="forms">
+            <FormsAdminCard />
           </TabsContent>
         )}
       </Tabs>

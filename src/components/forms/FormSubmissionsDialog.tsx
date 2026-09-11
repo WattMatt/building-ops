@@ -31,16 +31,9 @@ import { format } from 'date-fns';
 import { Loader2, Eye, FileText, User, Building2, Calendar, Download, Image, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { useOrganization } from '@/hooks/useOrganization';
 import { generateFilledFormPdf } from '@/lib/pdfGenerator';
-import { defaultFormFields } from '@/lib/formFields';
 import { toast } from 'sonner';
-
-interface FormTemplate {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  icon: React.ReactNode;
-}
+import { FormIcon } from '@/components/forms/FormIcon';
+import { parseFields, type FormTemplate } from '@/hooks/useFormTemplates';
 
 interface FormSubmissionsDialogProps {
   form: FormTemplate | null;
@@ -59,6 +52,9 @@ interface SubmissionDetails {
   reviewed_by?: string;
   reviewed_at?: string;
   review_notes?: string;
+  /** The template version and field list this submission was filled against (R4c). */
+  template_version?: number | null;
+  fields_snapshot?: unknown;
 }
 
 export function FormSubmissionsDialog({
@@ -98,13 +94,17 @@ export function FormSubmissionsDialog({
           photo_urls,
           reviewed_by,
           reviewed_at,
-          review_notes
+          review_notes,
+          template_version,
+          fields_snapshot
         `)
         .eq('form_template_id', form.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return data as SubmissionDetails[];
+      // template_version / fields_snapshot are not yet in the generated types — regenerate after
+      // 2026-09-14_03 ships.
+      return data as unknown as SubmissionDetails[];
     },
     enabled: open && !!form,
   });
@@ -249,7 +249,10 @@ export function FormSubmissionsDialog({
     
     setIsDownloading(true);
     try {
-      const fields = defaultFormFields[form.id] || [];
+      // The fields this submission was actually filled against, so an edited template never
+      // reshapes an old PDF; older rows have no snapshot and fall back to the current fields.
+      const snapshot = parseFields(submission.fields_snapshot);
+      const fields = snapshot.length > 0 ? snapshot : form.fields;
       const submitterName = profiles?.[submission.submitted_by] || 'Unknown';
       
       await generateFilledFormPdf(
@@ -282,7 +285,7 @@ export function FormSubmissionsDialog({
         <DialogHeader className="flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-              {form.icon}
+              <FormIcon name={form.icon} />
             </div>
             <div>
               <DialogTitle className="text-xl">
@@ -290,7 +293,9 @@ export function FormSubmissionsDialog({
               </DialogTitle>
               <p className="text-sm text-muted-foreground">
                 {selectedSubmission
-                  ? `Submitted on ${format(new Date(selectedSubmission.created_at), 'PPpp')}`
+                  ? `Submitted on ${format(new Date(selectedSubmission.created_at), 'PPpp')}${
+                      selectedSubmission.template_version ? ` · v${selectedSubmission.template_version}` : ''
+                    }`
                   : `${submissions?.length || 0} submission(s) found`}
               </p>
             </div>

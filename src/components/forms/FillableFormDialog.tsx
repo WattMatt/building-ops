@@ -31,21 +31,14 @@ import { Loader2, Send, Building2, ClipboardCheck } from 'lucide-react';
 import { PhotoCapture, PhotoFile } from '@/components/ui/photo-capture';
 import { useQuery } from '@tanstack/react-query';
 import { FormField } from '@/lib/formFields';
-
-interface FormTemplate {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  icon: React.ReactNode;
-  fields?: FormField[];
-}
+import { FormIcon } from '@/components/forms/FormIcon';
+import type { FormTemplate } from '@/hooks/useFormTemplates';
+import type { TablesInsert } from '@/integrations/supabase/types';
 
 // PhotoFile type is imported from photo-capture component
 
 interface FillableFormDialogProps {
   form: FormTemplate | null;
-  fields: FormField[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSubmitSuccess?: () => void;
@@ -55,7 +48,6 @@ interface FillableFormDialogProps {
 
 export function FillableFormDialog({
   form,
-  fields,
   open,
   onOpenChange,
   onSubmitSuccess,
@@ -102,6 +94,8 @@ export function FillableFormDialog({
   }, [photoUploads]);
 
   if (!form) return null;
+
+  const fields = form.fields ?? [];
 
   const handleFieldChange = (fieldLabel: string, value: any) => {
     setFormData((prev) => ({
@@ -202,7 +196,10 @@ export function FillableFormDialog({
         }
       }
 
-      const { error } = await supabase.from('form_submissions').insert({
+      // template_version / fields_snapshot are not yet in the generated types — regenerate after
+      // 2026-09-14_03 ships. The snapshot is what makes an old submission still render (and print)
+      // against the fields it was actually filled against once the template is edited.
+      const row = {
         form_template_id: form.id,
         form_name: form.name,
         building_id: selectedBuilding || null,
@@ -210,7 +207,12 @@ export function FillableFormDialog({
         form_data: finalFormData,
         photo_urls: photoUrls,
         status: 'submitted',
-      });
+        template_version: form.version,
+        fields_snapshot: form.fields,
+      };
+      const { error } = await supabase
+        .from('form_submissions')
+        .insert(row as unknown as TablesInsert<'form_submissions'>);
 
       if (error) throw error;
 
@@ -406,7 +408,7 @@ export function FillableFormDialog({
         <DialogHeader className="flex-shrink-0 pt-4">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-              {form.icon}
+              <FormIcon name={form.icon} />
             </div>
             <div>
               <DialogTitle className="text-xl">{form.name}</DialogTitle>

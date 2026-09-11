@@ -21,15 +21,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { format } from 'date-fns';
 import {
-  Key,
-  HardHat,
-  ClipboardList,
-  Wrench,
-  Users,
-  AlertTriangle,
-  Flame,
-  Shield,
-  Truck,
   PenLine,
   Eye,
   FileText,
@@ -46,7 +37,8 @@ import { SubmissionFilters } from '@/components/forms/SubmissionFilters';
 import { SubmissionCard } from '@/components/forms/SubmissionCard';
 import { SubmissionDetailView } from '@/components/forms/SubmissionDetailView';
 import { ReviewActionDialog } from '@/components/forms/ReviewActionDialog';
-import { defaultFormFields } from '@/lib/formFields';
+import { FormIcon } from '@/components/forms/FormIcon';
+import { formCategoryClass, parseFields, useFormTemplates, type FormTemplate } from '@/hooks/useFormTemplates';
 import { useOrganization } from '@/hooks/useOrganization';
 import { generateFilledFormPdf } from '@/lib/pdfGenerator';
 import { toast } from 'sonner';
@@ -54,14 +46,6 @@ import { toast } from 'sonner';
 interface FormsTabProps {
   buildingId: string;
   buildingName: string;
-}
-
-interface FormTemplate {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  icon: React.ReactNode;
 }
 
 interface SubmissionDetails {
@@ -76,39 +60,16 @@ interface SubmissionDetails {
   reviewed_by?: string;
   reviewed_at?: string;
   review_notes?: string;
+  /** The template version and field list this submission was filled against (R4c). */
+  template_version?: number | null;
+  fields_snapshot?: unknown;
 }
-
-const formTemplates: FormTemplate[] = [
-  { id: '1', name: 'Key Access Log', description: 'Track keys issued/returned', category: 'Security', icon: <Key className="h-5 w-5" /> },
-  { id: '2', name: 'Roof Access Journal', description: 'Record roof access', category: 'Maintenance', icon: <HardHat className="h-5 w-5" /> },
-  { id: '3', name: 'Daily Site Handover', description: 'Shift handover notes', category: 'Operations', icon: <ClipboardList className="h-5 w-5" /> },
-  { id: '4', name: 'Asset Inspection', description: 'Equipment condition checks', category: 'Maintenance', icon: <Wrench className="h-5 w-5" /> },
-  { id: '5', name: 'Cleaning Log', description: 'Hygiene & cleaning records', category: 'Cleaning', icon: <ClipboardList className="h-5 w-5" /> },
-  { id: '6', name: 'Visitor Log', description: 'Visitor access control', category: 'Security', icon: <Users className="h-5 w-5" /> },
-  { id: '7', name: 'Work Order', description: 'Job cards & work orders', category: 'Maintenance', icon: <Wrench className="h-5 w-5" /> },
-  { id: '8', name: 'Incident Report', description: 'Incident & near-miss reports', category: 'Safety', icon: <AlertTriangle className="h-5 w-5" /> },
-  { id: '9', name: 'Evacuation Drill', description: 'Emergency drill records', category: 'Safety', icon: <Flame className="h-5 w-5" /> },
-  { id: '10', name: 'Permit to Work', description: 'Hot work & safety permits', category: 'Safety', icon: <Shield className="h-5 w-5" /> },
-  { id: '11', name: 'Certificate Register', description: 'Compliance certificates', category: 'Compliance', icon: <FileText className="h-5 w-5" /> },
-  { id: '12', name: 'Pest Control Log', description: 'Pest & waste management', category: 'Maintenance', icon: <ClipboardList className="h-5 w-5" /> },
-  { id: '13', name: 'Parking Incident', description: 'Vehicle incident logs', category: 'Security', icon: <Truck className="h-5 w-5" /> },
-  { id: '14', name: 'Training Record', description: 'Training & PPE issuance', category: 'HR', icon: <Users className="h-5 w-5" /> },
-];
-
-const categoryColors: Record<string, string> = {
-  Security: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-  Maintenance: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
-  Operations: 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400',
-  Cleaning: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
-  Safety: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
-  Compliance: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
-  HR: 'bg-pink-100 text-pink-800 dark:bg-pink-900/30 dark:text-pink-400',
-};
 
 export default function FormsTab({ buildingId, buildingName }: FormsTabProps) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const { organization } = useOrganization();
+  const { templates, byId, isLoading: templatesLoading, isError: templatesError } = useFormTemplates();
 
   // Dialog states
   const [selectedForm, setSelectedForm] = useState<FormTemplate | null>(null);
@@ -134,12 +95,14 @@ export default function FormsTab({ buildingId, buildingName }: FormsTabProps) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('form_submissions')
-        .select('id, form_template_id, form_name, form_data, submitted_by, status, created_at, photo_urls, reviewed_by, reviewed_at, review_notes')
+        .select('id, form_template_id, form_name, form_data, submitted_by, status, created_at, photo_urls, reviewed_by, reviewed_at, review_notes, template_version, fields_snapshot')
         .eq('building_id', buildingId)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return data as SubmissionDetails[];
+      // template_version / fields_snapshot are not yet in the generated types — regenerate after
+      // 2026-09-14_03 ships.
+      return data as unknown as SubmissionDetails[];
     },
   });
 
@@ -211,14 +174,24 @@ export default function FormsTab({ buildingId, buildingName }: FormsTabProps) {
   };
 
   const handleDownloadPdf = async (submission: SubmissionDetails) => {
-    const form = formTemplates.find(f => f.id === submission.form_template_id);
-    if (!form) return;
-    
+    // The fields this submission was actually filled against, so an edited template never
+    // reshapes an old PDF; older rows have no snapshot and fall back to the template's fields.
+    const template = byId(submission.form_template_id);
+    const snapshot = parseFields(submission.fields_snapshot);
+    const fields = snapshot.length > 0 ? snapshot : template?.fields ?? [];
+    // A submission whose template id no longer resolves still downloads from its own snapshot.
+    if (!template && fields.length === 0) return;
+    const form = template ?? {
+      id: submission.form_template_id ?? '',
+      name: submission.form_name,
+      description: '',
+      category: '',
+    };
+
     setIsDownloading(true);
     try {
-      const fields = defaultFormFields[form.id] || [];
       const submitterName = profiles?.[submission.submitted_by] || 'Unknown';
-      
+
       await generateFilledFormPdf(
         { id: form.id, name: form.name, description: form.description, category: form.category },
         fields,
@@ -334,35 +307,45 @@ export default function FormsTab({ buildingId, buildingName }: FormsTabProps) {
 
         {/* Fill Forms Tab */}
         <TabsContent value="fill" className="mt-6">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {formTemplates.map((form) => (
-              <Card key={form.id} className="hover:shadow-md transition-shadow">
-                <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between">
-                    <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-                      {form.icon}
+          {templatesLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : templatesError ? (
+            <p className="text-sm text-destructive">Could not load the forms library.</p>
+          ) : templates.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No forms are available yet.</p>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {templates.map((form) => (
+                <Card key={form.id} className="hover:shadow-md transition-shadow">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-start justify-between">
+                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                        <FormIcon name={form.icon} />
+                      </div>
+                      <Badge className={formCategoryClass(form.category)} variant="secondary">
+                        {form.category}
+                      </Badge>
                     </div>
-                    <Badge className={categoryColors[form.category] || ''} variant="secondary">
-                      {form.category}
-                    </Badge>
-                  </div>
-                  <CardTitle className="text-base mt-3">{form.name}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground mb-4">{form.description}</p>
-                  <div className="flex gap-2">
-                    <Button size="sm" className="flex-1" onClick={() => handleFill(form)}>
-                      <PenLine className="h-4 w-4 mr-1" />
-                      Fill
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => handlePreview(form)}>
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                    <CardTitle className="text-base mt-3">{form.name}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground mb-4">{form.description}</p>
+                    <div className="flex gap-2">
+                      <Button size="sm" className="flex-1" onClick={() => handleFill(form)}>
+                        <PenLine className="h-4 w-4 mr-1" />
+                        Fill
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => handlePreview(form)}>
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </TabsContent>
 
         {/* Submissions Tab */}
@@ -489,7 +472,6 @@ export default function FormsTab({ buildingId, buildingName }: FormsTabProps) {
       {/* Fillable Form Dialog */}
       <FillableFormDialog
         form={selectedForm}
-        fields={selectedForm ? defaultFormFields[selectedForm.id] || [] : []}
         open={fillOpen}
         onOpenChange={setFillOpen}
         preselectedBuildingId={buildingId}
