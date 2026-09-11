@@ -10,9 +10,14 @@
  *   QR link)  →  POST multipart with one photo  →  issue row (source, reporter, reference,
  *   assigned_to, photo under intake/<building>/)  →  storage object exists  →  inbox rows kind
  *   issue_reported for the admin and the assignee  →  token counters  →  validation 400s
- *   →  honeypot 201 that stores nothing  →  429 on the 6th post from this IP  →  429 on the
+ *   →  honeypot 201 that stores nothing  →  429 on the 6th post from this IP+token  →  429 on the
  *   21st post for the token  →  recovery after the counters are cleared  →  disabled token 404
  *   →  flag off 404  →  405 for PUT.
+ *
+ * R4c review additions: the token rides on `?t=` for POST too (a POST without it is a 404 and the
+ * body is never parsed), a POST that declares no content-length is a 411, rejected posts never
+ * spend the token's 20/hour, and the GET lists shop NUMBERS only until
+ * organizations.settings.intake.show_shop_names is true.
  *
  *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... SUPABASE_ANON_KEY=... node scripts/intake-smoke.mjs
  *
@@ -101,11 +106,18 @@ async function get(token) {
   const res = await fetch(`${FN}?t=${encodeURIComponent(token)}`);
   return { status: res.status, headers: res.headers, body: await res.text() };
 }
-async function post(fd) {
-  const res = await fetch(FN, { method: 'POST', body: fd });
+/** The token rides on the query as well as in the body: the function resolves it before parsing. */
+async function post(fd, { token = fd.get('t'), init = {} } = {}) {
+  const url = token === null ? FN : `${FN}?t=${encodeURIComponent(String(token))}`;
+  const res = await fetch(url, { method: 'POST', body: fd, ...init });
   const text = await res.text();
   let json = null; try { json = JSON.parse(text); } catch { /* not json */ }
   return { status: res.status, headers: res.headers, text, json };
+}
+/** The bucket row the token's own 20/hour allowance lives in, or null while it has not been spent. */
+async function tokenBucketCount(tokenId) {
+  const rows = await svcSelect('intake_rate', `bucket=eq.t:${tokenId}&select=count`);
+  return rows[0]?.count ?? 0;
 }
 
 let orgId = null, orgSettingsBefore = null, building = null;
@@ -126,7 +138,11 @@ try {
   const orgs = await svcSelect('organizations', 'select=id,settings&limit=1');
   if (!orgs[0] || !('settings' in orgs[0])) throw new Error('organizations.settings is missing — apply the R4a migration (2026-09-14_01) first');
   orgId = orgs[0].id; orgSettingsBefore = orgs[0].settings ?? {};
-  const withFlag = (on) => ({ ...orgSettingsBefore, features: { ...(orgSettingsBefore.features ?? {}), tenant_intake: on } });
+  const withFlag = (on, showNames = false) => ({
+    ...orgSettingsBefore,
+    features: { ...(orgSettingsBefore.features ?? {}), tenant_intake: on },
+    intake: { ...(orgSettingsBefore.intake ?? {}), show_shop_names: showNames },
+  });
   await svcPatch('organizations', `id=eq.${orgId}`, { settings: withFlag(true) });
   ok('fixtures: building, admin, site user (role rule "user"), tenant 12, token, flag on');
 
@@ -142,10 +158,31 @@ try {
   assert('GET: no-store', (r.headers.get('cache-control') ?? '').includes('no-store'), r.headers.get('cache-control'));
   const info = JSON.parse(r.body || '{}');
   assert('GET: building name, org branding, categories', info.building?.name === `ZZTEST-INTAKE-${RUN}` && typeof info.org?.name === 'string' && Array.isArray(info.categories) && info.categories.includes('Lighting'), JSON.stringify(info).slice(0, 200));
-  assert('GET: shop 12 listed by number and name only', info.shops?.some((s) => s.shopNumber === '12' && s.shopName === `ZZTEST Shop ${RUN}`) && !JSON.stringify(info).includes(building), JSON.stringify(info.shops ?? []).slice(0, 200));
+  // The GET is unauthenticated and the token is printed on a poster, so the tenant roster is
+  // numbers-only unless the owner opts in: the shop NAME must not be in the default answer.
+  assert('GET: shop 12 listed by number, no shop name (the default)', info.shops?.some((s) => s.shopNumber === '12' && !s.shopName) && !JSON.stringify(info).includes(`ZZTEST Shop ${RUN}`) && !JSON.stringify(info).includes(building), JSON.stringify(info.shops ?? []).slice(0, 200));
+  await svcPatch('organizations', `id=eq.${orgId}`, { settings: withFlag(true, true) });
+  const named = JSON.parse((await get(tokenRow.token)).body || '{}');
+  assert('GET: shop names appear once settings.intake.show_shop_names is true', named.shops?.some((s) => s.shopNumber === '12' && s.shopName === `ZZTEST Shop ${RUN}`), JSON.stringify(named.shops ?? []).slice(0, 200));
+  await svcPatch('organizations', `id=eq.${orgId}`, { settings: withFlag(true) });
+
+  // ── 1b. POST guards that run BEFORE the body is parsed (neither spends the IP+token allowance) ──
+  let p = await post(formData(tokenRow.token), { token: null });
+  assert('POST with no ?t=: 404, body never parsed', p.status === 404 && p.json?.error === 'not_found', `HTTP ${p.status} ${p.text.slice(0, 120)}`);
+  p = await post(formData(mintToken()), { token: mintToken() });
+  assert('POST with an unknown token: 404', p.status === 404, `HTTP ${p.status} ${p.text.slice(0, 120)}`);
+  p = await post(new FormData(), {
+    token: tokenRow.token,
+    init: {
+      body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('--x--\r\n')); c.close(); } }),
+      headers: { 'content-type': 'multipart/form-data; boundary=x' },
+      duplex: 'half',
+    },
+  });
+  assert('POST with a chunked body (no content-length): 411, body never parsed', p.status === 411, `HTTP ${p.status} ${p.text.slice(0, 120)}`);
 
   // ── 2. POST with a photo ──
-  let p = await post(formData(tokenRow.token, {}, [{ bytes: JPEG_1PX, type: 'image/jpeg', name: 'light.jpg' }]));
+  p = await post(formData(tokenRow.token, {}, [{ bytes: JPEG_1PX, type: 'image/jpeg', name: 'light.jpg' }]));
   assert('POST: 201', p.status === 201, `HTTP ${p.status} ${p.text.slice(0, 200)}`);
   const reference = p.json?.reference;
   assert('POST: reference FO-XXXXXX and nothing else', REFERENCE_RE.test(reference ?? '') && Object.keys(p.json ?? {}).length === 1, p.text.slice(0, 120));
@@ -180,10 +217,23 @@ try {
   assert('honeypot: 201 with a reference', p.status === 201 && REFERENCE_RE.test(p.json?.reference ?? ''), `HTTP ${p.status} ${p.text.slice(0, 120)}`);
   assert('honeypot: nothing stored', (await svcSelect('issues', `reference=eq.${p.json?.reference}&select=id`)).length === 0, 'an issue row exists for the honeypot reference');
   assert('honeypot: token counter untouched', (await svcSelect('intake_tokens', `id=eq.${tokenRow.id}&select=submissions_count`))[0]?.submissions_count === 1, 'submissions_count moved');
+  // The token is printed on a poster: only the ONE stored submission may have spent its allowance,
+  // never the three rejected posts, the honeypot, the 404s or the 411.
+  assert('token allowance: spent once, by the stored submission only', await tokenBucketCount(tokenRow.id) === 1, `t:${tokenRow.id} count=${await tokenBucketCount(tokenRow.id)}`);
 
-  // ── 5. per-IP limit: the 6th post this hour ──
+  // ── 5. per-IP-and-token limit: the 6th post this hour ──
   p = await post(formData(tokenRow.token));
-  assert('6th POST from this IP: 429 rate_limited + Retry-After', p.status === 429 && p.json?.error === 'rate_limited' && !!p.headers.get('retry-after'), `HTTP ${p.status} ${p.text.slice(0, 120)}`);
+  assert('6th POST from this IP for this token: 429 rate_limited + Retry-After', p.status === 429 && p.json?.error === 'rate_limited' && !!p.headers.get('retry-after'), `HTTP ${p.status} ${p.text.slice(0, 120)}`);
+  // Keyed on address AND token, so a second building behind the same connection is unaffected.
+  const other = await svcInsert('intake_tokens', { building_id: building, token: mintToken(), created_by: admin.id, label: `ZZTEST other ${RUN}` });
+  cleanup.unshift(['intake_tokens', `id=eq.${other.id}`]);
+  p = await post(formData(other.token, { title: `ZZTEST other token ${RUN}` }));
+  assert('a different token from the same IP is not rate limited', p.status === 201, `HTTP ${p.status} ${p.text.slice(0, 120)}`);
+  if (p.json?.reference) {
+    cleanup.unshift(['issues', `reference=eq.${p.json.reference}`]);
+    const row = (await svcSelect('issues', `reference=eq.${p.json.reference}&select=id`))[0];
+    if (row?.id) cleanup.unshift(['notifications', `entity_id=eq.${row.id}`]);
+  }
 
   // ── 6. per-token limit: counter forced to 20, ip counters cleared ──
   await svcDelete('intake_rate', 'bucket=like.ip:*');
@@ -191,13 +241,15 @@ try {
   p = await post(formData(tokenRow.token));
   assert('21st POST for the token: 429', p.status === 429 && p.json?.error === 'rate_limited', `HTTP ${p.status} ${p.text.slice(0, 120)}`);
   await svcDelete('intake_rate', `bucket=eq.t:${tokenRow.id}`);
-  p = await post(formData(tokenRow.token, { title: `ZZTEST second ${RUN}` }));
+  const paragraphs = 'The light in the passage is out.\n\nIt has been out since Friday and the stairwell is dark.';
+  p = await post(formData(tokenRow.token, { title: `ZZTEST second ${RUN}`, description: paragraphs }));
   assert('after clearing the counters: 201 again (no photo → photo_urls null)', p.status === 201 && REFERENCE_RE.test(p.json?.reference ?? ''), `HTTP ${p.status} ${p.text.slice(0, 120)}`);
   if (p.json?.reference) {
     cleanup.unshift(['issues', `reference=eq.${p.json.reference}`]);
-    const second = (await svcSelect('issues', `reference=eq.${p.json.reference}&select=id,photo_urls,reference`))[0];
+    const second = (await svcSelect('issues', `reference=eq.${p.json.reference}&select=id,photo_urls,reference,description`))[0];
     if (second?.id) cleanup.unshift(['notifications', `entity_id=eq.${second.id}`]);   // the second submission notifies the real admins too
     assert('second issue: photo_urls null, distinct reference', second?.photo_urls === null && second.reference !== reference, JSON.stringify(second));
+    assert('second issue: the description keeps its paragraph break', second?.description === paragraphs, JSON.stringify(second?.description));
   }
 
   // ── 7. disabled token, flag off, method ──

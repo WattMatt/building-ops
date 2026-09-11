@@ -36,19 +36,23 @@ let sentry: typeof import('@sentry/react') | null = null;
 let ready: Promise<void> = Promise.resolve();
 
 /**
- * Query params carrying credential material. `t` is the bearer token of both the ICS feed
- * (`/functions/v1/ics-feed?t=…`) and the share function's GET (`/functions/v1/report-share?t=…`),
- * which reaches Sentry as a fetch breadcrumb's `data.url`; no route of ours uses `t` for anything else.
+ * Query params carrying credential material. `t` is the bearer token of the ICS feed
+ * (`/functions/v1/ics-feed?t=…`), the share function's GET (`/functions/v1/report-share?t=…`) and
+ * the tenant-intake function (`/functions/v1/tenant-intake?t=…`), which reaches Sentry as a fetch
+ * breadcrumb's `data.url`; no route of ours uses `t` for anything else.
  */
 const TOKEN_PARAMS = ['access_token', 'refresh_token', 'code', 't'];
 
 /**
- * Credentials embedded in the PATH rather than the query. `/share/:token` is a public page whose
- * 43-char token IS the credential, and PostHog records `$current_url`/`$pathname` for every pageview,
- * so the path has to be redacted as well as the query and the fragment.
+ * Credentials embedded in the PATH rather than the query. `/share/:token` (a shared report) and
+ * `/intake/:token` (the public tenant form whose token is printed on the building's poster) are
+ * both public pages whose 43-char token IS the credential, and PostHog records
+ * `$current_url`/`$pathname` for every pageview, so the path has to be redacted as well as the
+ * query and the fragment.
  */
 const TOKEN_PATHS: readonly (readonly [RegExp, string])[] = [
   [/\/share\/[A-Za-z0-9_-]{43}/g, '/share/[token]'],
+  [/\/intake\/[A-Za-z0-9_-]{43}/g, '/intake/[token]'],
 ];
 
 /** Replace every path-embedded token with a placeholder. Pure; safe on any string. */

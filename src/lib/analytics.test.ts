@@ -102,6 +102,33 @@ describe('analytics', () => {
         'https://app.example.com/share/help',
         'https://app.example.com/share/help',
       ],
+      // `/intake/:token` is the same shape: an unauthenticated page whose 43-char token is the
+      // credential — and one that is printed on a poster, so it is the longest-lived of the two.
+      [
+        'redacts the intake token out of the pathname',
+        'https://app.example.com/intake/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        'https://app.example.com/intake/[token]',
+      ],
+      [
+        'redacts an intake token on a bare path (the $pathname shape)',
+        '/intake/bBcC-dEfG_hIjKlMnOpQrStUvWxYz0123456789abcd',
+        '/intake/[token]',
+      ],
+      [
+        'redacts the intake token when the URL also carries a query and a fragment',
+        'https://app.example.com/intake/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA?ref=qr#x',
+        'https://app.example.com/intake/[token]?ref=qr',
+      ],
+      [
+        'redacts the intake token on the token-query branch too',
+        'https://app.example.com/intake/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA?code=x&page=2',
+        'https://app.example.com/intake/[token]?page=2',
+      ],
+      [
+        'leaves an /intake path that is not a token alone',
+        'https://app.example.com/intake/help',
+        'https://app.example.com/intake/help',
+      ],
       // `t` is the bearer token of the ICS feed and of the share function's GET; both reach
       // Sentry as a fetch breadcrumb URL.
       [

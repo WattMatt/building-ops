@@ -1,11 +1,23 @@
 // tenant-intake — the public "report a problem" endpoint behind a per-building QR token (spec §5.10,
 // R4c Task 2). The tenant has no account: the token IS the credential (`verify_jwt = false`). It is
 // resolved with the service role; a malformed, unknown or disabled token — or the org's
-// features.tenant_intake flag being off — answers the same 404. POST is rate-limited per token and
-// per hashed IP, drops honeypot hits without storing anything, uploads at most three photos under
-// intake/<building>/ (a prefix no session can write), inserts the issue with a reference the tenant
-// keeps, and notifies the admins/managers plus the building's assignee. Nothing here logs a token,
-// an IP, a reference or a reporter field — counts and statuses only.
+// features.tenant_intake flag being off — answers the same 404.
+//
+// The token arrives in `?t=` on BOTH verbs, so it is resolved — and the buckets charged — before a
+// request body is ever read. Three hashed rate buckets, each with a different job (R4c review):
+//
+//   attempts   per address, high cap, charged on every request of either verb before anything is
+//              resolved or parsed. This is the bucket that absorbs abuse.
+//   address    per address AND token, the everyday throttle. Keyed on both so a shopping centre
+//              behind one connection cannot exhaust another building's allowance.
+//   token      the building's own 20/hour, SPENT only by a submission that is actually stored. The
+//              token is printed on a poster by design, so junk posts must never silence a building.
+//
+// POST drops honeypot hits without storing anything, uploads at most three photos under
+// intake/<building>/ (a prefix no session can write, and swept again if the insert fails), inserts
+// the issue with a reference the tenant keeps, and notifies the admins/managers plus the building's
+// assignee. Nothing here logs a token, an address, a reference or a reporter field — counts and
+// statuses only.
 
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
@@ -18,8 +30,12 @@ const BUCKET = "tenant-documents";
 const MAX_PHOTOS = 3;
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 const MAX_BODY_BYTES = 16 * 1024 * 1024;
+/** Stored submissions per token per hour. Spent on success only. */
 const TOKEN_LIMIT_PER_HOUR = 20;
-const IP_LIMIT_PER_HOUR = 5;
+/** Submissions attempted from one address for ONE token per hour. */
+const ADDRESS_LIMIT_PER_HOUR = 5;
+/** Any request from one address per hour, whatever it carries. Deliberately generous. */
+const ATTEMPT_LIMIT_PER_HOUR = 120;
 const SHOP_CAP = 500;
 const REFERENCE_ATTEMPTS = 5;
 const PHOTO_EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
@@ -42,6 +58,8 @@ function json(status: number, body: Json, headers: Record<string, string>): Resp
 }
 /** Malformed, unknown, disabled, and flag-off all look identical from outside. */
 const notFound = (cors: Record<string, string>) => json(404, { error: "not_found" }, cors);
+const rateLimited = (cors: Record<string, string>) =>
+  json(429, { error: "rate_limited" }, { ...cors, "Retry-After": "3600" });
 
 /** `FO-` + 6 base32 characters (RFC 4648 alphabet, `byte & 31`). */
 function mintReference(): string {
@@ -51,27 +69,63 @@ function mintReference(): string {
   return `FO-${s}`;
 }
 
-/** 32 hex chars of sha256(salt ':' ip). The raw address never leaves this function. */
-async function ipBucket(req: Request, salt: string): Promise<string> {
-  // Supabase's gateway sets x-forwarded-for; x-real-ip is the fallback for a local `functions serve`.
-  // A request with neither shares one "unknown" bucket — logged once so it is never a silent 5/hour cap.
-  const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || req.headers.get("x-real-ip")?.trim() || "";
-  if (!ip) console.warn("tenant-intake: no client address header; using the shared bucket");
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${salt}:${ip || "unknown"}`));
+/**
+ * The connecting address, as trustworthy as this runtime can make it.
+ *
+ * A caller can send its own `x-forwarded-for`. A gateway that APPENDS the peer address rather than
+ * replacing the header therefore leaves an attacker-chosen value in FRONT — so the first hop is
+ * attacker-controlled and worthless as a rate-limit key (a fresh value per request would mint a
+ * fresh bucket every time). The LAST hop is the one the closest proxy wrote, so that is what we
+ * take. Better still is a header the platform itself sets from the TCP peer and a client cannot
+ * forge — `cf-connecting-ip` on the Cloudflare edge that fronts Supabase functions, `fly-client-ip`
+ * on Fly, `x-real-ip` on a local `functions serve` — so those win when present.
+ *
+ * The value is only ever hashed with INTAKE_IP_SALT. It is never logged and never stored.
+ */
+function clientAddress(req: Request): string {
+  const direct = req.headers.get("cf-connecting-ip")
+    ?? req.headers.get("fly-client-ip")
+    ?? req.headers.get("x-real-ip");
+  if (direct?.trim()) return direct.trim();
+  const hops = (req.headers.get("x-forwarded-for") ?? "").split(",").map((h) => h.trim()).filter(Boolean);
+  return hops.length ? hops[hops.length - 1] : "";
+}
+
+/** 32 hex chars of sha256(salt ':' address [':' scope]). The raw address never leaves this function. */
+async function addressBucket(salt: string, address: string, scope?: string): Promise<string> {
+  const parts = [salt, address || "unknown", ...(scope ? [scope] : [])];
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(parts.join(":")));
   return "ip:" + Array.from(new Uint8Array(digest)).slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** Single-line fields: every run of whitespace becomes one space. */
 const clean = (v: FormDataEntryValue | null, max: number): string =>
   (typeof v === "string" ? v : "").replace(/\s+/g, " ").trim().slice(0, max);
 
+/**
+ * The description is the one field a tenant writes more than a phrase into, and collapsing all
+ * whitespace turned a multi-paragraph report into a single line. Horizontal whitespace still
+ * collapses to one space; line breaks survive, normalised to `\n` and capped at one blank line.
+ */
+const cleanMultiline = (v: FormDataEntryValue | null, max: number): string =>
+  (typeof v === "string" ? v : "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, max);
+
 type TokenRow = { id: string; building_id: string; is_active: boolean; created_by: string | null };
-type Resolved = { token: TokenRow; buildingName: string };
+type OrgSettings = { features?: { tenant_intake?: unknown }; intake?: { show_shop_names?: unknown } };
+type OrgRow = { name?: string | null; logo_url?: string | null; primary_color?: string | null; settings?: OrgSettings | null };
+type Resolved = { token: TokenRow; buildingName: string; org: OrgRow };
 
 // The untyped service-role client, exactly as _shared/reportAccess.ts names it: the intake tables
 // are not in the generated Database types, and this function never runs through them anyway.
 type Admin = ReturnType<typeof createClient>;
 
-/** Token row + flag + building name, or null for every reason the caller must not learn. */
+/** Token row + flag + building name + the org row the GET renders, or null for every reason the caller must not learn. */
 async function resolve(admin: Admin, token: string): Promise<Resolved | null> {
   if (!TOKEN_RE.test(token)) return null;
   const { data: row, error } = await admin
@@ -83,81 +137,113 @@ async function resolve(admin: Admin, token: string): Promise<Resolved | null> {
   const t = row as TokenRow | null;
   if (!t || !t.is_active) return null;
   // Ship dark until the owner switches the flag on (organizations.settings is R4a's column).
-  const { data: org, error: orgErr } = await admin.from("organizations").select("settings").limit(1).maybeSingle();
+  const { data: orgRow, error: orgErr } = await admin
+    .from("organizations")
+    .select("name, logo_url, primary_color, settings")
+    .limit(1)
+    .maybeSingle();
   if (orgErr) throw orgErr;
-  const flag = (org as { settings?: { features?: { tenant_intake?: unknown } } } | null)?.settings?.features?.tenant_intake;
-  if (flag !== true) return null;
+  const org = (orgRow ?? {}) as OrgRow;
+  if (org.settings?.features?.tenant_intake !== true) return null;
   const { data: b, error: bErr } = await admin.from("buildings").select("name").eq("id", t.building_id).maybeSingle();
   if (bErr) throw bErr;
   if (!b) return null;
-  return { token: t, buildingName: (b as { name: string | null }).name ?? "Building" };
+  return { token: t, buildingName: (b as { name: string | null }).name ?? "Building", org };
+}
+
+/** Best-effort sweep of this request's uploads. Nothing else ever visits the intake prefix. */
+async function discardUploads(admin: Admin, paths: string[]): Promise<void> {
+  if (!paths.length) return;
+  const { error } = await admin.storage.from(BUCKET).remove(paths);
+  if (error) console.error("tenant-intake: could not remove orphaned uploads:", error.message ?? error);
+  else console.log("tenant-intake: swept orphaned uploads", { photos: paths.length });
 }
 
 async function handleGet(admin: Admin, resolved: Resolved, cors: Record<string, string>): Promise<Response> {
-  const [{ data: shops, error: shopErr }, { data: org, error: orgErr }] = await Promise.all([
-    admin
-      .from("building_tenants")
-      .select("shop_number, shop_name")
-      .eq("building_id", resolved.token.building_id)
-      .or("is_active.is.null,is_active.eq.true")
-      .not("shop_number", "is", null)
-      .order("shop_number")
-      .limit(SHOP_CAP),
-    admin.from("organizations").select("name, logo_url, primary_color").limit(1).maybeSingle(),
-  ]);
+  // Shop NAMES are the building's tenant roster, and this endpoint is unauthenticated: anyone who
+  // photographs the poster can read it. A shop NUMBER is all the form needs to identify a unit, so
+  // names ship only when the owner has opted in with organizations.settings.intake.show_shop_names
+  // — and when they have not, the column is not even selected.
+  const showNames = resolved.org.settings?.intake?.show_shop_names === true;
+  const { data: shops, error: shopErr } = await admin
+    .from("building_tenants")
+    .select(showNames ? "shop_number, shop_name" : "shop_number")
+    .eq("building_id", resolved.token.building_id)
+    .or("is_active.is.null,is_active.eq.true")
+    .not("shop_number", "is", null)
+    .order("shop_number")
+    .limit(SHOP_CAP);
   if (shopErr) throw shopErr;
-  if (orgErr) throw orgErr;
-  const o = (org ?? {}) as { name?: string | null; logo_url?: string | null; primary_color?: string | null };
+  const o = resolved.org;
   const color = typeof o.primary_color === "string" && /^#?[0-9a-f]{6}$/i.test(o.primary_color)
     ? (o.primary_color.startsWith("#") ? o.primary_color : `#${o.primary_color}`)
     : "#2563eb";
-  console.log("tenant-intake: served", { method: "GET", shops: shops?.length ?? 0 });
+  console.log("tenant-intake: served", { method: "GET", shops: shops?.length ?? 0, names: showNames ? 1 : 0 });
   return json(200, {
     building: { name: resolved.buildingName },
     org: { name: o.name?.trim() || "Building Ops", logoUrl: o.logo_url ?? null, primaryColor: color },
-    shops: ((shops ?? []) as { shop_number: string; shop_name: string | null }[]).map((s) => ({
+    shops: ((shops ?? []) as { shop_number: string; shop_name?: string | null }[]).map((s) => ({
       shopNumber: s.shop_number,
-      shopName: s.shop_name ?? "",
+      shopName: showNames ? (s.shop_name ?? "") : "",
     })),
     categories: INTAKE_CATEGORIES,
   }, cors);
 }
 
-async function handlePost(req: Request, admin: Admin, cors: Record<string, string>): Promise<Response> {
+async function handlePost(
+  req: Request,
+  admin: Admin,
+  resolved: Resolved,
+  salt: string,
+  address: string,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const { token, buildingName } = resolved;
+
   if (!(req.headers.get("content-type") ?? "").toLowerCase().includes("multipart/form-data")) {
     return json(400, { error: "invalid", fields: ["body"] }, cors);
   }
-  const declared = Number(req.headers.get("content-length") ?? "0");
+  // A chunked POST declares no length, and `Number(null ?? "0")` used to make that a 0 that sailed
+  // through the cap below — the whole body was then parsed anyway. Every client of ours sends a
+  // FormData body, whose length fetch computes, so a POST without a declared length is refused
+  // rather than read.
+  const declaredHeader = req.headers.get("content-length");
+  const declared = Number(declaredHeader);
+  if (declaredHeader === null || declaredHeader.trim() === "" || !Number.isFinite(declared) || declared < 0) {
+    return json(411, { error: "length_required" }, cors);
+  }
   if (declared > MAX_BODY_BYTES) return json(413, { error: "too_large" }, cors);
+
+  // This address, for THIS token. Keyed on both: a centre behind one connection used to get five
+  // reports an hour across every building it could see.
+  const { data: addressOk, error: addressErr } = await admin.rpc("intake_rate_hit", {
+    p_bucket: await addressBucket(salt, address, token.id),
+    p_limit: ADDRESS_LIMIT_PER_HOUR,
+  });
+  if (addressErr) throw addressErr;
+  if (addressOk !== true) {
+    console.log("tenant-intake: rate limited", { scope: "address" });
+    return rateLimited(cors);
+  }
+
+  // The token's allowance is READ here and SPENT only once a submission is stored (below). Twenty
+  // junk posts against a token that is printed at the door must not silence the building.
+  const tokenBucket = `t:${token.id}`;
+  const { data: tokenOk, error: tokenErr } = await admin.rpc("intake_rate_check", {
+    p_bucket: tokenBucket,
+    p_limit: TOKEN_LIMIT_PER_HOUR,
+  });
+  if (tokenErr) throw tokenErr;
+  if (tokenOk !== true) {
+    console.log("tenant-intake: rate limited", { scope: "token" });
+    return rateLimited(cors);
+  }
 
   let form: FormData;
   try {
     form = await req.formData();
   } catch {
     return json(400, { error: "invalid", fields: ["body"] }, cors);
-  }
-
-  const resolved = await resolve(admin, clean(form.get("t"), 64));
-  if (!resolved) return notFound(cors);
-  const { token, buildingName } = resolved;
-
-  const salt = Deno.env.get("INTAKE_IP_SALT");
-  if (!salt) {
-    console.error("tenant-intake: INTAKE_IP_SALT is not set; refusing to accept submissions");
-    return json(500, { error: "unavailable" }, cors);
-  }
-
-  // Both buckets are counted before either verdict is read: a burst that trips one limit still
-  // burns the other, so alternating tokens from one address does not double the allowance.
-  const [tokOk, ipOk] = await Promise.all([
-    admin.rpc("intake_rate_hit", { p_bucket: `t:${token.id}`, p_limit: TOKEN_LIMIT_PER_HOUR }),
-    admin.rpc("intake_rate_hit", { p_bucket: await ipBucket(req, salt), p_limit: IP_LIMIT_PER_HOUR }),
-  ]);
-  if (tokOk.error) throw tokOk.error;
-  if (ipOk.error) throw ipOk.error;
-  if (tokOk.data !== true || ipOk.data !== true) {
-    console.log("tenant-intake: rate limited", { token: tokOk.data !== true, ip: ipOk.data !== true });
-    return json(429, { error: "rate_limited" }, { ...cors, "Retry-After": "3600" });
   }
 
   // Honeypot: a filled hidden field is a bot. Answer like a success (a fresh, unstored reference)
@@ -168,7 +254,7 @@ async function handlePost(req: Request, admin: Admin, cors: Record<string, strin
   }
 
   const title = clean(form.get("title"), LIMITS.title);
-  const description = clean(form.get("description"), LIMITS.description);
+  const description = cleanMultiline(form.get("description"), LIMITS.description);
   const name = clean(form.get("name"), LIMITS.name);
   const shopNumber = clean(form.get("shop_number"), LIMITS.shop_number);
   const phone = clean(form.get("phone"), LIMITS.phone);
@@ -207,102 +293,119 @@ async function handlePost(req: Request, admin: Admin, cors: Record<string, strin
   if (invalid.length) return json(400, { error: "invalid", fields: invalid }, cors);
 
   // Photos: service-role upload under the intake prefix. The stored value is the public-style
-  // URL, the same shape src/lib/photos.ts writes, so SignedImage re-signs it on read.
+  // URL, the same shape src/lib/photos.ts writes, so SignedImage re-signs it on read. Every path is
+  // remembered: the uploads happen before the insert, so any failure after this point has to sweep
+  // them — nothing else ever walks the intake prefix.
+  const uploaded: string[] = [];
   const photoUrls: string[] = [];
   for (const f of files) {
     const path = `intake/${token.building_id}/${crypto.randomUUID()}.${PHOTO_EXT[f.type]}`;
     const { error } = await admin.storage.from(BUCKET).upload(path, await f.arrayBuffer(), { contentType: f.type, upsert: false });
     if (error) {
       console.error("tenant-intake: upload failed:", error.message ?? error);
+      await discardUploads(admin, uploaded);
       return json(500, { error: "upload_failed" }, cors);
     }
+    uploaded.push(path);
     photoUrls.push(admin.storage.from(BUCKET).getPublicUrl(path).data.publicUrl);
   }
 
-  // Who acts on it: the building's 'issue' rule, else its 'user' rule, else nobody.
-  const { data: rules, error: rulesErr } = await admin
-    .from("building_role_assignments")
-    .select("role, user_id")
-    .eq("building_id", token.building_id)
-    .in("role", ["issue", "user"]);
-  if (rulesErr) throw rulesErr;
-  const ruleFor = (role: string) => ((rules ?? []) as { role: string; user_id: string }[]).find((r) => r.role === role)?.user_id ?? null;
-  const assignee = ruleFor("issue") ?? ruleFor("user");
-
-  // reported_by is not null on issues: the token creator, or the first admin if that account is gone.
-  const admins = await adminAndManagerIds(admin);
-  let reportedBy = token.created_by;
-  if (!reportedBy) {
-    const { data } = await admin.from("user_roles").select("user_id").eq("role", "admin").limit(1).maybeSingle();
-    reportedBy = (data as { user_id: string } | null)?.user_id ?? admins[0] ?? null;
-  }
-  if (!reportedBy) {
-    console.error("tenant-intake: no account to report under");
-    return json(500, { error: "unavailable" }, cors);
-  }
-
-  const reporter = { name, shop_number: shopNumber || null, shop, unit, phone: phone || null, email: email || null };
-  const issueId = crypto.randomUUID();
-  let reference = "";
-  for (let attempt = 0; attempt < REFERENCE_ATTEMPTS; attempt++) {
-    reference = mintReference();
-    const { error } = await admin.from("issues").insert({
-      id: issueId,
-      building_id: token.building_id,
-      title,
-      description,
-      category,
-      priority: "medium",
-      status: "open",
-      reported_by: reportedBy,
-      assigned_to: assignee,
-      source: "tenant_intake",
-      reporter,
-      reference,
-      photo_urls: photoUrls.length ? photoUrls : null,
-    });
-    if (!error) break;
-    // 23505 on the reference's partial unique index → mint another; anything else is fatal.
-    if (error.code !== "23505" || attempt === REFERENCE_ATTEMPTS - 1) throw error;
-    reference = "";
-  }
-
-  // Counters ride after the response (the same waitUntil pattern as ics-feed's last_used_at).
-  const touch = admin.rpc("intake_touch", { p_token: token.id }).then(({ error }: { error: { message?: string } | null }) => {
-    if (error) console.warn("tenant-intake: intake_touch failed:", error.message ?? error);
-  });
-  const runtime = (globalThis as unknown as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
-  runtime?.waitUntil?.(touch);
-
-  // The issue is stored by now, so a notification failure is logged, never surfaced to the tenant.
-  let notified: Record<string, number> = {};
   try {
-    const recipients = Array.from(new Set([...admins, ...(assignee ? [assignee] : [])]));
-    const shopLabel = shop ? `${shop} (${shopNumber})` : shopNumber ? `Shop ${shopNumber}` : "No shop given";
-    const result = await createNotifications(admin, {
-      recipients,
-      actorId: null,
-      actorName: "Tenant intake",
-      kind: "issue_reported",
-      entityType: "issue",
-      entityId: issueId,
-      buildingId: token.building_id,
-      title: `Tenant reported: ${title}`,
-      body: `${buildingName} · ${shopLabel} · ${name}`,
-      url: `/issues?open=${issueId}`,
-      subject: `Tenant report in ${buildingName}: ${title}`,
-      detailHtml: `<p style="margin:0 0 12px;">A tenant reported a problem in <strong>${escapeText(buildingName)}</strong> through the intake form (reference ${escapeText(reference)}).${assignee ? "" : " Nobody is assigned yet."}</p>`,
-      bodyLabel: "Where and who",
-      ctaText: "Open the issue",
-      pushTo: assignee ? [assignee] : admins,
-    });
-    notified = { inserted: result.inserted, pushed: result.pushed, emailed: result.emailed, failed: result.failed };
-  } catch (e) {
-    console.error("tenant-intake: notify failed:", e instanceof Error ? e.message : e);
-  }
+    // Who acts on it: the building's 'issue' rule, else its 'user' rule, else nobody.
+    const { data: rules, error: rulesErr } = await admin
+      .from("building_role_assignments")
+      .select("role, user_id")
+      .eq("building_id", token.building_id)
+      .in("role", ["issue", "user"]);
+    if (rulesErr) throw rulesErr;
+    const ruleFor = (role: string) => ((rules ?? []) as { role: string; user_id: string }[]).find((r) => r.role === role)?.user_id ?? null;
+    const assignee = ruleFor("issue") ?? ruleFor("user");
 
-  console.log("tenant-intake: served", { method: "POST", photos: photoUrls.length, assigned: assignee ? 1 : 0, notified });
-  return json(201, { reference }, cors);
+    // reported_by is not null on issues: the token creator, or the first admin if that account is gone.
+    const admins = await adminAndManagerIds(admin);
+    let reportedBy = token.created_by;
+    if (!reportedBy) {
+      const { data } = await admin.from("user_roles").select("user_id").eq("role", "admin").limit(1).maybeSingle();
+      reportedBy = (data as { user_id: string } | null)?.user_id ?? admins[0] ?? null;
+    }
+    if (!reportedBy) {
+      console.error("tenant-intake: no account to report under");
+      await discardUploads(admin, uploaded);
+      return json(500, { error: "unavailable" }, cors);
+    }
+
+    const reporter = { name, shop_number: shopNumber || null, shop, unit, phone: phone || null, email: email || null };
+    const issueId = crypto.randomUUID();
+    let reference = "";
+    for (let attempt = 0; attempt < REFERENCE_ATTEMPTS; attempt++) {
+      reference = mintReference();
+      const { error } = await admin.from("issues").insert({
+        id: issueId,
+        building_id: token.building_id,
+        title,
+        description,
+        category,
+        priority: "medium",
+        status: "open",
+        reported_by: reportedBy,
+        assigned_to: assignee,
+        source: "tenant_intake",
+        reporter,
+        reference,
+        photo_urls: photoUrls.length ? photoUrls : null,
+      });
+      if (!error) break;
+      // 23505 on the reference's partial unique index → mint another; anything else is fatal.
+      if (error.code !== "23505" || attempt === REFERENCE_ATTEMPTS - 1) throw error;
+      reference = "";
+    }
+
+    // Counters ride after the response (the same waitUntil pattern as ics-feed's last_used_at).
+    // The token's own hourly allowance is spent right here, next to the touch, because only a
+    // submission that is actually stored may cost the building one of its twenty.
+    const { error: spendErr } = await admin.rpc("intake_rate_hit", { p_bucket: tokenBucket, p_limit: TOKEN_LIMIT_PER_HOUR });
+    if (spendErr) console.warn("tenant-intake: intake_rate_hit (token) failed:", spendErr.message ?? spendErr);
+    const touch = admin.rpc("intake_touch", { p_token: token.id }).then(({ error }: { error: { message?: string } | null }) => {
+      if (error) console.warn("tenant-intake: intake_touch failed:", error.message ?? error);
+    });
+    const runtime = (globalThis as unknown as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+    runtime?.waitUntil?.(touch);
+
+    // The issue is stored by now, so a notification failure is logged, never surfaced to the tenant.
+    let notified: Record<string, number> = {};
+    try {
+      const recipients = Array.from(new Set([...admins, ...(assignee ? [assignee] : [])]));
+      const shopLabel = shop ? `${shop} (${shopNumber})` : shopNumber ? `Shop ${shopNumber}` : "No shop given";
+      const result = await createNotifications(admin, {
+        recipients,
+        actorId: null,
+        actorName: "Tenant intake",
+        kind: "issue_reported",
+        entityType: "issue",
+        entityId: issueId,
+        buildingId: token.building_id,
+        title: `Tenant reported: ${title}`,
+        body: `${buildingName} · ${shopLabel} · ${name}`,
+        url: `/issues?open=${issueId}`,
+        subject: `Tenant report in ${buildingName}: ${title}`,
+        detailHtml: `<p style="margin:0 0 12px;">A tenant reported a problem in <strong>${escapeText(buildingName)}</strong> through the intake form (reference ${escapeText(reference)}).${assignee ? "" : " Nobody is assigned yet."}</p>`,
+        bodyLabel: "Where and who",
+        ctaText: "Open the issue",
+        pushTo: assignee ? [assignee] : admins,
+      });
+      notified = { inserted: result.inserted, pushed: result.pushed, emailed: result.emailed, failed: result.failed };
+    } catch (e) {
+      console.error("tenant-intake: notify failed:", e instanceof Error ? e.message : e);
+    }
+
+    console.log("tenant-intake: served", { method: "POST", photos: photoUrls.length, assigned: assignee ? 1 : 0, notified });
+    return json(201, { reference }, cors);
+  } catch (e) {
+    // The photos are in the bucket already and the issue that would have referenced them does not
+    // exist, so they would sit under the intake prefix forever. Sweep before the error goes up.
+    await discardUploads(admin, uploaded);
+    throw e;
+  }
 }
 
 serve(async (req: Request): Promise<Response> => {
@@ -312,13 +415,36 @@ serve(async (req: Request): Promise<Response> => {
     return json(405, { error: "method_not_allowed" }, { ...cors, Allow: "GET, POST, OPTIONS" });
   }
   try {
-    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    if (req.method === "GET") {
-      const resolved = await resolve(admin, new URL(req.url).searchParams.get("t") ?? "");
-      if (!resolved) return notFound(cors);
-      return await handleGet(admin, resolved, cors);
+    // Both verbs charge a bucket, so the salt is required to serve at all — the GET hands out a
+    // building's shop list and used to be pollable for free.
+    const salt = Deno.env.get("INTAKE_IP_SALT");
+    if (!salt) {
+      console.error("tenant-intake: INTAKE_IP_SALT is not set; refusing to serve");
+      return json(500, { error: "unavailable" }, cors);
     }
-    return await handlePost(req, admin, cors);
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const address = clientAddress(req);
+    // A request with no address header at all shares one bucket — logged once so it is never a
+    // silent cap. The address itself is never logged.
+    if (!address) console.warn("tenant-intake: no connecting-address header; using the shared bucket");
+
+    // Charged first, on every request of either verb, before a token is resolved or a body read.
+    const { data: attemptOk, error: attemptErr } = await admin.rpc("intake_rate_hit", {
+      p_bucket: await addressBucket(salt, address),
+      p_limit: ATTEMPT_LIMIT_PER_HOUR,
+    });
+    if (attemptErr) throw attemptErr;
+    if (attemptOk !== true) {
+      console.log("tenant-intake: rate limited", { scope: "attempts", method: req.method });
+      return rateLimited(cors);
+    }
+
+    // `?t=` on both verbs: on POST it is what lets the token be resolved and the buckets charged
+    // before `req.formData()` is called on a stranger's body.
+    const resolved = await resolve(admin, new URL(req.url).searchParams.get("t") ?? "");
+    if (!resolved) return notFound(cors);
+    if (req.method === "GET") return await handleGet(admin, resolved, cors);
+    return await handlePost(req, admin, resolved, salt, address, cors);
   } catch (error) {
     // The message may name a table or column, never the token or the tenant (neither is interpolated).
     console.error("tenant-intake error:", error instanceof Error ? error.message : error);

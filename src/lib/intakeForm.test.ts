@@ -140,6 +140,16 @@ describe('submitIntake', () => {
     await expect(submitIntake(fd, vi.fn(async () => { throw new Error('offline'); })))
       .resolves.toEqual({ ok: false, kind: 'failed', fields: [] });
   });
+
+  it('puts the token on the query as well as in the body, so the function never parses an unknown body', async () => {
+    const withToken = buildIntakeFormData('a b', { ...EMPTY_INTAKE, title: 'a', description: 'b', name: 'c' }, []);
+    const spy = vi.fn(async () => res(201, { reference: 'FO-ABC234' }));
+    await submitIntake(withToken, spy);
+    const [url, init] = spy.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain('/functions/v1/tenant-intake?t=a%20b');
+    expect(init.method).toBe('POST');
+    expect((init.body as FormData).get('t')).toBe('a b');
+  });
 });
 
 describe('serverFieldError', () => {

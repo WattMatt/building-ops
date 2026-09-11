@@ -99,6 +99,7 @@ describe('IssueDetailDialog', () => {
             ...issue,
             source: 'tenant_intake' as const,
             reference: 'FO-ABC234',
+            category: 'Lighting',
             reporter: { name: 'Thandi', shop: 'Kool Kids', shop_number: '12', unit: null, phone: '0821234567', email: null },
           }}
           open onOpenChange={() => {}} canManage onUpdated={() => {}}
@@ -109,6 +110,25 @@ describe('IssueDetailDialog', () => {
       expect(block).toHaveTextContent('FO-ABC234');
       expect(block).toHaveTextContent('Thandi · Kool Kids (Shop 12)');
       expect(screen.getByRole('link', { name: '0821234567' })).toHaveAttribute('href', 'tel:0821234567');
+      // The category the tenant chose on the form is shown, not just written to the CSV export.
+      expect(screen.getByTestId('tenant-category')).toHaveTextContent('Lighting');
+    });
+
+    it('leaves the category chip out when the tenant did not pick one', async () => {
+      render(
+        <IssueDetailDialog
+          issue={{
+            ...issue,
+            source: 'tenant_intake' as const,
+            reference: 'FO-ABC234',
+            category: null,
+            reporter: { name: 'Thandi', shop: null, shop_number: null, unit: null, phone: null, email: null },
+          }}
+          open onOpenChange={() => {}} canManage onUpdated={() => {}}
+        />,
+      );
+      await screen.findByTestId('tenant-report');
+      expect(screen.queryByTestId('tenant-category')).toBeNull();
     });
 
     it('is absent on an issue the app created', async () => {

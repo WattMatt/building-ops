@@ -61,6 +61,8 @@ interface Issue {
   source?: IssueSource;
   reporter?: IssueReporter | null;
   reference?: string | null;
+  /** The category the tenant picked on the intake form; null on an app-created issue. */
+  category?: string | null;
   // Optional: older fixtures and callers predate the SLA columns; no target means no clock.
   sla_target_hours?: number | null;
   sla_breached_at?: string | null;
@@ -309,6 +311,8 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className="border-info text-info">Tenant report</Badge>
                 {issue.reference && <span className="font-mono text-xs">{issue.reference}</span>}
+                {/* The tenant picks this on the public form; until now it only reached the CSV export. */}
+                {issue.category && <Badge variant="secondary" data-testid="tenant-category">{issue.category}</Badge>}
               </div>
               <p>{reporterSummary(issue.reporter)}</p>
               <p className="flex flex-wrap gap-3 text-xs">

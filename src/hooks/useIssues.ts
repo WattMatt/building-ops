@@ -34,7 +34,7 @@ export interface Issue {
   source: IssueSource;
   /** The tenant who reported through the public form (no account); null on every app-created issue. */
   reporter: IssueReporter | null;
-  /** The human-readable reference the intake function stamps on a tenant report, e.g. "TR-2609-0142". */
+  /** The human-readable reference the intake function stamps on a tenant report, e.g. "FO-K7QZ2M". */
   reference: string | null;
 }
 

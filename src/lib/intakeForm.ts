@@ -14,6 +14,11 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export interface IntakeInfo {
   building: { name: string };
   org: { name: string; logoUrl: string | null; primaryColor: string };
+  /**
+   * The building's shops. `shopName` is `''` unless the owner has opted into names
+   * (`organizations.settings.intake.show_shop_names`): the GET is unauthenticated, so the roster
+   * ships numbers only by default.
+   */
   shops: { shopNumber: string; shopName: string }[];
   categories: string[];
 }
@@ -49,7 +54,11 @@ export function intakeFunctionUrl(): string {
   return `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/tenant-intake`;
 }
 
-/** Field names are the function's contract; `website` is the honeypot the page keeps empty. */
+/**
+ * Field names are the function's contract; `website` is the honeypot the page keeps empty.
+ * `t` is still the first field, but the function reads the token off the query string (see
+ * `submitIntake`) so it can be resolved before the body is parsed.
+ */
 export function buildIntakeFormData(token: string, v: IntakeValues, photos: File[], honeypot = ''): FormData {
   const fd = new FormData();
   fd.append('t', token);
@@ -78,9 +87,12 @@ export async function fetchIntakeInfo(token: string, fetchImpl: typeof fetch = f
 }
 
 export async function submitIntake(fd: FormData, fetchImpl: typeof fetch = fetch): Promise<IntakeSubmitResult> {
+  // The token goes on the query as well as in the body: the function resolves it and charges its
+  // rate buckets there, so an unauthenticated caller can never make it parse a multipart body.
+  const token = typeof fd.get('t') === 'string' ? (fd.get('t') as string) : '';
   let res: Response;
   try {
-    res = await fetchImpl(intakeFunctionUrl(), { method: 'POST', body: fd });
+    res = await fetchImpl(`${intakeFunctionUrl()}?t=${encodeURIComponent(token)}`, { method: 'POST', body: fd });
   } catch {
     return { ok: false, kind: 'failed', fields: [] };
   }

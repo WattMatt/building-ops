@@ -22,6 +22,12 @@ describe('intakeSheetHtml', () => {
     expect(html).toContain(input.url);
   });
 
+  it('escapes the QR data URL too, so it can never break out of the src attribute', () => {
+    const evil = intakeSheetHtml({ ...input, qrDataUrl: 'data:image/png;base64,QQ=="><script>alert(1)</script>' });
+    expect(evil).not.toContain('<script>alert(1)</script>');
+    expect(evil).toContain('&quot;&gt;&lt;script&gt;');
+  });
+
   it('is an A5 sheet that prints itself once it has loaded', () => {
     expect(html).toContain('size: A5 portrait');
     expect(html).toContain('window.print()');
