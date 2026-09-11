@@ -91,6 +91,33 @@ describe('IssueDetailDialog', () => {
     expect(document.querySelector('[data-vaul-drawer]')).not.toBeNull();
   });
 
+  describe('tenant reports', () => {
+    it('shows the reference and the reporter for an issue that came through the intake form', async () => {
+      render(
+        <IssueDetailDialog
+          issue={{
+            ...issue,
+            source: 'tenant_intake' as const,
+            reference: 'FO-ABC234',
+            reporter: { name: 'Thandi', shop: 'Kool Kids', shop_number: '12', unit: null, phone: '0821234567', email: null },
+          }}
+          open onOpenChange={() => {}} canManage onUpdated={() => {}}
+        />,
+      );
+      const block = await screen.findByTestId('tenant-report');
+      expect(block).toHaveTextContent('Tenant report');
+      expect(block).toHaveTextContent('FO-ABC234');
+      expect(block).toHaveTextContent('Thandi · Kool Kids (Shop 12)');
+      expect(screen.getByRole('link', { name: '0821234567' })).toHaveAttribute('href', 'tel:0821234567');
+    });
+
+    it('is absent on an issue the app created', async () => {
+      render(<IssueDetailDialog issue={issue} open onOpenChange={() => {}} canManage onUpdated={() => {}} />);
+      await screen.findByRole('heading', { name: /leaking tap in kitchen/i });
+      expect(screen.queryByTestId('tenant-report')).toBeNull();
+    });
+  });
+
   describe('SLA', () => {
     it('shows the live chip and the due and first-response instants in SAST', async () => {
       // Reported half an hour ago with a 24 h target: 23.5 h left, floored to whole hours.

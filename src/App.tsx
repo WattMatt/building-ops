@@ -47,6 +47,7 @@ const Contractors = lazy(() => import("./pages/Contractors"));
 const Settings = lazy(() => import("./pages/Settings"));
 const Profile = lazy(() => import("./pages/Profile"));
 const SharePage = lazy(() => import("./pages/SharePage"));
+const IntakePage = lazy(() => import("./pages/IntakePage"));
 
 const App = () => (
   <ErrorBoundary>
@@ -67,6 +68,9 @@ const App = () => (
               <Route path="/reset" element={<ResetPassword />} />
               {/* Public share page (spec §5.8): no session; the token is the credential. Never wrap in ProtectedRoute. */}
               <Route path="/share/:token" element={<SharePage />} />
+              {/* Tenant intake (R4c): public by design — the token in the URL is the credential and
+                  the tenant has no account. Never add /intake/ to the notification/push URL allowlists. */}
+              <Route path="/intake/:token" element={<IntakePage />} />
               {/* First-run gate target (needs a session; enforces its own
                   entry conditions — wrapping it in ProtectedRoute would loop) */}
               <Route path="/onboarding" element={<Onboarding />} />

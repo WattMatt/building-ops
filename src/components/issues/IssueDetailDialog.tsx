@@ -25,6 +25,7 @@ import { Building2, Calendar, Clock, Loader2, UserCircle2, ArrowRight, Plus } fr
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import type { IssuePriority, IssueStatus } from '@/lib/constants';
+import { isTenantIssue, reporterSummary, type IssueReporter, type IssueSource } from '@/lib/issueSource';
 import { useBuildingMembers, memberDisplayName } from '@/hooks/useBuildingMembers';
 import { AssigneePicker } from '@/components/people/AssigneePicker';
 import { ContractorPicker } from '@/components/contractors/ContractorPicker';
@@ -55,6 +56,11 @@ interface Issue {
   corrective_action: string | null;
   photo_urls: string[] | null;
   task_instance_id: string | null;
+  // Optional: MyDay passes its own shape, and `useIssues` does not select the R4c intake columns
+  // yet — an issue without them simply is not a tenant report.
+  source?: IssueSource;
+  reporter?: IssueReporter | null;
+  reference?: string | null;
   // Optional: older fixtures and callers predate the SLA columns; no target means no clock.
   sla_target_hours?: number | null;
   sla_breached_at?: string | null;
@@ -298,6 +304,19 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
 
         <div className="space-y-4">
           <p className="text-sm whitespace-pre-wrap">{issue.description}</p>
+          {isTenantIssue(issue) && (
+            <div className="rounded-lg border p-3 text-sm space-y-1" data-testid="tenant-report">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="border-info text-info">Tenant report</Badge>
+                {issue.reference && <span className="font-mono text-xs">{issue.reference}</span>}
+              </div>
+              <p>{reporterSummary(issue.reporter)}</p>
+              <p className="flex flex-wrap gap-3 text-xs">
+                {issue.reporter?.phone && <a className="underline" href={`tel:${issue.reporter.phone}`}>{issue.reporter.phone}</a>}
+                {issue.reporter?.email && <a className="underline" href={`mailto:${issue.reporter.email}`}>{issue.reporter.email}</a>}
+              </p>
+            </div>
+          )}
           {issue.sla_target_hours != null && (
             <p className="text-xs text-muted-foreground">
               SLA target {issue.sla_target_hours} h
