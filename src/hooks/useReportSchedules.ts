@@ -22,9 +22,11 @@ export interface Recipient { email?: string; name?: string; user_id?: string }
 
 export interface LastResult {
   ranAt: string;
-  action: 'send' | 'remind';
+  /** `failed` when the schedule itself threw before its buildings could be walked. */
+  action: 'send' | 'remind' | 'failed';
   period: string;
-  buildings: { buildingId: string; buildingName: string; reportId: string | null; status: string; recipients: number; error?: string }[];
+  /** `recipients` is "1 of 2" (delivered of configured); rows written before R4b's review hold a number. */
+  buildings: { buildingId: string; buildingName: string; reportId: string | null; status: string; recipients: string; error?: string }[];
 }
 
 export interface ReportSchedule {
@@ -81,6 +83,8 @@ export type RunResponse = {
 export interface RunNowInput { scheduleId: string; dryRun: boolean; period?: string }
 
 export const SCHEDULE_PERMISSION_MESSAGE = 'Only admins and managers can change report schedules.';
+/** Postgres 23514 here is `report_recipients_valid()` — the only CHECK a client can trip on this table. */
+export const RECIPIENT_INVALID_MESSAGE = 'A recipient name is too long, or an address is invalid.';
 
 export const SCHEDULES_KEY = ['report-schedules'] as const;
 export const distributionsKey = (scheduleId: string | undefined) => ['report-distributions', scheduleId] as const;
@@ -100,9 +104,9 @@ function pickEditable(patch: Partial<ScheduleInput>): Partial<ScheduleInput> {
   return out as Partial<ScheduleInput>;
 }
 
-/** Zero rows back with no error is RLS saying no. */
-function guardRows(rows: unknown, error: { message: string } | null): void {
-  if (error) throw new Error(error.message);
+/** Zero rows back with no error is RLS saying no; a CHECK violation is the recipient list. */
+function guardRows(rows: unknown, error: { message: string; code?: string } | null): void {
+  if (error) throw new Error(error.code === '23514' ? RECIPIENT_INVALID_MESSAGE : error.message);
   if (!Array.isArray(rows) || rows.length === 0) throw new Error(SCHEDULE_PERMISSION_MESSAGE);
 }
 
@@ -119,10 +123,13 @@ async function functionErrorMessage(error: { message: string; context?: { json?:
 
 export function useReportSchedules() {
   const qc = useQueryClient();
-  const { user } = useAuth();
+  const { user, isAdminOrManager } = useAuth();
 
+  // `rs_select` is admin/manager-only, so for anyone else the read can only come back empty: the hook
+  // owns that gate rather than every caller re-deciding whether it is safe to mount.
   const query = useQuery({
     queryKey: SCHEDULES_KEY,
+    enabled: isAdminOrManager,
     queryFn: async (): Promise<ReportSchedule[]> => {
       const { data, error } = await db.from('report_schedules').select('*').order('created_at');
       if (error) throw new Error(error.message);

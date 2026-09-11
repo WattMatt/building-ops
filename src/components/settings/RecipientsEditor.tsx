@@ -17,6 +17,9 @@ import { isEmail, type Recipient } from '@/hooks/useReportSchedules';
 import { recipientLabel } from '@/lib/reportSchedule';
 
 export const RECIPIENTS_MAX = 50;
+/** `report_recipients_valid()` rejects `length(name) > 120`; the form must not offer what the DB refuses. */
+export const RECIPIENT_NAME_MAX = 120;
+const NAME_TOO_LONG = `A name can be at most ${RECIPIENT_NAME_MAX} characters.`;
 
 interface RecipientsEditorProps {
   value: Recipient[];
@@ -46,8 +49,12 @@ export function RecipientsEditor({ value, onChange, buildingId, disabled }: Reci
       setError('That address is already a recipient.');
       return;
     }
-    const row: Recipient = { email: address };
     const n = name.trim();
+    if (n.length > RECIPIENT_NAME_MAX) {
+      setError(NAME_TOO_LONG);
+      return;
+    }
+    const row: Recipient = { email: address };
     if (n) row.name = n;
     onChange([...value, row]);
     setEmail('');
@@ -62,7 +69,10 @@ export function RecipientsEditor({ value, onChange, buildingId, disabled }: Reci
       return;
     }
     const member = members?.find((m) => m.id === userId);
-    onChange([...value, { user_id: userId, name: member ? memberDisplayName(member) : 'Colleague' }]);
+    // A colleague's name is derived, not typed, so an over-long one is trimmed rather than refused —
+    // there would be nothing for the admin to correct.
+    const display = (member ? memberDisplayName(member) : 'Colleague').slice(0, RECIPIENT_NAME_MAX);
+    onChange([...value, { user_id: userId, name: display }]);
     setError(null);
     setPickerKey((k) => k + 1);
   };
@@ -128,10 +138,13 @@ export function RecipientsEditor({ value, onChange, buildingId, disabled }: Reci
             id="recipient-name"
             autoComplete="off"
             className="h-11"
+            maxLength={RECIPIENT_NAME_MAX}
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => { setName(e.target.value); if (error === NAME_TOO_LONG) setError(null); }}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addEmail(); } }}
             disabled={locked}
+            aria-invalid={error === NAME_TOO_LONG ? true : undefined}
+            aria-describedby={error ? 'recipients-error' : undefined}
           />
         </div>
         <Button type="button" variant="outline" className="min-h-11" onClick={addEmail} disabled={locked}>

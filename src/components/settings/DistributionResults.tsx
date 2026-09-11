@@ -20,7 +20,8 @@ function statusClass(status: string): string {
   if (status === 'sent') return 'border-success/40 bg-success/10 text-success';
   if (status === 'failed') return 'border-destructive/40 bg-destructive/10 text-destructive';
   if (status.startsWith('skipped')) return 'border-warning/40 bg-warning/10 text-warning';
-  if (status === 'would_send' || status === 'would_remind') return '';
+  // `would_send` is the only dry-run status there is: the run-now path always forces `action: 'send'`.
+  if (status === 'would_send') return '';
   return 'bg-muted text-muted-foreground';
 }
 
@@ -47,9 +48,14 @@ export function DistributionResults({ rows, title, buildingNames }: Distribution
           {list.map((r) => (
             <li key={r.key} className="grid gap-1 px-3 py-2 text-sm sm:grid-cols-[1fr_auto_6rem_8rem] sm:items-center sm:gap-3">
               <span className="font-medium">{r.building}</span>
-              <span><StatusChip status={r.status} /></span>
+              {/* Stacked on a phone there is no header row, so every cell but the building names itself. */}
+              <span className="flex items-center gap-1">
+                <span className="text-muted-foreground sm:hidden">Status:</span>
+                <StatusChip status={r.status} />
+              </span>
               <span className="text-muted-foreground"><span className="sm:hidden">Recipients: </span>{r.recipients}</span>
-              <span className="text-muted-foreground">{r.when ?? ''}</span>
+              {r.when && <span className="text-muted-foreground"><span className="sm:hidden">When: </span>{r.when}</span>}
+              {!r.when && <span className="text-muted-foreground hidden sm:block" aria-hidden="true" />}
               {r.error && <p className="text-xs text-destructive sm:col-span-4">{r.error}</p>}
             </li>
           ))}

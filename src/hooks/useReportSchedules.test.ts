@@ -4,12 +4,13 @@ import { createElement, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 interface RecordedCall { table: string; method: string; args: unknown[] }
-type QueryResult = { data?: unknown; error: { message: string } | null };
+type QueryResult = { data?: unknown; error: { message: string; code?: string } | null };
 type Chain = Record<string, (...args: unknown[]) => Chain> & { then: (resolve: (r: QueryResult) => unknown, reject?: (e: unknown) => unknown) => unknown };
 const state = vi.hoisted(() => ({
   queries: [] as { table: string; calls: RecordedCall[] }[],
   result: (() => ({ data: [], error: null })) as (table: string, calls: RecordedCall[]) => QueryResult,
   invoke: vi.fn(),
+  isAdminOrManager: true,
 }));
 vi.mock('@/integrations/supabase/client', () => ({
   supabase: {
@@ -25,9 +26,16 @@ vi.mock('@/integrations/supabase/client', () => ({
     functions: { invoke: (...args: unknown[]) => state.invoke(...args) },
   },
 }));
-vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u1' }, isAdminOrManager: true }) }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u1' }, isAdminOrManager: state.isAdminOrManager }) }));
 
-import { useReportSchedules, useScheduleDistributions, isEmail, SCHEDULE_PERMISSION_MESSAGE, type ScheduleInput } from './useReportSchedules';
+import {
+  useReportSchedules,
+  useScheduleDistributions,
+  isEmail,
+  RECIPIENT_INVALID_MESSAGE,
+  SCHEDULE_PERMISSION_MESSAGE,
+  type ScheduleInput,
+} from './useReportSchedules';
 
 let qc: QueryClient;
 const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client: qc }, children);
@@ -45,6 +53,7 @@ const INPUT: ScheduleInput = {
 beforeEach(() => {
   qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   state.queries = [];
+  state.isAdminOrManager = true;
   state.result = () => ({ data: [], error: null });
   state.invoke = vi.fn().mockResolvedValue({ data: { ok: true, dryRun: true, today: '2026-10-07', schedules: [], counts: {} }, error: null });
 });
@@ -81,6 +90,31 @@ describe('useReportSchedules', () => {
     const q = state.queries.find((x) => x.calls.some((c) => c.method === 'insert'))!;
     expect(q.calls.map((c) => c.method)).toEqual(['insert', 'select']);
     expect(q.calls[1].args).toEqual(['id']);
+  });
+
+  it('create drops anything outside the six editable columns', async () => {
+    state.result = (_t, calls) => (calls.some((c) => c.method === 'insert') ? { data: [{ id: 's-new' }], error: null } : { data: [], error: null });
+    const { result } = renderHook(() => useReportSchedules(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => {
+      await result.current.create({ ...INPUT, id: 'forged', created_by: 'someone-else', last_run_on: '2026-10-07', last_result: {} } as never);
+    });
+    // created_by is the hook's own (auth.uid()), never whatever the caller passed.
+    expect(callsOn('report_schedules', 'insert')[0].args[0]).toEqual({ ...INPUT, created_by: 'u1' });
+  });
+
+  it('does not read the table at all for a non-admin/manager', () => {
+    state.isAdminOrManager = false;
+    const { result } = renderHook(() => useReportSchedules(), { wrapper });
+    expect(result.current.isLoading).toBe(false);
+    expect(state.queries).toHaveLength(0);
+  });
+
+  it('a recipient CHECK violation is worded for the admin, not the database', async () => {
+    state.result = () => ({ data: null, error: { message: 'new row violates check constraint', code: '23514' } });
+    const { result } = renderHook(() => useReportSchedules(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await expect(result.current.create(INPUT)).rejects.toThrow(RECIPIENT_INVALID_MESSAGE);
   });
 
   it('create surfaces the permission message when RLS swallows the insert (zero rows, no error)', async () => {

@@ -47,6 +47,13 @@ function reportTypesOf(b: unknown): string[] {
 
 const REPORT_TYPES = Object.keys(REPORT_TYPE_LABELS) as ReportType[];
 
+/**
+ * A centred 44 × 44 px pointer overlay on a control that is drawn smaller (the checkbox is 16 px).
+ * It changes the hit area only — never the layout or the look.
+ */
+const TAP_TARGET =
+  "relative after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']";
+
 function parseDay(value: string, min: number, max: number): number | null {
   const n = Number(value);
   return value.trim() !== '' && Number.isInteger(n) && n >= min && n <= max ? n : null;
@@ -170,7 +177,12 @@ export function ScheduleDialog({ open, onOpenChange, schedule, onSubmit }: Sched
                     const id = `schedule-building-${b.id}`;
                     return (
                       <li key={b.id} className="flex min-h-11 items-center gap-3">
-                        <Checkbox id={id} checked={selected.includes(b.id)} onCheckedChange={(v) => toggleBuilding(b.id, v === true)} />
+                        <Checkbox
+                          id={id}
+                          checked={selected.includes(b.id)}
+                          onCheckedChange={(v) => toggleBuilding(b.id, v === true)}
+                          className={TAP_TARGET}
+                        />
                         <Label htmlFor={id} className="flex-1 cursor-pointer font-normal">{formatBuildingName(b.name)}</Label>
                       </li>
                     );

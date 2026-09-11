@@ -49,7 +49,6 @@ export const STATUS_LABELS: Record<string, string> = {
   failed: 'Failed',
   already_sent: 'Already sent',
   reminded: 'Reminded',
-  would_remind: 'Would remind',
 };
 
 export type RunRow = LastResult['buildings'][number];
@@ -81,6 +80,7 @@ export function toResultRows(rows: RunRow[] | Distribution[], buildingNames: Rec
       key: `${r.buildingId}-${i}`,
       building: r.buildingName || r.buildingId,
       status: r.status,
+      // Runs now report "1 of 2"; `String` keeps the bare number a pre-R4b `last_result` row stored.
       recipients: String(r.recipients),
       when: null,
       error: r.error ?? null,
@@ -88,20 +88,26 @@ export function toResultRows(rows: RunRow[] | Distribution[], buildingNames: Rec
   });
 }
 
-const COUNT_LABELS: Record<string, { real: string; dry: string }> = {
-  sent: { real: 'sent', dry: 'would send' },
-  skipped_no_artifact: { real: 'skipped: no PDF', dry: 'skipped: no PDF' },
-  skipped_not_approved: { real: 'skipped: not approved', dry: 'skipped: not approved' },
-  failed: { real: 'failed', dry: 'failed' },
-  reminded: { real: 'reminded', dry: 'would remind' },
-  already_sent: { real: 'already sent', dry: 'already sent' },
+/**
+ * A dry run reports its own `would_send` key rather than borrowing `sent` and being re-worded here,
+ * so one label per count is enough. (A dry run can only ever produce `would_send`: the run-now path
+ * forces `action: 'send'` and the cron never sets `dryRun`.)
+ */
+const COUNT_LABELS: Record<string, string> = {
+  sent: 'sent',
+  would_send: 'would send',
+  skipped_no_artifact: 'skipped: no PDF',
+  skipped_not_approved: 'skipped: not approved',
+  failed: 'failed',
+  reminded: 'reminded',
+  already_sent: 'already sent',
 };
 
 /** "31 would send · 4 skipped: no PDF" — zero counts left out; "Nothing to do" when every count is zero. */
-export function countsLine(counts: Record<string, number>, dryRun: boolean): string {
+export function countsLine(counts: Record<string, number>): string {
   const parts = Object.entries(counts)
     .filter(([, n]) => n > 0)
-    .map(([k, n]) => `${n} ${COUNT_LABELS[k]?.[dryRun ? 'dry' : 'real'] ?? k.replace(/_/g, ' ')}`);
+    .map(([k, n]) => `${n} ${COUNT_LABELS[k] ?? k.replace(/_/g, ' ')}`);
   return parts.length ? parts.join(' · ') : 'Nothing to do';
 }
 

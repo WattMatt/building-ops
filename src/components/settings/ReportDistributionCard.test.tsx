@@ -3,8 +3,6 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { ReportSchedule, RunResponse } from '@/hooks/useReportSchedules';
 
 const state = vi.hoisted(() => ({
-  flag: true,
-  isAdminOrManager: true,
   schedules: [] as ReportSchedule[],
   isLoading: false,
   isError: false,
@@ -13,11 +11,13 @@ const state = vi.hoisted(() => ({
   create: vi.fn(),
   remove: vi.fn(),
 }));
+// The card itself no longer gates: Settings.tsx mounts it only for an admin/manager with the
+// `report_schedules` flag on, and the schedules query carries its own `enabled`.
 vi.mock('@/hooks/useOrgSettings', () => ({
-  useFeature: () => state.flag,
+  useFeature: () => true,
   useOrgSettings: () => ({ settings: { report_due_day: 7 }, isLoading: false, isError: false }),
 }));
-vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u1' }, isAdminOrManager: state.isAdminOrManager }) }));
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u1' }, isAdminOrManager: true }) }));
 vi.mock('@/hooks/useReportSchedules', async (orig) => ({
   ...(await orig<typeof import('@/hooks/useReportSchedules')>()),
   useReportSchedules: () => ({
@@ -60,8 +60,8 @@ const SCHEDULE: ReportSchedule = {
     action: 'send',
     period: '2026-09-01',
     buildings: [
-      { buildingId: 'b1', buildingName: 'Alpha', reportId: 'r1', status: 'sent', recipients: 2 },
-      { buildingId: 'b2', buildingName: 'Beta', reportId: null, status: 'skipped_no_artifact', recipients: 2 },
+      { buildingId: 'b1', buildingName: 'Alpha', reportId: 'r1', status: 'sent', recipients: '2 of 2' },
+      { buildingId: 'b2', buildingName: 'Beta', reportId: null, status: 'skipped_no_artifact', recipients: '0 of 2' },
     ],
   },
 };
@@ -71,15 +71,13 @@ const DRY: RunResponse = {
   dryRun: true,
   today: '2026-10-01',
   schedules: [{ scheduleId: 's1', action: 'send', period: '2026-09-01', buildings: [
-    { buildingId: 'b1', buildingName: 'Alpha', reportId: 'r1', status: 'would_send', recipients: 2 },
-    { buildingId: 'b2', buildingName: 'Beta', reportId: null, status: 'skipped_not_approved', recipients: 2 },
+    { buildingId: 'b1', buildingName: 'Alpha', reportId: 'r1', status: 'would_send', recipients: '0 of 2' },
+    { buildingId: 'b2', buildingName: 'Beta', reportId: null, status: 'skipped_not_approved', recipients: '0 of 2' },
   ] }],
-  counts: { sent: 1, skipped_no_artifact: 0, skipped_not_approved: 1, failed: 0, reminded: 0, already_sent: 0 },
+  counts: { sent: 0, would_send: 1, skipped_no_artifact: 0, skipped_not_approved: 1, failed: 0, reminded: 0, already_sent: 0 },
 };
 
 beforeEach(() => {
-  state.flag = true;
-  state.isAdminOrManager = true;
   state.schedules = [SCHEDULE];
   state.isLoading = false;
   state.isError = false;
@@ -91,18 +89,6 @@ beforeEach(() => {
 });
 
 describe('ReportDistributionCard', () => {
-  it('renders nothing while the report_schedules flag is off', () => {
-    state.flag = false;
-    const { container } = render(<ReportDistributionCard />);
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it('renders nothing for a non-admin/manager even with the flag on', () => {
-    state.isAdminOrManager = false;
-    const { container } = render(<ReportDistributionCard />);
-    expect(container).toBeEmptyDOMElement();
-  });
-
   it('lists a schedule with its type, scope, recipients, timing, next send and last run', () => {
     render(<ReportDistributionCard />);
     expect(screen.getByText('Monthly OPS Report')).toBeInTheDocument();
@@ -153,6 +139,23 @@ describe('ReportDistributionCard', () => {
     expect(toast.success).toHaveBeenCalledWith('Distribution run finished.');
   });
 
+  it('a real run that sent nothing is not titled "Sent"', async () => {
+    state.runNow = vi.fn().mockResolvedValue({ ...DRY, dryRun: false, counts: { sent: 0, skipped_not_approved: 2 } });
+    render(<ReportDistributionCard />);
+    fireEvent.click(screen.getByRole('button', { name: 'Send now' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Send now' }));
+    expect(await screen.findByText('Nothing sent · Monthly OPS Report · September 2026')).toBeInTheDocument();
+    expect(screen.getByText('2 skipped: not approved')).toBeInTheDocument();
+  });
+
+  it('a paused schedule cannot be run: both run buttons are disabled', () => {
+    state.schedules = [{ ...SCHEDULE, is_active: false }];
+    render(<ReportDistributionCard />);
+    expect(screen.getByText('Paused')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preview run' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send now' })).toBeDisabled();
+  });
+
   it('the Active switch updates is_active only', async () => {
     render(<ReportDistributionCard />);
     fireEvent.click(screen.getByRole('switch', { name: 'Active: Monthly OPS Report' }));
@@ -177,17 +180,18 @@ describe('ReportDistributionCard', () => {
 });
 
 describe('countsLine', () => {
-  it('drops zero counts and words a dry run as would-send', () => {
-    expect(countsLine({ sent: 3, skipped_no_artifact: 0, failed: 1 }, true)).toBe('3 would send · 1 failed');
-    expect(countsLine({ sent: 3, already_sent: 2 }, false)).toBe('3 sent · 2 already sent');
-    expect(countsLine({ sent: 0 }, true)).toBe('Nothing to do');
+  it('drops zero counts and labels each key, a dry run through its own would_send count', () => {
+    expect(countsLine({ sent: 0, would_send: 3, skipped_no_artifact: 0, failed: 1 })).toBe('3 would send · 1 failed');
+    expect(countsLine({ sent: 3, already_sent: 2 })).toBe('3 sent · 2 already sent');
+    expect(countsLine({ sent: 0, would_send: 0 })).toBe('Nothing to do');
+    expect(countsLine({ something_new: 2 })).toBe('2 something new');
   });
 });
 
 describe('lastRunLabel', () => {
   it('summarises a send, a reminder, and a run without a result', () => {
     expect(lastRunLabel(SCHEDULE)).toBe('Ran 7 Oct: 1 sent · 1 skipped');
-    expect(lastRunLabel({ last_run_on: '2026-10-04', last_result: { ranAt: '', action: 'remind', period: '2026-09-01', buildings: [{ buildingId: 'b', buildingName: 'B', reportId: null, status: 'reminded', recipients: 0 }] } })).toBe('Reminded 4 Oct: 1 building');
+    expect(lastRunLabel({ last_run_on: '2026-10-04', last_result: { ranAt: '', action: 'remind', period: '2026-09-01', buildings: [{ buildingId: 'b', buildingName: 'B', reportId: null, status: 'reminded', recipients: '0' }] } })).toBe('Reminded 4 Oct: 1 building');
     expect(lastRunLabel({ last_run_on: '2026-10-07', last_result: null })).toBe('Ran 7 Oct');
     expect(lastRunLabel({ last_run_on: null, last_result: null })).toBeNull();
   });

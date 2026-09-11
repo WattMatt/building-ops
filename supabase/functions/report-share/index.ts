@@ -16,6 +16,8 @@ const SIGNED_URL_TTL = 600;
 const MAX_FAILURES = 10;
 const LOCK_MINUTES = 15;
 const BUCKET = "generated-reports";
+/** Compare-and-swap rounds allowed for the view counter before the count is given up on. */
+const MAX_COUNT_ATTEMPTS = 3;
 
 type ShareRow = {
   id: string;
@@ -41,9 +43,33 @@ const notFound = (cors: Record<string, string>) =>
     headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", ...cors },
   });
 
-/** The share row for a token that is well-formed, known, not revoked and not expired; otherwise null. */
+/** Length-independent byte comparison: a passcode check must not leak the prefix through its timing. */
+function constantTimeEquals(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const x = enc.encode(a);
+  const y = enc.encode(b);
+  // Both sides are hex SHA-256 digests, so a length mismatch is a bug rather than an attacker's probe.
+  if (x.length !== y.length) return false;
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
+/** `features.share_links` — off means every live link answers exactly like an unknown token. */
+async function shareLinksEnabled(admin: Admin): Promise<boolean> {
+  const { data } = await admin.from("organizations").select("settings").limit(1).maybeSingle();
+  const settings = (data?.settings ?? {}) as Record<string, unknown>;
+  const features = (settings.features ?? {}) as Record<string, unknown>;
+  return features.share_links === true;
+}
+
+/**
+ * The share row for a token that is well-formed, known, not revoked and not expired; otherwise null.
+ * The feature flag is checked here so turning it off is byte-identical to a bad token on every path.
+ */
 async function loadLiveShare(admin: Admin, token: string): Promise<ShareRow | null> {
   if (!TOKEN_RE.test(token)) return null;
+  if (!(await shareLinksEnabled(admin))) return null;
   const { data, error } = await admin
     .from("report_shares")
     .select("id, report_id, artifact_id, expires_at, revoked_at, passcode_hash, failed_attempts, locked_until, view_count")
@@ -53,6 +79,31 @@ async function loadLiveShare(admin: Admin, token: string): Promise<ShareRow | nu
   const row = data as ShareRow | null;
   if (!row || row.revoked_at || new Date(row.expires_at).getTime() <= Date.now()) return null;
   return row;
+}
+
+/**
+ * A view is counted with a compare-and-swap on the value we read, so two simultaneous opens cannot
+ * both write `n + 1` and lose one. PostgREST cannot express `view_count = view_count + 1`, so the
+ * loser of a race re-reads and tries again; after MAX_COUNT_ATTEMPTS the timestamp is still recorded
+ * (a lost count is cosmetic, a missing `last_viewed_at` is not).
+ */
+async function countView(admin: Admin, id: string, seen: number): Promise<void> {
+  const touch = { last_viewed_at: new Date().toISOString(), failed_attempts: 0, locked_until: null };
+  let current = seen;
+  for (let attempt = 0; attempt < MAX_COUNT_ATTEMPTS; attempt++) {
+    const { data } = await admin
+      .from("report_shares")
+      .update({ ...touch, view_count: current + 1 })
+      .eq("id", id)
+      .eq("view_count", current)
+      .select("id");
+    if ((data?.length ?? 0) > 0) return;
+    const { data: fresh } = await admin.from("report_shares").select("view_count").eq("id", id).maybeSingle();
+    if (typeof fresh?.view_count !== "number") break;
+    current = fresh.view_count;
+  }
+  console.log("report-share: view count contended");
+  await admin.from("report_shares").update(touch).eq("id", id);
 }
 
 serve(async (req: Request): Promise<Response> => {
@@ -147,7 +198,7 @@ serve(async (req: Request): Promise<Response> => {
     if (share.passcode_hash) {
       const passcode = typeof body.passcode === "string" ? body.passcode : "";
       const ok = passcode.length >= PASSCODE_MIN && passcode.length <= PASSCODE_MAX &&
-        (await passcodeHash(passcode, token, SHARE_SALT)) === share.passcode_hash;
+        constantTimeEquals(await passcodeHash(passcode, token, SHARE_SALT), share.passcode_hash);
       if (!ok) {
         // The 10th consecutive failure locks the link for 15 minutes and resets the counter.
         const failures = share.failed_attempts + 1;
@@ -169,10 +220,7 @@ serve(async (req: Request): Promise<Response> => {
       console.error("report-share: sign failed", signErr?.message);
       return notFound(cors);
     }
-    await admin
-      .from("report_shares")
-      .update({ view_count: share.view_count + 1, last_viewed_at: new Date().toISOString(), failed_attempts: 0, locked_until: null })
-      .eq("id", share.id);
+    await countView(admin, share.id, share.view_count);
     console.log("report-share: open", { ok: true });
     return json(cors, { url: signed.signedUrl, fileName: artifact.file_name, expiresInSeconds: SIGNED_URL_TTL });
   } catch (error) {

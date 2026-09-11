@@ -11,6 +11,10 @@ const LOCAL_ORIGINS = ["http://localhost:5173", "http://localhost:3000"];
 
 const ALLOW_HEADERS = "authorization, x-client-info, apikey, content-type";
 
+// Response headers a browser may read off a cross-origin reply. Without this the fetch layer hides
+// `Retry-After` on the 429s report-share sends, so the client could not honour the lockout window.
+const EXPOSE_HEADERS = "Retry-After";
+
 function canonicalOrigin(): string {
   try {
     const url = new URL(APP_URL);
@@ -64,6 +68,7 @@ export function corsHeaders(req: Request, extraHeaders: string[] = []): Record<s
   return {
     "Access-Control-Allow-Origin": allowedOrigin(req),
     "Access-Control-Allow-Headers": extra.length ? `${ALLOW_HEADERS}, ${extra.join(", ")}` : ALLOW_HEADERS,
+    "Access-Control-Expose-Headers": EXPOSE_HEADERS,
     "Vary": "Origin",
   };
 }

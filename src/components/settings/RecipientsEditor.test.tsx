@@ -110,6 +110,21 @@ describe('RecipientsEditor', () => {
     expect(screen.getByText('That colleague is already a recipient.')).toBeInTheDocument();
   });
 
+  it('caps a name at the 120 characters the CHECK constraint allows', () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    expect(nameInput()).toHaveAttribute('maxLength', '120');
+    fireEvent.change(emailInput(), { target: { value: 'client@example.com' } });
+    // The attribute caps typing; a paste or an autofill still has to be caught on the way in.
+    fireEvent.change(nameInput(), { target: { value: 'x'.repeat(121) } });
+    addEmail();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByText('A name can be at most 120 characters.')).toBeInTheDocument();
+    fireEvent.change(nameInput(), { target: { value: 'x'.repeat(120) } });
+    addEmail();
+    expect(onChange).toHaveBeenLastCalledWith([{ email: 'client@example.com', name: 'x'.repeat(120) }]);
+  });
+
   it('stops at 50 recipients', () => {
     const fifty: Recipient[] = Array.from({ length: 50 }, (_, i) => ({ email: `r${i}@example.com` }));
     const onChange = vi.fn();

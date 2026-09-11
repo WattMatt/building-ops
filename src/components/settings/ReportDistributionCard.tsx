@@ -1,9 +1,11 @@
 /**
  * Settings → Report distribution (R4b, spec §5.7). Lists the schedules, edits them, and drives the
  * `report-distribution` function for one schedule: "Preview run" is a dry run (nothing sent), "Send
- * now" is a real send behind a confirm — both show the per-building outcome. Gated on the
- * `report_schedules` flag and admin/manager; renders nothing otherwise so the Settings page can mount
- * it unconditionally.
+ * now" is a real send behind a confirm — both show the per-building outcome.
+ *
+ * Access is gated ONCE, by the Settings page (`isAdminOrManager && report_schedules`), and the
+ * schedules query carries its own `enabled` — the card used to re-test both and still ran the query
+ * before returning null.
  */
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -30,9 +32,7 @@ import {
   ResponsiveDialogTitle,
 } from '@/components/ui/responsive-dialog';
 import { Switch } from '@/components/ui/switch';
-import { useAuth } from '@/contexts/AuthContext';
 import { useBuildingNames } from '@/hooks/useBuildingNames';
-import { useFeature } from '@/hooks/useOrgSettings';
 import { useReportSchedules, useScheduleDistributions, type LastResult, type ReportSchedule, type RunResponse } from '@/hooks/useReportSchedules';
 import { REPORT_TYPE_LABELS, type ReportType } from '@/integrations/supabase/fortress-db';
 import { todayInOperatingTz } from '@/lib/myWork';
@@ -42,10 +42,22 @@ import { ScheduleDialog } from '@/components/settings/ScheduleDialog';
 
 interface RunOutcome { title: string; dryRun: boolean; counts: Record<string, number>; rows: LastResult['buildings'] }
 
+const PAUSED_HINT = 'This schedule is paused. Switch it on to run it.';
+/**
+ * A centred 44 × 44 px pointer overlay on a control that is drawn smaller (the switch is 24 px tall).
+ * It changes the hit area only — never the layout or the look. `ScheduleDialog` does the same for its
+ * checkboxes; the string is repeated rather than shared because these two files already import one way.
+ */
+const TAP_TARGET =
+  "relative after:absolute after:left-1/2 after:top-1/2 after:h-11 after:w-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-['']";
+
 function outcomeFrom(res: RunResponse, label: string, dryRun: boolean): RunOutcome {
   const s = res.schedules[0];
   const period = s?.period ? ` · ${periodLabel(s.period)}` : '';
-  return { title: `${dryRun ? 'Preview' : 'Sent'} · ${label}${period}`, dryRun, counts: res.counts ?? {}, rows: s?.buildings ?? [] };
+  const counts = res.counts ?? {};
+  // A real run that skipped every building must not be titled "Sent".
+  const what = dryRun ? 'Preview' : (counts.sent ?? 0) > 0 ? 'Sent' : 'Nothing sent';
+  return { title: `${what} · ${label}${period}`, dryRun, counts, rows: s?.buildings ?? [] };
 }
 
 function HistoryDialog({ schedule, onClose }: { schedule: ReportSchedule; onClose: () => void }) {
@@ -68,8 +80,6 @@ function HistoryDialog({ schedule, onClose }: { schedule: ReportSchedule; onClos
 }
 
 export function ReportDistributionCard() {
-  const enabled = useFeature('report_schedules');
-  const { isAdminOrManager } = useAuth();
   const { schedules, isLoading, isError, create, update, remove, runNow, isRunning } = useReportSchedules();
 
   // undefined = closed; null = create; a schedule = edit.
@@ -79,8 +89,6 @@ export function ReportDistributionCard() {
   const [deleteTarget, setDeleteTarget] = useState<ReportSchedule | null>(null);
   const [historyTarget, setHistoryTarget] = useState<ReportSchedule | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-
-  if (!enabled || !isAdminOrManager) return null;
 
   const today = todayInOperatingTz();
   const label = (s: ReportSchedule) => REPORT_TYPE_LABELS[s.report_type as ReportType] ?? s.report_type;
@@ -161,21 +169,40 @@ export function ReportDistributionCard() {
                     </div>
                     <div className="flex min-h-11 items-center gap-2">
                       <label htmlFor={`schedule-active-${s.id}`} className="text-sm">Active</label>
+                      {/* The switch is 24 px tall; the ::after overlay makes the tap target 44 px without moving it. */}
                       <Switch
                         id={`schedule-active-${s.id}`}
                         checked={s.is_active}
                         onCheckedChange={(on) => void toggleActive(s, on)}
                         aria-label={`Active: ${label(s)}`}
+                        className={TAP_TARGET}
                       />
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button variant="outline" size="sm" className="min-h-11" onClick={() => setEditing(s)}>Edit</Button>
-                    <Button variant="outline" size="sm" className="min-h-11" onClick={() => void run(s, true)} disabled={isRunning}>
+                    {/* A paused schedule sends nothing on the cron, so neither run button may force one. */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11"
+                      onClick={() => void run(s, true)}
+                      disabled={isRunning || !s.is_active}
+                      title={s.is_active ? undefined : PAUSED_HINT}
+                    >
                       {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />}
                       Preview run
                     </Button>
-                    <Button variant="outline" size="sm" className="min-h-11" onClick={() => setSendTarget(s)} disabled={isRunning}>Send now</Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="min-h-11"
+                      onClick={() => setSendTarget(s)}
+                      disabled={isRunning || !s.is_active}
+                      title={s.is_active ? undefined : PAUSED_HINT}
+                    >
+                      Send now
+                    </Button>
                     <Button variant="ghost" size="sm" className="min-h-11" onClick={() => setHistoryTarget(s)}>History</Button>
                     <Button variant="ghost" size="sm" className="min-h-11 text-destructive" onClick={() => setDeleteTarget(s)}>Delete</Button>
                   </div>
@@ -208,7 +235,7 @@ export function ReportDistributionCard() {
           <ResponsiveDialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <ResponsiveDialogHeader>
               <ResponsiveDialogTitle>{outcome.title}</ResponsiveDialogTitle>
-              <ResponsiveDialogDescription>{countsLine(outcome.counts, outcome.dryRun)}</ResponsiveDialogDescription>
+              <ResponsiveDialogDescription>{countsLine(outcome.counts)}</ResponsiveDialogDescription>
             </ResponsiveDialogHeader>
             {outcome.dryRun && <p className="text-sm text-muted-foreground">Nothing was sent.</p>}
             <DistributionResults rows={outcome.rows} title="Buildings" />
