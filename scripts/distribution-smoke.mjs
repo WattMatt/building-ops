@@ -11,11 +11,14 @@
  * the author; approved report with an artifact -> a dry run answers would_send and still writes nothing (no
  * share, no distribution row), then the real run writes a report_distributions 'sent' row and a
  * report_shares row (expires ~30 days, no passcode), emails counted (0 when RESEND_API_KEY is absent);
- * a second real run the same day is 'already_ran'; reminders: a schedule whose reminder date is today raises one
+ * a manual run writes last_result but never last_run_on, so the same day a second run-now is 'already_sent'
+ * (the per-report sent row), the first cron run is 'already_sent' too and stamps last_run_on, and only the cron
+ * run after that is 'already_ran'; reminders: a schedule whose reminder date is today raises one
  * report_due_soon per (building, type) and not twice; share GET 200 with needsPasscode=false; POST returns a
  * signed URL that fetches the PDF bytes (HTTP 200, application/pdf); create-with-passcode via JWT ->
- * GET needsPasscode=true, wrong passcode 404 x10 -> 429, right passcode after the lock window is not waited for
- * (asserts 429 body shape only), revoked share 404, malformed/unknown/expired tokens 404 with identical bodies;
+ * GET needsPasscode=true, ten failed opens (a missing passcode counts) answer 404 and the tenth locks for
+ * 15 minutes, the next attempt 429; the lock window is not waited for (cleared with the service role instead);
+ * revoked share 404, malformed/unknown/expired tokens 404 with identical bodies;
  * cron secret missing -> 401; site user JWT run-now -> 403; anon cannot read the three tables.
  *
  * Fixtures are scoped to one ZZTEST-DIST building and torn down (LIFO) afterwards. The cron-secret calls run
@@ -87,6 +90,7 @@ async function svcPatch(table, filter, patch) {
   return res.json();
 }
 
+let restoreSettings = null;   // set during setup once the feature flag has been forced on
 const cleanup = [];       // [table, filter] — iterated in order: unshift children, push parents
 const userIds = [];       // disposable users, torn down after the rows that reference them
 const storageCleanup = []; // object paths in the private bucket
@@ -193,8 +197,16 @@ try {
   const todayDay = Number(today.slice(8, 10));
 
   // ── setup ──
-  const org = (await svcSelect('organizations', 'select=id&limit=1'))[0];
+  const org = (await svcSelect('organizations', 'select=id,settings&limit=1'))[0];
   if (!org?.id) throw new Error('no organizations row: report_artifacts needs an org_id');
+  // Both functions refuse to do anything unless their feature flag is on (R4b review item C1): report-distribution
+  // returns an empty run, and report-share answers 404/403 on every path. The smoke turns both on for the duration
+  // and puts the original settings back in teardown, including on a failure path.
+  const originalSettings = org.settings ?? {};
+  await svcPatch('organizations', `id=eq.${org.id}`, {
+    settings: { ...originalSettings, features: { ...(originalSettings.features ?? {}), report_schedules: true, share_links: true } },
+  });
+  restoreSettings = async () => { await svcPatch('organizations', `id=eq.${org.id}`, { settings: originalSettings }); };
   A = (await svcInsert('buildings', { name: `ZZTEST-DIST-A-${RUN}` })).id;
   cleanup.push(['buildings', `id=eq.${A}`]);
   const admin = await persona('admin', 'admin', null);
@@ -238,7 +250,9 @@ try {
     const b = forA(entry, A);
     assert('dry run: HTTP 200 ok/dryRun/today', r.status === 200 && r.body?.ok === true && r.body?.dryRun === true && r.body?.today === today, `HTTP ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
     assert('dry run: action send for the previous month', entry?.action === 'send' && entry?.period === period, JSON.stringify(entry).slice(0, 200));
-    assert('dry run: building A is skipped_not_approved with 2 recipients', b?.status === 'skipped_not_approved' && b?.recipients === 2 && b?.reportId === report.id && b?.buildingName === `ZZTEST-DIST-A-${RUN}`, JSON.stringify(b));
+    // `recipients` is the "delivered of configured" label the history rows use, not a count: nothing was
+    // delivered on a skip, so a 2-recipient schedule reads "0 of 2".
+    assert('dry run: building A is skipped_not_approved, recipients "0 of 2"', b?.status === 'skipped_not_approved' && b?.recipients === '0 of 2' && b?.reportId === report.id && b?.buildingName === `ZZTEST-DIST-A-${RUN}`, JSON.stringify(b));
     assert('dry run: counts.skipped_not_approved = 1', r.body?.counts?.skipped_not_approved === 1 && r.body?.counts?.sent === 0, JSON.stringify(r.body?.counts));
     const dist = await svcSelect('report_distributions', `schedule_id=eq.${schedule.id}&select=id`);
     const sched = (await svcSelect('report_schedules', `id=eq.${schedule.id}&select=last_run_on,last_result`))[0];
@@ -258,7 +272,9 @@ try {
     assert('no artifact: exactly one report_export_needed inbox row, to the author', inbox.length === 1 && inbox[0].recipient_id === admin.id, `${inbox.length} rows ${JSON.stringify(inbox).slice(0, 200)}`);
     assert('no artifact: inbox row shape (entity report, url /reports/fortress/<id>, title Export needed…)', inbox[0]?.entity_type === 'report' && inbox[0]?.entity_id === report.id && inbox[0]?.url === `/reports/fortress/${report.id}` && /^Export needed:/.test(inbox[0]?.title ?? '') && inbox[0]?.title.includes(`ZZTEST-DIST-A-${RUN}`), JSON.stringify(inbox[0]));
     const sched = (await svcSelect('report_schedules', `id=eq.${schedule.id}&select=last_run_on,last_result`))[0];
-    assert('no artifact: real run stamps last_run_on = today and last_result', sched?.last_run_on === today && sched?.last_result?.action === 'send' && sched?.last_result?.period === period, JSON.stringify(sched));
+    // `last_run_on` is the cron's own "done for today" marker, so a manual "Send now" must leave it alone —
+    // stamping it here would suppress that day's scheduled run. `last_result` is what the card shows: both paths write it.
+    assert('no artifact: a manual run writes last_result and leaves last_run_on null', sched?.last_run_on === null && sched?.last_result?.action === 'send' && sched?.last_result?.period === period, JSON.stringify(sched));
   }
 
   // ── 4. approved with an issued artifact: sent + share ──
@@ -283,11 +299,10 @@ try {
       const d = await runNow(admin.jwt, { scheduleId: schedule.id, dryRun: true });
       const b = forA(entryFor(d, schedule.id), A);
       assert('dry run on the send path: HTTP 200, dryRun true', d.status === 200 && d.body?.ok === true && d.body?.dryRun === true, `HTTP ${d.status} ${JSON.stringify(d.body).slice(0, 200)}`);
-      assert('dry run on the send path: building A is would_send', b?.status === 'would_send' && b?.reportId === report.id && b?.recipients === 2, JSON.stringify(b));
-      // The count key is `sent` at 8f2113e and may be renamed to `would_send`; the per-building status above
-      // is the stable assertion, so accept either key here rather than pinning a name that is in flux.
-      const wouldSend = d.body?.counts?.would_send ?? d.body?.counts?.sent;
-      assert('dry run on the send path: one would-be send counted', wouldSend === 1 && (d.body?.counts?.skipped_no_artifact ?? 0) === 0 && (d.body?.counts?.failed ?? 0) === 0, JSON.stringify(d.body?.counts));
+      assert('dry run on the send path: building A is would_send, recipients "0 of 2"', b?.status === 'would_send' && b?.reportId === report.id && b?.recipients === '0 of 2', JSON.stringify(b));
+      // A dry run has its own count key: `counts.sent` stays 0 so a dry run can never be mistaken for a send
+      // in the run log or on the schedule card.
+      assert('dry run on the send path: counted as would_send, counts.sent stays 0', d.body?.counts?.would_send === 1 && d.body?.counts?.sent === 0 && (d.body?.counts?.skipped_no_artifact ?? 0) === 0 && (d.body?.counts?.failed ?? 0) === 0, JSON.stringify(d.body?.counts));
       const sharesAfter = await svcSelect('report_shares', `report_id=eq.${report.id}&select=id`);
       const distAfter = await svcSelect('report_distributions', `report_id=eq.${report.id}&select=id,status`);
       assert('dry run on the send path: no share was minted', sharesAfter.length === 0, `${sharesAfter.length} share row(s) after a dry run`);
@@ -296,7 +311,7 @@ try {
 
     const r = await runNow(admin.jwt, { scheduleId: schedule.id, dryRun: false });
     const b = forA(entryFor(r, schedule.id), A);
-    assert('with artifact: real run answers sent with a shareId', r.status === 200 && b?.status === 'sent' && typeof b?.shareId === 'string' && r.body?.counts?.sent === 1, `HTTP ${r.status} ${JSON.stringify(b)} ${JSON.stringify(r.body?.counts)}`);
+    assert('with artifact: real run answers sent with a shareId and a "<delivered> of 2" label', r.status === 200 && b?.status === 'sent' && typeof b?.shareId === 'string' && /^\d+ of 2$/.test(b?.recipients ?? '') && r.body?.counts?.sent === 1 && r.body?.counts?.would_send === 0, `HTTP ${r.status} ${JSON.stringify(b)} ${JSON.stringify(r.body?.counts)}`);
     const dist = await svcSelect('report_distributions', `schedule_id=eq.${schedule.id}&status=eq.sent&select=report_id,artifact_id,share_id,sent_to,error`);
     assert('with artifact: one sent distribution row pinned to the artifact and share', dist.length === 1 && dist[0].report_id === report.id && dist[0].artifact_id === artifact.id && dist[0].share_id === b?.shareId && dist[0].error === null, JSON.stringify(dist));
     const sentTo = Array.isArray(dist[0]?.sent_to) ? dist[0].sent_to : [];
@@ -309,13 +324,23 @@ try {
     assert('with artifact: share expires in ~30 days, no passcode, zero counters', Math.abs(days - 30) < 0.05 && share?.passcode_hash === null && share?.view_count === 0 && share?.failed_attempts === 0 && share?.locked_until === null && share?.revoked_at === null, `days=${days} ${JSON.stringify(share)}`);
     assert('with artifact: token is 43-char base64url', /^[A-Za-z0-9_-]{43}$/.test(share?.token ?? ''), String(share?.token).slice(0, 8));
 
-    // Same day again: the per-report sent row stops a second send (run-now), the cron path answers already_ran.
+    // Same day again. Two independent guards, and the send above was a MANUAL one, so they are tested in order:
+    //   • the per-(schedule, report) 'sent' row stops a second send whoever asks → already_sent;
+    //   • `last_run_on`, which only a cron run stamps, stops the cron re-entering the schedule at all → already_ran.
+    // Because "Send now" deliberately leaves `last_run_on` null, the first cron call still walks the buildings and
+    // is caught by the row guard; only the cron call after it short-circuits. Asserting both, in that order, is what
+    // proves a manual send does not silently consume that day's scheduled run.
     const again = await runNow(admin.jwt, { scheduleId: schedule.id, dryRun: false });
     const bAgain = forA(entryFor(again, schedule.id), A);
     assert('second run-now the same day: already_sent, no new share', bAgain?.status === 'already_sent' && again.body?.counts?.already_sent === 1 && again.body?.counts?.sent === 0 && (await svcSelect('report_shares', `report_id=eq.${report.id}&select=id`)).length === 1, JSON.stringify(bAgain));
     const viaCron = await cron();
     const cronEntry = entryFor(viaCron, schedule.id);
-    assert('cron run the same day: the schedule answers already_ran', viaCron.status === 200 && cronEntry?.action === 'already_ran' && cronEntry?.buildings?.length === 0, `HTTP ${viaCron.status} ${JSON.stringify(cronEntry)}`);
+    assert('cron after a manual send: not suppressed by last_run_on, the sent row answers already_sent', viaCron.status === 200 && cronEntry?.action === 'send' && forA(cronEntry, A)?.status === 'already_sent' && viaCron.body?.counts?.sent === 0, `HTTP ${viaCron.status} ${JSON.stringify(cronEntry)}`);
+    const cronStamped = (await svcSelect('report_schedules', `id=eq.${schedule.id}&select=last_run_on`))[0];
+    assert('cron run stamps last_run_on = today (the manual runs did not)', cronStamped?.last_run_on === today, JSON.stringify(cronStamped));
+    const viaCron2 = await cron();
+    const cronEntry2 = entryFor(viaCron2, schedule.id);
+    assert('cron run the same day again: the schedule answers already_ran without walking its buildings', viaCron2.status === 200 && cronEntry2?.action === 'already_ran' && cronEntry2?.buildings?.length === 0, `HTTP ${viaCron2.status} ${JSON.stringify(cronEntry2)}`);
   }
 
   // ── 5. reminders: a schedule whose reminder date is today ──
@@ -382,16 +407,22 @@ try {
     assert('create: row carries a 64-hex passcode hash, created_by = caller, ~7 days', /^[0-9a-f]{64}$/.test(row?.passcode_hash ?? '') && row?.created_by === admin.id && Math.abs(cDays - 7) < 0.05, `${JSON.stringify({ ...row, passcode_hash: row?.passcode_hash ? `${row.passcode_hash.length} chars` : row?.passcode_hash })} days=${cDays}`);
     const g = await shareGet(token);
     assert('create: GET needsPasscode true', g.status === 200 && g.body?.needsPasscode === true, `HTTP ${g.status} ${g.text.slice(0, 120)}`);
+    // The lockout counts FAILED OPENS, not wrong passcodes: an open with no passcode at all is one of them,
+    // so the probe below is failure 1 of the 10 and the loop only has to add MAX_FAILURES - 2 more.
+    const MAX_FAILURES = 10;
     const noPass = await shareOpen(token);
-    assert('open without a passcode → 404', noPass.status === 404, `HTTP ${noPass.status}`);
-    let wrongStatuses = [];
-    for (let i = 0; i < 9; i++) wrongStatuses.push((await shareOpen(token, 'wrong-1')).status);
+    const at1 = (await svcSelect('report_shares', `id=eq.${c.body?.id}&select=failed_attempts,locked_until`))[0];
+    assert('open without a passcode → 404, and it counts as failed attempt 1', noPass.status === 404 && at1?.failed_attempts === 1 && at1?.locked_until === null, `HTTP ${noPass.status} ${JSON.stringify(at1)}`);
+    const wrongStatuses = [];
+    for (let i = 0; i < MAX_FAILURES - 2; i++) wrongStatuses.push((await shareOpen(token, 'wrong-1')).status);
     const at9 = (await svcSelect('report_shares', `id=eq.${c.body?.id}&select=failed_attempts,locked_until`))[0];
-    assert('open with a wrong passcode ×9 → 404 each, failed_attempts 9, not locked', wrongStatuses.every((s) => s === 404) && at9?.failed_attempts === 9 && at9?.locked_until === null, `${wrongStatuses.join(',')} ${JSON.stringify(at9)}`);
+    assert(`failures 2..${MAX_FAILURES - 1} → 404 each, failed_attempts ${MAX_FAILURES - 1}, still not locked`, wrongStatuses.every((s) => s === 404) && at9?.failed_attempts === MAX_FAILURES - 1 && at9?.locked_until === null, `${wrongStatuses.join(',')} ${JSON.stringify(at9)}`);
     const tenth = await shareOpen(token, 'wrong-1');
     const at10 = (await svcSelect('report_shares', `id=eq.${c.body?.id}&select=failed_attempts,locked_until`))[0];
     const lockMinutes = at10?.locked_until ? (Date.parse(at10.locked_until) - Date.now()) / 60_000 : NaN;
-    assert('10th wrong passcode → 404, locked_until ≈ now + 15 min, counter reset', tenth.status === 404 && at10?.failed_attempts === 0 && lockMinutes > 13 && lockMinutes <= 15.1, `HTTP ${tenth.status} ${JSON.stringify(at10)} minutes=${lockMinutes}`);
+    // The 10th failure is answered with the same 404 as the others (the lock must not tell a prober it landed);
+    // the 429 only starts on the attempt AFTER it, which the next assertion takes.
+    assert(`failure ${MAX_FAILURES} → 404, locked_until ≈ now + 15 min, counter reset to 0`, tenth.status === 404 && at10?.failed_attempts === 0 && lockMinutes > 13 && lockMinutes <= 15.1, `HTTP ${tenth.status} ${JSON.stringify(at10)} minutes=${lockMinutes}`);
     const locked = await shareOpen(token, passcode);
     assert('locked share → 429 {error: locked, retryAfterSeconds} with Retry-After', locked.status === 429 && locked.body?.error === 'locked' && Number.isInteger(locked.body?.retryAfterSeconds) && locked.body.retryAfterSeconds > 0 && locked.body.retryAfterSeconds <= 900 && locked.retryAfter === String(locked.body.retryAfterSeconds), `HTTP ${locked.status} ${locked.text.slice(0, 120)} retry-after=${locked.retryAfter}`);
     const lockedGet = await shareGet(token);
@@ -469,12 +500,24 @@ try {
   fail('smoke run', e.message);
 } finally {
   // ════ Teardown (service role): children first (cleanup is ordered), storage, personas, stray sweep ════
+  if (restoreSettings) { try { await restoreSettings(); } catch (e) { fail('teardown organizations.settings', e.message); } }
   for (const [table, filter] of cleanup) {
     try { await svcDelete(table, filter); } catch (e) { fail(`teardown ${table}`, e.message); }
   }
   for (const path of storageCleanup) {
-    const r = await fetch(`${URL_BASE}/storage/v1/object/${BUCKET}/${path}`, { method: 'DELETE', headers: SVC });
-    if (!r.ok) fail('teardown storage', `HTTP ${r.status} for ${path}`);
+    // No Content-Type here: storage-api is Fastify, and a DELETE that declares application/json with no body
+    // is rejected with 400 ("Body cannot be empty…"), which would silently leave the object in the bucket.
+    const r = await fetch(`${URL_BASE}/storage/v1/object/${BUCKET}/${path}`, { method: 'DELETE', headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` } });
+    if (!r.ok) fail('teardown storage', `HTTP ${r.status} for ${path} — ${(await r.text()).slice(0, 160)}`);
+  }
+  // Deleting an object is not the same as the bucket forgetting it: list the prefix back and prove it is gone.
+  if (storageCleanup.length) {
+    const prefix = storageCleanup[0].slice(0, storageCleanup[0].lastIndexOf('/'));
+    const res = await fetch(`${URL_BASE}/storage/v1/object/list/${BUCKET}`, { method: 'POST', headers: SVC, body: JSON.stringify({ prefix, limit: 100 }) });
+    const rows = res.ok ? await res.json() : [];
+    const names = new Set(Array.isArray(rows) ? rows.map((x) => `${prefix}/${x.name}`) : []);
+    const left = storageCleanup.filter((p) => names.has(p));
+    if (left.length) fail('teardown storage', `${left.length} object(s) survived under ${prefix}`);
   }
   for (const uid of userIds) {
     await svcDelete('user_buildings', `user_id=eq.${uid}`).catch(() => {});
