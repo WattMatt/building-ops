@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { subscribePostgresChanges } from '@/lib/realtime/subscribePostgresChanges';
 import { useAuth } from '@/contexts/AuthContext';
 import type { NotificationKind } from '@/lib/notify';
 
@@ -28,15 +29,18 @@ const rowsKeyFor = (uid: string | undefined) => [...KEY, uid];
 const countKeyFor = (uid: string | undefined) => [...KEY, 'unread-count', uid];
 
 /**
- * Owns the single realtime channel for the signed-in user's notifications. Call this ONCE,
- * from the layout that persists across routes — never from a component that mounts per page.
+ * Owns the refetch-on-change side of the inbox. Call this ONCE, from the layout that persists
+ * across routes — never from a component that mounts per page: each caller runs its own
+ * debounce and would invalidate the same queries again.
  *
- * Why once: `supabase.channel(topic)` returns the EXISTING channel for a topic that is already
- * open, so a second caller does not get its own channel — it appends another binding to a
- * channel that has already joined. `.subscribe()` is then a no-op, and the binding count in the
- * join reply no longer matches what the server acknowledged, which errors the channel: live
- * updates stop working for everybody. Worse, the first consumer to unmount calls
- * `removeChannel` and tears the shared channel down under the others. One owner, one channel.
+ * The channel itself belongs to the registry, so calling this twice can no longer break
+ * anything. `supabase.channel(topic)` returns the EXISTING channel for a topic that is already
+ * open, so a second direct caller does not get its own channel — it appends another binding to
+ * a channel that has already joined, `.subscribe()` is a no-op, and the binding count no longer
+ * matches what the server acknowledged, which errors the channel for everybody; the first one
+ * to unmount then removes it out from under the rest. One owner per channel — see
+ * subscribePostgresChanges. The user id is part of the key because listeners share the filter
+ * the key was opened with.
  */
 export function useNotificationsRealtime() {
   const { user } = useAuth();
@@ -45,20 +49,21 @@ export function useNotificationsRealtime() {
 
   useEffect(() => {
     if (!user?.id) return;
-    const channel = supabase
-      .channel(`notifications-${user.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'notifications', filter: `recipient_id=eq.${user.id}` }, () => {
+    const release = subscribePostgresChanges(
+      `notifications-${user.id}`,
+      { event: '*', schema: 'public', table: 'notifications', filter: `recipient_id=eq.${user.id}` },
+      () => {
         if (debounce.current) clearTimeout(debounce.current);
         debounce.current = setTimeout(() => {
           debounce.current = null;
           // The ['notifications'] prefix covers both the row list and the exact unread count.
           void qc.invalidateQueries({ queryKey: KEY });
         }, INVALIDATE_DEBOUNCE_MS);
-      })
-      .subscribe();
+      },
+    );
     return () => {
       if (debounce.current) { clearTimeout(debounce.current); debounce.current = null; }
-      supabase.removeChannel(channel);
+      release();
     };
   }, [user?.id, qc]);
 }

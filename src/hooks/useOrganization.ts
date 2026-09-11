@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { RealtimeChannel, Session } from '@supabase/supabase-js';
+import type { Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
+import { subscribePostgresChanges } from '@/lib/realtime/subscribePostgresChanges';
 import type { Tables } from '@/integrations/supabase/types';
 import { ORG_SETTINGS_KEY } from '@/hooks/useOrgSettings';
 
@@ -16,24 +17,33 @@ export function useOrganization() {
     let cancelled = false;
     // null until the first read has seen the session; afterwards "was the last read anonymous?".
     let wasAnon: boolean | null = null;
-    let channel: RealtimeChannel | null = null;
+    /** Non-null while this consumer holds the shared 'organization-changes' subscription. */
+    let releaseRealtime: (() => void) | null = null;
 
     // The organizations table is authenticated-only, so a signed-out client would only ever get
     // CHANNEL_ERROR from it: subscribe while a session exists, tear down when it goes.
+    //
+    // Many components call this hook at once (the layout plus whatever page is inside it), so the
+    // subscription goes through the registry, which keeps ONE live channel for all of them: opening
+    // a channel per consumer under a fixed name errors the shared channel, and the first consumer
+    // to unmount would remove it under the others — see subscribePostgresChanges. Sign-out releases
+    // this consumer's hold; signing back in re-acquires the key, and the registry waits for the
+    // previous channel's leave to be acknowledged before reopening it.
     const syncRealtime = (hasSession: boolean) => {
-      if (hasSession && !channel) {
-        channel = supabase
-          .channel('organization-changes')
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'organizations' }, (payload) => {
+      if (hasSession && !releaseRealtime) {
+        releaseRealtime = subscribePostgresChanges<Organization>(
+          'organization-changes',
+          { event: '*', schema: 'public', table: 'organizations' },
+          (payload) => {
             if (!payload.new || cancelled) return;
             setOrganization(payload.new as Organization);
             // The settings editors read through useOrgSettings; a row change from elsewhere must reach them too.
             if ('settings' in payload.new) void qc.invalidateQueries({ queryKey: ORG_SETTINGS_KEY });
-          })
-          .subscribe();
-      } else if (!hasSession && channel) {
-        supabase.removeChannel(channel);
-        channel = null;
+          },
+        );
+      } else if (!hasSession && releaseRealtime) {
+        releaseRealtime();
+        releaseRealtime = null;
       }
     };
 
