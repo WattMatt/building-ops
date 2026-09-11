@@ -58,7 +58,8 @@ interface TemplateItemDialogProps {
   onSuccess: () => void;
 }
 
-const responsibleParties = [
+/** Fixed responsible-party labels shared with TemplateDialog (template-level responsible_role). */
+export const responsibleParties = [
   'Cleaning Staff',
   'Maintenance',
   'Security',

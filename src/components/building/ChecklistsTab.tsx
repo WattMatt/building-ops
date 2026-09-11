@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,22 +6,22 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Progress } from '@/components/ui/progress';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   ChevronLeft,
   ChevronRight,
   Calendar,
-  Clock,
-  CheckCircle2,
+  CalendarDays,
   AlertTriangle,
-  Camera,
   Loader2,
   RefreshCw,
-  User,
   Plus,
-  ClipboardCheck,
+  UserPlus,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { categoryMeta } from '@/lib/compliance';
+import { useBuildingMembers, memberDisplayName } from '@/hooks/useBuildingMembers';
+import { AssigneePicker } from '@/components/people/AssigneePicker';
+import { notify } from '@/lib/notify';
 import {
   format,
   startOfDay,
@@ -36,38 +36,47 @@ import {
   addDays,
   addMonths,
   subMonths,
-  addQuarters,
-  addYears,
   eachDayOfInterval,
   isSameMonth,
   isToday,
   isWithinInterval,
   isAfter,
 } from 'date-fns';
+import { Hint } from '@/components/ui/hint';
 import ReportIssueDialog from '@/components/checklists/ReportIssueDialog';
 import CompleteTaskDialog from '@/components/checklists/CompleteTaskDialog';
+import { TasksList, type TaskInstance, type TaskFrequency, type TaskStatus } from '@/components/building/TasksList';
+import { RoleAssignmentsPanel } from '@/components/building/RoleAssignmentsPanel';
+import { UpcomingTasks, HORIZON_DAYS, groupUpcoming } from '@/components/building/UpcomingTasks';
+import { todayInOperatingTz } from '@/lib/myWork';
+import { ALL_FREQUENCIES } from '@/lib/taskSchedule';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
+import { csvInstant, csvText, type CsvColumn } from '@/lib/exportCsv';
 
-type TaskFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually';
-type TaskStatus = 'pending' | 'completed' | 'overdue' | 'issue_logged';
+/** Days ahead the on-demand generate buttons fill (the nightly job uses its own horizon). */
+const GENERATE_HORIZON_DAYS = 90;
 
-interface TaskInstance {
-  id: string;
-  task_name: string;
-  task_description: string | null;
-  frequency: TaskFrequency;
-  status: TaskStatus;
-  due_date: string;
-  requires_photo: boolean;
-  requires_signature: boolean;
-  responsible_role: string;
-  building_id: string;
-  category: string | null;
-  completion?: {
-    completed_by: string;
-    completed_at: string;
-    completed_by_name?: string;
-  };
+/**
+ * The plan's phone breakpoint for this tab is `< sm` (640 px), not `useIsMobile`'s 768. The
+ * value is read synchronously from `matchMedia` on the first render so a phone's first paint
+ * is the horizon card, never a flash of the desktop strip (`useIsMobile` starts `false`).
+ */
+const PHONE_LAYOUT_QUERY = '(max-width: 639px)';
+const phoneLayoutNow = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(PHONE_LAYOUT_QUERY).matches;
+function usePhoneLayout(): boolean {
+  const [phone, setPhone] = useState<boolean>(phoneLayoutNow);
+  useEffect(() => {
+    const mql = window.matchMedia(PHONE_LAYOUT_QUERY);
+    const onChange = (e: { matches: boolean }) => setPhone(e.matches);
+    mql.addEventListener('change', onChange);
+    setPhone(mql.matches);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+  return phone;
 }
+
+/** The tab strip: the rolling horizon view, then one tab per legacy frequency bucket. */
+type ChecklistView = 'upcoming' | TaskFrequency;
 
 interface ChecklistsTabProps {
   buildingId: string;
@@ -81,31 +90,6 @@ const frequencyLabels: Record<TaskFrequency, string> = {
   quarterly: 'Quarterly',
   annually: 'Annual',
 };
-
-const statusColors: Record<TaskStatus, string> = {
-  pending: 'bg-warning text-warning-foreground',
-  completed: 'bg-success text-success-foreground',
-  overdue: 'bg-destructive text-destructive-foreground',
-  issue_logged: 'bg-destructive/80 text-destructive-foreground',
-};
-
-function getDueDateForFrequency(frequency: TaskFrequency): string {
-  const now = new Date();
-  switch (frequency) {
-    case 'daily':
-      return format(startOfDay(now), 'yyyy-MM-dd');
-    case 'weekly':
-      return format(addDays(startOfWeek(now, { weekStartsOn: 1 }), 6), 'yyyy-MM-dd');
-    case 'monthly':
-      return format(addMonths(startOfMonth(now), 1), 'yyyy-MM-dd');
-    case 'quarterly':
-      return format(addQuarters(startOfQuarter(now), 1), 'yyyy-MM-dd');
-    case 'annually':
-      return format(addYears(startOfYear(now), 1), 'yyyy-MM-dd');
-    default:
-      return format(now, 'yyyy-MM-dd');
-  }
-}
 
 function getPeriodLabel(frequency: TaskFrequency): string {
   const now = new Date();
@@ -151,17 +135,41 @@ function getCurrentPeriodRange(frequency: TaskFrequency): { start: Date; end: Da
 }
 
 export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTabProps) {
-  const { isAdminOrManager } = useAuth();
+  const { user, isAdminOrManager } = useAuth();
+  const { byId: members } = useBuildingMembers(buildingId);
+  const isMobile = usePhoneLayout();
   const [tasks, setTasks] = useState<TaskInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [selectedFrequency, setSelectedFrequency] = useState<TaskFrequency>('daily');
+  // Desktop opens on the horizon view (first tab). On mobile that view sits above the strip
+  // instead of in it, so the strip itself falls back to the first frequency.
+  const [selectedView, setSelectedView] = useState<ChecklistView>('upcoming');
+  const activeView: ChecklistView = isMobile && selectedView === 'upcoming' ? 'daily' : selectedView;
+  const selectedFrequency: TaskFrequency = activeView === 'upcoming' ? 'daily' : activeView;
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
   // Dialog states
   const [issueDialogOpen, setIssueDialogOpen] = useState(false);
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<TaskInstance | null>(null);
+
+  const nameOf = useCallback((id: string | null) => (id && members.get(id) ? memberDisplayName(members.get(id)!) : null), [members]);
+
+  const assignTasks = async (taskIds: string[], assigned_to: string | null) => {
+    if (!taskIds.length) return;
+    const { data, error } = await supabase.from('task_instances').update({ assigned_to }).in('id', taskIds).select('id');
+    if (error) { toast.error(`Could not assign: ${error.message}`); return; }
+    if ((data?.length ?? 0) < taskIds.length) toast.error(`Only ${data?.length ?? 0} of ${taskIds.length} tasks could be assigned.`);
+    else toast.success(assigned_to ? `Assigned ${taskIds.length} task${taskIds.length === 1 ? '' : 's'} to ${nameOf(assigned_to) ?? 'user'}` : 'Unassigned');
+    if (assigned_to && assigned_to !== user?.id && data?.length) {
+      void notify({ kind: 'task_assigned', entityType: 'task', entityId: data[0].id, buildingId, recipients: [assigned_to], title: `${data.length} task${data.length === 1 ? '' : 's'} assigned to you at ${buildingName ?? 'a building'}`, url: `/buildings/${buildingId}?tab=checklists` });
+    }
+    const landed = new Set((data ?? []).map((r) => r.id));
+    setTasks((prev) => prev.map((t) => (landed.has(t.id) ? { ...t, assigned_to } : t)));
+  };
+
+  const canAssignTask = (task: TaskInstance) => isAdminOrManager || task.assigned_to === user?.id;
+  const onAssignTask = (task: TaskInstance, userId: string | null) => assignTasks([task.id], userId);
 
   useEffect(() => {
     fetchTasks();
@@ -171,7 +179,7 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
     setLoading(true);
     try {
       // Fetch tasks with their completions
-      const { data: tasksData, error: tasksError } = await supabase
+      const { data: tasksRaw, error: tasksError } = await supabase
         .from('task_instances')
         .select(`
           id,
@@ -184,12 +192,15 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
           requires_signature,
           responsible_role,
           building_id,
-          category
+          category,
+          assigned_to
         `)
         .eq('building_id', buildingId)
         .order('due_date');
 
       if (tasksError) throw tasksError;
+
+      const tasksData = tasksRaw;
 
       // Fetch completions for these tasks
       const taskIds = (tasksData || []).map(t => t.id);
@@ -204,31 +215,26 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
 
       if (completionsError) throw completionsError;
 
-      // Fetch profile names for completions
-      const userIds = [...new Set((completionsData || []).map(c => c.completed_by))];
-      const { data: profilesData } = await supabase
-        .from('profiles')
-        .select('id, full_name, email')
-        .in('id', userIds);
-
-      const profileMap = new Map((profilesData || []).map(p => [p.id, p.full_name || p.email]));
-
-      // Map completions to tasks
+      // Map completions to tasks. The completer's name is resolved at render time from the
+      // building's member list (`nameOf`) — other users' `profiles` rows are not readable here.
       const completionMap = new Map(
         (completionsData || []).map(c => [
           c.task_instance_id,
           {
             completed_by: c.completed_by,
             completed_at: c.completed_at,
-            completed_by_name: profileMap.get(c.completed_by) || 'Unknown',
           },
         ])
       );
 
+      // Nullable in the generated types; the generator always writes them, so narrow here.
       const formattedTasks: TaskInstance[] = (tasksData || []).map(task => ({
         ...task,
         frequency: task.frequency as TaskFrequency,
         status: task.status as TaskStatus,
+        requires_photo: task.requires_photo ?? false,
+        requires_signature: task.requires_signature ?? false,
+        responsible_role: task.responsible_role ?? 'user',
         completion: completionMap.get(task.id),
       }));
 
@@ -241,107 +247,39 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
     }
   };
 
-  const generateTasksForFrequency = async (frequency: TaskFrequency) => {
-    try {
-      const { data: templateItems, error: templateError } = await supabase
-        .from('template_items')
-        .select(`
-          id,
-          task_name,
-          task_description,
-          responsible_party,
-          requires_photo,
-          requires_signature,
-          checklist_templates!inner (frequency)
-        `)
-        .eq('checklist_templates.frequency', frequency);
-
-      if (templateError) throw templateError;
-      if (!templateItems || templateItems.length === 0) return 0;
-
-      const dueDate = getDueDateForFrequency(frequency);
-
-      const { data: existingTasks } = await supabase
-        .from('task_instances')
-        .select('template_item_id')
-        .eq('building_id', buildingId)
-        .eq('due_date', dueDate)
-        .eq('frequency', frequency);
-
-      const existingItemIds = new Set((existingTasks || []).map(t => t.template_item_id));
-
-      const newTasks = templateItems
-        .filter(item => !existingItemIds.has(item.id))
-        .map(item => ({
-          building_id: buildingId,
-          template_item_id: item.id,
-          task_name: item.task_name,
-          task_description: item.task_description,
-          frequency: frequency,
-          responsible_role: 'user' as const,
-          status: 'pending' as const,
-          due_date: dueDate,
-          requires_photo: item.requires_photo,
-          requires_signature: item.requires_signature,
-        }));
-
-      if (newTasks.length > 0) {
-        // .select() counts rows that actually landed — the DB scoping trigger
-        // may legitimately skip rows for non-applicable templates
-        const { data: inserted, error: insertError } = await supabase
-          .from('task_instances')
-          .insert(newTasks)
-          .select('id');
-
-        if (insertError) throw insertError;
-        return inserted?.length ?? 0;
-      }
-
-      return 0;
-    } catch (error) {
-      console.error('Error generating tasks:', error);
-      throw error;
-    }
+  const generate = async (frequency?: TaskFrequency) => {
+    // An omitted p_frequency is dropped from the JSON body, so the function sees its `default null`.
+    const { data, error } = await supabase.rpc('generate_scheduled_tasks', {
+      p_building: buildingId,
+      p_frequency: frequency,
+      p_horizon_days: GENERATE_HORIZON_DAYS,
+    });
+    if (error) throw new Error(error.message);
+    return data ?? 0;
   };
 
   const handleGenerateTasks = async () => {
     setGenerating(true);
     try {
-      const count = await generateTasksForFrequency(selectedFrequency);
-      if (count && count > 0) {
-        toast.success(`Generated ${count} new ${frequencyLabels[selectedFrequency].toLowerCase()} tasks`);
-        fetchTasks();
-      } else {
-        toast.info('All tasks already exist for this period');
-      }
+      const count = await generate(selectedFrequency);
+      if (count > 0) { toast.success(`Generated ${count} new ${frequencyLabels[selectedFrequency].toLowerCase()} tasks`); fetchTasks(); }
+      else toast.info('All tasks already exist for this period');
     } catch (error) {
+      if (import.meta.env.DEV) console.error('generate tasks:', error);
       toast.error('Failed to generate tasks');
-    } finally {
-      setGenerating(false);
-    }
+    } finally { setGenerating(false); }
   };
 
   const handleGenerateAllFrequencies = async () => {
     setGenerating(true);
-    let totalGenerated = 0;
-
     try {
-      for (const freq of ['daily', 'weekly', 'monthly', 'quarterly', 'annually'] as TaskFrequency[]) {
-        const count = await generateTasksForFrequency(freq);
-        totalGenerated += count || 0;
-      }
-
-      if (totalGenerated > 0) {
-        toast.success(`Generated ${totalGenerated} new tasks`);
-        fetchTasks();
-      } else {
-        toast.info('All tasks already exist for current periods');
-      }
+      const count = await generate();
+      if (count > 0) { toast.success(`Generated ${count} new tasks`); fetchTasks(); }
+      else toast.info('All tasks already exist for current periods');
     } catch (error) {
+      if (import.meta.env.DEV) console.error('generate tasks:', error);
       toast.error('Failed to generate tasks');
-    } finally {
-      setGenerating(false);
-    }
+    } finally { setGenerating(false); }
   };
 
   const handleCompleteTask = (task: TaskInstance) => {
@@ -394,6 +332,30 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
     return isAfter(day, currentPeriodRange.end);
   };
 
+  // Badge on the horizon tab: open tasks due within the window (plus anything already overdue).
+  const upcomingCount = useMemo(() => groupUpcoming(tasks, todayInOperatingTz()).reduce((n, w) => n + w.tasks.length, 0), [tasks]);
+
+  // The rows the active tab is showing: the horizon window, or the selected frequency bucket.
+  const exportableTasks = useMemo(
+    () => (activeView === 'upcoming' ? groupUpcoming(tasks, todayInOperatingTz()).flatMap((w) => w.tasks) : filteredTasks),
+    [activeView, tasks, filteredTasks],
+  );
+
+  // `nameOf` closes over the loaded member list, so the columns are memoised rather than
+  // rebuilt on every render. "Completed at" is an instant and goes through the shared
+  // formatter — a raw ISO string lands in Excel as text, not a date.
+  const csvColumns = useMemo((): CsvColumn<TaskInstance>[] => [
+    { key: 'task_name', header: 'Task' },
+    { key: 'category', header: 'Category', format: csvText },
+    { key: 'frequency', header: 'Frequency' },
+    { key: 'responsible_role', header: 'Responsible role', format: csvText },
+    { key: 'assigned_to', header: 'Assignee', format: (v) => nameOf((v as string | null) ?? null) ?? '' },
+    { key: 'due_date', header: 'Due date' },
+    { key: 'status', header: 'Status' },
+    { header: 'Completed by', format: (_v, row) => (row.completion ? nameOf(row.completion.completed_by) ?? '' : '') },
+    { header: 'Completed at', format: (_v, row) => csvInstant(row.completion?.completed_at) },
+  ], [nameOf]);
+
   // Calculate progress
   const pendingTasks = filteredTasks.filter(t => t.status === 'pending');
   const completedTasksList = filteredTasks.filter(t => t.status === 'completed');
@@ -419,28 +381,68 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
           <p className="text-sm text-muted-foreground">
             Track and complete maintenance tasks for this building
           </p>
+          {isAdminOrManager && (
+            <Hint>Tasks are generated automatically every night; use these buttons to run it now.</Hint>
+          )}
         </div>
-        {isAdminOrManager && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleGenerateAllFrequencies}
-            disabled={generating}
-          >
-            {generating ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-            ) : (
-              <RefreshCw className="h-4 w-4 mr-2" />
-            )}
-            Generate All Tasks
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <ExportCsvButton
+            rows={exportableTasks}
+            columns={csvColumns}
+            filename={`checklists-${activeView === 'upcoming' ? 'upcoming' : activeView}`}
+          />
+          {isAdminOrManager && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleGenerateAllFrequencies}
+              disabled={generating}
+            >
+              {generating ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-2" />
+              )}
+              Generate All Tasks
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Frequency Tabs */}
-      <Tabs value={selectedFrequency} onValueChange={v => setSelectedFrequency(v as TaskFrequency)}>
-        <TabsList className="grid w-full grid-cols-5">
-          {(['daily', 'weekly', 'monthly', 'quarterly', 'annually'] as TaskFrequency[]).map(freq => {
+      {/* Who does what here — the panel renders nothing for non-managers; the guard here only skips its queries. */}
+      {isAdminOrManager && (
+        <RoleAssignmentsPanel buildingId={buildingId} buildingName={buildingName} onApplied={fetchTasks} />
+      )}
+
+      {/* Mobile: the horizon view sits above the strip, one column, no tab to find it under. */}
+      {isMobile && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <CalendarDays className="h-4 w-4" aria-hidden="true" />
+              Next {HORIZON_DAYS} days
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <UpcomingTasks tasks={tasks} onComplete={handleCompleteTask} onAssign={onAssignTask} canAssign={canAssignTask} members={members} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Frequency Tabs (desktop adds the horizon view as the first tab) */}
+      <Tabs value={activeView} onValueChange={v => setSelectedView(v as ChecklistView)}>
+        <TabsList className={`grid w-full ${isMobile ? 'grid-cols-5' : 'grid-cols-6'}`}>
+          {!isMobile && (
+            <TabsTrigger value="upcoming" className="relative">
+              Next {HORIZON_DAYS} days
+              {upcomingCount > 0 && (
+                <Badge variant="secondary" className="ml-1 h-5 min-w-[20px] text-xs">
+                  {upcomingCount}
+                </Badge>
+              )}
+            </TabsTrigger>
+          )}
+          {ALL_FREQUENCIES.map(freq => {
             const count = tasks.filter(t => t.frequency === freq).length;
             return (
               <TabsTrigger key={freq} value={freq} className="relative">
@@ -455,6 +457,16 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
           })}
         </TabsList>
 
+        {!isMobile && (
+          <TabsContent value="upcoming" className="mt-6">
+            <Card>
+              <CardContent className="pt-6">
+                <UpcomingTasks tasks={tasks} onComplete={handleCompleteTask} onAssign={onAssignTask} canAssign={canAssignTask} members={members} />
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
+
         <TabsContent value={selectedFrequency} className="mt-6 space-y-6">
           {/* Period Label & Progress */}
           <div className="flex items-center justify-between">
@@ -463,21 +475,34 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
               <span className="font-medium">{getPeriodLabel(selectedFrequency)}</span>
               <Badge variant="outline" className="text-xs">Current Period</Badge>
             </div>
-            {isAdminOrManager && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleGenerateTasks}
-                disabled={generating}
-              >
-                {generating ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : (
-                  <Plus className="h-4 w-4 mr-2" />
-                )}
-                Generate {frequencyLabels[selectedFrequency]}
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {isAdminOrManager && pendingTasks.length > 0 && (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm"><UserPlus className="mr-2 h-4 w-4" />Assign all pending</Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-72 space-y-2">
+                    <p className="text-sm">Assign the {pendingTasks.length} pending {frequencyLabels[selectedFrequency].toLowerCase()} tasks to:</p>
+                    <AssigneePicker buildingId={buildingId} value={null} onChange={(id) => id && assignTasks(pendingTasks.map((t) => t.id), id)} allowUnassigned={false} placeholder="Choose a person" />
+                  </PopoverContent>
+                </Popover>
+              )}
+              {isAdminOrManager && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleGenerateTasks}
+                  disabled={generating}
+                >
+                  {generating ? (
+                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Plus className="h-4 w-4 mr-2" />
+                  )}
+                  Generate {frequencyLabels[selectedFrequency]}
+                </Button>
+              )}
+            </div>
           </div>
 
           {/* Progress Card */}
@@ -619,6 +644,12 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
                   onReportIssue={handleReportIssue}
                   emptyMessage={`No ${frequencyLabels[selectedFrequency].toLowerCase()} tasks scheduled. Click "Generate ${frequencyLabels[selectedFrequency]}" to create tasks.`}
                   showDueDate
+                  buildingId={buildingId}
+                  nameOf={nameOf}
+                  canAssign={canAssignTask}
+                  onAssign={onAssignTask}
+                  showEvidencePack
+                  buildingName={buildingName}
                 />
               </CardContent>
             </Card>
@@ -640,6 +671,10 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
                   onReportIssue={handleReportIssue}
                   variant="issue"
                   showDueDate
+                  buildingId={buildingId}
+                  nameOf={nameOf}
+                  canAssign={canAssignTask}
+                  onAssign={onAssignTask}
                 />
               </CardContent>
             </Card>
@@ -671,125 +706,6 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
           />
         </>
       )}
-    </div>
-  );
-}
-
-// Sub-component for task lists
-interface TasksListProps {
-  tasks: TaskInstance[];
-  onComplete: (task: TaskInstance) => void;
-  onReportIssue: (task: TaskInstance) => void;
-  emptyMessage?: string;
-  variant?: 'default' | 'issue';
-  showDueDate?: boolean;
-}
-
-function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, variant = 'default', showDueDate = false }: TasksListProps) {
-  if (tasks.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-8 text-center">
-        <ClipboardCheck className="h-10 w-10 text-muted-foreground mb-3" />
-        <p className="text-sm text-muted-foreground">{emptyMessage || 'No tasks'}</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3 max-h-[400px] overflow-y-auto">
-      {tasks.map(task => (
-        <div
-          key={task.id}
-          className={`p-3 rounded-lg border ${
-            variant === 'issue'
-              ? 'border-destructive/50 bg-destructive/5'
-              : task.status === 'completed'
-              ? 'bg-muted/30'
-              : ''
-          }`}
-        >
-          <div className="flex items-start gap-3">
-            {task.status === 'completed' ? (
-              <CheckCircle2 className="h-5 w-5 text-success mt-0.5 shrink-0" />
-            ) : task.status === 'issue_logged' ? (
-              <AlertTriangle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
-            ) : (
-              <Clock className="h-5 w-5 text-warning mt-0.5 shrink-0" />
-            )}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p
-                    className={`font-medium text-sm ${
-                      task.status === 'completed' ? 'line-through text-muted-foreground' : ''
-                    }`}
-                  >
-                    {task.task_name}
-                  </p>
-                  {task.task_description && (
-                    <p className="text-xs text-muted-foreground mt-0.5">{task.task_description}</p>
-                  )}
-                  {categoryMeta(task.category) && (
-                    <Badge variant="outline" className={`mt-1 ${categoryMeta(task.category)!.color}`}>
-                      {categoryMeta(task.category)!.label}
-                    </Badge>
-                  )}
-                  {showDueDate && (
-                    <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                      <Calendar className="h-3 w-3" />
-                      Due: {format(new Date(task.due_date), 'MMM d, yyyy')}
-                    </p>
-                  )}
-                </div>
-                <Badge
-                  variant={task.status === 'completed' ? 'secondary' : 'outline'}
-                  className={`shrink-0 ${task.status === 'completed' ? statusColors.completed : ''}`}
-                >
-                  {task.status === 'completed'
-                    ? 'Done'
-                    : task.status === 'issue_logged'
-                    ? 'Issue'
-                    : 'Pending'}
-                </Badge>
-              </div>
-
-              {/* Completed by info */}
-              {task.completion && (
-                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                  <User className="h-3 w-3" />
-                  {task.completion.completed_by_name} •{' '}
-                  {format(new Date(task.completion.completed_at), 'MMM d, h:mm a')}
-                </p>
-              )}
-
-              {/* Actions for pending tasks */}
-              {task.status === 'pending' && (
-                <div className="flex items-center gap-2 mt-2">
-                  <Button size="sm" className="h-7 text-xs" onClick={() => onComplete(task)}>
-                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                    Complete
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={() => onReportIssue(task)}
-                  >
-                    <AlertTriangle className="h-3 w-3 mr-1" />
-                    Issue
-                  </Button>
-                  {task.requires_photo && (
-                    <Badge variant="outline" className="text-xs gap-1">
-                      <Camera className="h-3 w-3" />
-                      Photo
-                    </Badge>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      ))}
     </div>
   );
 }

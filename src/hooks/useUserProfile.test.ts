@@ -18,8 +18,9 @@ const stub = vi.hoisted(() => {
     bindings: [] as Binding[],
     channels: [] as FakeChannel[],
     filters: [] as unknown[],
+    columns: [] as string[],
     removeChannel: vi.fn(async () => 'ok'),
-    row: { full_name: 'Ada', avatar_url: null, phone: null, email: 'ada@example.com' } as Record<string, unknown>,
+    row: { full_name: 'Ada', avatar_url: null, phone: null, email: 'ada@example.com', geotag_photos: true } as Record<string, unknown>,
     user: { id: 'user-1' } as { id: string } | null,
   };
   const channel = vi.fn((name: string) => {
@@ -36,9 +37,10 @@ const stub = vi.hoisted(() => {
     return chan;
   });
   const from = vi.fn(() => ({
-    select: () => ({
-      eq: () => ({ maybeSingle: async () => ({ data: state.row, error: null }) }),
-    }),
+    select: (columns: string) => {
+      state.columns.push(columns);
+      return { eq: () => ({ maybeSingle: async () => ({ data: state.row, error: null }) }) };
+    },
   }));
   return { state, channel, from };
 });
@@ -57,6 +59,7 @@ beforeEach(async () => {
   stub.state.bindings = [];
   stub.state.channels = [];
   stub.state.filters = [];
+  stub.state.columns = [];
   stub.state.user = { id: 'user-1' };
   stub.channel.mockClear();
   stub.state.removeChannel.mockClear();
@@ -75,6 +78,18 @@ describe('useUserProfile realtime ownership', () => {
     expect(stub.state.channels[0].on).toHaveBeenCalledTimes(1);
     expect(stub.state.filters[0]).toMatchObject({ event: 'UPDATE', table: 'profiles', filter: 'id=eq.user-1' });
     expect(stub.state.channels[0].subscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads every column the profile menu needs, geotag_photos included', async () => {
+    const { result } = renderHook(() => useUserProfile());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(stub.state.columns[0]).toBe('full_name, avatar_url, phone, email, geotag_photos');
+    expect(result.current.profile?.geotag_photos).toBe(true);
+
+    act(() => {
+      for (const cb of stub.state.bindings) cb({ eventType: 'UPDATE', new: { ...stub.state.row, geotag_photos: false }, old: {} });
+    });
+    expect(result.current.profile?.geotag_photos).toBe(false);
   });
 
   it('a live change reaches every consumer', async () => {

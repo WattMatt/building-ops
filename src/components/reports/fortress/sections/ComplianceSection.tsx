@@ -28,7 +28,7 @@ export default function ComplianceSection({ reportId, buildingId, readOnly }: Se
   return (
     <SectionCard
       title="OHS Act Compliance"
-      hint="Weighted compliance scored live from the active template. N/A counts as compliant."
+      hint="Weighted compliance scored live from the active template. N/A counts as compliant. Answers save automatically as you click — there is no Save button here."
       headerAccessory={
         <div className="text-right">
           <Badge variant={liveBuildingPct != null && liveBuildingPct >= 90 ? 'default' : 'secondary'} className="text-sm">

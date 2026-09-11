@@ -1,6 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
+import { VitePWA } from "vite-plugin-pwa";
 import path from "path";
+
+// Brand blue: hsl(217 91% 50%) = --primary in src/index.css. Keep in sync with
+// <meta name="theme-color"> in index.html.
+const THEME_COLOR = "#0b64f4";
 
 // https://vitejs.dev/config/
 export default defineConfig(() => ({
@@ -13,7 +18,50 @@ export default defineConfig(() => ({
       overlay: false,
     },
   },
-  plugins: [react()],
+  plugins: [
+    react(),
+    VitePWA({
+      // The worker is our own file (src/sw.ts) so it can own push and notificationclick;
+      // the build injects the precache manifest into it. Its behaviour for the app shell
+      // matches what generateSW used to emit: precache + navigation fallback + SKIP_WAITING.
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
+      registerType: "prompt",
+      injectRegister: null, // registered from UpdateToast via virtual:pwa-register/react so the update prompt is ours
+      includeAssets: ["favicon.ico", "favicon.svg", "apple-touch-icon.png"],
+      manifest: {
+        name: "Building Ops",
+        short_name: "Ops",
+        description: "Property and facilities management",
+        start_url: "/",
+        scope: "/",
+        display: "standalone",
+        background_color: "#ffffff",
+        theme_color: THEME_COLOR,
+        icons: [
+          { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+          { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+          { src: "/icons/maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+        ],
+      },
+      injectManifest: {
+        // App shell only. Supabase REST/storage responses carry the user's bearer token and
+        // per-user RLS results; a shared SW cache would leak across users on one device.
+        // Offline data lives in the per-user query persister (src/lib/persist.ts, Task 4).
+        // The navigation fallback (/index.html) and its denylist, and the absence of any
+        // runtime caching, now live in src/sw.ts next to precacheAndRoute.
+        globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
+        // Routes are code-split (src/App.tsx), so the entry is ~0.8 MB and the largest
+        // chunk is pdfmake's embedded fonts (vfs_fonts, ~1.8 MB). Everything must be
+        // precached or that route is unusable offline, so the limit sits at the smallest
+        // power of two that covers the largest chunk. If a build's biggest chunk grows
+        // past this, Workbox skips it silently: check `precache N entries` in the build log.
+        maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
+      },
+      devOptions: { enabled: false },
+    }),
+  ],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

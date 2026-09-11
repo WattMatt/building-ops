@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { todayInOperatingTz } from '@/lib/myWork';
 
 interface DashboardStats {
   buildings: number;
@@ -72,11 +73,14 @@ export function useDashboardStats(): UseDashboardStatsReturn {
         // Buildings count
         supabase.from('buildings').select('*', { count: 'exact', head: true }),
         // Open tasks = pending OR overdue (matches the iOS F-06 semantics; the
-        // old status='pending' match silently dropped overdue-status tasks).
+        // old status='pending' match silently dropped overdue-status tasks),
+        // due today or earlier: the generator writes up to 90 days ahead and a
+        // task due next month is not "open" yet.
         supabase
           .from('task_instances')
           .select('*', { count: 'exact', head: true })
-          .in('status', ['pending', 'overdue']),
+          .in('status', ['pending', 'overdue'])
+          .lte('due_date', todayInOperatingTz()),
         // Completed today = completed WITH completed_at falling in the local
         // day (was due_date=today, which miscounts: a task completed today but
         // due another day wasn't counted, and vice-versa).

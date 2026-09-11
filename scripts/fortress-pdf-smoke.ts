@@ -16,7 +16,11 @@ const PdfPrinter = PrinterMod.default ?? PrinterMod;
 import { buildReportDoc, type ReportData } from '@/lib/fortressReportDoc';
 import { ANNUAL_FIELD_SETS } from '@/lib/annualFieldSets';
 
-const REF = 'qdzgkttiosahdfqresvz';
+// Reads through the Management API. Follows the project the other smokes target (SUPABASE_URL),
+// so a staging run never touches production; FORTRESS_PDF_REF overrides, prod remains the fallback.
+const REF = process.env.FORTRESS_PDF_REF
+  ?? process.env.SUPABASE_URL?.match(/^https:\/\/([a-z0-9]+)\.supabase\.co/)?.[1]
+  ?? 'qdzgkttiosahdfqresvz';
 let tok = execSync('security find-generic-password -s "Supabase CLI" -w', { encoding: 'utf8' }).trim();
 if (tok.startsWith('go-keyring-base64:')) tok = Buffer.from(tok.slice(18), 'base64').toString('utf8').trim();
 
@@ -29,7 +33,11 @@ async function q(sql: string): Promise<any[]> {
   return JSON.parse(t);
 }
 
-const PHOTO_BASE = '/Users/spud/Documents/DEVELOPER/GMI/fortress/seed/annual_photos';
+// The Fortress fixtures live in the sibling GMI repo. Override with FORTRESS_DIR when it is elsewhere.
+const FORTRESS_DIR = process.env.FORTRESS_DIR
+  ?? [path.resolve(process.cwd(), '../GMI/fortress'), '/Users/spud/Documents/DEVELOPER/GMI/fortress'].find((d) => fs.existsSync(d))
+  ?? path.resolve(process.cwd(), '../GMI/fortress');
+const PHOTO_BASE = path.join(FORTRESS_DIR, 'seed/annual_photos');
 function localPhoto(p: string): string | null {
   const i = p.indexOf('/annual-2025/');
   if (i < 0) return null;
@@ -93,7 +101,9 @@ async function main() {
     Roboto: { normal: F('Roboto-Regular.ttf'), bold: F('Roboto-Medium.ttf'), italics: F('Roboto-Italic.ttf'), bolditalics: F('Roboto-MediumItalic.ttf') },
   });
   const pdfDoc: any = await printer.createPdfKitDocument(doc as any);
-  const out = '/Users/spud/Documents/DEVELOPER/GMI/fortress/build/abaqulusi_annual_TEST.pdf';
+  const outDir = path.join(FORTRESS_DIR, 'build');
+  fs.mkdirSync(outDir, { recursive: true });
+  const out = path.join(outDir, 'abaqulusi_annual_TEST.pdf');
   const stream = typeof pdfDoc.pipe === 'function' ? pdfDoc : (typeof pdfDoc.getStream === 'function' ? pdfDoc.getStream() : null);
   if (stream) {
     await new Promise<void>((res, rej) => {

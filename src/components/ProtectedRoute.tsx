@@ -1,5 +1,6 @@
-import { Navigate, useLocation } from 'react-router-dom';
+import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { Button } from '@/components/ui/button';
 import type { AppRole } from '@/lib/constants';
 
 interface ProtectedRouteProps {
@@ -8,7 +9,7 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) {
-  const { user, role, authError, mustSetPassword, onboardingCompleted, loading } = useAuth();
+  const { user, role, authError, mustSetPassword, onboardingCompleted, loading, refreshRole } = useAuth();
   const location = useLocation();
 
   if (loading) {
@@ -45,10 +46,25 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
   if (allowedRoles && (authError || !role || !allowedRoles.includes(role))) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-destructive mb-2">Access Denied</h1>
-          <p className="text-muted-foreground">
-            You don't have permission to access this page.
+        <div className="max-w-sm text-center">
+          {authError ? (
+            <>
+              <h1 className="mb-2 text-2xl font-bold">Couldn't verify your access</h1>
+              <p className="text-muted-foreground">
+                Your role could not be loaded, so this page is locked for now. This is usually a connection problem, not a permissions one.
+              </p>
+              <Button variant="outline" size="sm" className="mt-4" onClick={() => { void refreshRole(); }}>
+                Try again
+              </Button>
+            </>
+          ) : (
+            <>
+              <h1 className="mb-2 text-2xl font-bold text-destructive">Access Denied</h1>
+              <p className="text-muted-foreground">You don't have permission to access this page.</p>
+            </>
+          )}
+          <p className="mt-4 text-sm">
+            <Link to="/" className="underline">Back to dashboard</Link>
           </p>
         </div>
       </div>

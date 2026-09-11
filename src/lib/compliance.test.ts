@@ -14,8 +14,10 @@ describe('templateAppliesToBuilding', () => {
     expect(templateAppliesToBuilding(['retail', 'mixed_use'], 'office')).toBe(false);
     expect(templateAppliesToBuilding(['retail', 'mixed_use'], null)).toBe(false);
   });
-  it('empty array behaves like null (applies to all)', () => {
-    expect(templateAppliesToBuilding([], 'office')).toBe(true);
+  it("empty array matches nothing, like SQL `= any('{}')` (only null means every building)", () => {
+    expect(templateAppliesToBuilding([], 'office')).toBe(false);
+    expect(templateAppliesToBuilding([], null)).toBe(false);
+    expect(templateAppliesToBuilding(undefined, 'office')).toBe(true);
   });
 });
 

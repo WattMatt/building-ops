@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
 import { useOrganization } from '@/hooks/useOrganization';
@@ -7,32 +8,35 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import {
   Building2,
-  Bell,
+  FileText,
   Palette,
+  SlidersHorizontal,
   Upload,
   Loader2,
+  Send,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { SlaSettingsCard } from '@/components/settings/SlaSettingsCard';
+import { ReportDueDayCard } from '@/components/settings/ReportDueDayCard';
+import { FeatureFlagsCard } from '@/components/settings/FeatureFlagsCard';
+import { ReportDistributionCard } from '@/components/settings/ReportDistributionCard';
+import { FormsAdminCard } from '@/components/settings/FormsAdminCard';
+import { useFeature } from '@/hooks/useOrgSettings';
 
 export default function Settings() {
-  const { user, isAdmin, isAdminOrManager } = useAuth();
+  const { isAdmin, isAdminOrManager } = useAuth();
   const { organization } = useOrganization();
+  const schedulesOn = useFeature('report_schedules');
   const [orgName, setOrgName] = useState('');
   const [orgEmail, setOrgEmail] = useState('');
-  const [emailNotifications, setEmailNotifications] = useState(true);
-  const [overdueAlerts, setOverdueAlerts] = useState(true);
-  const [dailyDigest, setDailyDigest] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [primaryColor, setPrimaryColor] = useState('#2563eb');
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingBranding, setIsSavingBranding] = useState(false);
-  const [isLoadingNotifications, setIsLoadingNotifications] = useState(true);
-  const [isSavingNotifications, setIsSavingNotifications] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load organization data
@@ -44,49 +48,6 @@ export default function Settings() {
       setPrimaryColor(organization.primary_color || '#2563eb');
     }
   }, [organization]);
-
-  // Load the signed-in user's notification preferences
-  // Keyed on the id, not the user object: AuthContext calls setUser on every
-  // auth event including TOKEN_REFRESHED, and a fresh object identity would
-  // refetch mid-edit and silently revert the user's unsaved toggles.
-  const userId = user?.id;
-
-  useEffect(() => {
-    if (!userId) return;
-
-    let cancelled = false;
-
-    const fetchNotifications = async () => {
-      setIsLoadingNotifications(true);
-      try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('email_notifications, overdue_alerts, daily_digest')
-          .eq('id', userId)
-          .maybeSingle();
-
-        if (error) throw error;
-        if (cancelled) return;
-
-        if (data) {
-          setEmailNotifications(data.email_notifications ?? true);
-          setOverdueAlerts(data.overdue_alerts ?? true);
-          setDailyDigest(data.daily_digest ?? false);
-        }
-      } catch (error) {
-        if (import.meta.env.DEV) console.error('Error fetching notification preferences:', error);
-        if (!cancelled) toast.error('Failed to load notification preferences');
-      } finally {
-        if (!cancelled) setIsLoadingNotifications(false);
-      }
-    };
-
-    fetchNotifications();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [userId]);
 
   const handleSaveOrg = async () => {
     if (!organization) {
@@ -112,40 +73,6 @@ export default function Settings() {
       toast.error('Failed to save organization settings');
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  const handleSaveNotifications = async () => {
-    if (!user) {
-      toast.error('You must be signed in to save preferences');
-      return;
-    }
-
-    setIsSavingNotifications(true);
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .update({
-          email_notifications: emailNotifications,
-          overdue_alerts: overdueAlerts,
-          daily_digest: dailyDigest,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', user.id)
-        .select('id');
-
-      if (error) throw error;
-      // An RLS-denied update succeeds with zero rows — treat that as a failure.
-      if (!data || data.length === 0) {
-        toast.error('Failed to save notification preferences');
-        return;
-      }
-      toast.success('Notification preferences saved');
-    } catch (error) {
-      if (import.meta.env.DEV) console.error('Error saving notifications:', error);
-      toast.error('Failed to save notification preferences');
-    } finally {
-      setIsSavingNotifications(false);
     }
   };
 
@@ -242,7 +169,10 @@ export default function Settings() {
       <div>
         <h1 className="text-2xl font-bold">Settings</h1>
         <p className="text-muted-foreground">
-          Manage your organization and application preferences
+          Manage your organization.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Email notification settings are on <Link to="/profile" className="underline">your profile</Link>.
         </p>
       </div>
 
@@ -252,14 +182,28 @@ export default function Settings() {
             <Building2 className="h-4 w-4 mr-2" />
             Organization
           </TabsTrigger>
-          <TabsTrigger value="notifications">
-            <Bell className="h-4 w-4 mr-2" />
-            Notifications
-          </TabsTrigger>
           {isAdmin && (
             <TabsTrigger value="branding">
               <Palette className="h-4 w-4 mr-2" />
               Branding
+            </TabsTrigger>
+          )}
+          {isAdminOrManager && (
+            <TabsTrigger value="operations">
+              <SlidersHorizontal className="h-4 w-4 mr-2" />
+              Operations
+            </TabsTrigger>
+          )}
+          {isAdminOrManager && schedulesOn && (
+            <TabsTrigger value="distribution">
+              <Send className="h-4 w-4 mr-2" />
+              Report distribution
+            </TabsTrigger>
+          )}
+          {isAdmin && (
+            <TabsTrigger value="forms">
+              <FileText className="h-4 w-4 mr-2" />
+              Forms
             </TabsTrigger>
           )}
         </TabsList>
@@ -316,73 +260,6 @@ export default function Settings() {
                   {isSaving ? 'Saving...' : 'Save Changes'}
                 </Button>
               )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="notifications">
-          <Card>
-            <CardHeader>
-              <CardTitle>Notification Preferences</CardTitle>
-              <CardDescription>
-                Configure how and when you receive notifications
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Email Notifications</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Receive notifications via email
-                    </p>
-                  </div>
-                  <Switch
-                    checked={emailNotifications}
-                    onCheckedChange={setEmailNotifications}
-                    disabled={isLoadingNotifications}
-                  />
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Overdue Task Alerts</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Get alerted when tasks become overdue
-                    </p>
-                  </div>
-                  <Switch
-                    checked={overdueAlerts}
-                    onCheckedChange={setOverdueAlerts}
-                    disabled={isLoadingNotifications}
-                  />
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Daily Digest</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Receive a daily summary of pending tasks
-                    </p>
-                  </div>
-                  <Switch
-                    checked={dailyDigest}
-                    onCheckedChange={setDailyDigest}
-                    disabled={isLoadingNotifications}
-                  />
-                </div>
-              </div>
-
-              <Button
-                onClick={handleSaveNotifications}
-                disabled={isLoadingNotifications || isSavingNotifications}
-              >
-                {isSavingNotifications ? 'Saving...' : 'Save Preferences'}
-              </Button>
             </CardContent>
           </Card>
         </TabsContent>
@@ -477,6 +354,26 @@ export default function Settings() {
                 </Button>
               </CardContent>
             </Card>
+          </TabsContent>
+        )}
+
+        {isAdminOrManager && (
+          <TabsContent value="operations" className="space-y-6">
+            <SlaSettingsCard canEdit={isAdmin} />
+            <ReportDueDayCard canEdit={isAdmin} />
+            <FeatureFlagsCard canEdit={isAdmin} />
+          </TabsContent>
+        )}
+
+        {isAdminOrManager && schedulesOn && (
+          <TabsContent value="distribution">
+            <ReportDistributionCard />
+          </TabsContent>
+        )}
+
+        {isAdmin && (
+          <TabsContent value="forms">
+            <FormsAdminCard />
           </TabsContent>
         )}
       </Tabs>

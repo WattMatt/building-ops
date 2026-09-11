@@ -31,9 +31,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, MoreVertical, Edit, Trash2, FileText, Store, Search, Upload, Download, ChevronRight, ChevronDown } from 'lucide-react';
+import { Plus, MoreVertical, Edit, Trash2, FileText, Store, Search, Upload, ChevronRight, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
-import * as XLSX from 'xlsx';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
+import { csvText, type CsvColumn } from '@/lib/exportCsv';
+import { TenantIntakeCard } from './TenantIntakeCard';
 import TenantDocumentsDialog from './TenantDocumentsDialog';
 import TenantShopSpecDialog from './TenantShopSpecDialog';
 import { TenantImportDialog } from '@/components/import';
@@ -53,6 +55,17 @@ interface Tenant {
 interface TenantsTabProps {
   buildingId: string;
 }
+
+/** The tenant register as a spreadsheet. */
+export const TENANT_CSV_COLUMNS: CsvColumn<Tenant>[] = [
+  { key: 'shop_number', header: 'Shop Number' },
+  { key: 'shop_name', header: 'Shop Name' },
+  { key: 'area', header: 'Area', format: csvText },
+  { key: 'contact_name', header: 'Contact Name', format: csvText },
+  { key: 'contact_phone', header: 'Contact Phone', format: csvText },
+  { key: 'contact_email', header: 'Contact Email', format: csvText },
+  { key: 'is_active', header: 'Status', format: (v) => (v ? 'Active' : 'Inactive') },
+];
 
 /** Shop-spec fields shown in the expandable per-tenant detail row (read-only). */
 const SPEC_FIELDS: { key: keyof TenantShopSpec; label: string }[] = [
@@ -272,46 +285,24 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
     if (!confirm(`Are you sure you want to delete ${tenant.shop_name}?`)) return;
 
     try {
-      const { error } = await supabase
+      // Select the deleted row back: an RLS-denied delete returns no error and zero
+      // rows, which would otherwise refetch (row reappears) while the toast claims success.
+      const { data: deleted, error } = await supabase
         .from('building_tenants')
         .delete()
-        .eq('id', tenant.id);
+        .eq('id', tenant.id)
+        .select('id');
 
       if (error) throw error;
+      if (!deleted || deleted.length === 0) {
+        throw new Error('You do not have permission to delete this tenant.');
+      }
       toast.success('Tenant deleted successfully');
       fetchTenants();
     } catch (error) {
       console.error('Error deleting tenant:', error);
-      toast.error('Failed to delete tenant');
+      toast.error(error instanceof Error ? error.message : 'Failed to delete tenant');
     }
-  };
-
-  const handleExport = (format: 'csv' | 'xlsx') => {
-    if (tenants.length === 0) {
-      toast.error('No tenants to export');
-      return;
-    }
-
-    const exportData = tenants.map((tenant) => ({
-      'Shop Number': tenant.shop_number,
-      'Shop Name': tenant.shop_name,
-      'Area': tenant.area || '',
-      'Contact Name': tenant.contact_name || '',
-      'Contact Phone': tenant.contact_phone || '',
-      'Contact Email': tenant.contact_email || '',
-      'Status': tenant.is_active ? 'Active' : 'Inactive',
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Tenants');
-
-    if (format === 'csv') {
-      XLSX.writeFile(wb, 'tenants_export.csv', { bookType: 'csv' });
-    } else {
-      XLSX.writeFile(wb, 'tenants_export.xlsx');
-    }
-    toast.success(`Exported ${tenants.length} tenants`);
   };
 
   const filteredTenants = tenants
@@ -333,6 +324,8 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
 
   return (
     <div className="space-y-4">
+      {/* The card gates itself on the org's tenant_intake flag and the admin/manager role. */}
+      <TenantIntakeCard buildingId={buildingId} />
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="relative max-w-sm">
@@ -346,22 +339,8 @@ export default function TenantsTab({ buildingId }: TenantsTabProps) {
         </div>
         {isAdminOrManager && (
           <div className="flex items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline">
-                  <Download className="w-4 h-4 mr-2" />
-                  Export
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => handleExport('xlsx')}>
-                  Export as Excel (.xlsx)
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleExport('csv')}>
-                  Export as CSV
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {/* Exactly the rows on screen after the search, in the order they are listed. */}
+            <ExportCsvButton rows={filteredTenants} columns={TENANT_CSV_COLUMNS} filename="tenants" />
             <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
               <Upload className="w-4 h-4 mr-2" />
               Import

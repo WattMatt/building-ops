@@ -1,6 +1,11 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { useGeotagPreference } from '@/hooks/useGeotagPreference';
+import { useGeotag } from '@/hooks/useGeotag';
+import { captionText, drawCaption } from '@/lib/photoCaption';
 import { Camera, X, ImagePlus, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Hint } from '@/components/ui/hint';
 import { toast } from 'sonner';
 import heic2any from 'heic2any';
 
@@ -84,7 +89,16 @@ interface PhotoCaptureProps {
   maxDimension?: number;
   /** JPEG quality for compression (0-1, default: 0.8) */
   compressionQuality?: number;
+  /**
+   * Provenance caption burned into the bottom of every accepted photo.
+   * `time` (default true) stamps the capture time in the operating timezone;
+   * `geotag` adds the device location and defaults to the user's
+   * "Location on photos" profile preference (off unless they opted in).
+   */
+  caption?: { time?: boolean; geotag?: boolean };
 }
+
+const DEFAULT_CAPTION = { time: true } as const;
 
 /**
  * A cross-device photo capture component that handles:
@@ -108,28 +122,22 @@ export function PhotoCapture({
   enableCompression = true,
   maxDimension = 1920,
   compressionQuality = 0.8,
+  caption = DEFAULT_CAPTION,
 }: PhotoCaptureProps) {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-
-  // Detect mobile device
-  useEffect(() => {
-    const checkMobile = () => {
-      const userAgent = navigator.userAgent || navigator.vendor;
-      const isMobileDevice = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
-        userAgent.toLowerCase()
-      );
-      // Also check for touch capability as a secondary indicator
-      const hasTouchScreen = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-      setIsMobile(isMobileDevice || (hasTouchScreen && window.innerWidth < 768));
-    };
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
+  const isMobile = useIsMobile();
+  // Labels/helper text follow touch capability, not just viewport width, so an
+  // iPad (>= 768px) still reads "Camera / Gallery". Class names and the
+  // capture attribute stay keyed off isMobile.
+  const isTouch = isMobile || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
+  const geotagPreferred = useGeotagPreference();
+  const geotagOn = caption?.geotag ?? geotagPreferred;
+  const { position } = useGeotag(geotagOn);
+  // Any caption forces the canvas path: re-encoding strips EXIF, so the strip
+  // is the only capture-time provenance the stored file keeps.
+  const captionOn = caption?.time !== false || geotagOn;
 
   const remainingSlots = maxPhotos - photos.length;
   const canAddMore = remainingSlots > 0 && !disabled;
@@ -138,8 +146,9 @@ export function PhotoCapture({
    * Compress an image using Canvas API
    */
   const compressImage = useCallback(async (file: File): Promise<File> => {
-    // Skip compression for small files (< 500KB) or if disabled
-    if (!enableCompression || file.size < 500 * 1024) {
+    // Skip compression for small files (< 500KB) or if disabled — unless a
+    // caption is wanted, in which case every photo goes through the canvas.
+    if (!captionOn && (!enableCompression || file.size < 500 * 1024)) {
       return file;
     }
 
@@ -176,11 +185,16 @@ export function PhotoCapture({
           ctx.fillRect(0, 0, width, height);
           ctx.drawImage(img, 0, 0, width, height);
 
+          if (captionOn) {
+            drawCaption(ctx, width, height, captionText(new Date(), geotagOn ? position : null));
+          }
+
           // Convert to blob
           canvas.toBlob(
             (blob) => {
-              if (blob && blob.size < file.size) {
-                // Only use compressed version if it's smaller
+              // With a caption the canvas output is the point, even if it is
+              // larger than the original; otherwise only keep it when smaller.
+              if (blob && (captionOn || blob.size < file.size)) {
                 const compressedFile = new File([blob], file.name, {
                   type: 'image/jpeg',
                   lastModified: Date.now(),
@@ -208,7 +222,7 @@ export function PhotoCapture({
       // Load image from file
       img.src = URL.createObjectURL(file);
     });
-  }, [enableCompression, maxDimension, compressionQuality]);
+  }, [enableCompression, maxDimension, compressionQuality, captionOn, geotagOn, position]);
 
   const validateAndProcessFile = useCallback(async (file: File): Promise<PhotoFile | null> => {
     // Validate file type (including HEIC)
@@ -386,7 +400,7 @@ export function PhotoCapture({
             >
               <Camera className={sizes.icon} />
               <span className={sizes.text}>
-                {isMobile ? 'Camera' : 'Take'}
+                {isTouch ? 'Camera' : 'Take'}
               </span>
             </button>
 
@@ -407,7 +421,7 @@ export function PhotoCapture({
             >
               <ImagePlus className={sizes.icon} />
               <span className={sizes.text}>
-                {isMobile ? 'Gallery' : 'Upload'}
+                {isTouch ? 'Gallery' : 'Upload'}
               </span>
             </button>
           </>
@@ -449,15 +463,19 @@ export function PhotoCapture({
         aria-hidden="true"
       />
 
-      {/* Helper text */}
+      {/* Helper text. The touch line is coaching copy, so it goes through <Hint> (its own <p>)
+          and can be switched off; the desktop line states the remaining slots and size limit,
+          which must survive hints being off. */}
       {canAddMore && !isProcessing && (
-        <p className="text-xs text-muted-foreground">
-          {isMobile ? (
-            <>Tap <strong>Camera</strong> to take a photo or <strong>Gallery</strong> to choose existing</>
-          ) : (
-            <>Add up to {remainingSlots} more photo{remainingSlots !== 1 ? 's' : ''} (max {maxSizeMB}MB each)</>
-          )}
-        </p>
+        isTouch ? (
+          <Hint icon={false}>
+            Tap <strong>Camera</strong> to take a photo or <strong>Gallery</strong> to choose existing
+          </Hint>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Add up to {remainingSlots} more photo{remainingSlots !== 1 ? 's' : ''} (max {maxSizeMB}MB each)
+          </p>
+        )
       )}
     </div>
   );
@@ -511,22 +529,8 @@ export function SinglePhotoCapture({
   compressionQuality = 0.85,
 }: SinglePhotoCaptureProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isMobile, setIsMobile] = useState(false);
+  const isMobile = useIsMobile();
   const [isCompressing, setIsCompressing] = useState(false);
-
-  useEffect(() => {
-    const checkMobile = () => {
-      const userAgent = navigator.userAgent || navigator.vendor;
-      const isMobileDevice = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(
-        userAgent.toLowerCase()
-      );
-      setIsMobile(isMobileDevice || window.innerWidth < 768);
-    };
-    
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
 
   const compressImage = useCallback(async (file: File): Promise<File> => {
     // Skip compression for small files or if disabled

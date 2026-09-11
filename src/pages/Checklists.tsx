@@ -4,6 +4,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -44,24 +46,30 @@ import {
   ListChecks,
   Send,
   Eye,
+  Archive,
+  ArchiveRestore,
+  CalendarPlus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import TemplateItemDialog from '@/components/checklists/TemplateItemDialog';
 import ApplyTemplateDialog from '@/components/checklists/ApplyTemplateDialog';
+import TemplateDialog, { archiveTemplate } from '@/components/checklists/TemplateDialog';
 import PreviewTemplateDialog, { type PreviewItem } from '@/components/checklists/PreviewTemplateDialog';
 import { categoryMeta, BUILDING_TYPES } from '@/lib/compliance';
+import { describeRule, isValidRule, type RecurrenceRule } from '@/lib/recurrence';
+import type { Tables } from '@/integrations/supabase/types';
 
 type TaskFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually';
 
-interface Template {
-  id: string;
-  name: string;
-  description: string | null;
+/**
+ * A `checklist_templates` row as the page uses it. The DB types `frequency` as any string
+ * (a check constraint pins the five buckets) and `recurrence` as jsonb; both are narrowed once
+ * in `fetchData`. `archived_at` set = archived: hidden by default, no new tasks, never deleted.
+ */
+interface Template extends Omit<Tables<'checklist_templates'>, 'frequency' | 'recurrence'> {
   frequency: TaskFrequency;
-  responsible_role: string;
-  is_active: boolean;
-  organization_id: string;
-  applies_to_building_types: string[] | null;
+  /** null = legacy five-bucket schedule driven by `frequency`. */
+  recurrence: RecurrenceRule | null;
 }
 
 interface TemplateItem {
@@ -116,6 +124,35 @@ export default function Checklists() {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTemplate, setPreviewTemplate] = useState<Template | null>(null);
 
+  // Template administration (R3a): create/edit dialog, archive confirm, archived visibility.
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false);
+  const [templateToEdit, setTemplateToEdit] = useState<Template | null>(null);
+  const [templateToArchive, setTemplateToArchive] = useState<Template | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+
+  const handleNewTemplate = () => {
+    setTemplateToEdit(null);
+    setTemplateDialogOpen(true);
+  };
+
+  const handleEditTemplate = (template: Template) => {
+    setTemplateToEdit(template);
+    setTemplateDialogOpen(true);
+  };
+
+  const setArchived = async (template: Template, archive: boolean) => {
+    try {
+      await archiveTemplate(template.id, archive);
+      toast.success(archive ? `Archived "${template.name}"` : `Restored "${template.name}"`);
+      fetchData();
+    } catch (error) {
+      console.error('Error archiving template:', error);
+      toast.error(error instanceof Error ? error.message : 'Failed to update template');
+    } finally {
+      setTemplateToArchive(null);
+    }
+  };
+
   const handlePreviewTemplate = (template: Template) => {
     setPreviewTemplate(template);
     setPreviewOpen(true);
@@ -151,7 +188,12 @@ export default function Checklists() {
 
       if (itemsError) throw itemsError;
 
-      setTemplates(templatesData || []);
+      // jsonb → RecurrenceRule after isValidRule (anything else reads as the legacy bucket); frequency string → TaskFrequency per the check constraint.
+      setTemplates((templatesData ?? []).map((t) => ({
+        ...t,
+        frequency: t.frequency as TaskFrequency,
+        recurrence: isValidRule(t.recurrence) ? t.recurrence : null,
+      })));
       setItems(
         (itemsData || []).map((item) => ({
           ...item,
@@ -186,18 +228,24 @@ export default function Checklists() {
     if (!itemToDelete) return;
 
     try {
-      const { error } = await supabase
+      // Select the deleted row back: an RLS-denied delete returns no error and zero
+      // rows, which would otherwise refetch (item reappears) while the toast claims success.
+      const { data: deleted, error } = await supabase
         .from('template_items')
         .delete()
-        .eq('id', itemToDelete.id);
+        .eq('id', itemToDelete.id)
+        .select('id');
 
       if (error) throw error;
+      if (!deleted || deleted.length === 0) {
+        throw new Error('You do not have permission to delete this task.');
+      }
 
       toast.success('Task deleted successfully');
       fetchData();
     } catch (error) {
       console.error('Error deleting item:', error);
-      toast.error('Failed to delete task');
+      toast.error(error instanceof Error ? error.message : 'Failed to delete task');
     } finally {
       setDeleteDialogOpen(false);
       setItemToDelete(null);
@@ -221,10 +269,13 @@ export default function Checklists() {
   });
 
   // Group items by template for summary
-  const templateSummary = templates.map((template) => ({
-    ...template,
-    itemCount: items.filter((i) => i.template_id === template.id).length,
-  }));
+  const templateSummary = templates
+    .filter((template) => showArchived || !template.archived_at)
+    .map((template) => ({
+      ...template,
+      itemCount: items.filter((i) => i.template_id === template.id).length,
+    }));
+  const archivedCount = templates.filter((t) => t.archived_at).length;
 
   if (loading) {
     return (
@@ -248,22 +299,40 @@ export default function Checklists() {
           </p>
         </div>
         {isAdminOrManager && (
-          <Button onClick={() => handleAddItem()}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Task
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button variant="outline" className="h-11 sm:h-10" onClick={handleNewTemplate}>
+              <CalendarPlus className="h-4 w-4 mr-2" />
+              New template
+            </Button>
+            <Button className="h-11 sm:h-10" onClick={() => handleAddItem()}>
+              <Plus className="h-4 w-4 mr-2" />
+              Add Task
+            </Button>
+          </div>
         )}
       </div>
+
+      {isAdminOrManager && (
+        <div className="flex items-center gap-2">
+          <Switch id="show-archived" checked={showArchived} onCheckedChange={setShowArchived} />
+          <Label htmlFor="show-archived" className="cursor-pointer">
+            Show archived{archivedCount > 0 ? ` (${archivedCount})` : ''}
+          </Label>
+        </div>
+      )}
 
       {/* Template Summary Cards */}
       <div className="grid gap-4 md:grid-cols-5">
         {templateSummary.map((template) => (
-          <Card key={template.id} className="relative group">
+          <Card key={template.id} className={`relative group ${template.archived_at ? 'opacity-60' : ''}`}>
             <CardHeader className="pb-2">
-              <div className="flex items-center justify-between">
-                <Badge className={frequencyColors[template.frequency]}>
-                  {frequencyLabels[template.frequency]}
-                </Badge>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-1">
+                  <Badge className={frequencyColors[template.frequency]}>
+                    {template.recurrence ? describeRule(template.recurrence) : frequencyLabels[template.frequency]}
+                  </Badge>
+                  {template.archived_at && <Badge variant="outline">Archived</Badge>}
+                </div>
                 {isAdminOrManager && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -276,10 +345,28 @@ export default function Checklists() {
                         <Plus className="h-4 w-4 mr-2" />
                         Add Task
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleApplyTemplate(template)}>
-                        <Send className="h-4 w-4 mr-2" />
-                        Apply to Buildings
+                      {/* An archived template generates nothing, so it cannot be applied either. */}
+                      {!template.archived_at && (
+                        <DropdownMenuItem onClick={() => handleApplyTemplate(template)}>
+                          <Send className="h-4 w-4 mr-2" />
+                          Apply to Buildings
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem onClick={() => handleEditTemplate(template)}>
+                        <Pencil className="h-4 w-4 mr-2" />
+                        Edit
                       </DropdownMenuItem>
+                      {template.archived_at ? (
+                        <DropdownMenuItem onClick={() => setArchived(template, false)}>
+                          <ArchiveRestore className="h-4 w-4 mr-2" />
+                          Restore
+                        </DropdownMenuItem>
+                      ) : (
+                        <DropdownMenuItem onClick={() => setTemplateToArchive(template)}>
+                          <Archive className="h-4 w-4 mr-2" />
+                          Archive
+                        </DropdownMenuItem>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 )}
@@ -308,15 +395,17 @@ export default function Checklists() {
                     <Eye className="h-3 w-3 mr-1" />
                     Preview
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleApplyTemplate(template)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <Building2 className="h-3 w-3 mr-1" />
-                    Apply
-                  </Button>
+                  {!template.archived_at && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleApplyTemplate(template)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <Building2 className="h-3 w-3 mr-1" />
+                      Apply
+                    </Button>
+                  )}
                 </div>
               </div>
             </CardContent>
@@ -471,6 +560,34 @@ export default function Checklists() {
         defaultTemplateId={selectedTemplate?.id}
         onSuccess={fetchData}
       />
+
+      {/* Template create / edit */}
+      <TemplateDialog
+        open={templateDialogOpen}
+        onOpenChange={setTemplateDialogOpen}
+        template={templateToEdit}
+        organizationId={templates[0]?.organization_id ?? null}
+        onSaved={fetchData}
+      />
+
+      {/* Archive confirmation */}
+      <AlertDialog open={templateToArchive !== null} onOpenChange={(o) => { if (!o) setTemplateToArchive(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive template</AlertDialogTitle>
+            <AlertDialogDescription>
+              Archive "{templateToArchive?.name}"? No new tasks will be created from it. Existing tasks and
+              history stay, and you can restore it later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (templateToArchive) void setArchived(templateToArchive, true); }}>
+              Archive
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Apply Template Dialog */}
       <ApplyTemplateDialog

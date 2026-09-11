@@ -31,16 +31,9 @@ import { format } from 'date-fns';
 import { Loader2, Eye, FileText, User, Building2, Calendar, Download, Image, CheckCircle, XCircle, Clock } from 'lucide-react';
 import { useOrganization } from '@/hooks/useOrganization';
 import { generateFilledFormPdf } from '@/lib/pdfGenerator';
-import { defaultFormFields } from '@/lib/formFields';
 import { toast } from 'sonner';
-
-interface FormTemplate {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  icon: React.ReactNode;
-}
+import { FormIcon } from '@/components/forms/FormIcon';
+import { parseFields, type FormTemplate } from '@/hooks/useFormTemplates';
 
 interface FormSubmissionsDialogProps {
   form: FormTemplate | null;
@@ -59,6 +52,9 @@ interface SubmissionDetails {
   reviewed_by?: string;
   reviewed_at?: string;
   review_notes?: string;
+  /** The template version and field list this submission was filled against (R4c). */
+  template_version?: number | null;
+  fields_snapshot?: unknown;
 }
 
 export function FormSubmissionsDialog({
@@ -66,7 +62,13 @@ export function FormSubmissionsDialog({
   open,
   onOpenChange,
 }: FormSubmissionsDialogProps) {
-  const { user } = useAuth();
+  const { user, isAdminOrManager } = useAuth();
+  // Who may review a submission: admin/manager only, matching the fs_update RLS policy
+  // (`is_admin_or_manager()`, see supabase/schema), and
+  // never the person who submitted it. Previously the buttons rendered on submission
+  // status alone, so any user — including the submitter — saw Approve/Reject/Mark-
+  // reviewed, and a denied write toasted success.
+  const canReview = isAdminOrManager;
   const queryClient = useQueryClient();
   const [selectedSubmission, setSelectedSubmission] = useState<SubmissionDetails | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -92,13 +94,17 @@ export function FormSubmissionsDialog({
           photo_urls,
           reviewed_by,
           reviewed_at,
-          review_notes
+          review_notes,
+          template_version,
+          fields_snapshot
         `)
         .eq('form_template_id', form.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return data as SubmissionDetails[];
+      // The generated Row types form_data / photo_urls / fields_snapshot as Json; this view narrows
+      // them to the shapes the writers use.
+      return data as unknown as SubmissionDetails[];
     },
     enabled: open && !!form,
   });
@@ -187,7 +193,9 @@ export function FormSubmissionsDialog({
     const newStatus = actionType === 'review' ? 'reviewed' : actionType === 'approve' ? 'approved' : 'rejected';
     
     try {
-      const { error } = await supabase
+      // Select the affected row back: an RLS-denied update returns no error and zero
+      // rows, which would otherwise toast success while nothing changed.
+      const { data: updated, error } = await supabase
         .from('form_submissions')
         .update({
           status: newStatus,
@@ -195,9 +203,13 @@ export function FormSubmissionsDialog({
           reviewed_at: reviewedAt,
           review_notes: actionNotes || null,
         })
-        .eq('id', selectedSubmission.id);
+        .eq('id', selectedSubmission.id)
+        .select('id');
 
       if (error) throw error;
+      if (!updated || updated.length === 0) {
+        throw new Error('You do not have permission to review this submission.');
+      }
 
       toast.success(`Submission ${actionType === 'review' ? 'marked as reviewed' : actionType === 'approve' ? 'approved' : 'rejected'}`);
       
@@ -237,7 +249,10 @@ export function FormSubmissionsDialog({
     
     setIsDownloading(true);
     try {
-      const fields = defaultFormFields[form.id] || [];
+      // The fields this submission was actually filled against, so an edited template never
+      // reshapes an old PDF; older rows have no snapshot and fall back to the current fields.
+      const snapshot = parseFields(submission.fields_snapshot);
+      const fields = snapshot.length > 0 ? snapshot : form.fields;
       const submitterName = profiles?.[submission.submitted_by] || 'Unknown';
       
       await generateFilledFormPdf(
@@ -270,7 +285,7 @@ export function FormSubmissionsDialog({
         <DialogHeader className="flex-shrink-0">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
-              {form.icon}
+              <FormIcon name={form.icon} />
             </div>
             <div>
               <DialogTitle className="text-xl">
@@ -278,7 +293,9 @@ export function FormSubmissionsDialog({
               </DialogTitle>
               <p className="text-sm text-muted-foreground">
                 {selectedSubmission
-                  ? `Submitted on ${format(new Date(selectedSubmission.created_at), 'PPpp')}`
+                  ? `Submitted on ${format(new Date(selectedSubmission.created_at), 'PPpp')}${
+                      selectedSubmission.template_version ? ` · v${selectedSubmission.template_version}` : ''
+                    }`
                   : `${submissions?.length || 0} submission(s) found`}
               </p>
             </div>
@@ -359,8 +376,8 @@ export function FormSubmissionsDialog({
                 </div>
               )}
 
-              {/* Action Buttons for Pending Submissions */}
-              {selectedSubmission.status === 'submitted' && (
+              {/* Action Buttons for Pending Submissions — reviewers only, never the submitter */}
+              {selectedSubmission.status === 'submitted' && canReview && selectedSubmission.submitted_by !== user?.id && (
                 <div className="p-4 rounded-lg border-2 border-dashed border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-700 mb-4">
                   <p className="text-sm text-amber-800 dark:text-amber-200 mb-3 font-medium">This submission requires review</p>
                   <div className="flex gap-2 flex-wrap">
@@ -392,8 +409,8 @@ export function FormSubmissionsDialog({
                 </div>
               )}
 
-              {/* Action buttons for reviewed submissions */}
-              {selectedSubmission.status === 'reviewed' && (
+              {/* Action buttons for reviewed submissions — reviewers only, never the submitter */}
+              {selectedSubmission.status === 'reviewed' && canReview && selectedSubmission.submitted_by !== user?.id && (
                 <div className="p-4 rounded-lg border bg-muted/30 mb-4">
                   <p className="text-sm text-muted-foreground mb-3">Final decision required</p>
                   <div className="flex gap-2">

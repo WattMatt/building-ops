@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { formatBuildingName } from '@/lib/buildingName';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -11,8 +11,9 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import TenantsTab from '@/components/building/TenantsTab';
 import AssetsTab from '@/components/building/AssetsTab';
+import PpmTab from '@/components/building/PpmTab';
 import DocumentsTab from '@/components/building/DocumentsTab';
-import MaintenanceCalendarTab from '@/components/building/MaintenanceCalendarTab';
+import BuildingCalendarTab from '@/components/building/BuildingCalendarTab';
 import NotesTab from '@/components/building/NotesTab';
 import OverviewWidgets from '@/components/building/OverviewWidgets';
 import ChecklistsTab from '@/components/building/ChecklistsTab';
@@ -23,17 +24,19 @@ import { BuildingAvatar } from '@/components/building/BuildingAvatar';
 import { BuildingAvatarDialog } from '@/components/building/BuildingAvatarDialog';
 import { BuildingScoreChips } from '@/components/building/BuildingScoreChips';
 import { useBuildingScore } from '@/hooks/useBuildingScore';
+import { useBuildingTrend } from '@/hooks/useBuildingTrend';
 
 interface Building {
   id: string;
   name: string;
-  address: string;
-  city: string;
+  // Nullable in the regenerated row type; the header renders whatever is there.
+  address: string | null;
+  city: string | null;
   logo_url: string | null;
   logo_position: string | null;
   avatar_color: string | null;
   emergency_contacts: any;
-  created_at: string;
+  created_at: string | null;
 }
 
 export default function BuildingDetails() {
@@ -44,7 +47,8 @@ export default function BuildingDetails() {
   const [building, setBuilding] = useState<Building | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') ?? 'overview');
-  const { ohsPct, taskPct } = useBuildingScore(id);
+  const { ohsPct, taskPct, asOf } = useBuildingScore(id);
+  const trend = useBuildingTrend(id, 90);
   const [avatarDialogOpen, setAvatarDialogOpen] = useState(false);
 
   // keep the active tab in the URL so report links / the editor back-button can deep-link here
@@ -52,6 +56,24 @@ export default function BuildingDetails() {
     setActiveTab(tab);
     setSearchParams((prev) => { prev.set('tab', tab); return prev; }, { replace: true });
   };
+
+  // `activeTab` is seeded from ?tab= once above; in-app navigations to the same
+  // building with a different ?tab= (quick-create "New note", palette hits) must
+  // switch too. Only write when the param is present and differs, so the
+  // handleTabChange -> setSearchParams -> effect round-trip cannot loop.
+  const tabParam = searchParams.get('tab');
+  useEffect(() => {
+    if (tabParam !== null && tabParam !== activeTab) setActiveTab(tabParam);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync from the URL only when the param changes
+  }, [tabParam]);
+
+  // On phones the tab strip scrolls horizontally; keep the active tab in view
+  // (deep links like ?tab=documents land on a tab that starts off-screen).
+  // `loading` is a dep because the strip only mounts once the building has loaded.
+  const tabsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    tabsRef.current?.querySelector<HTMLElement>('[data-state="active"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }, [activeTab, loading]);
 
   useEffect(() => {
     if (id) fetchBuilding(id);
@@ -161,7 +183,7 @@ export default function BuildingDetails() {
                 <span className="truncate">{building.address}, {building.city}</span>
               </p>
               <div className="mt-2">
-                <BuildingScoreChips ohsPct={ohsPct} taskPct={taskPct} />
+                <BuildingScoreChips ohsPct={ohsPct} taskPct={taskPct} ohsTrend={trend.series.compliance} taskTrend={trend.series.tasks} asOf={asOf} />
               </div>
             </div>
           </div>
@@ -178,40 +200,49 @@ export default function BuildingDetails() {
 
       {/* Tabs - Mobile optimized with icons */}
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        <TabsList className="w-full">
-          <TabsTrigger value="overview" className="flex-1 sm:flex-none">
+        <TabsList ref={tabsRef} className="w-full flex-nowrap justify-start overflow-x-auto overflow-y-hidden whitespace-nowrap snap-x scroll-px-3 sm:flex-wrap sm:overflow-visible [&::-webkit-scrollbar]:hidden">
+          <TabsTrigger value="overview" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
             <span className="hidden sm:inline">Overview</span>
             <span className="sm:hidden">Info</span>
           </TabsTrigger>
-          <TabsTrigger value="checklists" className="flex-1 sm:flex-none">
+          <TabsTrigger value="checklists" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
             <span className="hidden sm:inline">Checklists</span>
             <span className="sm:hidden">Tasks</span>
           </TabsTrigger>
-          <TabsTrigger value="forms" className="flex-1 sm:flex-none">Forms</TabsTrigger>
-          <TabsTrigger value="reports" className="flex-1 sm:flex-none">Reports</TabsTrigger>
-          <TabsTrigger value="tenants" className="flex-1 sm:flex-none">Tenants</TabsTrigger>
-          <TabsTrigger value="assets" className="flex-1 sm:flex-none">Assets</TabsTrigger>
-          <TabsTrigger value="maintenance" className="flex-1 sm:flex-none">
-            <span className="hidden sm:inline">Maintenance</span>
-            <span className="sm:hidden">Maint.</span>
+          <TabsTrigger value="forms" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Forms</TabsTrigger>
+          <TabsTrigger value="reports" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Reports</TabsTrigger>
+          <TabsTrigger value="tenants" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Tenants</TabsTrigger>
+          <TabsTrigger value="assets" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Assets</TabsTrigger>
+          <TabsTrigger value="ppm" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">PPM</TabsTrigger>
+          {/* Value stays `maintenance` so existing ?tab=maintenance deep links keep working. */}
+          <TabsTrigger value="maintenance" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
+            <span className="hidden sm:inline">Calendar</span>
+            <span className="sm:hidden">Cal.</span>
           </TabsTrigger>
-          <TabsTrigger value="electrical" className="flex-1 sm:flex-none">
+          <TabsTrigger value="electrical" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
             <span className="hidden sm:inline">Electrical &amp; Compliance</span>
             <span className="sm:hidden">Elec.</span>
           </TabsTrigger>
-          <TabsTrigger value="documents" className="flex-1 sm:flex-none">
+          <TabsTrigger value="documents" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
             <span className="hidden sm:inline">Documents</span>
             <span className="sm:hidden">Docs</span>
           </TabsTrigger>
-          <TabsTrigger value="notes" className="flex-1 sm:flex-none">Notes</TabsTrigger>
+          <TabsTrigger value="notes" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Notes</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="space-y-6 mt-6">
-          {/* Alert Widgets */}
-          <OverviewWidgets buildingId={building.id} onTabChange={setActiveTab} />
+        <TabsContent value="overview" className="mt-6">
+          {/* Phone-first order (spec §5.3): score chips live in the header;
+              OverviewWidgets leads with today's tasks and open issues, then the
+              alert widgets; contacts follow. That is plain DOM order — nothing is
+              reordered per breakpoint. */}
+          <div className="flex flex-col gap-6">
+            {/* Overview Widgets */}
+            <div>
+              <OverviewWidgets buildingId={building.id} onTabChange={handleTabChange} />
+            </div>
 
-          {/* Contacts Grid */}
-          <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+            {/* Contacts Grid */}
+            <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
             {/* Asset Manager */}
             <Card>
               <CardHeader className="pb-3">
@@ -227,13 +258,13 @@ export default function BuildingDetails() {
                     {contacts.assetManager.phone && (
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
                         <Phone className="h-3 w-3" />
-                        {contacts.assetManager.phone}
+                        <a href={`tel:${contacts.assetManager.phone.replace(/\s+/g, '')}`} className="hover:underline">{contacts.assetManager.phone}</a>
                       </p>
                     )}
                     {contacts.assetManager.email && (
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
                         <Mail className="h-3 w-3" />
-                        {contacts.assetManager.email}
+                        <a href={`mailto:${contacts.assetManager.email}`} className="hover:underline">{contacts.assetManager.email}</a>
                       </p>
                     )}
                   </div>
@@ -258,13 +289,13 @@ export default function BuildingDetails() {
                     {contacts.centreManagement.phone && (
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
                         <Phone className="h-3 w-3" />
-                        {contacts.centreManagement.phone}
+                        <a href={`tel:${contacts.centreManagement.phone.replace(/\s+/g, '')}`} className="hover:underline">{contacts.centreManagement.phone}</a>
                       </p>
                     )}
                     {contacts.centreManagement.email && (
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
                         <Mail className="h-3 w-3" />
-                        {contacts.centreManagement.email}
+                        <a href={`mailto:${contacts.centreManagement.email}`} className="hover:underline">{contacts.centreManagement.email}</a>
                       </p>
                     )}
                   </div>
@@ -289,13 +320,13 @@ export default function BuildingDetails() {
                     {contacts.securityContact.phone && (
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
                         <Phone className="h-3 w-3" />
-                        {contacts.securityContact.phone}
+                        <a href={`tel:${contacts.securityContact.phone.replace(/\s+/g, '')}`} className="hover:underline">{contacts.securityContact.phone}</a>
                       </p>
                     )}
                     {contacts.securityContact.email && (
                       <p className="text-sm text-muted-foreground flex items-center gap-1">
                         <Mail className="h-3 w-3" />
-                        {contacts.securityContact.email}
+                        <a href={`mailto:${contacts.securityContact.email}`} className="hover:underline">{contacts.securityContact.email}</a>
                       </p>
                     )}
                   </div>
@@ -304,6 +335,7 @@ export default function BuildingDetails() {
                 )}
               </CardContent>
             </Card>
+          </div>
           </div>
         </TabsContent>
 
@@ -328,11 +360,15 @@ export default function BuildingDetails() {
         </TabsContent>
 
         <TabsContent value="assets" className="mt-6">
-          <AssetsTab buildingId={building.id} />
+          <AssetsTab buildingId={building.id} buildingName={building.name} />
+        </TabsContent>
+
+        <TabsContent value="ppm" className="mt-6">
+          <PpmTab buildingId={building.id} />
         </TabsContent>
 
         <TabsContent value="maintenance" className="mt-6">
-          <MaintenanceCalendarTab buildingId={building.id} />
+          <BuildingCalendarTab buildingId={building.id} buildingName={building.name} />
         </TabsContent>
 
         <TabsContent value="documents" className="mt-6">

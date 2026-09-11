@@ -1,0 +1,79 @@
+name: Backend smoke (RLS matrix)
+
+# Proves the row-level-security access matrix against a LIVE backend, so the
+# policy expectations encoded in scripts/rls-smoke.mjs are continuously verified
+# rather than assumed (the script's matrix is dated "as of 2026-06-12" — this
+# job keeps it honest). This is the enforcement boundary the app leans on, so
+# regressions here are security regressions.
+#
+# ── Setup required before this does anything ────────────────────────────────
+# rls-smoke.mjs CREATES and DELETES real users and fixtures, so it MUST target a
+# disposable STAGING project — never production. Add three repo secrets, all
+# pointing at that staging project:
+#   SMOKE_SUPABASE_URL
+#   SMOKE_SUPABASE_ANON_KEY
+#   SMOKE_SUPABASE_SERVICE_ROLE_KEY
+# Until they are set, the job SKIPS (it never runs destructively by default).
+# A hard guard also refuses to run if the URL points at the known production
+# project ref, so a mis-pasted secret cannot nuke prod users.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rls-smoke:
+    name: RLS access matrix
+    runs-on: ubuntu-latest
+    env:
+      SMOKE_SUPABASE_URL: ${{ secrets.SMOKE_SUPABASE_URL }}
+      SMOKE_SUPABASE_ANON_KEY: ${{ secrets.SMOKE_SUPABASE_ANON_KEY }}
+      SMOKE_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SMOKE_SUPABASE_SERVICE_ROLE_KEY }}
+      # Production project ref — the smoke test must never run against it.
+      PROD_PROJECT_REF: qdzgkttiosahdfqresvz
+    steps:
+      - name: Check smoke secrets are configured
+        id: guard
+        run: |
+          if [ -z "$SMOKE_SUPABASE_URL" ] || [ -z "$SMOKE_SUPABASE_ANON_KEY" ] || [ -z "$SMOKE_SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::notice::Smoke secrets not configured — skipping. Add SMOKE_SUPABASE_* secrets for a STAGING project to enable."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Footgun guard: rls-smoke creates/deletes users, so refuse production.
+          if printf '%s' "$SMOKE_SUPABASE_URL" | grep -q "$PROD_PROJECT_REF"; then
+            echo "::error::SMOKE_SUPABASE_URL points at the production project ($PROD_PROJECT_REF). This test creates and deletes users — point it at a disposable staging project."
+            exit 1
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.run == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.run == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.guard.outputs.run == 'true'
+        run: npm ci --no-audit --no-fund
+
+      - name: Run RLS access-matrix smoke
+        if: steps.guard.outputs.run == 'true'
+        # rls-smoke.mjs reads SUPABASE_* — map the staging-scoped secrets onto them
+        # here so the secret names can never be confused for production defaults.
+        env:
+          SUPABASE_URL: ${{ secrets.SMOKE_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SMOKE_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SMOKE_SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/rls-smoke.mjs
+        # To extend to the full backend suite once staging is wired, replace the
+        # line above with: npm run smoke  (also set STAGING_URL/STAGING_ANON/
+        # STAGING_SROLE from the same staging secrets — several scripts read those).

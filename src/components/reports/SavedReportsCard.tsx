@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { downloadBlob } from '@/lib/exportCsv';
 import {
   createArtifactSignedUrl,
   listReportArtifacts,
@@ -32,7 +33,7 @@ function formatSize(bytes: number): string {
 }
 
 export function SavedReportsCard() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['report-artifacts'],
     queryFn: async () => {
       const { data: rows, error } = await listReportArtifacts();
@@ -76,14 +77,7 @@ export function SavedReportsCard() {
         toast.error('Download failed: the stored file is empty.');
         return;
       }
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = objectUrl;
-      a.download = artifact.file_name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+      downloadBlob(blob, artifact.file_name);
     } catch (e) {
       if (import.meta.env.DEV) console.error('Artifact download failed:', e);
       toast.error('Download failed.');
@@ -104,6 +98,11 @@ export function SavedReportsCard() {
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : isError ? (
+          <div className="py-4 text-sm">
+            <p className="text-destructive">Could not load saved reports.</p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => refetch()}>Try again</Button>
           </div>
         ) : !data || data.length === 0 ? (
           <p className="py-4 text-sm text-muted-foreground">

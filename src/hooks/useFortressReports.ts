@@ -3,13 +3,55 @@
  * (draft → submitted → reviewed → approved / rejected). Mirrors the
  * form_submissions review model. RLS enforces who may transition: the author can
  * submit their own draft; admin/manager perform review transitions.
+ *
+ * PPM (R3c): an ops report's `ppm_services` rows are SEEDED from the building's active plan
+ * lines (`seedPpmFromPlan`) when the report is created and again on carry-forward — the
+ * function is idempotent, so the second run only picks up lines the first did not. The
+ * prior report's PPM rows are never cloned: a plan-backed row's grid is derived from
+ * execution, and its overrides belong to the month they were written for.
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
 import { fdb, type Report, type ReportType, type ReportStatus, type FTableName } from '@/integrations/supabase/fortress-db';
 import { useAuth } from '@/contexts/AuthContext';
+import { useOrganization } from '@/hooks/useOrganization';
+import { notify } from '@/lib/notify';
+import { describeSeed, seedPpmFromPlan } from '@/hooks/useReportPpm';
+import { APPROVAL_EXPORT_FAILED, exportApprovedArtifact, type ApprovalExportResult } from '@/lib/reportApproval';
+import { track } from '@/lib/analytics';
 
 const REPORTS_KEY = ['fortress-reports'];
+/** Keys of the readers that derive figures from report status (usePortfolioCompliance, useBuildingsScores). */
+const PORTFOLIO_COMPLIANCE_KEY = ['portfolio-compliance'];
+const BUILDINGS_OHS_SCORES_KEY = ['buildings-ohs-scores'];
+
+/** Report types that carry the PPM section (see REPORT_SECTIONS in lib/fortressReports.ts). */
+const PPM_REPORT_TYPES: ReadonlySet<string> = new Set<ReportType>(['ops_monthly']);
+
+/** Plain copy for a seed that failed after the report itself was saved. */
+export const PPM_SEED_FAILED_MESSAGE =
+  'The report was saved, but its PPM services could not be seeded from the building plan. Use "Sync with the PPM plan" on the PPM section.';
+
+/**
+ * Seed the report's PPM rows from the plan without failing the surrounding write: the
+ * report row already exists, so a refused seed is reported and the user is pointed at the
+ * section's sync button rather than left with a create that "failed" after it succeeded.
+ * A plan line the seed had to skip (its name is taken by a row linked to another line) is
+ * said out loud too — silently missing a service from a compliance grid is the worse outcome.
+ */
+async function seedPpmOrWarn(report: Pick<Report, 'id' | 'building_id' | 'report_type'>): Promise<number> {
+  if (!PPM_REPORT_TYPES.has(report.report_type)) return 0;
+  try {
+    const result = await seedPpmFromPlan(report.id, report.building_id);
+    if (result.skipped > 0) toast.warning(describeSeed(result));
+    return result.added + result.linked;
+  } catch (e) {
+    if (import.meta.env.DEV) console.error('Seed PPM from plan failed:', e);
+    toast.error(PPM_SEED_FAILED_MESSAGE);
+    return 0;
+  }
+}
 
 export function useFortressReports(buildingId?: string) {
   return useQuery({
@@ -85,6 +127,7 @@ export function useCreateReport() {
         .select('*')
         .single();
       if (error) throw error;
+      await seedPpmOrWarn(data);
       return data;
     },
     onSuccess: () => {
@@ -102,7 +145,10 @@ export function useCreateReport() {
 
 /** Section tables cloned on carry-forward, with volatile columns blanked (operator
  *  re-enters fresh values). Scaffold columns (services, tenants, narratives, contacts)
- *  carry over. Heavy/seeded sections (tenant_compliance, inspections) regenerate. */
+ *  carry over. Heavy/seeded sections (tenant_compliance, inspections) regenerate.
+ *  `ppm_services` is deliberately absent: PPM rows are re-seeded from the building plan
+ *  (`seedPpmFromPlan`), not cloned, so the new report gets the plan as it stands today
+ *  and none of last month's overrides. */
 const CARRY_FORWARD: Record<ReportType, { table: FTableName; blank: string[] }[]> = {
   ops_monthly: [
     { table: 'report_narratives', blank: [] },
@@ -135,6 +181,8 @@ export function useCarryForwardReport() {
     mutationFn: async ({ newReport, fromReportId }: { newReport: Report; fromReportId: string }): Promise<number> => {
       let cloned = 0;
       for (const { table, blank } of CARRY_FORWARD[newReport.report_type as ReportType] ?? []) {
+        // `table` is a runtime union of section tables; the typed client cannot narrow it.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { data: rows } = await (fdb.from(table) as any).select('*').eq('report_id', fromReportId);
         if (!rows?.length) continue;
         const mapped = (rows as Record<string, unknown>[]).map((r) => {
@@ -144,11 +192,15 @@ export function useCarryForwardReport() {
           for (const c of blank) row[c] = null;
           return row;
         });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error } = await (fdb.from(table) as any).insert(mapped);
         if (error) { if (import.meta.env.DEV) console.error(`carry-forward ${table}:`, error); }
         else cloned += mapped.length;
       }
-      await (fdb.from('reports') as any).update({ cloned_from_report_id: fromReportId }).eq('id', newReport.id);
+      // PPM: seed from the plan (idempotent — creation usually did this already, so this
+      // only adds lines the plan gained since, or seeds a report created another way).
+      cloned += await seedPpmOrWarn(newReport);
+      await fdb.from('reports').update({ cloned_from_report_id: fromReportId }).eq('id', newReport.id);
       return cloned;
     },
     onSuccess: (n) => {
@@ -174,12 +226,23 @@ export function nextStatus(status: ReportStatus): ReportStatus | null {
   return FORWARD[status];
 }
 
+/**
+ * A lifecycle transition, plus the auto-export that follows an approval (spec §5.7): approving issues the
+ * final, unwatermarked PDF and saves it as the report's current artifact. `exported` is null for every
+ * other transition. The export is deliberately non-fatal — the approval itself already landed.
+ */
+export interface ReportTransitionResult {
+  report: Report;
+  exported: ApprovalExportResult | null;
+}
+
 export function useReportLifecycle(reportId: string) {
   const qc = useQueryClient();
   const { user } = useAuth();
+  const { organization } = useOrganization();
 
   return useMutation({
-    mutationFn: async (params: { status: ReportStatus; reviewNotes?: string }): Promise<Report> => {
+    mutationFn: async (params: { status: ReportStatus; reviewNotes?: string }): Promise<ReportTransitionResult> => {
       const patch: Record<string, unknown> = { status: params.status };
       if (params.status === 'reviewed' || params.status === 'approved' || params.status === 'rejected') {
         patch.reviewed_by = user?.id ?? null;
@@ -192,10 +255,52 @@ export function useReportLifecycle(reportId: string) {
         .select('*')
         .single();
       if (error) throw error;
-      return data;
+      // Export AFTER the status write, never before: the renderer reads `reports.status` itself, so the
+      // PDF only comes out unwatermarked once the row says approved.
+      const exported = params.status === 'approved'
+        ? await exportApprovedArtifact({
+            reportId,
+            orgId: organization?.id,
+            userId: user?.id,
+            branding: {
+              name: organization?.name ?? '',
+              primaryColor: organization?.primary_color ?? '#2563eb',
+              logoUrl: organization?.logo_url ?? null,
+            },
+          })
+        : null;
+      return { report: data, exported };
     },
-    onSuccess: (r) => {
+    onSuccess: ({ report: r, exported }) => {
       qc.invalidateQueries({ queryKey: REPORTS_KEY });
+      // The portfolio compliance card and the building chips read the latest filed/approved ops report per
+      // building; a transition changes what they show, so they must not wait out their stale time.
+      qc.invalidateQueries({ queryKey: PORTFOLIO_COMPLIANCE_KEY });
+      qc.invalidateQueries({ queryKey: BUILDINGS_OHS_SCORES_KEY });
+      // Approval may have just issued a new version; the editor's Issued PDFs card reads this key.
+      qc.invalidateQueries({ queryKey: ['report-artifacts', reportId] });
+      const label = r.title ?? 'Building report';
+      const url = `/reports/fortress/${r.id}`;
+      if (r.status === 'submitted') {
+        void notify({ kind: 'report_submitted', entityType: 'report', entityId: r.id, buildingId: r.building_id, recipients: [], title: `Report submitted for review: ${label}`, url });
+      } else if ((r.status === 'rejected' || r.status === 'approved') && r.author_id && r.author_id !== user?.id) {
+        void notify({
+          kind: r.status === 'rejected' ? 'report_returned' : 'report_approved', entityType: 'report', entityId: r.id, buildingId: r.building_id,
+          recipients: [r.author_id], title: r.status === 'rejected' ? `Report returned: ${label}` : `Report approved: ${label}`,
+          body: r.status === 'rejected' ? (r.review_notes ?? undefined) : undefined, url,
+        });
+      }
+      if (exported?.ok) {
+        track('report_exported', { reportType: exported.reportType, reportStatus: 'approved' });
+        toast.success('Report approved and the final PDF was saved.');
+        return;
+      }
+      if (exported && !exported.ok) {
+        // The approval stands; only the PDF is missing. Say which half failed rather than a bare success.
+        if (import.meta.env.DEV) console.error('Approval export failed:', exported.error);
+        toast.warning(APPROVAL_EXPORT_FAILED);
+        return;
+      }
       const verb: Record<string, string> = {
         submitted: 'submitted for review',
         reviewed: 'marked reviewed',
@@ -208,6 +313,70 @@ export function useReportLifecycle(reportId: string) {
     onError: (e: unknown) => {
       if (import.meta.env.DEV) console.error('Lifecycle transition failed:', e);
       toast.error('You do not have permission to change this report, or the change failed.');
+    },
+  });
+}
+
+/**
+ * Why delete_empty_report refused, by SQLSTATE (2026-09-14_01): the code is the contract, the message is
+ * prose for the log. Older builds of the function raise everything as 42501 with a distinguishing message,
+ * so the substring match stays as a fallback.
+ */
+export const DISCARD_ERROR_CODES: Record<string, string> = {
+  '42501': 'Only an admin can discard a draft.',
+  P0002: 'That report no longer exists.',
+  PR001: 'Only a draft can be discarded.',
+  PR002: 'This draft has saved PDF versions and cannot be discarded.',
+  PR003: 'This draft has saved content. Clear its sections before discarding it.',
+};
+
+export function discardErrorMessage(e: unknown): string {
+  const { code, message } = (e as { code?: string; message?: string } | null) ?? {};
+  if (code && DISCARD_ERROR_CODES[code]) return DISCARD_ERROR_CODES[code];
+  const msg = message ?? '';
+  return msg.includes('saved row') ? DISCARD_ERROR_CODES.PR003
+    : msg.includes('PDF versions') ? DISCARD_ERROR_CODES.PR002
+    : msg.includes('only a draft') ? DISCARD_ERROR_CODES.PR001
+    : msg.includes('not found') ? DISCARD_ERROR_CODES.P0002
+    : msg.includes('admin only') ? DISCARD_ERROR_CODES['42501']
+    : 'Could not discard the draft.';
+}
+
+/** Admin only: deletes a draft that holds no content (delete_empty_report, 2026-09-14_01). */
+export function useDiscardDraft() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (reportId: string): Promise<string> => {
+      const { error } = await supabase.rpc('delete_empty_report', { p_report: reportId });
+      if (error) throw error;
+      return reportId;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: REPORTS_KEY });
+      toast.success('Draft discarded.');
+    },
+    onError: (e: unknown) => {
+      if (import.meta.env.DEV) console.error('Discard draft failed:', e);
+      // Gone already: the list is stale, so refresh it along with the message.
+      if ((e as { code?: string } | null)?.code === 'P0002') qc.invalidateQueries({ queryKey: REPORTS_KEY });
+      toast.error(discardErrorMessage(e));
+    },
+  });
+}
+
+/** Which report types a building owes (buildings.report_types); drives "missing" on the coverage grid. */
+export function useSetBuildingReportTypes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ buildingId, reportTypes }: { buildingId: string; reportTypes: ReportType[] }): Promise<void> => {
+      // buildings.report_types lives in the generated (production) types, not the Fortress slice `fdb` is typed to.
+      const { error } = await supabase.from('buildings').update({ report_types: reportTypes }).eq('id', buildingId);
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['buildings-for-reports'] }); },
+    onError: (e: unknown) => {
+      if (import.meta.env.DEV) console.error('Set report types failed:', e);
+      toast.error('Could not update the report types for that building.');
     },
   });
 }

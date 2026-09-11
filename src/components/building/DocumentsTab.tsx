@@ -15,6 +15,7 @@ import {
   type GroupBy,
 } from './documents/filterDocuments';
 import { resolveDocUrl } from './documents/resolveDocUrl';
+import { csvText, type CsvColumn } from '@/lib/exportCsv';
 import type { UnifiedDocument, BuildingDocumentRow } from './documents/types';
 import DocumentsToolbar from './DocumentsToolbar';
 import DocumentsTable from './DocumentsTable';
@@ -26,6 +27,21 @@ interface DocumentsTabProps {
 }
 
 const METRIC = 'rounded-md bg-muted/50 px-4 py-3';
+
+const docText = csvText;
+
+/** The register as a spreadsheet: one row per document on screen, both sources together. */
+export const DOCUMENT_CSV_COLUMNS: CsvColumn<UnifiedDocument>[] = [
+  { key: 'name', header: 'Name' },
+  { key: 'type', header: 'Type' },
+  { key: 'scope', header: 'Scope' },
+  { key: 'shopNumber', header: 'Shop number', format: docText },
+  { key: 'tenantName', header: 'Tenant', format: docText },
+  { key: 'issueDate', header: 'Issue date', format: docText },
+  { key: 'expiryDate', header: 'Expiry date', format: docText },
+  { key: 'status', header: 'Status', format: (_v, row) => row.status.label },
+  { key: 'source', header: 'Source' },
+];
 
 export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
   const { isAdminOrManager, user } = useAuth();
@@ -206,6 +222,8 @@ export default function DocumentsTab({ buildingId }: DocumentsTabProps) {
           setEditing(null);
           setFormOpen(true);
         }}
+        exportRows={flat}
+        exportColumns={DOCUMENT_CSV_COLUMNS}
       />
 
       {isAdminOrManager && selected.size > 0 && (

@@ -15,22 +15,33 @@ export function useMySignoffs() {
   const { user } = useAuth();
   const [items, setItems] = useState<MySignoff[]>([]);
   const [loading, setLoading] = useState(true);
+  /**
+   * Message of the last failed load, or null. Callers need this to tell "nothing is
+   * waiting on you" apart from "we could not find out" — an empty list is otherwise
+   * indistinguishable from a fetch that fell over. Cleared at the start of every load.
+   */
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!user) {
       setItems([]);
+      setError(null);
       setLoading(false);
       return;
     }
     setLoading(true);
+    setError(null);
     try {
-      const { data: reqs } = await supabase
+      const { data: reqs, error: reqsError } = await supabase
         .from('form_signoff_requests')
         .select('id, submission_id, due_at, sequence_order')
         .eq('assigned_to', user.id)
         .eq('active', true)
         .eq('status', 'pending')
         .order('due_at', { nullsFirst: false });
+      // PostgREST reports a denied or failed read in `error`, not by throwing, so this
+      // has to be checked explicitly — otherwise the hook reports an empty, healthy list.
+      if (reqsError) throw new Error(reqsError.message);
 
       const subIds = [...new Set((reqs || []).map((r) => r.submission_id))];
       const subs = subIds.length
@@ -59,6 +70,8 @@ export function useMySignoffs() {
       );
     } catch (e) {
       console.error('useMySignoffs error:', e);
+      setItems([]);
+      setError(e instanceof Error ? e.message : 'Could not load your sign-offs.');
     } finally {
       setLoading(false);
     }
@@ -68,5 +81,5 @@ export function useMySignoffs() {
     load();
   }, [load]);
 
-  return { items, loading, reload: load };
+  return { items, loading, error, reload: load };
 }

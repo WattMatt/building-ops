@@ -19,6 +19,10 @@ verify_jwt = false
 [functions.set-user-status]
 verify_jwt = false
 
+# Server-side role change (validates the JWT + admin role itself, like set-user-status).
+[functions.set-user-role]
+verify_jwt = false
+
 # Self-service clear of the first-login gate (validates the JWT itself, like
 # set-user-status; the profiles trigger blocks any client-side flag write).
 [functions.clear-password-gate]
@@ -40,6 +44,33 @@ verify_jwt = true
 [functions.notify-signoff-complete]
 verify_jwt = true
 
+# Client-invoked (authenticated): require a JWT so they can't be hit anonymously.
+[functions.notify]
+verify_jwt = true
+
+# Cron-invoked (no user JWT): guarded by the x-digest-secret header instead.
+[functions.daily-digest]
+verify_jwt = false
+
 # Cron-invoked (no user JWT): guarded by the x-signoff-secret header instead.
 [functions.signoff-reminders]
+verify_jwt = false
+
+# Public calendar subscription feed (no user JWT — Outlook/Google fetch it server-side):
+# scoped by a secret token looked up with the service role; unknown/revoked → 404.
+[functions.ics-feed]
+verify_jwt = false
+
+# Cron-invoked (x-distribution-secret) OR admin/manager JWT validated in code (run-now).
+[functions.report-distribution]
+verify_jwt = false
+
+# Public share-link endpoint (no user JWT): token looked up with the service role; unknown/expired/revoked → 404.
+[functions.report-share]
+verify_jwt = false
+
+# Public tenant intake (no user JWT — the tenant has no account). The per-building token from
+# the QR code is the credential, resolved with the service role; unknown/disabled/flag-off → 404;
+# rate-limited per token and per hashed IP (INTAKE_IP_SALT). Client: /intake/:token.
+[functions.tenant-intake]
 verify_jwt = false

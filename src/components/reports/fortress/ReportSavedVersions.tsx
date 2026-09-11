@@ -8,11 +8,12 @@
  */
 import { useCallback, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Download, FileText, Loader2 } from 'lucide-react';
+import { Download, FileText, Loader2, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { downloadBlob } from '@/lib/exportCsv';
 import { listReportArtifactsForSource, createArtifactSignedUrl, type ReportArtifactRow } from '@/lib/reportArtifacts';
 
 const fmtSize = (bytes: number) =>
@@ -24,7 +25,13 @@ const fmtWhen = (iso: string | null) => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 };
 
-export function ReportSavedVersions({ reportId }: { reportId: string }) {
+interface ReportSavedVersionsProps {
+  reportId: string;
+  /** Given only when share links are on and the viewer may share: adds a per-version Share button. */
+  onShare?: (a: ReportArtifactRow) => void;
+}
+
+export function ReportSavedVersions({ reportId, onShare }: ReportSavedVersionsProps) {
   const [busy, setBusy] = useState<string | null>(null);
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -51,14 +58,9 @@ export function ReportSavedVersions({ reportId }: { reportId: string }) {
         toast.error(`Could not download this version (${res.status}).`);
         return;
       }
-      const objectUrl = URL.createObjectURL(await res.blob());
-      const link = document.createElement('a');
-      link.href = objectUrl;
-      link.download = a.file_name;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(objectUrl);
+      // The shared helper, not a local copy: it defers the revoke, which the copy here did not —
+      // a synchronous revoke can beat a browser that starts the download asynchronously.
+      downloadBlob(await res.blob(), a.file_name);
     } catch (e) {
       if (import.meta.env.DEV) console.error('Artifact download failed:', e);
       toast.error('Could not download this version.');
@@ -100,8 +102,19 @@ export function ReportSavedVersions({ reportId }: { reportId: string }) {
                     v{a.version} · {fmtWhen(a.created_at)} · {fmtSize(a.size_bytes)}
                   </p>
                 </div>
+                {a.status === 'issued' && <Badge className="text-xs">Current</Badge>}
                 {a.status === 'superseded' && (
                   <Badge variant="outline" className="text-xs">superseded</Badge>
+                )}
+                {/* Which PDF is safe to send a client: one exported before approval is not (E2). */}
+                {a.report_status && a.report_status !== 'approved' && (
+                  <Badge variant="outline" className="text-xs">exported while {a.report_status}</Badge>
+                )}
+                {onShare && (
+                  <Button variant="outline" size="sm" className="min-h-11" onClick={() => onShare(a)}>
+                    <Share2 className="mr-2 h-4 w-4" />
+                    Share this version
+                  </Button>
                 )}
                 <Button variant="outline" size="sm" disabled={busy === a.id} onClick={() => download(a)}>
                   {busy === a.id

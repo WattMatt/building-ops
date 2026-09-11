@@ -20,6 +20,7 @@ import {
   ArrowRight,
   Plus,
   Loader2,
+  Sun,
   UserCircle,
   X,
 } from 'lucide-react';
@@ -29,6 +30,8 @@ import GlobalAlertsWidget from '@/components/dashboard/GlobalAlertsWidget';
 import HsComplianceWidget from '@/components/dashboard/HsComplianceWidget';
 import PendingSubmissionsWidget from '@/components/dashboard/PendingSubmissionsWidget';
 import BuildingAlertsWidget from '@/components/dashboard/BuildingAlertsWidget';
+import WaitingOnYouWidget from '@/components/dashboard/WaitingOnYouWidget';
+import ActivityFeedCard from '@/components/dashboard/ActivityFeedCard';
 
 const priorityColors: Record<string, string> = {
   daily: 'bg-info text-info-foreground',
@@ -119,6 +122,12 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button asChild variant="outline">
+            <Link to="/my-day">
+              <Sun className="w-4 h-4 mr-2" />
+              My Day
+            </Link>
+          </Button>
           <Button asChild variant="outline">
             <Link to="/checklists">
               <ClipboardCheck className="w-4 h-4 mr-2" />
@@ -234,6 +243,19 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
+      {/* The manager's own queues, directly under the portfolio numbers and side by side:
+          these are the only two blocks on this page that are work *for the viewer*, and
+          they were previously below three portfolio-wide widgets and a week of activity —
+          off-screen on a laptop, so the things actually blocking other people went unseen. */}
+      {isAdminOrManager && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          {/* Reports and sign-offs waiting on this manager specifically */}
+          <WaitingOnYouWidget />
+          {/* Pending Form Submissions for Managers */}
+          <PendingSubmissionsWidget />
+        </div>
+      )}
+
       {/* H&S compliance score per building */}
       {isAdminOrManager && <HsComplianceWidget />}
 
@@ -242,9 +264,6 @@ export default function Dashboard() {
 
       {/* Building Health Widget */}
       {isAdminOrManager && <BuildingAlertsWidget />}
-
-      {/* Pending Form Submissions for Managers */}
-      {isAdminOrManager && <PendingSubmissionsWidget />}
 
       {/* Two Column Layout */}
       <div className="grid gap-6 lg:grid-cols-2">
@@ -367,6 +386,11 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* What happened this week, for everyone who can see the dashboard. Last of the
+          read-only blocks: it is context, not a queue, so it sits below the things that
+          ask the viewer to do something. */}
+      <ActivityFeedCard />
 
       {/* Quick Actions for Field Staff */}
       {role === 'user' && (

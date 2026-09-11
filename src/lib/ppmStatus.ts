@@ -9,9 +9,13 @@
 
 export type PpmCellStatus = 'due' | 'done' | 'missed' | 'na';
 
-/** One stored month cell. `date` is optional. */
+/**
+ * One month cell. `date` is optional. `status` may be null so a merged grid cell
+ * (src/lib/ppmGrid.ts — derived + override + legacy layers) is structurally a PpmCell
+ * and the K11 KPI has one definition of "done" whichever layer filled the cell.
+ */
 export interface PpmCell {
-  status?: PpmCellStatus;
+  status?: PpmCellStatus | null;
   date?: string | null;
 }
 

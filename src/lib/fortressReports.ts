@@ -195,6 +195,11 @@ export function formatPeriodLabel(period: string | null | undefined): string {
   return d.toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
 }
 
+/** Anything not yet approved is visibly a draft in the client's hands (E2). */
+export function watermarkFor(status: string | null | undefined): string | null {
+  return status === 'approved' ? null : 'DRAFT';
+}
+
 export const REPORT_STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   draft: 'outline',
   submitted: 'secondary',

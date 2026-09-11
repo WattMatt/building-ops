@@ -12,12 +12,14 @@
  * Persistence failing is NON-fatal to the download itself — callers download
  * first, then report both outcomes (degradation ladder, standard D2/D4).
  *
- * The `report_artifacts` table is not in the generated `types.ts` yet, so the
- * runtime client is re-typed through a narrow structural interface (same
- * pattern as `fortress-db.ts`), which also makes the module unit-testable with
- * a mocked client.
+ * `report_artifacts` IS in the generated `types.ts` (regenerated from production
+ * after R4a), so every query here type-checks against the real table rather than
+ * a hand-rolled structural interface. The client is still a parameter — narrowed
+ * to the two surfaces this module touches — so the module stays unit-testable
+ * with a mocked client.
  */
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables, TablesInsert } from '@/integrations/supabase/types';
 
 export const GENERATED_REPORTS_BUCKET = 'generated-reports';
 export const ARTIFACT_SIGNED_URL_TTL_SECONDS = 600;
@@ -37,71 +39,13 @@ export const REPORT_KIND_LABELS: Record<ReportArtifactKind, string> = {
   fortress_annual_inspection: 'Annual Inspection Report',
 };
 
-export interface ReportArtifactRow {
-  id: string;
-  org_id: string;
-  kind: string;
-  source_id: string | null;
-  building_id: string | null;
-  version: number;
-  file_path: string;
-  file_name: string;
-  size_bytes: number;
-  generated_by: string;
-  created_at: string;
-  status: string;
-  superseded_by: string | null;
-}
+export type ReportArtifactRow = Tables<'report_artifacts'>;
+export type ReportArtifactInsert = TablesInsert<'report_artifacts'>;
 
-export type ReportArtifactInsert = Omit<ReportArtifactRow, 'id' | 'created_at' | 'superseded_by'>;
+/** The two surfaces this module touches, typed straight off the generated client (injectable for tests). */
+export type ReportArtifactsClient = Pick<typeof supabase, 'from' | 'storage'>;
 
-interface PgErr {
-  message: string;
-}
-
-interface ArtifactSelectBuilder extends PromiseLike<{ data: ReportArtifactRow[] | null; error: PgErr | null }> {
-  eq(column: string, value: string): ArtifactSelectBuilder;
-  is(column: string, value: null): ArtifactSelectBuilder;
-  order(column: string, opts: { ascending: boolean }): ArtifactSelectBuilder;
-  limit(count: number): ArtifactSelectBuilder;
-}
-
-interface ArtifactUpdateBuilder extends PromiseLike<{ error: PgErr | null }> {
-  eq(column: string, value: string): ArtifactUpdateBuilder;
-  is(column: string, value: null): ArtifactUpdateBuilder;
-  neq(column: string, value: string): ArtifactUpdateBuilder;
-}
-
-interface ArtifactTable {
-  select(columns: string): ArtifactSelectBuilder;
-  insert(row: ReportArtifactInsert): {
-    select(): { single(): Promise<{ data: ReportArtifactRow | null; error: PgErr | null }> };
-  };
-  update(patch: { status: string; superseded_by: string }): ArtifactUpdateBuilder;
-}
-
-interface ArtifactBucket {
-  upload(
-    path: string,
-    body: Blob,
-    opts: { contentType: string; upsert: boolean }
-  ): Promise<{ data: { path: string } | null; error: PgErr | null }>;
-  remove(paths: string[]): Promise<{ data: unknown; error: PgErr | null }>;
-  createSignedUrl(
-    path: string,
-    expiresIn: number,
-    opts?: { download?: string | boolean }
-  ): Promise<{ data: { signedUrl: string } | null; error: PgErr | null }>;
-}
-
-export interface ReportArtifactsClient {
-  from(table: 'report_artifacts'): ArtifactTable;
-  storage: { from(bucket: string): ArtifactBucket };
-}
-
-// Same runtime client, re-typed to the narrow surface this module uses
-// (fortress-db.ts pattern; report_artifacts is not in the generated types yet).
-const defaultClient = supabase as unknown as ReportArtifactsClient;
+const defaultClient: ReportArtifactsClient = supabase;
 
 /** Filesystem/storage-safe file name stem: keeps letters, digits, `._-`. */
 export function sanitizeReportFileName(name: string): string {
@@ -124,6 +68,8 @@ export interface SaveReportArtifactInput {
   sourceId?: string | null;
   /** Building scope; null for portfolio-level reports. */
   buildingId?: string | null;
+  /** Lifecycle status of the source report at export time; omit for ad-hoc kinds. */
+  reportStatus?: string | null;
 }
 
 export type SaveReportArtifactResult =
@@ -181,6 +127,7 @@ export async function saveReportArtifact(
       size_bytes: blob.size,
       generated_by: generatedBy,
       status: 'issued',
+      report_status: input.reportStatus ?? null,
     })
     .select()
     .single();

@@ -26,12 +26,16 @@ export function categoryMeta(value: string | null | undefined) {
   return COMPLIANCE_CATEGORIES.find((c) => c.value === value) ?? null;
 }
 
-/** Mirrors the DB trigger enforce_hs_template_scope: null/empty = applies to all. */
+/**
+ * Mirrors the generator's SQL: `applies_to_building_types is null or building_type = any(...)`.
+ * null = applies to every building; an EMPTY array matches nothing (`= any('{}')` is never true),
+ * so the UI must not read `[]` as "all". The dialog writes null, never `[]`, for "every building".
+ */
 export function templateAppliesToBuilding(
   appliesTo: string[] | null | undefined,
   buildingType: string | null | undefined
 ): boolean {
-  if (!appliesTo || appliesTo.length === 0) return true;
+  if (appliesTo == null) return true;
   if (!buildingType) return false;
   return appliesTo.includes(buildingType);
 }

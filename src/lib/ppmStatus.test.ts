@@ -64,3 +64,10 @@ describe('ppmCompletion (K11)', () => {
     expect(r.pct).toBeNull();
   });
 });
+
+describe('null status cells (merged grid shape)', () => {
+  it('a null status is blank — not done, not captured', () => {
+    expect(hasDoneCell(svc({ '2025-08': { status: null } }))).toBe(false);
+    expect(doneMonths(svc({ '2025-08': { status: null }, '2025-09': { status: 'done' } }))).toEqual(['2025-09']);
+  });
+});

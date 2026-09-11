@@ -10,12 +10,17 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { FileText, Search } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
-import { useFortressReports } from '@/hooks/useFortressReports';
+import { useAuth } from '@/contexts/AuthContext';
+import { useDiscardDraft, useFortressReports, useSetBuildingReportTypes } from '@/hooks/useFortressReports';
 import { REPORT_TYPE_LABELS, type ReportType } from '@/integrations/supabase/fortress-db';
 import { REPORT_STATUS_VARIANT, formatPeriodLabel } from '@/lib/fortressReports';
 import { formatBuildingName } from '@/lib/buildingName';
+import { buildCoverage, previousMonthPeriod } from '@/lib/reportCoverage';
+import { CoverageGrid } from '@/components/reports/fortress/CoverageGrid';
+import { DiscardDraftDialog } from '@/components/reports/fortress/DiscardDraftDialog';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import { Hint } from '@/components/ui/hint';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -25,12 +30,17 @@ const ALL = '__all__';
 
 export default function FortressReports() {
   const navigate = useNavigate();
+  const { isAdmin, isAdminOrManager } = useAuth();
   const { data: reports, isLoading, isError, error } = useFortressReports();
+  const discard = useDiscardDraft();
+  const setTypes = useSetBuildingReportTypes();
+  /** The draft the coverage grid asked to discard; the dialog confirms before anything is sent. */
+  const [discardId, setDiscardId] = useState<string | null>(null);
 
   const { data: buildings } = useQuery({
     queryKey: ['buildings-for-reports'],
     queryFn: async () => {
-      const { data, error: bErr } = await supabase.from('buildings').select('id, name').order('name');
+      const { data, error: bErr } = await supabase.from('buildings').select('id, name, report_types').order('name');
       if (bErr) throw bErr;
       return data ?? [];
     },
@@ -42,7 +52,7 @@ export default function FortressReports() {
     return m;
   }, [buildings]);
 
-  const [period, setPeriod] = useState<string>(ALL);
+  const [period, setPeriod] = useState<string>(() => previousMonthPeriod());
   const [type, setType] = useState<string>(ALL);
   const [status, setStatus] = useState<string>(ALL);
   const [q, setQ] = useState('');
@@ -51,6 +61,8 @@ export default function FortressReports() {
     () => [...new Set((reports ?? []).map((r) => r.report_period))].sort().reverse(),
     [reports],
   );
+  // The default period is offered even when no report exists for it yet.
+  const periodOptions = useMemo(() => [...new Set([previousMonthPeriod(), ...periods])].sort().reverse(), [periods]);
   const statuses = useMemo(
     () => [...new Set((reports ?? []).map((r) => r.status))].sort(),
     [reports],
@@ -75,11 +87,14 @@ export default function FortressReports() {
       });
   }, [reports, period, type, status, q, buildingName]);
 
-  // Buildings that have nothing for the selected period — the gap is as important as the list.
-  const missing = useMemo(() => {
-    if (period === ALL || !buildings?.length) return [];
-    const covered = new Set((reports ?? []).filter((r) => r.report_period === period).map((r) => r.building_id));
-    return buildings.filter((b) => !covered.has(b.id));
+  // Coverage for the selected period — the gap is as important as the list.
+  const coverage = useMemo(() => {
+    if (period === ALL || !buildings?.length) return null;
+    return buildCoverage(
+      buildings.map((b) => ({ id: b.id, name: b.name, report_types: b.report_types })),
+      (reports ?? []).map((r) => ({ id: r.id, building_id: r.building_id, report_type: r.report_type, report_period: r.report_period, status: r.status })),
+      period,
+    );
   }, [buildings, reports, period]);
 
   return (
@@ -89,6 +104,7 @@ export default function FortressReports() {
         <p className="text-sm text-muted-foreground">
           Every monthly OPS &amp; CM and annual inspection report, across the portfolio.
         </p>
+        <Hint className="mt-1">Pick a period to see which buildings still owe a report.</Hint>
       </div>
 
       <Card>
@@ -112,7 +128,7 @@ export default function FortressReports() {
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL}>All periods</SelectItem>
-                {periods.map((p) => <SelectItem key={p} value={p}>{formatPeriodLabel(p)}</SelectItem>)}
+                {periodOptions.map((p) => <SelectItem key={p} value={p}>{formatPeriodLabel(p)}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -198,29 +214,22 @@ export default function FortressReports() {
         </CardContent>
       </Card>
 
-      {missing.length > 0 && (
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm font-medium">
-              No report for {formatPeriodLabel(period)} — {missing.length} building{missing.length === 1 ? '' : 's'}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              These buildings have nothing filed for this period.
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {missing.map((b) => (
-                <button
-                  key={b.id}
-                  onClick={() => navigate(`/buildings/${b.id}?tab=reports`)}
-                  className="rounded-full border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted"
-                >
-                  {formatBuildingName(b.name)}
-                </button>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+      {coverage && (
+        <CoverageGrid
+          period={period}
+          rows={coverage.rows}
+          summary={coverage.summary}
+          canEditTypes={isAdminOrManager}
+          canDiscard={isAdmin}
+          discarding={discard.isPending}
+          onOpenReport={(id) => navigate(`/reports/fortress/${id}`)}
+          onOpenBuilding={(id) => navigate(`/buildings/${id}?tab=reports`)}
+          onDiscardDraft={setDiscardId}
+          onSetReportTypes={(buildingId, reportTypes) => setTypes.mutate({ buildingId, reportTypes })}
+        />
       )}
+      <DiscardDraftDialog open={discardId !== null} onOpenChange={(open) => { if (!open) setDiscardId(null); }}
+        pending={discard.isPending} onConfirm={() => { if (discardId) discard.mutate(discardId); }} />
     </div>
   );
 }

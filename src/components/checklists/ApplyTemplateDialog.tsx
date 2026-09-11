@@ -16,7 +16,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Building2, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { format, startOfDay, startOfWeek, startOfMonth, startOfQuarter, startOfYear, addDays, addMonths, addQuarters, addYears } from 'date-fns';
 import { templateAppliesToBuilding, BUILDING_TYPES } from '@/lib/compliance';
 
 type TaskFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually';
@@ -26,6 +25,8 @@ interface Template {
   name: string;
   frequency: TaskFrequency;
   applies_to_building_types?: string[] | null;
+  /** Number of template items; supplied by the parent so the dialog needs no extra fetch. */
+  itemCount?: number;
 }
 
 interface Building {
@@ -39,24 +40,6 @@ interface ApplyTemplateDialogProps {
   onOpenChange: (open: boolean) => void;
   template: Template | null;
   onSuccess: () => void;
-}
-
-function getDueDateForFrequency(frequency: TaskFrequency): string {
-  const now = new Date();
-  switch (frequency) {
-    case 'daily':
-      return format(startOfDay(now), 'yyyy-MM-dd');
-    case 'weekly':
-      return format(addDays(startOfWeek(now, { weekStartsOn: 1 }), 6), 'yyyy-MM-dd');
-    case 'monthly':
-      return format(addMonths(startOfMonth(now), 1), 'yyyy-MM-dd');
-    case 'quarterly':
-      return format(addQuarters(startOfQuarter(now), 1), 'yyyy-MM-dd');
-    case 'annually':
-      return format(addYears(startOfYear(now), 1), 'yyyy-MM-dd');
-    default:
-      return format(now, 'yyyy-MM-dd');
-  }
 }
 
 export default function ApplyTemplateDialog({
@@ -121,62 +104,18 @@ export default function ApplyTemplateDialog({
       toast.error('Please select at least one building');
       return;
     }
+    if (template.itemCount === 0) {
+      toast.error('This template has no tasks');
+      return;
+    }
 
     setLoading(true);
     try {
-      // Fetch template items
-      const { data: templateItems, error: itemsError } = await supabase
-        .from('template_items')
-        .select('*')
-        .eq('template_id', template.id);
-
-      if (itemsError) throw itemsError;
-      if (!templateItems || templateItems.length === 0) {
-        toast.error('This template has no tasks');
-        return;
-      }
-
-      const dueDate = getDueDateForFrequency(template.frequency);
       let totalCreated = 0;
-
       for (const buildingId of selectedBuildings) {
-        // Check for existing tasks
-        const { data: existingTasks } = await supabase
-          .from('task_instances')
-          .select('template_item_id')
-          .eq('building_id', buildingId)
-          .eq('due_date', dueDate)
-          .eq('frequency', template.frequency);
-
-        const existingItemIds = new Set((existingTasks || []).map(t => t.template_item_id));
-
-        // Create new task instances
-        const newTasks = templateItems
-          .filter(item => !existingItemIds.has(item.id))
-          .map(item => ({
-            building_id: buildingId,
-            template_item_id: item.id,
-            task_name: item.task_name,
-            task_description: item.task_description,
-            frequency: template.frequency,
-            responsible_role: 'user' as const,
-            status: 'pending' as const,
-            due_date: dueDate,
-            requires_photo: item.requires_photo,
-            requires_signature: item.requires_signature,
-          }));
-
-        if (newTasks.length > 0) {
-          // .select() returns the rows that actually landed — the DB scoping
-          // trigger may legitimately skip rows, so don't trust newTasks.length
-          const { data: inserted, error: insertError } = await supabase
-            .from('task_instances')
-            .insert(newTasks)
-            .select('id');
-
-          if (insertError) throw insertError;
-          totalCreated += inserted?.length ?? 0;
-        }
+        const { data, error } = await supabase.rpc('generate_scheduled_tasks', { p_building: buildingId, p_template: template.id });
+        if (error) throw new Error(error.message);
+        totalCreated += data ?? 0;
       }
 
       if (totalCreated > 0) {

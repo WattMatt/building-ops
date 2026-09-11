@@ -1,43 +1,12 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
-import { escapeText, loadBranding, renderEmail } from "../_shared/email.ts";
+import { escapeText } from "../_shared/email.ts";
 import { corsHeaders } from "../_shared/cors.ts";
-
-const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-const APP_URL = (Deno.env.get("APP_URL") ?? "https://buildingops.app").replace(/\/+$/, "");
-
-async function sendEmail(from: string, to: string[], subject: string, html: string) {
-  const res = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${RESEND_API_KEY}`,
-    },
-    body: JSON.stringify({
-      from,
-      to,
-      subject,
-      html,
-    }),
-  });
-
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`Resend API error: ${error}`);
-  }
-
-  return res.json();
-}
+import { createNotifications } from "../_shared/notify.ts";
 
 const UUID_RE = /^[0-9a-f-]{36}$/i;
 
 const SUBJECT_NAME_MAX = 120;
-
-/** Organization name is operator-supplied; keep it to characters that are safe
- *  in the display-name part of an email `From` header. */
-function senderName(name: string): string {
-  return name.replace(/[^A-Za-z0-9 &.-]/g, "").trim().slice(0, 64) || "Building Ops";
-}
 
 /**
  * `submissionId` is the only field read from the body. The recipient, form
@@ -119,39 +88,18 @@ serve(async (req: Request): Promise<Response> => {
     }
     if (!submission) return json({ error: "Submission not found" }, 404);
 
-    const status = submission.status;
+    const status = submission.status as string;
     console.log(`Processing review notification for submission: ${submission.id}, status: ${status}`);
 
     // Only send notifications for approve/reject, not for "reviewed"
     if (status !== "approved" && status !== "rejected") {
       console.log(`Status is '${status}', no notification needed`);
-      return json({ success: true, notified: 0, message: "No notification for this status" });
+      return json({ success: true, inserted: 0, emailed: 0, pushed: 0, skipped: 0, failed: 0, message: "No notification for this status" });
     }
 
     if (!submission.submitted_by) {
       console.log("Submission has no submitter");
-      return json({ success: true, notified: 0, message: "No submitter to notify" });
-    }
-
-    // Get the submitter's email from profiles
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("email, full_name")
-      .eq("id", submission.submitted_by)
-      .maybeSingle();
-
-    if (profileError) {
-      console.error("Error fetching submitter profile:", profileError);
-      return json({ error: "Unable to send notification" }, 500);
-    }
-    if (!profile) {
-      console.log("Submitter profile not found");
-      return json({ success: false, notified: 0, message: "Submitter profile not found" });
-    }
-
-    if (!profile.email) {
-      console.log("Submitter has no email address");
-      return json({ success: true, notified: 0, message: "Submitter has no email" });
+      return json({ success: true, inserted: 0, emailed: 0, pushed: 0, skipped: 0, failed: 0, message: "No submitter to notify" });
     }
 
     // Never fall back to the reviewer's email address — this body goes to the
@@ -178,22 +126,29 @@ serve(async (req: Request): Promise<Response> => {
     // Format the review time
     const formattedTime = formatTime(submission.reviewed_at);
 
-    const isApproved = status === 'approved';
-    const statusLabel = isApproved ? 'Approved' : 'Rejected';
-    const statusColor = isApproved ? '#16a34a' : '#dc2626';
+    const isApproved = status === "approved";
+    const statusLabel = isApproved ? "Approved" : "Rejected";
+    const statusColor = isApproved ? "#16a34a" : "#dc2626";
 
-    const branding = await loadBranding(supabase);
-
-    // Send email notification
-    const emailResponse = await sendEmail(
-      `${senderName(branding.appName)} <notifications@buildingops.app>`,
-      [profile.email],
-      `Form ${statusLabel}: ${subjectFormName}`,
-      renderEmail({
-        branding,
-        heading: `Form ${statusLabel}`,
-        greeting: `Hi ${profile.full_name || 'there'},`,
-        bodyHtml: `
+    // One sender for both the inbox row and the email: the reviewer notes ride as the
+    // body (so the inbox row carries them) and the details table as detailHtml.
+    const result = await createNotifications(supabase, {
+      recipients: [submission.submitted_by as string],
+      // The actor is whoever the row says reviewed it — the same person reviewerName was
+      // read for. Using caller.id would mislabel a review the caller only re-notified for.
+      actorId: reviewerId,
+      actorName: reviewerName,
+      kind: "form_reviewed",
+      entityType: "form_submission",
+      entityId: submission.id as string,
+      buildingId: (submission.building_id as string | null) ?? null,
+      title: `Form ${status}: ${formName}`,
+      body: reviewNotes,
+      // Named in the email so the notes read as the reviewer's words, not more boilerplate.
+      bodyLabel: reviewNotes ? "Reviewer notes" : undefined,
+      url: "/forms",
+      subject: `Form ${statusLabel}: ${subjectFormName}`,
+      detailHtml: `
           <p style="margin:0 0 16px;">
             Your form submission has been <strong style="color: ${statusColor};">${escapeText(status)}</strong>.
           </p>
@@ -208,7 +163,7 @@ serve(async (req: Request): Promise<Response> => {
                 <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Building:</td>
                 <td style="padding: 8px 0; color: #111827; font-size: 14px; font-weight: 600;">${escapeText(buildingName)}</td>
               </tr>
-              ` : ''}
+              ` : ""}
               <tr>
                 <td style="padding: 8px 0; color: #6b7280; font-size: 14px;">Reviewed by:</td>
                 <td style="padding: 8px 0; color: #111827; font-size: 14px;">${escapeText(reviewerName)}</td>
@@ -218,25 +173,13 @@ serve(async (req: Request): Promise<Response> => {
                 <td style="padding: 8px 0; color: #111827; font-size: 14px;">${escapeText(formattedTime)}</td>
               </tr>
             </table>
-          </div>
-          ${reviewNotes ? `
-          <div style="background-color: ${isApproved ? '#f0fdf4' : '#fef2f2'}; border-left: 4px solid ${statusColor}; padding: 16px; border-radius: 4px; margin-bottom: 16px;">
-            <p style="color: #374151; font-size: 14px; font-weight: 600; margin: 0 0 8px;">Reviewer Notes:</p>
-            <p style="color: #4b5563; font-size: 14px; margin: 0; white-space: pre-wrap;">${escapeText(reviewNotes)}</p>
-          </div>
-          ` : ''}`,
-        ctaText: "View full details",
-        ctaUrl: `${APP_URL}/forms`,
-      })
-    );
-
-    console.log("Review notification email sent successfully:", emailResponse);
-
-    return json({
-      success: true,
-      notified: 1,
-      message: "Review notification sent",
+          </div>`,
+      ctaText: "View form",
     });
+
+    console.log("Review notification processed:", result);
+
+    return json({ success: true, ...result });
 
   } catch (error) {
     console.error("Error in notify-form-review:", error);

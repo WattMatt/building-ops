@@ -21,6 +21,9 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
       "@typescript-eslint/no-unused-vars": "warn",
+      // A dropped wrapper call once left `(await query, 'label')` — a comma expression
+      // that evaluated to the label string and crashed every CM PDF export. Ban it.
+      "no-sequences": "error",
     },
   },
 );

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,31 +38,22 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Plus, MoreVertical, Edit, Trash2, Search, Wrench, AlertTriangle, CheckCircle, Clock, History, Upload, Download } from 'lucide-react';
+import { Plus, MoreVertical, Edit, Trash2, Search, Wrench, AlertTriangle, CheckCircle, Clock, History, Upload } from 'lucide-react';
 import { toast } from 'sonner';
-import * as XLSX from 'xlsx';
+import { ExportCsvButton } from '@/components/ui/export-csv-button';
+import { csvText, type CsvColumn } from '@/lib/exportCsv';
+import { EvidencePackItems } from '@/components/evidence/EvidencePackMenu';
+import { parseCost } from '@/lib/money';
 import { format } from 'date-fns';
 import AssetServiceHistoryDialog from './AssetServiceHistoryDialog';
 import { AssetImportDialog } from '@/components/import';
 
-interface Asset {
-  id: string;
-  name: string;
-  category: string;
-  location: string | null;
-  manufacturer: string | null;
-  model: string | null;
-  serial_number: string | null;
-  installation_date: string | null;
-  last_service_date: string | null;
-  next_service_date: string | null;
-  status: string;
-  notes: string | null;
-  created_at: string;
-}
+type Asset = Tables<'building_assets'>;
 
 interface AssetsTabProps {
   buildingId: string;
+  /** Printed on the evidence-pack cover. Threaded from the building page like every other tab. */
+  buildingName: string;
 }
 
 const ASSET_CATEGORIES = [
@@ -82,7 +74,33 @@ const ASSET_STATUSES = [
   { value: 'out_of_service', label: 'Out of Service', color: 'destructive' },
 ];
 
-export default function AssetsTab({ buildingId }: AssetsTabProps) {
+const assetCategoryLabel = (value: string | null) => ASSET_CATEGORIES.find((c) => c.value === value)?.label || value || '-';
+const assetStatusInfo = (value: string | null) => ASSET_STATUSES.find((s) => s.value === value) || ASSET_STATUSES[0];
+
+/** The register as a spreadsheet: the words on the chips, not the stored enum values. */
+export const ASSET_CSV_COLUMNS: CsvColumn<Asset>[] = [
+  { key: 'name', header: 'Name' },
+  { key: 'category', header: 'Category', format: (v) => assetCategoryLabel(v as string | null) },
+  { key: 'location', header: 'Location', format: csvText },
+  { key: 'manufacturer', header: 'Manufacturer', format: csvText },
+  { key: 'model', header: 'Model', format: csvText },
+  { key: 'serial_number', header: 'Serial Number', format: csvText },
+  { key: 'installation_date', header: 'Installation Date', format: csvText },
+  { key: 'last_service_date', header: 'Last Service Date', format: csvText },
+  { key: 'next_service_date', header: 'Next Service Date', format: csvText },
+  { key: 'status', header: 'Status', format: (v) => assetStatusInfo(v as string | null).label },
+  { key: 'notes', header: 'Notes', format: csvText },
+];
+
+/** '' → null; a non-negative whole number → number; anything else → undefined (rejected). */
+function parseYears(text: string): number | null | undefined {
+  const t = text.trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isInteger(n) && n >= 0 ? n : undefined;
+}
+
+export default function AssetsTab({ buildingId, buildingName }: AssetsTabProps) {
   const { isAdminOrManager } = useAuth();
   const [assets, setAssets] = useState<Asset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -106,6 +124,13 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
   const [nextServiceDate, setNextServiceDate] = useState('');
   const [status, setStatus] = useState('operational');
   const [notes, setNotes] = useState('');
+  // Cost + warranty (spec §8): kept as strings while editing; parsed on save.
+  const [purchaseDate, setPurchaseDate] = useState('');
+  const [purchasePrice, setPurchasePrice] = useState('');
+  const [replacementCost, setReplacementCost] = useState('');
+  const [warrantyExpiry, setWarrantyExpiry] = useState('');
+  const [warrantyProvider, setWarrantyProvider] = useState('');
+  const [expectedLifespanYears, setExpectedLifespanYears] = useState('');
 
   useEffect(() => {
     fetchAssets();
@@ -141,13 +166,19 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
     setNextServiceDate('');
     setStatus('operational');
     setNotes('');
+    setPurchaseDate('');
+    setPurchasePrice('');
+    setReplacementCost('');
+    setWarrantyExpiry('');
+    setWarrantyProvider('');
+    setExpectedLifespanYears('');
     setEditingAsset(null);
   };
 
   const openEditDialog = (asset: Asset) => {
     setEditingAsset(asset);
     setName(asset.name);
-    setCategory(asset.category);
+    setCategory(asset.category ?? '');
     setLocation(asset.location || '');
     setManufacturer(asset.manufacturer || '');
     setModel(asset.model || '');
@@ -155,8 +186,14 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
     setInstallationDate(asset.installation_date || '');
     setLastServiceDate(asset.last_service_date || '');
     setNextServiceDate(asset.next_service_date || '');
-    setStatus(asset.status);
+    setStatus(asset.status ?? 'operational');
     setNotes(asset.notes || '');
+    setPurchaseDate(asset.purchase_date || '');
+    setPurchasePrice(asset.purchase_price == null ? '' : String(asset.purchase_price));
+    setReplacementCost(asset.replacement_cost == null ? '' : String(asset.replacement_cost));
+    setWarrantyExpiry(asset.warranty_expiry || '');
+    setWarrantyProvider(asset.warranty_provider || '');
+    setExpectedLifespanYears(asset.expected_lifespan_years == null ? '' : String(asset.expected_lifespan_years));
     setIsDialogOpen(true);
   };
 
@@ -165,6 +202,18 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
 
     if (!name.trim() || !category) {
       toast.error('Name and category are required');
+      return;
+    }
+
+    const price = parseCost(purchasePrice);
+    const replacement = parseCost(replacementCost);
+    const lifespan = parseYears(expectedLifespanYears);
+    if (price === undefined || replacement === undefined) {
+      toast.error('Purchase price and replacement cost must be amounts of R 0 or more');
+      return;
+    }
+    if (lifespan === undefined) {
+      toast.error('Expected lifespan must be a whole number of years');
       return;
     }
 
@@ -184,6 +233,12 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
         next_service_date: nextServiceDate || null,
         status,
         notes: notes.trim() || null,
+        purchase_date: purchaseDate || null,
+        purchase_price: price,
+        replacement_cost: replacement,
+        warranty_expiry: warrantyExpiry || null,
+        warranty_provider: warrantyProvider.trim() || null,
+        expected_lifespan_years: lifespan,
       };
 
       if (editingAsset) {
@@ -206,9 +261,9 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
       setIsDialogOpen(false);
       resetForm();
       fetchAssets();
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error saving asset:', error);
-      toast.error(error.message || 'Failed to save asset');
+      toast.error((error instanceof Error && error.message) || 'Failed to save asset');
     } finally {
       setSaving(false);
     }
@@ -232,56 +287,19 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
     }
   };
 
-  const handleExport = (exportFormat: 'csv' | 'xlsx') => {
-    if (assets.length === 0) {
-      toast.error('No assets to export');
-      return;
-    }
-
-    const exportData = assets.map((asset) => ({
-      'Name': asset.name,
-      'Category': getCategoryLabel(asset.category),
-      'Location': asset.location || '',
-      'Manufacturer': asset.manufacturer || '',
-      'Model': asset.model || '',
-      'Serial Number': asset.serial_number || '',
-      'Installation Date': asset.installation_date || '',
-      'Last Service Date': asset.last_service_date || '',
-      'Next Service Date': asset.next_service_date || '',
-      'Status': getStatusInfo(asset.status).label,
-      'Notes': asset.notes || '',
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Assets');
-
-    if (exportFormat === 'csv') {
-      XLSX.writeFile(wb, 'assets_export.csv', { bookType: 'csv' });
-    } else {
-      XLSX.writeFile(wb, 'assets_export.xlsx');
-    }
-    toast.success(`Exported ${assets.length} assets`);
-  };
-
   const filteredAssets = assets.filter((asset) => {
     const matchesSearch =
       asset.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      asset.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (asset.category?.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (asset.location?.toLowerCase().includes(searchQuery.toLowerCase()));
     const matchesCategory = categoryFilter === 'all' || asset.category === categoryFilter;
     return matchesSearch && matchesCategory;
   });
 
-  const getCategoryLabel = (value: string) => {
-    return ASSET_CATEGORIES.find((c) => c.value === value)?.label || value;
-  };
+  const getCategoryLabel = assetCategoryLabel;
+  const getStatusInfo = assetStatusInfo;
 
-  const getStatusInfo = (statusValue: string) => {
-    return ASSET_STATUSES.find((s) => s.value === statusValue) || ASSET_STATUSES[0];
-  };
-
-  const getStatusIcon = (statusValue: string) => {
+  const getStatusIcon = (statusValue: string | null) => {
     switch (statusValue) {
       case 'operational':
         return <CheckCircle className="h-3 w-3" />;
@@ -334,22 +352,8 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
         </div>
         {isAdminOrManager && (
           <div className="flex items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline">
-                  <Download className="w-4 h-4 mr-2" />
-                  Export
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => handleExport('xlsx')}>
-                  Export as Excel (.xlsx)
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleExport('csv')}>
-                  Export as CSV
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            {/* Exactly the rows on screen after the search and the category filter. */}
+            <ExportCsvButton rows={filteredAssets} columns={ASSET_CSV_COLUMNS} filename="assets" />
             <Button variant="outline" onClick={() => setIsImportDialogOpen(true)}>
               <Upload className="w-4 h-4 mr-2" />
               Import
@@ -490,6 +494,84 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="purchase-date">Purchase date</Label>
+                    <Input
+                      id="purchase-date"
+                      className="h-11"
+                      type="date"
+                      value={purchaseDate}
+                      onChange={(e) => setPurchaseDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="purchase-price">Purchase price (R)</Label>
+                    <Input
+                      id="purchase-price"
+                      className="h-11"
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      step="0.01"
+                      placeholder="0"
+                      value={purchasePrice}
+                      onChange={(e) => setPurchasePrice(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="replacement-cost">Replacement cost (R)</Label>
+                    <Input
+                      id="replacement-cost"
+                      className="h-11"
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      step="0.01"
+                      placeholder="0"
+                      value={replacementCost}
+                      onChange={(e) => setReplacementCost(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="warranty-expiry">Warranty expiry</Label>
+                    <Input
+                      id="warranty-expiry"
+                      className="h-11"
+                      type="date"
+                      value={warrantyExpiry}
+                      onChange={(e) => setWarrantyExpiry(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="warranty-provider">Warranty provider</Label>
+                    <Input
+                      id="warranty-provider"
+                      className="h-11"
+                      placeholder="e.g., Carrier SA"
+                      value={warrantyProvider}
+                      onChange={(e) => setWarrantyProvider(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="expected-lifespan">Expected lifespan (years)</Label>
+                    <Input
+                      id="expected-lifespan"
+                      className="h-11"
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      step={1}
+                      placeholder="e.g., 15"
+                      value={expectedLifespanYears}
+                      onChange={(e) => setExpectedLifespanYears(e.target.value)}
+                    />
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   <Label htmlFor="notes">Notes</Label>
                   <Textarea
@@ -601,6 +683,7 @@ export default function AssetsTab({ buildingId }: AssetsTabProps) {
                             <History className="h-4 w-4 mr-2" />
                             Service History
                           </DropdownMenuItem>
+                          <EvidencePackItems kind="asset" id={asset.id} buildingName={buildingName} />
                           {isAdminOrManager && (
                             <>
                               <DropdownMenuItem onClick={() => openEditDialog(asset)}>

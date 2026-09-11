@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { generateRandomAvatar } from '@/lib/avatars';
+import type { Tables } from '@/integrations/supabase/types';
+import { queryClient } from '@/lib/queryClient';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,21 +25,18 @@ import {
 import { AvatarPicker } from '@/components/avatar/AvatarPicker';
 import { ImageCropper } from '@/components/avatar/ImageCropper';
 import { PasswordStrengthMeter } from '@/components/PasswordStrengthMeter';
+import { PushSwitch } from '@/components/profile/PushSwitch';
+import { SubscribeCard } from '@/components/calendar/SubscribeCard';
 import { gatePassword } from '@/lib/password-strength';
-import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CheckSquare, Upload, Lock, Eye, EyeOff, Trash2, Crop } from 'lucide-react';
+import { User, Loader2, Mail, Phone, Camera, Bell, AlertTriangle, Calendar, CalendarDays, CheckSquare, Upload, Lock, Eye, EyeOff, Trash2, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 
-interface ProfileData {
-  full_name: string | null;
-  avatar_url: string | null;
-  phone: string | null;
-  email: string;
-  email_notifications: boolean | null;
-  overdue_alerts: boolean | null;
-  daily_digest: boolean | null;
-  issue_updates: boolean | null;
-  task_reminders: boolean | null;
-}
+type ProfileData = Pick<
+  Tables<'profiles'>,
+  | 'full_name' | 'avatar_url' | 'phone' | 'email'
+  | 'email_notifications' | 'overdue_alerts' | 'daily_digest' | 'issue_updates' | 'task_reminders'
+  | 'geotag_photos'
+>;
 
 export default function Profile() {
   const { user, signOut } = useAuth();
@@ -52,6 +50,7 @@ export default function Profile() {
   const [dailyDigest, setDailyDigest] = useState(false);
   const [issueUpdates, setIssueUpdates] = useState(true);
   const [taskReminders, setTaskReminders] = useState(true);
+  const [geotagPhotos, setGeotagPhotos] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingNotifications, setIsSavingNotifications] = useState(false);
@@ -69,59 +68,74 @@ export default function Profile() {
   const [imageToCrop, setImageToCrop] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const userId = user?.id;
+
   useEffect(() => {
-    if (user) {
-      fetchProfile();
-    }
-  }, [user]);
+    if (!userId) return;
 
-  const fetchProfile = async () => {
-    if (!user) return;
+    let cancelled = false;
 
-    setIsLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('full_name, avatar_url, phone, email, email_notifications, overdue_alerts, daily_digest, issue_updates, task_reminders')
-        .eq('id', user.id)
-        .maybeSingle();
+    const fetchProfile = async () => {
+      setIsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('full_name, avatar_url, phone, email, email_notifications, overdue_alerts, daily_digest, issue_updates, task_reminders, geotag_photos')
+          .eq('id', userId)
+          .maybeSingle();
 
-      if (error) throw error;
+        if (error) throw error;
 
-      if (data) {
-        setProfile(data);
-        setFullName(data.full_name || '');
-        setPhone(data.phone || '');
-        setAvatarUrl(data.avatar_url);
-        setEmailNotifications(data.email_notifications ?? true);
-        setOverdueAlerts(data.overdue_alerts ?? true);
-        setDailyDigest(data.daily_digest ?? false);
-        setIssueUpdates(data.issue_updates ?? true);
-        setTaskReminders(data.task_reminders ?? true);
+        if (data && !cancelled) {
+          setProfile(data);
+          setFullName(data.full_name || '');
+          setPhone(data.phone || '');
+          setAvatarUrl(data.avatar_url);
+          setEmailNotifications(data.email_notifications ?? true);
+          setOverdueAlerts(data.overdue_alerts ?? true);
+          setDailyDigest(data.daily_digest ?? false);
+          setIssueUpdates(data.issue_updates ?? true);
+          setTaskReminders(data.task_reminders ?? true);
+          setGeotagPhotos(data.geotag_photos ?? false);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          if (import.meta.env.DEV) console.error('Error fetching profile:', error);
+          toast.error('Failed to load profile');
+        }
+      } finally {
+        if (!cancelled) setIsLoading(false);
       }
-    } catch (error) {
-      if (import.meta.env.DEV) console.error('Error fetching profile:', error);
-      toast.error('Failed to load profile');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    };
+
+    fetchProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   const handleSaveProfile = async () => {
     if (!user) return;
 
     setIsSaving(true);
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
         .update({
           full_name: fullName.trim() || null,
           phone: phone.trim() || null,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', user.id);
+        .eq('id', user.id)
+        .select('id');
 
       if (error) throw error;
+      // An RLS-denied update succeeds with zero rows — treat that as a failure.
+      if (!data || data.length === 0) {
+        toast.error('Failed to save profile');
+        return;
+      }
       toast.success('Profile updated successfully');
     } catch (error) {
       if (import.meta.env.DEV) console.error('Error saving profile:', error);
@@ -136,7 +150,7 @@ export default function Profile() {
 
     setIsSavingNotifications(true);
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
         .update({
           email_notifications: emailNotifications,
@@ -144,12 +158,21 @@ export default function Profile() {
           daily_digest: dailyDigest,
           issue_updates: issueUpdates,
           task_reminders: taskReminders,
+          geotag_photos: geotagPhotos,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', user.id);
+        .eq('id', user.id)
+        .select('id');
 
       if (error) throw error;
-      toast.success('Notification preferences saved');
+      // An RLS-denied update succeeds with zero rows — treat that as a failure.
+      if (!data || data.length === 0) {
+        toast.error('Failed to save notification preferences');
+        return;
+      }
+      toast.success('Preferences saved');
+      // PhotoCapture reads this flag through a cached query, not a realtime channel.
+      queryClient.invalidateQueries({ queryKey: ['profile', 'geotag'] });
     } catch (error) {
       if (import.meta.env.DEV) console.error('Error saving notifications:', error);
       toast.error('Failed to save notification preferences');
@@ -354,15 +377,6 @@ export default function Profile() {
     }
   };
 
-  const handleGenerateRandom = async () => {
-    if (!user) return;
-    // Randomly select a style from available cartoon styles
-    const styles: Array<'adventurer' | 'lorelei' | 'notionists' | 'fun-emoji'> = ['adventurer', 'lorelei', 'notionists', 'fun-emoji'];
-    const randomStyle = styles[Math.floor(Math.random() * styles.length)];
-    const randomUrl = generateRandomAvatar(user.id + Date.now(), randomStyle);
-    await handleSelectDefaultAvatar(randomUrl);
-  };
-
   const triggerFileUpload = () => {
     fileInputRef.current?.click();
   };
@@ -543,25 +557,29 @@ export default function Profile() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Bell className="h-5 w-5" />
-            Notification Preferences
+            Notifications
           </CardTitle>
           <CardDescription>
-            Choose how and when you want to be notified
+            Alerts below also appear in your inbox in the app. These switches control email and push.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-4">
+            <PushSwitch userId={userId} />
+            <Separator />
+
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label className="flex items-center gap-2">
+                <Label htmlFor="notify-email-all" className="flex items-center gap-2">
                   <Mail className="h-4 w-4" />
-                  Email Notifications
+                  Send me emails
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  Receive notifications via email
+                  Turn this off to stop every email; the inbox still updates.
                 </p>
               </div>
               <Switch
+                id="notify-email-all"
                 checked={emailNotifications}
                 onCheckedChange={setEmailNotifications}
               />
@@ -571,51 +589,16 @@ export default function Profile() {
 
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label className="flex items-center gap-2">
+                <Label htmlFor="notify-issues" className="flex items-center gap-2">
                   <AlertTriangle className="h-4 w-4" />
-                  Overdue Task Alerts
+                  Issues and reports
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  Get alerted when tasks become overdue
+                  Assignments, comments, mentions, report reviews, and form reviews.
                 </p>
               </div>
               <Switch
-                checked={overdueAlerts}
-                onCheckedChange={setOverdueAlerts}
-              />
-            </div>
-
-            <Separator />
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4" />
-                  Daily Digest
-                </Label>
-                <p className="text-sm text-muted-foreground">
-                  Receive a daily summary of pending tasks
-                </p>
-              </div>
-              <Switch
-                checked={dailyDigest}
-                onCheckedChange={setDailyDigest}
-              />
-            </div>
-
-            <Separator />
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4" />
-                  Issue Updates
-                </Label>
-                <p className="text-sm text-muted-foreground">
-                  Get notified when issues you reported or are assigned to are updated
-                </p>
-              </div>
-              <Switch
+                id="notify-issues"
                 checked={issueUpdates}
                 onCheckedChange={setIssueUpdates}
               />
@@ -625,18 +608,71 @@ export default function Profile() {
 
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
-                <Label className="flex items-center gap-2">
+                <Label htmlFor="notify-tasks" className="flex items-center gap-2">
                   <CheckSquare className="h-4 w-4" />
-                  Task Reminders
+                  Tasks and sign-offs
                 </Label>
                 <p className="text-sm text-muted-foreground">
-                  Receive reminders for upcoming task deadlines
+                  Tasks and sign-offs assigned to me, reminders, and when a sign-off I asked for is done.
                 </p>
               </div>
               <Switch
+                id="notify-tasks"
                 checked={taskReminders}
                 onCheckedChange={setTaskReminders}
               />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="notify-overdue" className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4" />
+                  Overdue and expiring
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Overdue sign-offs, expiring documents, and asset service due.
+                </p>
+              </div>
+              <Switch
+                id="notify-overdue"
+                checked={overdueAlerts}
+                onCheckedChange={setOverdueAlerts}
+              />
+            </div>
+
+            <Separator />
+
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="notify-digest" className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4" />
+                  Daily digest
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  One email each morning with what's on my day.
+                </p>
+              </div>
+              <Switch
+                id="notify-digest"
+                checked={dailyDigest}
+                onCheckedChange={setDailyDigest}
+              />
+            </div>
+
+            <Separator />
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label htmlFor="photo-geotag" className="flex items-center gap-2">
+                  <MapPin className="h-4 w-4" />
+                  Location on photos
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Adds the location to the caption on photos you take. Off by default; nothing is stored separately.
+                </p>
+              </div>
+              <Switch id="photo-geotag" checked={geotagPhotos} onCheckedChange={setGeotagPhotos} />
             </div>
           </div>
 
@@ -652,6 +688,22 @@ export default function Profile() {
               )}
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Calendar Subscription Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CalendarDays className="h-5 w-5" />
+            Calendar subscription
+          </CardTitle>
+          <CardDescription>
+            See your tasks, deadlines and inspections in Outlook, Google Calendar or Apple Calendar.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SubscribeCard buildingId={null} />
         </CardContent>
       </Card>
 
