@@ -10,14 +10,19 @@
  *   QR link)  →  POST multipart with one photo  →  issue row (source, reporter, reference,
  *   assigned_to, photo under intake/<building>/)  →  storage object exists  →  inbox rows kind
  *   issue_reported for the admin and the assignee  →  token counters  →  validation 400s
- *   →  honeypot 201 that stores nothing  →  429 on the 6th post from this IP+token  →  429 on the
- *   21st post for the token  →  recovery after the counters are cleared  →  disabled token 404
- *   →  flag off 404  →  405 for PUT.
+ *   →  honeypot 201 that stores nothing  →  an address allowance spent on purpose, then 429  →  429
+ *   on the 21st post for the token  →  recovery after the counters are cleared  →  disabled token
+ *   404  →  flag off 404  →  405 for PUT.
  *
  * R4c review additions: the token rides on `?t=` for POST too (a POST without it is a 404 and the
- * body is never parsed), a POST that declares no content-length is a 411, rejected posts never
- * spend the token's 20/hour, and the GET lists shop NUMBERS only until
- * organizations.settings.intake.show_shop_names is true.
+ * body is never parsed), a POST declaring more than 16 MB is refused before parsing, rejected posts
+ * never spend the token's 20/hour, the address bucket is keyed on address AND token, and the GET
+ * lists shop NUMBERS only until organizations.settings.intake.show_shop_names is true.
+ *
+ * Rate limits and run order: the address bucket allows five posts an hour and a full run makes far
+ * more than five against one token, so every probe that needs a known allowance calls
+ * `resetAddressBuckets()` itself rather than relying on how many posts happened to come before it.
+ * The one probe that must find a spent bucket spends it explicitly, five posts in a row, first.
  *
  *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... SUPABASE_ANON_KEY=... node scripts/intake-smoke.mjs
  *
@@ -114,18 +119,34 @@ async function post(fd, { token = fd.get('t'), init = {} } = {}) {
   let json = null; try { json = JSON.parse(text); } catch { /* not json */ }
   return { status: res.status, headers: res.headers, text, json };
 }
-/** The bucket row the token's own 20/hour allowance lives in, or null while it has not been spent. */
+/** The bucket row the token's own 20/hour allowance lives in, or 0 while it has not been spent. */
 async function tokenBucketCount(tokenId) {
   const rows = await svcSelect('intake_rate', `bucket=eq.t:${tokenId}&select=count`);
   return rows[0]?.count ?? 0;
 }
+/**
+ * Clear every address-keyed bucket (the `attempts` bucket and every address+token bucket).
+ *
+ * Their keys are sha256(INTAKE_IP_SALT ':' address [':' token]) — the smoke knows neither the salt
+ * nor which address the gateway reports, and the function now prefers a platform peer header and
+ * otherwise takes the LAST forwarded-for hop, so a probe cannot spoof its way to a fresh bucket.
+ * Clearing with the service role is the only way to give a probe a known allowance. Every probe
+ * that must start clean calls this itself, so the run order carries no hidden state.
+ */
+const resetAddressBuckets = () => svcDelete('intake_rate', 'bucket=like.ip:*');
 
 let orgId = null, orgSettingsBefore = null, building = null;
+/**
+ * Submissions actually STORED under the main token so far. The token's 20/hour is spent by nothing
+ * else, so every assertion about its bucket compares against this counter rather than against a
+ * number that only happens to be right at one point in the run.
+ */
+let storedForToken = 0;
 try {
   console.log(`intake-smoke vs ${URL_BASE} (run ${RUN})`);
 
   // ── setup ──
-  await svcDelete('intake_rate', 'bucket=like.ip:*');   // a re-run inside the hour must not open on a 429
+  await resetAddressBuckets();   // a re-run inside the hour must not open on a 429
   building = (await svcInsert('buildings', { name: `ZZTEST-INTAKE-${RUN}` })).id;
   cleanup.push(['buildings', `id=eq.${building}`]);
   const admin = await persona('admin', 'admin');
@@ -166,23 +187,39 @@ try {
   assert('GET: shop names appear once settings.intake.show_shop_names is true', named.shops?.some((s) => s.shopNumber === '12' && s.shopName === `ZZTEST Shop ${RUN}`), JSON.stringify(named.shops ?? []).slice(0, 200));
   await svcPatch('organizations', `id=eq.${orgId}`, { settings: withFlag(true) });
 
-  // ── 1b. POST guards that run BEFORE the body is parsed (neither spends the IP+token allowance) ──
+  // ── 1b. POST guards that run BEFORE the body is parsed ──
+  // None of these may cost the token its 20/hour, and the 404s never reach the address bucket
+  // either (the token is resolved first), so this block leaves the allowances where it found them.
+  //
+  // Each probe sends a body that WOULD produce field errors if it were parsed, so an answer that
+  // names no fields is the evidence the guard ran first.
+  //
+  // The function's two body-shape guards — 411 for a POST that declares no content-length, 413 for
+  // one declaring more than 16 MB — have no assertion here and must not have one re-added. Neither
+  // is reachable through Supabase's gateway, measured against staging on 2026-09-11:
+  //   * a chunked POST arrives at the function WITH a content-length (the gateway buffers the
+  //     request and fills it in), so it is parsed normally and answers 400 with field errors. That
+  //     is the right outcome for real traffic — no legitimate POST will ever see a 411.
+  //   * a POST that declares 17 MB without sending it is reset by the edge (ECONNRESET) before the
+  //     function answers, and one that really sends 17/20 MB is refused by the edge itself with a
+  //     502/504 after 34 s/160 s. The function's own 413 never gets a chance to fire.
+  // Both stay in the function as defence in depth for any path that does not go through the gateway.
+  await resetAddressBuckets();
   let p = await post(formData(tokenRow.token), { token: null });
   assert('POST with no ?t=: 404, body never parsed', p.status === 404 && p.json?.error === 'not_found', `HTTP ${p.status} ${p.text.slice(0, 120)}`);
   p = await post(formData(mintToken()), { token: mintToken() });
-  assert('POST with an unknown token: 404', p.status === 404, `HTTP ${p.status} ${p.text.slice(0, 120)}`);
-  p = await post(new FormData(), {
+  assert('POST with an unknown token: 404', p.status === 404 && !p.json?.fields, `HTTP ${p.status} ${p.text.slice(0, 120)}`);
+  p = await post(null, {
     token: tokenRow.token,
-    init: {
-      body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('--x--\r\n')); c.close(); } }),
-      headers: { 'content-type': 'multipart/form-data; boundary=x' },
-      duplex: 'half',
-    },
+    init: { body: 'title=&description=&name=', headers: { 'content-type': 'application/x-www-form-urlencoded' } },
   });
-  assert('POST with a chunked body (no content-length): 411, body never parsed', p.status === 411, `HTTP ${p.status} ${p.text.slice(0, 120)}`);
+  assert('POST that is not multipart: 400 invalid[body], no field errors (never parsed)', p.status === 400 && p.json?.error === 'invalid' && JSON.stringify(p.json?.fields) === '["body"]', `HTTP ${p.status} ${p.text.slice(0, 120)}`);
+  assert('the pre-parse guards cost the token nothing', await tokenBucketCount(tokenRow.id) === 0, `t:${tokenRow.id} count=${await tokenBucketCount(tokenRow.id)}`);
 
   // ── 2. POST with a photo ──
+  await resetAddressBuckets();
   p = await post(formData(tokenRow.token, {}, [{ bytes: JPEG_1PX, type: 'image/jpeg', name: 'light.jpg' }]));
+  if (p.status === 201) storedForToken++;
   assert('POST: 201', p.status === 201, `HTTP ${p.status} ${p.text.slice(0, 200)}`);
   const reference = p.json?.reference;
   assert('POST: reference FO-XXXXXX and nothing else', REFERENCE_RE.test(reference ?? '') && Object.keys(p.json ?? {}).length === 1, p.text.slice(0, 120));
@@ -204,7 +241,8 @@ try {
   const tok = (await svcSelect('intake_tokens', `id=eq.${tokenRow.id}&select=submissions_count,last_used_at`))[0];
   assert('token: submissions_count 1, last_used_at set', tok?.submissions_count === 1 && !!tok?.last_used_at, JSON.stringify(tok));
 
-  // ── 3. validation (these count against the limits: 2, 3, 4 of 5 for this IP) ──
+  // ── 3. validation ──
+  await resetAddressBuckets();
   p = await post(formData(tokenRow.token, { title: '' }));
   assert('POST missing title: 400 invalid[title]', p.status === 400 && p.json?.error === 'invalid' && p.json.fields?.includes('title'), `HTTP ${p.status} ${p.text.slice(0, 120)}`);
   p = await post(formData(tokenRow.token, { shop_number: '999' }));
@@ -212,21 +250,34 @@ try {
   p = await post(formData(tokenRow.token, {}, Array.from({ length: 4 }, (_, i) => ({ bytes: JPEG_1PX, type: 'image/jpeg', name: `p${i}.jpg` }))));
   assert('POST four photos: 400 invalid[photos]', p.status === 400 && p.json?.fields?.includes('photos'), `HTTP ${p.status} ${p.text.slice(0, 120)}`);
 
-  // ── 4. honeypot (5 of 5) ──
+  // ── 4. honeypot ──
+  await resetAddressBuckets();
   p = await post(formData(tokenRow.token, { website: 'http://spam.example' }));
   assert('honeypot: 201 with a reference', p.status === 201 && REFERENCE_RE.test(p.json?.reference ?? ''), `HTTP ${p.status} ${p.text.slice(0, 120)}`);
   assert('honeypot: nothing stored', (await svcSelect('issues', `reference=eq.${p.json?.reference}&select=id`)).length === 0, 'an issue row exists for the honeypot reference');
-  assert('honeypot: token counter untouched', (await svcSelect('intake_tokens', `id=eq.${tokenRow.id}&select=submissions_count`))[0]?.submissions_count === 1, 'submissions_count moved');
-  // The token is printed on a poster: only the ONE stored submission may have spent its allowance,
-  // never the three rejected posts, the honeypot, the 404s or the 411.
-  assert('token allowance: spent once, by the stored submission only', await tokenBucketCount(tokenRow.id) === 1, `t:${tokenRow.id} count=${await tokenBucketCount(tokenRow.id)}`);
+  assert('honeypot: token counter untouched', (await svcSelect('intake_tokens', `id=eq.${tokenRow.id}&select=submissions_count`))[0]?.submissions_count === storedForToken, 'submissions_count moved');
+  // The token is printed on a poster, so only a STORED submission may cost it one of its twenty —
+  // never a rejected post, the honeypot, a 404 or the oversized-length refusal. `storedForToken` is
+  // the running count of submissions this run actually stored under it, so the comparison holds
+  // wherever this block runs rather than only after a particular earlier probe.
+  assert('token allowance: spent only by stored submissions', await tokenBucketCount(tokenRow.id) === storedForToken, `t:${tokenRow.id} count=${await tokenBucketCount(tokenRow.id)} stored=${storedForToken}`);
 
-  // ── 5. per-IP-and-token limit: the 6th post this hour ──
+  // ── 5. the address-and-token limit, exhausted on purpose ──
+  // Five posts of any kind spend the allowance (the bucket is charged before the body is parsed),
+  // so five rejected ones get there without storing anything; the sixth must be refused.
+  await resetAddressBuckets();
+  for (let i = 1; i <= 5; i++) {
+    p = await post(formData(tokenRow.token, { title: '' }));
+    if (p.status !== 400) fail(`spending the address allowance (post ${i} of 5)`, `HTTP ${p.status} ${p.text.slice(0, 120)}`);
+  }
   p = await post(formData(tokenRow.token));
   assert('6th POST from this IP for this token: 429 rate_limited + Retry-After', p.status === 429 && p.json?.error === 'rate_limited' && !!p.headers.get('retry-after'), `HTTP ${p.status} ${p.text.slice(0, 120)}`);
-  // Keyed on address AND token, so a second building behind the same connection is unaffected.
+  assert('a spent address allowance still costs the token nothing', await tokenBucketCount(tokenRow.id) === storedForToken, `t:${tokenRow.id} count=${await tokenBucketCount(tokenRow.id)} stored=${storedForToken}`);
+  // Keyed on address AND token: with THIS token's allowance deliberately spent (above, not by
+  // accident of ordering), a second token from the same address must still be served.
   const other = await svcInsert('intake_tokens', { building_id: building, token: mintToken(), created_by: admin.id, label: `ZZTEST other ${RUN}` });
   cleanup.unshift(['intake_tokens', `id=eq.${other.id}`]);
+  cleanup.unshift(['intake_rate', `bucket=eq.t:${other.id}`]);
   p = await post(formData(other.token, { title: `ZZTEST other token ${RUN}` }));
   assert('a different token from the same IP is not rate limited', p.status === 201, `HTTP ${p.status} ${p.text.slice(0, 120)}`);
   if (p.json?.reference) {
@@ -235,15 +286,20 @@ try {
     if (row?.id) cleanup.unshift(['notifications', `entity_id=eq.${row.id}`]);
   }
 
-  // ── 6. per-token limit: counter forced to 20, ip counters cleared ──
-  await svcDelete('intake_rate', 'bucket=like.ip:*');
+  // ── 6. the token's own 20/hour, forced to its cap ──
+  // The address allowance is cleared first so the only thing under test here is the token bucket.
+  await resetAddressBuckets();
+  cleanup.unshift(['intake_rate', `bucket=eq.t:${tokenRow.id}`]);
   await svcUpsert('intake_rate', { bucket: `t:${tokenRow.id}`, window_start: hourStart(), count: 20 }, 'bucket,window_start');
   p = await post(formData(tokenRow.token));
   assert('21st POST for the token: 429', p.status === 429 && p.json?.error === 'rate_limited', `HTTP ${p.status} ${p.text.slice(0, 120)}`);
   await svcDelete('intake_rate', `bucket=eq.t:${tokenRow.id}`);
+  storedForToken = 0;   // the bucket is back to empty, so the running count starts again with it
   const paragraphs = 'The light in the passage is out.\n\nIt has been out since Friday and the stairwell is dark.';
   p = await post(formData(tokenRow.token, { title: `ZZTEST second ${RUN}`, description: paragraphs }));
+  if (p.status === 201) storedForToken++;
   assert('after clearing the counters: 201 again (no photo → photo_urls null)', p.status === 201 && REFERENCE_RE.test(p.json?.reference ?? ''), `HTTP ${p.status} ${p.text.slice(0, 120)}`);
+  assert('the stored submission spent exactly one of the token\'s twenty', await tokenBucketCount(tokenRow.id) === storedForToken, `t:${tokenRow.id} count=${await tokenBucketCount(tokenRow.id)} stored=${storedForToken}`);
   if (p.json?.reference) {
     cleanup.unshift(['issues', `reference=eq.${p.json.reference}`]);
     const second = (await svcSelect('issues', `reference=eq.${p.json.reference}&select=id,photo_urls,reference,description`))[0];
@@ -253,6 +309,7 @@ try {
   }
 
   // ── 7. disabled token, flag off, method ──
+  await resetAddressBuckets();
   await svcPatch('intake_tokens', `id=eq.${tokenRow.id}`, { is_active: false });
   r = await get(tokenRow.token);
   assert('disabled token: GET 404', r.status === 404, `HTTP ${r.status}`);
