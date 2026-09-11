@@ -2589,6 +2589,34 @@ and after the branding `TabsContent`:
 
 ---
 
-## Status — not started
+## Status — shipped 2026-09-11 (range 5a925cd..HEAD)
+
+**Shipped.** `2026-09-14_03_r4_intake_forms.sql` (GMI `7a1bdda`): `intake_tokens` (one active bearer token per
+building, admin or manager by building access, insert pinned to the creator, no delete policy); `intake_rate` plus
+`intake_rate_hit` and `intake_touch`, service-role only; `issues.source`, `reporter` and `reference` with
+`issues_intake_guard`, so no signed-in session can forge a tenant report or alter one; `form_templates` seeded
+`'1'`–`'14'` with field lists byte-identical to the retired hard-coded ones, plus a version-bump trigger the client
+cannot drive; `form_submissions.template_version` and `fields_snapshot`; a read policy for the intake storage prefix
+and deliberately no insert policy, so only the service role writes there; kind `issue_reported`. Function
+`tenant-intake` (unauthenticated): GET answers building name, branding, shop list and categories or an identical 404;
+POST validates, rate-limits, drops honeypot hits without storing anything, uploads at most three photos with the
+service role, mints an `FO-XXXXXX` reference, assigns the building's issue-rule holder and notifies with the push
+narrowed to the assignee. Client: public intake route, Building → Tenants intake card (create, rotate, disable, QR,
+printable sheet), the Tenant chip and reporter block on issues, one catalogue hook behind the forms library, the
+building tab and all three dialogs, and Settings → Forms admin with a field editor. Staging: access control 737,
+intake 31. Production: access control 737, fourteen templates active, flag off.
+
+**Decisions taken.** The token is semi-public by design, because it is printed on a poster, so rotation rather than
+secrecy is the control and every refusal returns the same 404. The template ids stay `'1'`–`'14'` and there is no
+"create template", so no live submission can render against a different field set; a submission without a snapshot
+falls back to the template's current fields, exactly as it rendered before. The version is server-set, and an
+activation or reorder does not bump it.
+
+**Follow-ups.** Landing now, before the flag: redact the intake token in the analytics scrubber, which covered the
+share route only; resolve the token and charge the rate buckets before parsing the request body; take the last
+forwarded-for hop; charge the token bucket only on a stored submission, so junk posts cannot silence a building for
+an hour; rate-limit the GET and default its shop list to numbers without names. Still open afterwards: a failed
+insert leaves orphan uploads, and the created-by line on a tenant report reads as the token's creator.
+
 
 (Filled in by the controller: shipped range, decisions taken, follow-ups. Known follow-ups already: no "create template" in the Forms admin (ids stay `'1'…'14'`); `INTAKE_CATEGORIES` lives only in the function (the page reads it from GET); the `issue_activity` `created` row for an intake issue is logged under the token creator's name (`log_issue_activity` uses `reported_by` when there is no session) — the Tenant chip and reporter block are the honest source.)
