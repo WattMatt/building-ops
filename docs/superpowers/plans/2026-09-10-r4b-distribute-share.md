@@ -1320,3 +1320,41 @@ export async function downloadEvidencePack(kind: 'issue' | 'task' | 'asset', id:
 - [ ] Types: `supabase gen types typescript --project-id qdzgkttiosahdfqresvz > src/integrations/supabase/types.ts`; drop the four boundary casts (`reportShares.ts`, `useReportSchedules.ts`, `SharePage.tsx` branding, and any R4a leftovers); `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep -c 'error TS'` ≤ 51.
 - [ ] Whole-slice review (superpowers:code-reviewer over `git diff <plan-sha>..HEAD`): look specifically for a share created for a DRAFT-status artifact by distribution (must be impossible — the query filters `report_status = 'approved'`), `/share/` appearing in any allowlist, a token or passcode reaching `console.log`, `as never`, XLSX left in the three exporters, an evidence pack reading `task_instances` before `task_completions`, the `report_shares` insert policy admitting a non-null `passcode_hash`, `last_run_on` writable by clients, and the cron placeholder strings surviving into an applied job.
 - [ ] Records: append a `## Status — shipped <date>` section to this plan (range, migrations, smoke counts, decisions, follow-ups — R3c format); `docs/plans/APPLY_CHECKLIST.md` gains `## R4b "Distribute & Share"` (migration + GMI sha, functions, secrets, cron `report-distribution-daily 0 5 * * *`, staging/prod DONE lines, owner items: enable the two flags, set `report_due_day`, mark `report_types` per building, decide `distribution_from`); `git push`; PR #3 body gets an R4b paragraph; memory `fortress-daily-ops-roadmap.md` updated (R4b live; open owner items).
+
+---
+
+## Status — shipped 2026-09-11 (range 7f259ab..HEAD)
+
+**Shipped.** `2026-09-14_02_r4_distribute.sql` (GMI `99bf1b4`): `report_recipients_valid(jsonb)`; `report_schedules`
+(admin/manager CRUD, the six editable columns by column privilege on INSERT as well as UPDATE, `last_run_on` and
+`last_result` service-role only); `report_shares` (a bearer link pinned to ONE artifact, artifact-pinning trigger,
+client create limited to no-passcode / zero-counters / ≤ 90 days, revoke-only and one-way, with `passcode_hash`,
+`failed_attempts` and `locked_until` column-revoked and a generated `has_passcode` bit in their place);
+`report_distributions` plus `report_distributions_sent_once_idx` as the database-level double-send guard; kinds
+`report_due_soon` and `report_export_needed`; cron `report-distribution-daily 0 5 * * *` (07:00 SAST). Functions
+`report-distribution` (cron secret or admin/manager run-now, dry run by default, the flag is the kill switch,
+record-before-send, per-building failure isolation) and `report-share` (GET metadata, POST signed URL, JWT create;
+every refusal is the same 404, 429 only for a passcode lockout). Client: approval auto-export of the final
+unwatermarked PDF, `ShareReportDialog`, public `/share/:token`, Settings → Report distribution, `ExportCsvButton`
+on twelve grids and registers, evidence packs (PDF, or PDF plus originals as a zip) for issues, tasks and assets,
+and analytics scrubbing of the share token in both the path and the `t` query parameter. Staging: access control
+737, distribution 73, intake 31. Production: access control 737. Vitest 1697, typecheck 46 (baseline), build green.
+
+**Decisions taken.** The feature flag, not the UI, is the kill switch: with it off the cron reads and sends nothing
+and `create` refuses, so a link minted while the flag is off 404s for everyone. `last_run_on` is the cron's own
+marker and "Send now" deliberately never writes it, so a manual run cannot suppress that day's scheduled run. The
+send is claimed by inserting the distribution row BEFORE any email, and a unique-violation on the partial index IS
+"already sent". The function never generates a report: an approved report with no approved-status artifact is
+skipped with an inbox nudge to its author. A share pins one artifact, so re-exporting never changes what a
+recipient holds, and a pre-approval version says DRAFT in the dialog and on the page. `has_passcode` is generated so
+the passcode chip survives the hash being unreadable. One report-type label map, one CSV export button, one
+download helper. Evidence packs are ungated and rely on row-level security: a pack contains nothing the viewer
+could not already open.
+
+**Follow-ups.** Before `report_schedules` is switched on: drop the no-mail-provider branch in `report-distribution`
+(with no provider a run records `sent` and the once-only index makes that permanent), and default a NEW schedule to
+paused so nothing reaches the cron unpreviewed. Revocation has a ten-minute tail on an already-issued signed URL —
+shorten the lifetime or reword the confirmation. The recipients label drifts between the run dialog and history.
+Two cost and trend exports still call the CSV helper directly and miss the dated filename; three hand-rolled
+download helpers remain, two of them revoking the object URL synchronously. The distribution function logs the mail
+provider's error body, which can echo a recipient address.
