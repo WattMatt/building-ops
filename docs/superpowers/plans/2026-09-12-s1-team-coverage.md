@@ -40,7 +40,7 @@
 - Modify: `scripts/rls-smoke.mjs` (`:357` flips; new block before `// ════ Teardown`)
 - Scratch only (not committed): `$SCRATCH/pg17/shim.sql`, `$SCRATCH/pg17/verify.sql`
 
-- [ ] **Step 1: Write the migration** (exact content):
+- [x] **Step 1: Write the migration** (exact content):
 
 ```sql
 -- 2026-09-15_01_team_coverage.sql — S1 "Team & coverage" (field-readiness spec §4.1).
@@ -182,7 +182,7 @@ commit;
 --   select count(*) from public.portfolio_coverage();   -> number of buildings
 ```
 
-- [ ] **Step 2: Vendor and confirm**
+- [x] **Step 2: Vendor and confirm**
 
 ```bash
 npm run schema:vendor
@@ -191,7 +191,7 @@ grep -c 'vendored_files: 105' supabase/schema/.source
 ```
 Expected: `2026-09-15_01_team_coverage.sql` listed; `.source` shows `vendored_files: 105` (was 104) and the new GMI commit.
 
-- [ ] **Step 3: Verify on a throwaway Postgres 17.** The mirror cannot be replayed on a blank cluster (see Facts), so build a shim of exactly the objects the migration touches, copied from the vendored files, then apply the vendored migration, then assert. Everything lives in the scratchpad and is torn down at the end.
+- [x] **Step 3: Verify on a throwaway Postgres 17.** The mirror cannot be replayed on a blank cluster (see Facts), so build a shim of exactly the objects the migration touches, copied from the vendored files, then apply the vendored migration, then assert. Everything lives in the scratchpad and is torn down at the end.
 
 ```bash
 export LC_ALL=C
@@ -404,7 +404,7 @@ Tear down: `"$PG/pg_ctl" -D "$SCRATCH/data" stop && rm -rf "$SCRATCH"` → `serv
 
 If row 2 differs, the SQL is wrong, not the fixture: `field_members` counts userA only (role `user`, active, ub row); `unassigned_open` is the two weekly pendings (the overdue ones are assigned); `overdue_open` is both overdue rows; `due_yesterday` is the two dailies dated yesterday SAST; `completed_yesterday` is the one with status `completed`.
 
-- [ ] **Step 4: Smoke assertions.** In `scripts/rls-smoke.mjs` replace line 357:
+- [x] **Step 4: Smoke assertions.** In `scripts/rls-smoke.mjs` replace line 357:
 
 ```js
   assert('user_buildings insert as manager (admin-only)', (await canInsert(personas.manager.jwt, 'user_buildings', { user_id: personas.norole.id, building_id: A })) === false, 'manager wrote an assignment');
@@ -453,7 +453,7 @@ Add a matrix line to the header comment block (after the R4c line): `*   S1 "Tea
 
 The smoke cannot run here (needs `SUPABASE_*` env); it must parse: `node --check scripts/rls-smoke.mjs` → no output.
 
-- [ ] **Step 5: Commit (both repos)**
+- [x] **Step 5: Commit (both repos)**
 
 ```bash
 git -C ../GMI add sql/2026-09-15_01_team_coverage.sql && git -C ../GMI commit -m "S1 team coverage: managed user_buildings writes, assignable_people, portfolio_coverage
