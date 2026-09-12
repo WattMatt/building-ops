@@ -13,14 +13,23 @@ vi.mock('react-router-dom', async (importOriginal) => ({
 }));
 const auth = vi.hoisted(() => ({ value: { user: { id: 'u1' }, isAdminOrManager: false } as { user: { id: string }; isAdminOrManager: boolean } }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => auth.value }));
+const bld = vi.hoisted(() => ({
+  value: [{ id: 'b1', name: 'North Tower' }] as { id: string; name: string }[],
+  loading: false,
+}));
 vi.mock('@/hooks/useBuildings', () => ({
-  useBuildings: () => ({ buildings: [{ id: 'b1', name: 'North Tower' }], loading: false }),
+  useBuildings: () => ({ buildings: bld.value, loading: bld.loading }),
 }));
 vi.mock('@/components/ui/photo-capture', () => ({ PhotoCapture: () => null }));
 
 import NewIssue from './NewIssue';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const renderAt = (path = '/issues/new') =>
+  render(<MemoryRouter initialEntries={[path]}><NewIssue /></MemoryRouter>);
+
+const two = [{ id: 'b1', name: 'North Tower' }, { id: 'b2', name: 'South Wing' }];
 
 const submit = async () => {
   fireEvent.change(screen.getByLabelText(/issue title/i), { target: { value: ' Lift out of service ' } });
@@ -34,6 +43,9 @@ describe('NewIssue', () => {
     enqueueAndRun.mockReset().mockResolvedValue({ status: 'synced', result: {} });
     navigate.mockClear();
     auth.value = { user: { id: 'u1' }, isAdminOrManager: false };
+    bld.value = [{ id: 'b1', name: 'North Tower' }];
+    bld.loading = false;
+    window.localStorage.clear();
     toast.mockClear(); toast.success.mockClear(); toast.error.mockClear();
   });
 
@@ -109,5 +121,71 @@ describe('NewIssue', () => {
     await submit();
     expect(toast.error).toHaveBeenCalledWith('new row violates row-level security policy');
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  describe('building precedence (spec §8)', () => {
+    it('?building= wins over the last-used building', async () => {
+      bld.value = two;
+      window.localStorage.setItem('fortress.lastBuilding.u1', 'b1');
+      renderAt('/issues/new?building=b2');
+      await submit();
+      expect(enqueueAndRun.mock.calls[0][1].row.building_id).toBe('b2');
+    });
+
+    it('a single building is pre-selected', async () => {
+      window.localStorage.setItem('fortress.lastBuilding.u1', 'b9');
+      renderAt();
+      await submit();
+      expect(enqueueAndRun.mock.calls[0][1].row.building_id).toBe('b1');
+    });
+
+    it('falls back to the last-used building when there are several', async () => {
+      bld.value = two;
+      window.localStorage.setItem('fortress.lastBuilding.u1', 'b2');
+      renderAt();
+      await submit();
+      expect(enqueueAndRun.mock.calls[0][1].row.building_id).toBe('b2');
+    });
+
+    it('ignores a last-used building the user can no longer access', async () => {
+      bld.value = two;
+      window.localStorage.setItem('fortress.lastBuilding.u1', 'b9');
+      renderAt();
+      fireEvent.change(screen.getByLabelText(/issue title/i), { target: { value: 'Broken door' } });
+      fireEvent.change(screen.getByLabelText(/^description/i), { target: { value: 'Hinge snapped.' } });
+      fireEvent.click(screen.getByRole('button', { name: /report issue/i }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Please select a building'));
+      expect(enqueueAndRun).not.toHaveBeenCalled();
+    });
+
+    it('stays empty when nothing decides', async () => {
+      bld.value = two;
+      renderAt();
+      fireEvent.change(screen.getByLabelText(/issue title/i), { target: { value: 'Broken door' } });
+      fireEvent.change(screen.getByLabelText(/^description/i), { target: { value: 'Hinge snapped.' } });
+      fireEvent.click(screen.getByRole('button', { name: /report issue/i }));
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Please select a building'));
+      expect(enqueueAndRun).not.toHaveBeenCalled();
+    });
+
+    it('remembers the building after a synced submit and after a queued one', async () => {
+      const { unmount } = renderAt();
+      await submit();
+      expect(window.localStorage.getItem('fortress.lastBuilding.u1')).toBe('b1');
+      unmount();
+
+      window.localStorage.clear();
+      enqueueAndRun.mockReset().mockResolvedValueOnce({ status: 'queued' });
+      renderAt();
+      await submit();
+      expect(window.localStorage.getItem('fortress.lastBuilding.u1')).toBe('b1');
+    });
+
+    it('does not remember the building when the submit is rejected', async () => {
+      enqueueAndRun.mockReset().mockResolvedValueOnce({ status: 'failed', error: 'permission denied' });
+      renderAt();
+      await submit();
+      expect(window.localStorage.getItem('fortress.lastBuilding.u1')).toBeNull();
+    });
   });
 });

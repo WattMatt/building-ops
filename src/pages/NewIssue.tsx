@@ -24,6 +24,7 @@ import { enqueueAndRun } from '@/lib/offline/enqueueAndRun';
 import { toastForOutcome } from '@/lib/offline/outcomeToast';
 import { toast } from 'sonner';
 import { parseCost } from '@/lib/money';
+import { readLastBuilding, writeLastBuilding } from '@/lib/lastBuilding';
 
 export default function NewIssue() {
   const navigate = useNavigate();
@@ -34,7 +35,7 @@ export default function NewIssue() {
   // Form state
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [buildingId, setBuildingId] = useState(searchParams.get('building') || '');
+  const [buildingId, setBuildingId] = useState('');
   const [priority, setPriority] = useState<IssuePriority>('medium');
   const [deadline, setDeadline] = useState('');
   const [correctiveAction, setCorrectiveAction] = useState('');
@@ -44,12 +45,19 @@ export default function NewIssue() {
   const [estimatedCost, setEstimatedCost] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Set default building if only one exists
+  // Building precedence (spec §8): ?building= → the user's only building → the building they
+  // last reported from → empty. Decided once the roster has loaded and only while nothing is
+  // chosen, so a roster refetch never overrides what the user picked. A remembered building the
+  // user can no longer access (revoked, removed) is ignored rather than submitted blind.
   useEffect(() => {
-    if (buildings.length === 1 && !buildingId) {
-      setBuildingId(buildings[0].id);
-    }
-  }, [buildings, buildingId]);
+    if (buildingsLoading || buildingId) return;
+    const fromUrl = searchParams.get('building');
+    if (fromUrl) { setBuildingId(fromUrl); return; }
+    if (buildings.length === 1) { setBuildingId(buildings[0].id); return; }
+    if (!user) return;
+    const last = readLastBuilding(user.id);
+    if (last && buildings.some((b) => b.id === last)) setBuildingId(last);
+  }, [buildings, buildingsLoading, buildingId, searchParams, user]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -109,8 +117,10 @@ export default function NewIssue() {
         synced: 'Issue reported successfully',
         queued: "Issue saved on this device — it will be reported when you're back online",
       });
-      // A queued issue already shows on the list with a "Queued" chip, so leave the form either way.
+      // A queued issue already shows on the list with a "Queued" chip, so leave the form either
+      // way; both outcomes mean the building was a real choice worth remembering next time.
       if (outcome.status !== 'failed') {
+        writeLastBuilding(user.id, buildingId);
         navigate('/issues');
       }
     } catch (error) {
