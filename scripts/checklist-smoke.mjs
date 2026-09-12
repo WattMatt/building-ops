@@ -23,7 +23,8 @@
  * (SUPABASE_URL containing the prod ref qdzgkttiosahdfqresvz) unless SMOKE_ALLOW_PROD=1;
  * the rest of the journey still runs:
  *   - the overdue sweep calls `mark_overdue_tasks` as the service role, which flips EVERY
- *     genuinely back-dated pending task on the target project, not just the fixture;
+ *     genuinely back-dated pending task on the target project, not just the fixture, and (S4)
+ *     writes a task_overdue inbox row to each flipped task's assignee;
  *   - `reschedule_template` regenerates into every building the template applies to. The
  *     fixture template is scoped to a building type only the fixture building carries
  *     (asserted first, service role), so on staging the fan-out stays inside the fixture.
@@ -240,15 +241,34 @@ try {
   if (!SWEEP_ALLOWED) {
     console.log(`  SKIP  mark_overdue_tasks sweep — SUPABASE_URL contains the prod ref ${PROD_REF}; the sweep flips every back-dated pending task. Set SMOKE_ALLOW_PROD=1 to run it.`);
   } else {
+    // S4: the sweep also writes one task_overdue inbox row per flipped task that has an assignee.
+    // `late` is assigned to the site user; `lateNobody` has no assignee and must stay silent.
     const late = (await svcInsert('task_instances', {
-      building_id: building, task_name: `ZZTEST-late-${RUN}`, frequency: 'daily', status: 'pending', due_date: '2020-01-01', responsible_role: 'user',
+      building_id: building, task_name: `ZZTEST-late-${RUN}`, frequency: 'daily', status: 'pending', due_date: '2020-01-01', responsible_role: 'user', assigned_to: userId,
     })).id;
-    cleanup.unshift(['task_instances', `id=eq.${late}`]);
+    const lateNobody = (await svcInsert('task_instances', {
+      building_id: building, task_name: `ZZTEST-late-nobody-${RUN}`, frequency: 'daily', status: 'pending', due_date: '2020-01-01', responsible_role: 'user',
+    })).id;
+    cleanup.unshift(['task_instances', `id=in.(${late},${lateNobody})`]);
+    cleanup.unshift(['notifications', `entity_id=in.(${late},${lateNobody})`]); // in front: the rows point at the tasks
     r = await fetch(`${URL_BASE}/rest/v1/rpc/mark_overdue_tasks`, { method: 'POST', headers: SVC, body: '{}' });
     assert('mark_overdue_tasks runs as service role', r.ok, `HTTP ${r.status}`);
-    const lateRow = await (await fetch(`${URL_BASE}/rest/v1/task_instances?id=eq.${late}&select=status`, { headers: SVC })).json();
-    assert('back-dated pending task is now overdue', lateRow[0]?.status === 'overdue', JSON.stringify(lateRow[0]));
-    await svcDelete('task_instances', `id=eq.${late}`);
+    const lateRows = await svcSelect('task_instances', `id=in.(${late},${lateNobody})&select=id,status`);
+    assert('back-dated pending tasks are now overdue', lateRows.length === 2 && lateRows.every((t) => t.status === 'overdue'), JSON.stringify(lateRows));
+    const overdueRows = await svcSelect('notifications', `entity_id=in.(${late},${lateNobody})&select=recipient_id,actor_id,kind,entity_type,entity_id,building_id,title,body,url,read_at`);
+    assert('the assignee got exactly one task_overdue inbox row; the unassigned task told nobody',
+      overdueRows.length === 1 && overdueRows[0].recipient_id === userId && overdueRows[0].entity_id === late, JSON.stringify(overdueRows));
+    const o = overdueRows[0] ?? {};
+    assert('  → shaped for My Day: kind, entity, building, title, body, url, unread, no actor',
+      o.kind === 'task_overdue' && o.entity_type === 'task' && o.building_id === building && o.actor_id === null
+        && o.title === `Overdue: ZZTEST-late-${RUN}` && o.body === 'Was due 1 Jan' && o.url === '/my-day' && o.read_at === null,
+      JSON.stringify(o));
+    r = await fetch(`${URL_BASE}/rest/v1/rpc/mark_overdue_tasks`, { method: 'POST', headers: SVC, body: '{}' });
+    assert('a second sweep runs', r.ok, `HTTP ${r.status}`);
+    const overdueAgain = await svcSelect('notifications', `entity_id=in.(${late},${lateNobody})&select=id`);
+    assert('  → and adds no inbox row (a task flips once, so it notifies once)', overdueAgain.length === 1, `${overdueAgain.length} rows`);
+    await svcDelete('notifications', `entity_id=in.(${late},${lateNobody})`);
+    await svcDelete('task_instances', `id=in.(${late},${lateNobody})`);
   }
 
   // ── R3a: recurrence rule -> horizon generation with per-role assignment -> reschedule ──
