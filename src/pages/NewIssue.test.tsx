@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { mockViewport } from '@/test/mobile';
 
 const enqueueAndRun = vi.hoisted(() => vi.fn());
 const navigate = vi.hoisted(() => vi.fn());
@@ -30,6 +31,10 @@ const draft = vi.hoisted(() => ({
   clear: vi.fn(),
 }));
 vi.mock('@/hooks/useIssueDraft', () => ({ useIssueDraft: () => draft }));
+const hints = vi.hoisted(() => ({ enabled: true }));
+vi.mock('@/hooks/useHints', () => ({
+  useHints: () => ({ hintsEnabled: hints.enabled, setHintsEnabled: vi.fn() }),
+}));
 // jsdom has no object URLs; restoring a draft recreates previews through them.
 const createObjectURL = vi.hoisted(() => vi.fn((_file: Blob) => 'blob:fake'));
 const revokeObjectURL = vi.hoisted(() => vi.fn());
@@ -68,6 +73,8 @@ describe('NewIssue', () => {
     revokeObjectURL.mockClear();
     toast.mockClear(); toast.success.mockClear(); toast.error.mockClear();
   });
+
+  afterEach(() => { mockViewport(1024); hints.enabled = true; });
 
   it('queues an issue_create op with a client-generated issue id and goes to the list', async () => {
     render(<MemoryRouter><NewIssue /></MemoryRouter>);
@@ -297,6 +304,61 @@ describe('NewIssue', () => {
       renderAt();
       await submit();
       expect(draft.clear).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('phone layout (spec §8)', () => {
+    // jsdom has no layout engine: every scrollWidth/clientWidth is 0 and Tailwind's CSS is not
+    // compiled into the test DOM, so "scrollWidth <= 375" would pass vacuously. What the test
+    // CAN observe is the decision the page makes from the viewport — the class list — so that
+    // is what it asserts. The real no-horizontal-scroll check is the browser step in Task 6.
+    it('pins the action bar to the bottom on a phone and leaves it inline on a desktop', () => {
+      mockViewport(375);
+      const { unmount } = renderAt();
+      const bar = screen.getByTestId('issue-actions');
+      expect(bar.className).toMatch(/\bfixed\b/);
+      expect(bar.className).toMatch(/safe-area-inset-bottom/);
+      expect(bar.className).toMatch(/\bbottom-0\b/);
+      unmount();
+
+      mockViewport(1024);
+      renderAt();
+      expect(screen.getByTestId('issue-actions').className).not.toMatch(/\bfixed\b/);
+    });
+
+    it('puts the photo control directly under the building select, before the title', () => {
+      renderAt();
+      const building = screen.getByLabelText(/building/i);
+      const photos = screen.getByTestId('photo-capture');
+      const title = screen.getByLabelText(/issue title/i);
+      expect(building.compareDocumentPosition(photos) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(photos.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('gives every control a 44 px minimum below sm', () => {
+      auth.value = { user: { id: 'u1' }, isAdminOrManager: true };
+      renderAt();
+      for (const el of [
+        screen.getByLabelText(/building/i),
+        screen.getByLabelText(/issue title/i),
+        screen.getByLabelText(/priority/i),
+        screen.getByLabelText(/resolution deadline/i),
+        screen.getByLabelText(/estimated cost/i),
+        screen.getByRole('button', { name: /report issue/i }),
+        screen.getByRole('button', { name: /cancel/i }),
+      ]) {
+        expect(el.className).toMatch(/\bmin-h-11\b/);
+      }
+    });
+
+    it('routes the photo coaching line through the hints toggle', () => {
+      const line = 'One clear photo of the fault is worth more than a paragraph.';
+      const { unmount } = renderAt();
+      expect(screen.getByText(line)).toBeInTheDocument();
+      unmount();
+      hints.enabled = false;
+      renderAt();
+      expect(screen.queryByText(line)).toBeNull();
     });
   });
 });

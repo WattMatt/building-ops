@@ -3,6 +3,7 @@ import { formatBuildingName } from '@/lib/buildingName';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useBuildings } from '@/hooks/useBuildings';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Hint } from '@/components/ui/hint';
 import { AlertTriangle, ArrowLeft, Loader2 } from 'lucide-react';
 import { PRIORITY_OPTIONS } from '@/lib/constants';
 import type { IssuePriority } from '@/lib/constants';
@@ -26,12 +28,20 @@ import { toast } from 'sonner';
 import { parseCost } from '@/lib/money';
 import { readLastBuilding, writeLastBuilding } from '@/lib/lastBuilding';
 import { useIssueDraft } from '@/hooks/useIssueDraft';
+import { cn } from '@/lib/utils';
+
+/** 44 px tap target on phones (spec §8), the shared component's 40 px from `sm` up. */
+const CONTROL = 'min-h-11 sm:min-h-10';
 
 export default function NewIssue() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user, isAdminOrManager } = useAuth();
   const { buildings, loading: buildingsLoading } = useBuildings();
+  // The app's phone test (same breakpoint as ResponsiveDialog). The action bar is pinned by
+  // this decision rather than a CSS-only class so a test can observe it; the heights above use
+  // plain responsive classes.
+  const isMobile = useIsMobile();
 
   // Form state
   const [title, setTitle] = useState('');
@@ -187,10 +197,11 @@ export default function NewIssue() {
   }
 
   return (
-    <div className="space-y-6 max-w-2xl mx-auto">
+    // pb-28 on a phone keeps the last field clear of the fixed action bar.
+    <div className={cn('space-y-6 max-w-2xl mx-auto', isMobile && 'pb-28')}>
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+        <Button variant="ghost" size="icon" className="h-11 w-11 sm:h-10 sm:w-10" onClick={() => navigate(-1)} aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
         </Button>
         <div>
@@ -230,12 +241,12 @@ export default function NewIssue() {
             <div className="space-y-2">
               <Label htmlFor="building">Building *</Label>
               <Select value={buildingId} onValueChange={setBuildingId}>
-                <SelectTrigger id="building">
+                <SelectTrigger id="building" className={CONTROL}>
                   <SelectValue placeholder="Select a building" />
                 </SelectTrigger>
                 <SelectContent>
                   {buildings.map((building) => (
-                    <SelectItem key={building.id} value={building.id}>
+                    <SelectItem key={building.id} value={building.id} className="min-h-11 sm:min-h-0">
                       {formatBuildingName(building.name)}
                     </SelectItem>
                   ))}
@@ -243,11 +254,25 @@ export default function NewIssue() {
               </Select>
             </div>
 
+            {/* Photos — first, directly under the building (spec §8): on site the photo is the
+                report; the words come after. */}
+            <div className="space-y-2">
+              <PhotoCapture
+                label="Photo Evidence"
+                photos={photos}
+                onPhotosChange={setPhotos}
+                maxPhotos={5}
+                disabled={submitting}
+              />
+              <Hint>One clear photo of the fault is worth more than a paragraph.</Hint>
+            </div>
+
             {/* Title */}
             <div className="space-y-2">
               <Label htmlFor="title">Issue Title *</Label>
               <Input
                 id="title"
+                className={CONTROL}
                 placeholder="Brief summary of the issue"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -272,12 +297,12 @@ export default function NewIssue() {
             <div className="space-y-2">
               <Label htmlFor="priority">Priority</Label>
               <Select value={priority} onValueChange={(v) => setPriority(v as IssuePriority)}>
-                <SelectTrigger id="priority">
+                <SelectTrigger id="priority" className={CONTROL}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {PRIORITY_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
+                    <SelectItem key={option.value} value={option.value} className="min-h-11 sm:min-h-0">
                       {option.label}
                     </SelectItem>
                   ))}
@@ -291,6 +316,7 @@ export default function NewIssue() {
               <Input
                 id="deadline"
                 type="date"
+                className={CONTROL}
                 value={deadline}
                 onChange={(e) => setDeadline(e.target.value)}
                 min={new Date().toISOString().split('T')[0]}
@@ -322,7 +348,7 @@ export default function NewIssue() {
                   min={0}
                   step="0.01"
                   placeholder="0"
-                  className="h-11"
+                  className={CONTROL}
                   value={estimatedCost}
                   onChange={(e) => setEstimatedCost(e.target.value)}
                   disabled={submitting}
@@ -330,28 +356,27 @@ export default function NewIssue() {
               </div>
             )}
 
-            {/* Photos */}
-            <div className="space-y-2">
-              <PhotoCapture
-                label="Photo Evidence"
-                photos={photos}
-                onPhotosChange={setPhotos}
-                maxPhotos={5}
-                disabled={submitting}
-              />
-            </div>
-
-            {/* Submit */}
-            <div className="flex gap-3 pt-4">
+            {/* Submit. On a phone the row is pinned above the home indicator (thumb zone);
+                z-30 keeps it under the select popover, dialogs and the drawer (z-50). */}
+            <div
+              data-testid="issue-actions"
+              className={cn(
+                'flex gap-3',
+                isMobile
+                  ? 'fixed inset-x-0 bottom-0 z-30 border-t bg-background p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]'
+                  : 'pt-4',
+              )}
+            >
               <Button
                 type="button"
                 variant="outline"
+                className={cn(CONTROL, isMobile && 'flex-1')}
                 onClick={() => navigate(-1)}
                 disabled={submitting}
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={submitting}>
+              <Button type="submit" className={cn(CONTROL, isMobile && 'flex-[2]')} disabled={submitting}>
                 {submitting ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />

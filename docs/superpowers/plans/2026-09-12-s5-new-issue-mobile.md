@@ -24,7 +24,7 @@
 - Create: `src/lib/lastBuilding.ts`, `src/lib/lastBuilding.test.ts`
 - Modify: `src/pages/NewIssue.tsx`, `src/pages/NewIssue.test.tsx`
 
-- [ ] **Step 1: Failing store test**
+- [x] **Step 1: Failing store test**
 
 ```ts
 // src/lib/lastBuilding.test.ts
@@ -62,7 +62,7 @@ describe('lastBuilding', () => {
 Run: `npx vitest run src/lib/lastBuilding.test.ts`
 Expected: `FAIL  src/lib/lastBuilding.test.ts` with `Error: Failed to resolve import "./lastBuilding"` — `Test Files  1 failed (1)`.
 
-- [ ] **Step 2: Store**
+- [x] **Step 2: Store**
 
 ```ts
 // src/lib/lastBuilding.ts
@@ -98,7 +98,7 @@ export function writeLastBuilding(uid: string, buildingId: string): void {
 Run: `npx vitest run src/lib/lastBuilding.test.ts`
 Expected: `✓ src/lib/lastBuilding.test.ts (3 tests)` — `Test Files  1 passed (1)`.
 
-- [ ] **Step 3: Failing page tests** — in `src/pages/NewIssue.test.tsx` the buildings mock is a fixed one-building roster. Replace lines 16–18 (the `vi.mock('@/hooks/useBuildings', …)` block) with a controllable one:
+- [x] **Step 3: Failing page tests** — in `src/pages/NewIssue.test.tsx` the buildings mock is a fixed one-building roster. Replace lines 16–18 (the `vi.mock('@/hooks/useBuildings', …)` block) with a controllable one:
 
 ```ts
 const bld = vi.hoisted(() => ({
@@ -206,7 +206,7 @@ Append this `describe` inside `describe('NewIssue', …)`, after the `'still goe
 Run: `npx vitest run src/pages/NewIssue.test.tsx`
 Expected: `Tests  2 failed | 10 passed (12)`. Exactly two fail: `falls back to the last-used building when there are several` (the page has no last-used rule yet, so the building is empty, the toast fires and `submit()`'s `waitFor` times out) and `remembers the building after a synced submit and after a queued one` (`expected null to be 'b1'`). The other five new tests already hold with today's code (`?building=` and the single-building rule exist; nothing is remembered), and the five existing tests stay green.
 
-- [ ] **Step 4: Precedence effect and the write on submit** — in `src/pages/NewIssue.tsx`:
+- [x] **Step 4: Precedence effect and the write on submit** — in `src/pages/NewIssue.tsx`:
 
 Add the import after line 26 (`import { parseCost } from '@/lib/money';`):
 
@@ -252,7 +252,7 @@ Replace the navigate block inside `handleSubmit` (lines 112–115) with:
 Run: `npx vitest run src/pages/NewIssue.test.tsx src/lib/lastBuilding.test.ts`
 Expected: `Test Files  2 passed (2)` — `Tests  15 passed (15)`.
 
-- [ ] **Step 5: gate, tests, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'lastBuilding|NewIssue'` prints nothing; `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep -c 'error TS'` ≤ 46; then `git add src/lib/lastBuilding.ts src/lib/lastBuilding.test.ts src/pages/NewIssue.tsx src/pages/NewIssue.test.tsx && git commit -m "New Issue pre-selects the building: URL, only building, then last used per user"` (blank line, then the `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` trailer).
+- [x] **Step 5: gate, tests, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'lastBuilding|NewIssue'` prints nothing; `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep -c 'error TS'` ≤ 46; then `git add src/lib/lastBuilding.ts src/lib/lastBuilding.test.ts src/pages/NewIssue.tsx src/pages/NewIssue.test.tsx && git commit -m "New Issue pre-selects the building: URL, only building, then last used per user"` (blank line, then the `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` trailer).
 
 ---
 
@@ -262,7 +262,7 @@ Expected: `Test Files  2 passed (2)` — `Tests  15 passed (15)`.
 - Create: `src/lib/offline/drafts.ts`, `src/lib/offline/drafts.test.ts`
 - Modify: `src/components/PersistedQueryProvider.tsx`, `src/components/PersistedQueryProvider.test.tsx`
 
-- [ ] **Step 1: Failing store test**
+- [x] **Step 1: Failing store test**
 
 ```ts
 // src/lib/offline/drafts.test.ts
@@ -339,7 +339,7 @@ describe('issue draft store', () => {
 Run: `npx vitest run src/lib/offline/drafts.test.ts`
 Expected: `FAIL` with `Error: Failed to resolve import "./drafts"`.
 
-- [ ] **Step 2: Store**
+- [x] **Step 2: Store**
 
 ```ts
 // src/lib/offline/drafts.ts
@@ -403,7 +403,7 @@ export async function clearDraftStore(uid: string): Promise<void> {
 Run: `npx vitest run src/lib/offline/drafts.test.ts`
 Expected: `✓ src/lib/offline/drafts.test.ts (6 tests)` (the File test may report `skipped` on Node 20/22 — the same as `queue.test.ts` — and `passed` on Node 26).
 
-- [ ] **Step 3: Failing provider test** — in `src/components/PersistedQueryProvider.test.tsx`:
+- [x] **Step 3: Failing provider test** — in `src/components/PersistedQueryProvider.test.tsx`:
 
 Add the import after line 8 (`import { clearQueue, enqueue, listOps } from '@/lib/offline/queue';`):
 
@@ -457,7 +457,7 @@ Replace the test `'an implicit user switch also drops the outgoing user\'s offli
 Run: `npx vitest run src/components/PersistedQueryProvider.test.tsx`
 Expected: that one test fails at `expect(await readIssueDraft('A')).toBeNull()` — `expected { title: 'Lift', … } to be null` (waitFor times out); the other tests pass.
 
-- [ ] **Step 4: Clear the draft store with the queue** — in `src/components/PersistedQueryProvider.tsx`:
+- [x] **Step 4: Clear the draft store with the queue** — in `src/components/PersistedQueryProvider.tsx`:
 
 Add after line 6 (`import { clearQueue } from '@/lib/offline/queue';`):
 
@@ -486,7 +486,7 @@ In the docblock, extend the sentence that ends `so on a shared device they can n
 Run: `npx vitest run src/components/PersistedQueryProvider.test.tsx src/lib/offline/drafts.test.ts`
 Expected: `Test Files  2 passed (2)`.
 
-- [ ] **Step 5: gate, tests, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'drafts|PersistedQueryProvider'` prints nothing; global count ≤ 46; `git add src/lib/offline/drafts.ts src/lib/offline/drafts.test.ts src/components/PersistedQueryProvider.tsx src/components/PersistedQueryProvider.test.tsx && git commit -m "Issue draft store: per-user IndexedDB record with photos, dropped with the queue on user change"` (+ trailer).
+- [x] **Step 5: gate, tests, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'drafts|PersistedQueryProvider'` prints nothing; global count ≤ 46; `git add src/lib/offline/drafts.ts src/lib/offline/drafts.test.ts src/components/PersistedQueryProvider.tsx src/components/PersistedQueryProvider.test.tsx && git commit -m "Issue draft store: per-user IndexedDB record with photos, dropped with the queue on user change"` (+ trailer).
 
 ---
 
@@ -496,7 +496,7 @@ Expected: `Test Files  2 passed (2)`.
 - Create: `src/hooks/useIssueDraft.ts`, `src/hooks/useIssueDraft.test.ts`
 - Modify: `src/pages/NewIssue.tsx`, `src/pages/NewIssue.test.tsx`
 
-- [ ] **Step 1: Failing hook test** — the store is mocked here so the debounce can run under fake timers without fake-indexeddb (which schedules on `setImmediate`) in the loop; the store's own behaviour is Task 2's test.
+- [x] **Step 1: Failing hook test** — the store is mocked here so the debounce can run under fake timers without fake-indexeddb (which schedules on `setImmediate`) in the loop; the store's own behaviour is Task 2's test.
 
 ```ts
 // src/hooks/useIssueDraft.test.ts
@@ -596,7 +596,7 @@ describe('useIssueDraft', () => {
 Run: `npx vitest run src/hooks/useIssueDraft.test.ts`
 Expected: `FAIL` with `Error: Failed to resolve import "./useIssueDraft"`.
 
-- [ ] **Step 2: Hook**
+- [x] **Step 2: Hook**
 
 ```ts
 // src/hooks/useIssueDraft.ts
@@ -684,7 +684,7 @@ export function useIssueDraft(uid: string | undefined): UseIssueDraft {
 Run: `npx vitest run src/hooks/useIssueDraft.test.ts`
 Expected: `✓ src/hooks/useIssueDraft.test.ts (6 tests)`.
 
-- [ ] **Step 3: Failing page tests** — in `src/pages/NewIssue.test.tsx`:
+- [x] **Step 3: Failing page tests** — in `src/pages/NewIssue.test.tsx`:
 
 Replace the `PhotoCapture` mock (line 19, `vi.mock('@/components/ui/photo-capture', () => ({ PhotoCapture: () => null }));`) with one that exposes the photo count, and add the draft hook mock and the object-URL stubs under it:
 
@@ -815,7 +815,7 @@ Append inside `describe('NewIssue', …)` after the building-precedence `describ
 Run: `npx vitest run src/pages/NewIssue.test.tsx`
 Expected: `Tests  5 failed | 14 passed (19)`. The five that need the integration fail — `restores the fields…` (`Unable to find an accessible element with the role "status"`), `a draft without a building…` (`waitFor` times out: nothing is enqueued because the title is empty), `saves on every change…`, `Discard…` (`Unable to find … name /discard/i`), `a successful or queued submit clears…` (`expected "spy" to be called 1 times`). `does not restore … while the store is still being read` and `an empty form is never saved` hold trivially today; the 12 earlier tests stay green.
 
-- [ ] **Step 4: Page integration** — in `src/pages/NewIssue.tsx`:
+- [x] **Step 4: Page integration** — in `src/pages/NewIssue.tsx`:
 
 Change line 1 to:
 
@@ -915,7 +915,7 @@ In the JSX, insert the guardrail bar between the header `</div>` (line 144) and 
 Run: `npx vitest run src/pages/NewIssue.test.tsx src/hooks/useIssueDraft.test.ts`
 Expected: `Test Files  2 passed (2)` — `Tests  25 passed (25)` (19 page + 6 hook).
 
-- [ ] **Step 5: gate, tests, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'useIssueDraft|NewIssue'` prints nothing; global count ≤ 46; `git add src/hooks/useIssueDraft.ts src/hooks/useIssueDraft.test.ts src/pages/NewIssue.tsx src/pages/NewIssue.test.tsx && git commit -m "New Issue keeps a draft across the camera and reloads, with a plain Draft restored bar"` (+ trailer).
+- [x] **Step 5: gate, tests, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'useIssueDraft|NewIssue'` prints nothing; global count ≤ 46; `git add src/hooks/useIssueDraft.ts src/hooks/useIssueDraft.test.ts src/pages/NewIssue.tsx src/pages/NewIssue.test.tsx && git commit -m "New Issue keeps a draft across the camera and reloads, with a plain Draft restored bar"` (+ trailer).
 
 ---
 
@@ -924,7 +924,7 @@ Expected: `Test Files  2 passed (2)` — `Tests  25 passed (25)` (19 page + 6 ho
 **Files:**
 - Modify: `src/pages/NewIssue.tsx`, `src/pages/NewIssue.test.tsx`
 
-- [ ] **Step 1: Failing tests** — in `src/pages/NewIssue.test.tsx`:
+- [x] **Step 1: Failing tests** — in `src/pages/NewIssue.test.tsx`:
 
 Add the imports after line 3 (`import { MemoryRouter } from 'react-router-dom';`):
 
@@ -1015,7 +1015,7 @@ Append inside `describe('NewIssue', …)` after the draft `describe`:
 Run: `npx vitest run src/pages/NewIssue.test.tsx`
 Expected: `Tests  4 failed | 19 passed (23)` — the four layout tests fail (`Unable to find an element by: [data-testid="issue-actions"]`, the order assertion `expected 0 to be truthy` because today the photo control sits after the title, `expected 'flex h-10 …' to match /\bmin-h-11\b/`, `Unable to find an element with the text: One clear photo…`); the 19 earlier tests pass.
 
-- [ ] **Step 2: Layout** — replace `src/pages/NewIssue.tsx` in full with the file below. Logic is unchanged from Task 3; only the imports (`Hint`, `useIsMobile`, `cn`), the field order, the classes, the bar and the hint are new.
+- [x] **Step 2: Layout** — replace `src/pages/NewIssue.tsx` in full with the file below. Logic is unchanged from Task 3; only the imports (`Hint`, `useIsMobile`, `cn`), the field order, the classes, the bar and the hint are new.
 
 ```tsx
 import { useState, useEffect, useRef } from 'react';
@@ -1418,7 +1418,7 @@ export default function NewIssue() {
 Run: `npx vitest run src/pages/NewIssue.test.tsx`
 Expected: `✓ src/pages/NewIssue.test.tsx (23 tests)`.
 
-- [ ] **Step 3: gate, tests, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'NewIssue'` prints nothing; global count ≤ 46; `git add src/pages/NewIssue.tsx src/pages/NewIssue.test.tsx && git commit -m "New Issue phone layout: photo first, 44 px controls, pinned action bar, one photo hint"` (+ trailer).
+- [x] **Step 3: gate, tests, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'NewIssue'` prints nothing; global count ≤ 46; `git add src/pages/NewIssue.tsx src/pages/NewIssue.test.tsx && git commit -m "New Issue phone layout: photo first, 44 px controls, pinned action bar, one photo hint"` (+ trailer).
 
 ---
 
