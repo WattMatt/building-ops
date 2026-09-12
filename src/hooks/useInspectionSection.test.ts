@@ -117,7 +117,10 @@ describe('useInspectionSection.setResponse — a key absent keeps the stored val
 
     const { row, opts } = upsertPayload();
     expect(opts).toEqual({ onConflict: 'inspection_id,template_item_id' });
-    expect(row.id).toBe('r1');
+    // No id (the stored PK must never be rewritten on conflict) and no photo_urls (that column
+    // belongs to append_inspection_photo; sending the cached list would overwrite a fresh append).
+    expect(row).not.toHaveProperty('id');
+    expect(row).not.toHaveProperty('photo_urls');
     expect(row.inspection_id).toBe('i1');
     expect(row.template_item_id).toBe('it1');
     expect(row.capex_estimate).toBeNull();
@@ -126,7 +129,6 @@ describe('useInspectionSection.setResponse — a key absent keeps the stored val
     expect(row.condition_rating).toBe('fair');
     expect(row.applicable).toBe(true);
     expect(row.detail).toEqual({ size: '5' });
-    expect(row.photo_urls).toEqual(existing.photo_urls);
   });
 
   it('{ comment: "x" } keeps the existing capex estimate', async () => {
@@ -158,11 +160,56 @@ describe('useInspectionSection.setResponse — a key absent keeps the stored val
     await act(async () => { await result.current.setResponse('it1', { condition_rating: 'poor' }); });
 
     const { row } = upsertPayload();
-    expect(row.id).toMatch(/^[0-9a-f-]{36}$/);
+    // The column defaults supply the id and the empty photo list; neither is sent.
+    expect(row).not.toHaveProperty('id');
+    expect(row).not.toHaveProperty('photo_urls');
     expect(row.condition_rating).toBe('poor');
     expect(row.capex_estimate).toBeNull();
     expect(row.applicable).toBe(true);
     expect(row.detail).toEqual({});
-    expect(row.photo_urls).toEqual([]);
+  });
+});
+
+describe('useInspectionSection.setResponse — two blurs before a refetch', () => {
+  /** Every inspection_responses upsert so far, oldest first, as the row each one sent. */
+  const upsertRows = () =>
+    state.queries
+      .filter((q) => q.table === 'inspection_responses' && q.calls.some((c) => c.method === 'upsert'))
+      .map((q) => q.calls.find((c) => c.method === 'upsert')!.args[0] as Record<string, unknown>);
+
+  it('the second payload carries the first patch (optimistic cache merge), so neither write is lost', async () => {
+    const { result } = mount();
+    await waitFor(() => expect(result.current.inspectionId).toBe('i1'));
+    await act(async () => {
+      // Same render, same closure, no round trip in between: blur A then blur B.
+      const a = result.current.setResponse('it1', { comment: 'A' });
+      const b = result.current.setResponse('it1', { capex_estimate: 7 });
+      await Promise.all([a, b]);
+    });
+    const rows = upsertRows();
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ comment: 'A', capex_estimate: 500 });
+    expect(rows[1]).toMatchObject({ comment: 'A', capex_estimate: 7 });
+  });
+
+  it('the cache shows the patch before the round trip, and a failed upsert rolls it back', async () => {
+    state.result = (table, calls) =>
+      table === 'inspection_responses' && calls.some((c) => c.method === 'upsert')
+        ? { data: null, error: { message: 'permission denied' } }
+        : tables(table, calls);
+    const { qc, result } = mount();
+    await waitFor(() => expect(result.current.inspectionId).toBe('i1'));
+    const cachedComment = () => qc.getQueryData<{ responses: Record<string, InspectionResponse> }>(KEY)?.responses.it1.comment;
+
+    let seenDuringFlight: string | null | undefined;
+    await act(async () => {
+      const p = result.current.setResponse('it1', { comment: 'B' });
+      seenDuringFlight = cachedComment(); // synchronously after the call, before the upsert answers
+      await p;
+    });
+    expect(seenDuringFlight).toBe('B');
+    // Rolled back to the snapshot the moment the error came back (the refetch is still pending).
+    expect(cachedComment()).toBe('old comment');
+    expect(upsertRows()).toHaveLength(1);
   });
 });

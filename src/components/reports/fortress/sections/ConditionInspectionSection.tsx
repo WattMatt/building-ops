@@ -198,12 +198,12 @@ export default function ConditionInspectionSection({ reportId, buildingId, readO
               {RATINGS.map((rt) => <ToggleGroupItem key={rt.value} value={rt.value} className="h-8 px-3 text-xs">{rt.label}</ToggleGroupItem>)}
             </ToggleGroup>
             <Textarea placeholder="Recommendation (optional)" defaultValue={r?.recommendation ?? ''} rows={2} disabled={readOnly}
-              onBlur={(e) => { if (!readOnly && e.target.value !== (r?.recommendation ?? '')) setResponse(it.id, { recommendation: e.target.value }); }} />
+              onBlur={(e) => { if (!readOnly && e.target.value !== (r?.recommendation ?? '')) setResponse(it.id, { recommendation: e.target.value === '' ? null : e.target.value }); }} />
             <div className="flex gap-2">
               <Input type="number" className="h-8 w-44" placeholder="Capex estimate (ZAR)" defaultValue={r?.capex_estimate ?? ''} disabled={readOnly}
                 onBlur={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); if (!readOnly && v !== (r?.capex_estimate ?? null)) setResponse(it.id, { capex_estimate: v }); }} />
               <Input className="h-8 flex-1" placeholder="Comment (optional)" defaultValue={r?.comment ?? ''} disabled={readOnly}
-                onBlur={(e) => { if (!readOnly && e.target.value !== (r?.comment ?? '')) setResponse(it.id, { comment: e.target.value }); }} />
+                onBlur={(e) => { if (!readOnly && e.target.value !== (r?.comment ?? '')) setResponse(it.id, { comment: e.target.value === '' ? null : e.target.value }); }} />
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {((r?.photo_urls as unknown as PhotoRef[] | undefined) ?? []).map((p, idx) => (

@@ -15,6 +15,8 @@ import heic2any from 'heic2any';
  * a phone camera produces is that large — it is a screenshot of a scan, a RAW export, or a mistake.
  */
 export const MAX_SOURCE_BYTES = 40 * 1024 * 1024;
+/** The same limit as the toast prints it — derived, so the copy can never drift from the gate. */
+const MAX_SOURCE_LABEL = `${MAX_SOURCE_BYTES / (1024 * 1024)} MB`;
 
 /**
  * Check if a file is HEIC/HEIF format
@@ -234,7 +236,7 @@ export function PhotoCapture({
   const validateAndProcessFile = useCallback(async (file: File): Promise<PhotoFile | null> => {
     // Size gate FIRST: the type check below is cheap, but everything after it decodes the file.
     if (file.size > MAX_SOURCE_BYTES) {
-      toast.error(`${file.name} is larger than 40 MB and can't be processed on this device. Take the photo with the camera instead.`);
+      toast.error(`${file.name} is larger than ${MAX_SOURCE_LABEL} and can't be processed on this device. Take the photo with the camera instead.`);
       return null;
     }
     // Validate file type (including HEIC)

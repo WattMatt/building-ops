@@ -71,7 +71,8 @@ describe('PhotoCapture', () => {
     const { onPhotosChange, pick } = renderCapture();
     pick(fileOfSize('huge.heic', '', MAX_SOURCE_BYTES + 1));
     await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
-    expect(toast.error).toHaveBeenCalledWith("huge.heic is larger than 40 MB and can't be processed on this device. Take the photo with the camera instead.");
+    // Derived from the constant, as the component derives it: the copy and the gate cannot drift apart.
+    expect(toast.error).toHaveBeenCalledWith(`huge.heic is larger than ${MAX_SOURCE_BYTES / (1024 * 1024)} MB and can't be processed on this device. Take the photo with the camera instead.`);
     expect(heic2any).not.toHaveBeenCalled();
     expect(createObjectURL).not.toHaveBeenCalled();
     expect(onPhotosChange).not.toHaveBeenCalled();
