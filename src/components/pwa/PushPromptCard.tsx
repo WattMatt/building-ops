@@ -59,18 +59,21 @@ interface PushPromptCardProps {
  */
 export function PushPromptCard({ userId }: PushPromptCardProps) {
   if (!PUSH_ENABLED || !userId) return null;
-  return <PushPromptCardOwned userId={userId} />;
+  // Keyed on the user so the dismissed flag is re-read when the account changes without an unmount.
+  return <PushPromptCardOwned key={userId} userId={userId} />;
 }
 
 function PushPromptCardOwned({ userId }: { userId: string }) {
   const { status, enable, disable } = usePushSubscription(userId);
   const [dismissed, setDismissed] = useState(() => readDismissed(userId));
   // The hook also reports 'busy' during its first probe on mount; the card must not flash
-  // then. It stays through 'busy' only once the user has touched the switch here.
+  // then. Once the user has touched the switch here the card stays for every outcome but
+  // 'on': through 'busy' while subscribing, and through 'denied' / 'unsupported' so the
+  // row's guardrail copy explains what just happened instead of the card vanishing.
   const [engaged, setEngaged] = useState(false);
 
   if (dismissed) return null;
-  const visible = status === 'off' || (status === 'busy' && engaged);
+  const visible = status === 'off' || (engaged && status !== 'on');
   if (!visible) return null;
 
   const onEnable = async () => {

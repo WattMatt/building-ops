@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 import { Label } from '@/components/ui/label';
@@ -56,6 +57,10 @@ export interface PushSwitchRowProps {
  * one set of guardrail copy and one 44 px target.
  */
 export function PushSwitchRow({ status, enable, disable, coaching = true }: PushSwitchRowProps) {
+  // Generated per instance: the row is shared by Profile and the My Day card, and a fixed id
+  // would collide if both ever co-mount, sending the label's click to the wrong switch.
+  const switchId = useId();
+  const labelId = `${switchId}-label`;
   const disabled = status === 'busy' || status === 'denied' || status === 'unsupported' || status === 'ios-not-installed';
   const checked = status === 'on';
   const copy = STATUS_COPY[status];
@@ -75,7 +80,7 @@ export function PushSwitchRow({ status, enable, disable, coaching = true }: Push
   return (
     <div className="flex min-h-11 items-center justify-between gap-4">
       <div className="space-y-0.5">
-        <Label id="push-device-label" htmlFor="push-device" className="flex items-center gap-2">
+        <Label id={labelId} htmlFor={switchId} className="flex items-center gap-2">
           <Smartphone className="h-4 w-4" />
           Push notifications on this device
         </Label>
@@ -88,10 +93,10 @@ export function PushSwitchRow({ status, enable, disable, coaching = true }: Push
         ) : null}
       </div>
       {/* The 44 px label wrapper is the touch target; the visual switch stays 24 px tall. */}
-      <label htmlFor="push-device" className="flex h-11 w-11 shrink-0 items-center justify-center">
+      <label htmlFor={switchId} className="flex h-11 w-11 shrink-0 items-center justify-center">
         <Switch
-          id="push-device"
-          aria-labelledby="push-device-label"
+          id={switchId}
+          aria-labelledby={labelId}
           aria-busy={status === 'busy' || undefined}
           checked={checked}
           disabled={disabled}

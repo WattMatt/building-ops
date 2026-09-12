@@ -106,6 +106,13 @@ describe('PushPromptCard', () => {
     expect(screen.getByRole('switch')).toBeDisabled();
     expect(screen.getByText('Turn on push notifications')).toBeInTheDocument();
 
+    // If the browser prompt ends in a block, the card stays so the row's guardrail explains it.
+    status('denied');
+    rerender(createElement(PushPromptCard, { userId: 'u1' }));
+    expect(screen.getByText('Turn on push notifications')).toBeInTheDocument();
+    expect(screen.getByText('Notifications are blocked for this site. Allow them in your browser settings, then try again.')).toBeInTheDocument();
+    expect(screen.getByRole('switch')).toBeDisabled();
+
     // …and goes once the device is on.
     status('on');
     rerender(createElement(PushPromptCard, { userId: 'u1' }));

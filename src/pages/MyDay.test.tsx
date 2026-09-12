@@ -42,8 +42,9 @@ vi.mock('@/hooks/useOfflineQueue', () => ({
     retryAll: vi.fn(),
   }),
 }));
-// The install offer has its own hooks and tests; My Day only needs to mount it.
-vi.mock('@/components/pwa/InstallCard', () => ({ InstallCard: () => null }));
+// The install offer has its own hooks and tests; My Day only needs to mount it. A marker
+// div rather than null so the push prompt's position relative to it can be asserted.
+vi.mock('@/components/pwa/InstallCard', () => ({ InstallCard: () => <div>InstallCard</div> }));
 // The push offer owns its own subscription state and tests; My Day only has to mount it for
 // the signed-in user, above the week strip.
 vi.mock('@/components/pwa/PushPromptCard', () => ({
@@ -321,11 +322,13 @@ describe('MyDay', () => {
     expect(screen.getByText('Check fire extinguishers')).toBeInTheDocument();
   });
 
-  it('mounts the push prompt for the signed-in user, above the week strip', () => {
+  it('mounts the push prompt for the signed-in user, after the install card and above the week strip', () => {
     renderPage();
+    const install = screen.getByText('InstallCard');
     const card = screen.getByText('PushPromptCard userId=u1');
     const strip = screen.getByText('This week');
-    // DOCUMENT_POSITION_FOLLOWING: the strip comes after the card in document order.
+    // DOCUMENT_POSITION_FOLLOWING: the argument comes after the receiver in document order.
+    expect(install.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(card.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

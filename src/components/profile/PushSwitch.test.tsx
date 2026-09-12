@@ -56,7 +56,11 @@ describe('PushSwitch', () => {
     render(createElement(PushSwitch, { userId: 'u1' }));
 
     const sw = screen.getByRole('switch', { name: 'Push notifications on this device' });
-    expect(sw).toHaveAttribute('id', 'push-device');
+    // The ids are generated per instance; what matters is that label and switch point at each other.
+    const label = screen.getByText('Push notifications on this device');
+    expect(sw.id).toBeTruthy();
+    expect(label).toHaveAttribute('for', sw.id);
+    expect(sw).toHaveAttribute('aria-labelledby', label.id);
     expect(sw).not.toBeChecked();
     expect(sw).toBeEnabled();
     expect(screen.getByText(/Turn this on to get urgent alerts/)).toBeInTheDocument();
