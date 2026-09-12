@@ -750,7 +750,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 `useBuildingRoleAssignments` already exposes `setRule(role, userId | null)` (`src/hooks/useBuildingRoleAssignments.ts:133-141`, tested at `useBuildingRoleAssignments.test.ts:129-139`), so no hook change is needed. `roleLabel()` stays exported from `RoleAssignmentsPanel.tsx` (Task 4 keeps it) and is imported from there.
 
-- [ ] **Step 1: Failing test for the write sequence** (the chain mock is the one `useBuildingRoleAssignments.test.ts:15-42` uses, extended with `insert`, `in` and a `count` on the resolved result):
+- [x] **Step 1: Failing test for the write sequence** (the chain mock is the one `useBuildingRoleAssignments.test.ts:15-42` uses, extended with `insert`, `in` and a `count` on the resolved result):
 
 ```ts
 // src/components/building/team/teamActions.test.ts
@@ -881,9 +881,9 @@ describe('removeMember', () => {
 });
 ```
 
-- [ ] **Step 2: Run** `npm run test -- src/components/building/team/teamActions.test.ts` → FAIL (module missing).
+- [x] **Step 2: Run** `npm run test -- src/components/building/team/teamActions.test.ts` → FAIL (module missing).
 
-- [ ] **Step 3: Implement the write sequence**
+- [x] **Step 3: Implement the write sequence**
 
 ```ts
 // src/components/building/team/teamActions.ts
@@ -1017,9 +1017,9 @@ export function describeRemoveOutcome(name: string, o: RemoveOutcome): string {
 }
 ```
 
-- [ ] **Step 4: Run** `npm run test -- src/components/building/team/teamActions.test.ts` → PASS (9 tests).
+- [x] **Step 4: Run** `npm run test -- src/components/building/team/teamActions.test.ts` → PASS (9 tests).
 
-- [ ] **Step 5: Child components** (no separate tests: they are driven through `TeamTab.test.tsx` in Step 7).
+- [x] **Step 5: Child components** (no separate tests: they are driven through `TeamTab.test.tsx` in Step 7).
 
 ```tsx
 // src/components/building/team/MemberRow.tsx
@@ -1232,7 +1232,7 @@ export function RemoveMemberDialog({ open, onOpenChange, name, buildingName, ope
 }
 ```
 
-- [ ] **Step 6: Failing test for `TeamTab`**
+- [x] **Step 6: Failing test for `TeamTab`**
 
 ```tsx
 // src/components/building/team/TeamTab.test.tsx
@@ -1436,9 +1436,9 @@ describe('TeamTab', () => {
 });
 ```
 
-- [ ] **Step 7: Run** `npm run test -- src/components/building/team/TeamTab.test.tsx` → FAIL (module missing).
+- [x] **Step 7: Run** `npm run test -- src/components/building/team/TeamTab.test.tsx` → FAIL (module missing).
 
-- [ ] **Step 8: Implement `TeamTab`**
+- [x] **Step 8: Implement `TeamTab`**
 
 ```tsx
 // src/components/building/team/TeamTab.tsx
@@ -1669,9 +1669,9 @@ export default function TeamTab({ buildingId, buildingName }: TeamTabProps) {
 }
 ```
 
-- [ ] **Step 9: Run** `npm run test -- src/components/building/team` → PASS (teamActions 9, TeamTab 12). If the Radix `Checkbox` asserts `aria-checked` differently in jsdom, assert `toBeChecked()` instead; if the `AlertDialogAction` `preventDefault` leaves the dialog open after a successful remove, that is intended (`setRemoving(null)` closes it).
+- [x] **Step 9: Run** `npm run test -- src/components/building/team` → PASS (teamActions 9, TeamTab 12). If the Radix `Checkbox` asserts `aria-checked` differently in jsdom, assert `toBeChecked()` instead; if the `AlertDialogAction` `preventDefault` leaves the dialog open after a successful remove, that is intended (`setRemoving(null)` closes it).
 
-- [ ] **Step 10: Failing page test for the tab**
+- [x] **Step 10: Failing page test for the tab**
 
 ```tsx
 // src/pages/BuildingDetails.team.test.tsx
@@ -1737,9 +1737,9 @@ describe('BuildingDetails Team tab', () => {
   });
 });
 ```
-- [ ] **Step 11: Run** `npm run test -- src/pages/BuildingDetails.team.test.tsx` → FAIL (no `Team` tab).
+- [x] **Step 11: Run** `npm run test -- src/pages/BuildingDetails.team.test.tsx` → FAIL (no `Team` tab).
 
-- [ ] **Step 12: Wire the tab into `BuildingDetails.tsx`**
+- [x] **Step 12: Wire the tab into `BuildingDetails.tsx`**
 
 After line 19 (`import ChecklistsTab …`):
 ```tsx
@@ -1769,9 +1769,9 @@ After line 344 (the `checklists` `TabsContent`), before `forms`:
         )}
 ```
 
-- [ ] **Step 13: Run** `npm run test -- src/pages/BuildingDetails` → PASS (both BuildingDetails test files). Gate: `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'components/building/team|BuildingDetails'` prints nothing.
+- [x] **Step 13: Run** `npm run test -- src/pages/BuildingDetails` → PASS (both BuildingDetails test files). Gate: `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'components/building/team|BuildingDetails'` prints nothing.
 
-- [ ] **Step 14: Commit**
+- [x] **Step 14: Commit**
 
 ```bash
 git add src/components/building/team src/pages/BuildingDetails.tsx src/pages/BuildingDetails.team.test.tsx
@@ -1789,7 +1789,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Modify: `src/components/building/RoleAssignmentsPanel.test.tsx` (rewrite)
 - Modify: `src/components/building/ChecklistsTab.tsx:414` (drop the props the panel no longer takes)
 
-- [ ] **Step 1: Rewrite the test first**
+- [x] **Step 1: Rewrite the test first**
 
 ```tsx
 // src/components/building/RoleAssignmentsPanel.test.tsx
@@ -1903,9 +1903,9 @@ describe('RoleAssignmentsPanel (summary)', () => {
 });
 ```
 
-- [ ] **Step 2: Run** `npm run test -- src/components/building/RoleAssignmentsPanel.test.tsx` → FAIL (`summaryLine` / `NO_DAILY_OWNER_WARNING` not exported; pickers still rendered).
+- [x] **Step 2: Run** `npm run test -- src/components/building/RoleAssignmentsPanel.test.tsx` → FAIL (`summaryLine` / `NO_DAILY_OWNER_WARNING` not exported; pickers still rendered).
 
-- [ ] **Step 3: Rewrite the panel** (whole file):
+- [x] **Step 3: Rewrite the panel** (whole file):
 
 ```tsx
 // src/components/building/RoleAssignmentsPanel.tsx
@@ -1992,7 +1992,7 @@ export function RoleAssignmentsPanel({ buildingId }: RoleAssignmentsPanelProps) 
 export default RoleAssignmentsPanel;
 ```
 
-- [ ] **Step 4: Update the mount.** `ChecklistsTab.tsx:412-415` becomes:
+- [x] **Step 4: Update the mount.** `ChecklistsTab.tsx:412-415` becomes:
 
 ```tsx
       {/* Who does what here — read-only since S1 (edited on the Team tab); the panel renders nothing for non-managers, the guard here only skips its queries. */}
@@ -2002,9 +2002,9 @@ export default RoleAssignmentsPanel;
 ```
 `fetchTasks` and `buildingName` stay in use elsewhere in the file; do not remove them.
 
-- [ ] **Step 5: Run** `npm run test -- src/components/building/RoleAssignmentsPanel.test.tsx` → PASS (8 tests). Gate: `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'RoleAssignmentsPanel|ChecklistsTab'` prints nothing; `grep -rn 'onApplied' src` prints nothing.
+- [x] **Step 5: Run** `npm run test -- src/components/building/RoleAssignmentsPanel.test.tsx` → PASS (8 tests). Gate: `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'RoleAssignmentsPanel|ChecklistsTab'` prints nothing; `grep -rn 'onApplied' src` prints nothing.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/components/building/RoleAssignmentsPanel.tsx src/components/building/RoleAssignmentsPanel.test.tsx src/components/building/ChecklistsTab.tsx
