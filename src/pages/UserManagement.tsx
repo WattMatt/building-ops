@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { formatBuildingName } from '@/lib/buildingName';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { inviteBlockedReason, teamTabUrl, FIELD_STAFF_BUILDING_HELP, SET_TEAM_ACTION_LABEL } from '@/lib/invite';
 import { useAuth, type InviteUserPayload } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
@@ -116,7 +116,9 @@ export default function UserManagement() {
   const [isInviting, setIsInviting] = useState(false);
 
   // One-time temp-password modal state
-  const [tempPasswordResult, setTempPasswordResult] = useState<{ email: string; password: string } | null>(null);
+  // `teamBuildingId` is set for a field-staff account so the modal can offer the Team tab as the
+  // next step — a toast behind a modal is unreachable and gone before the modal closes.
+  const [tempPasswordResult, setTempPasswordResult] = useState<{ email: string; password: string; teamBuildingId?: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
   // Deactivate/reactivate in-flight tracking
@@ -275,10 +277,12 @@ export default function UserManagement() {
       toast.error(blocked);
       return;
     }
-    // After a field-staff invite the next thing to do is say what they do at their building.
+    // After a field-staff invite the next thing to do is say what they do at their building. On
+    // the email and link paths that is a toast action, held open long enough to be read and
+    // clicked; on the temp-password path the modal itself carries the link (see the dialog).
     const firstBuildingId = inviteRole === 'user' ? inviteBuildingIds[0] : undefined;
-    const teamAction = firstBuildingId
-      ? { label: SET_TEAM_ACTION_LABEL, onClick: () => navigate(teamTabUrl(firstBuildingId)) }
+    const teamToast = firstBuildingId
+      ? { duration: 10000, action: { label: SET_TEAM_ACTION_LABEL, onClick: () => navigate(teamTabUrl(firstBuildingId)) } }
       : undefined;
 
     const payload: InviteUserPayload = {
@@ -296,20 +300,19 @@ export default function UserManagement() {
 
       if (result.status === 'temp_password' && result.tempPassword) {
         // Show the generated password exactly once.
-        setTempPasswordResult({ email, password: result.tempPassword });
+        setTempPasswordResult({ email, password: result.tempPassword, teamBuildingId: firstBuildingId });
         setCopied(false);
-        if (teamAction) toast.success(`Account created for ${email}`, { action: teamAction });
       } else if (result.actionLink) {
         // Email delivery wasn't available — copy the setup link so the admin
         // can send it manually. Onboarding still completes.
         try {
           await navigator.clipboard.writeText(result.actionLink);
-          toast.success(`Invite created — email couldn't be sent, so the setup link is copied to your clipboard. Send it to ${email} (valid 24 hours).`, { action: teamAction });
+          toast.success(`Invite created — email couldn't be sent, so the setup link is copied to your clipboard. Send it to ${email} (valid 24 hours).`, teamToast);
         } catch {
-          toast.success(`Invite created for ${email}, but email couldn't be sent. Use "Resend → Copy link" on their row to get the setup link.`, { action: teamAction });
+          toast.success(`Invite created for ${email}, but email couldn't be sent. Use "Resend → Copy link" on their row to get the setup link.`, teamToast);
         }
       } else {
-        toast.success(`Invite emailed to ${email}`, { action: teamAction });
+        toast.success(`Invite emailed to ${email}`, teamToast);
       }
 
       resetInviteForm();
@@ -864,6 +867,12 @@ export default function UserManagement() {
             </div>
           </div>
           <DialogFooter>
+            {tempPasswordResult?.teamBuildingId && (
+              // Field staff: the next step is saying what they do at their building.
+              <Button variant="outline" asChild>
+                <Link to={teamTabUrl(tempPasswordResult.teamBuildingId)}>{SET_TEAM_ACTION_LABEL}</Link>
+              </Button>
+            )}
             <Button
               onClick={() => {
                 setTempPasswordResult(null);

@@ -217,7 +217,7 @@ describe('coverage section', () => {
     });
     expect(sections!.map((s) => s.heading)).toEqual([
       '1 expiring document, warranty or service',
-      'Coverage',
+      'Coverage: 2 buildings with no field team, 1 silent yesterday',
       '1 unread notification',
     ]);
     expect(sections![1].lines).toEqual([
@@ -239,6 +239,20 @@ describe('coverage section', () => {
     expect(lines).toHaveLength(SECTION_MAX + 3);
     expect(lines[SECTION_MAX]).toBe('…and 2 more');
     expect(lines.slice(-2)).toEqual(['2 open tasks have nobody assigned', 'Nothing was logged yesterday at Z']);
+  });
+
+  it('caps the silent-yesterday list at SECTION_MAX too, with the true counts in the heading', () => {
+    const silentYesterday = Array.from({ length: SECTION_MAX + 3 }, (_, i) => `Building ${i}`);
+    const [section] = composeDigest({ ...empty, coverage: { noTeam: ['A'], unassignedOpen: 0, silentYesterday } })!;
+    expect(section.heading).toBe(`Coverage: 1 building with no field team, ${SECTION_MAX + 3} silent yesterday`);
+    expect(section.lines).toHaveLength(1 + SECTION_MAX + 1);
+    expect(section.lines[0]).toBe('A has no field team');
+    expect(section.lines[SECTION_MAX]).toBe(`Nothing was logged yesterday at Building ${SECTION_MAX - 1}`);
+    expect(section.lines[SECTION_MAX + 1]).toBe('…and 3 more');
+  });
+
+  it('keeps a plain Coverage heading when only unassigned work is reported', () => {
+    expect(composeDigest({ ...empty, coverage: { noTeam: [], unassignedOpen: 3, silentYesterday: [] } })![0].heading).toBe('Coverage');
   });
 
   it('adds no section for null or all-empty coverage (site users pass null)', () => {

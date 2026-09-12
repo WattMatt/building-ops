@@ -8,24 +8,31 @@ const state = vi.hoisted(() => ({
   isLoading: false,
   isError: false,
   isFetching: false,
+  isAdminOrManager: true,
+  enabledArgs: [] as unknown[],
   refetch: vi.fn(),
 }));
+
+vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ isAdminOrManager: state.isAdminOrManager }) }));
 
 vi.mock('@/hooks/usePortfolioCoverage', async (orig) => {
   const real = await orig<typeof import('@/hooks/usePortfolioCoverage')>();
   return {
     ...real,
-    usePortfolioCoverage: () => ({
-      data: state.isLoading || state.isError ? undefined : state.rows,
-      isLoading: state.isLoading,
-      isError: state.isError,
-      isSuccess: !state.isLoading && !state.isError,
-      isFetching: state.isFetching,
-      refetch: state.refetch,
-      gaps: real.coverageGaps(state.rows),
-      unassignedOpen: state.rows.reduce((n, r) => n + r.unassigned_open, 0),
-      byBuilding: new Map(state.rows.map((r) => [r.building_id, r])),
-    }),
+    usePortfolioCoverage: (enabled?: boolean) => {
+      state.enabledArgs.push(enabled);
+      return {
+        data: state.isLoading || state.isError ? undefined : state.rows,
+        isLoading: state.isLoading,
+        isError: state.isError,
+        isSuccess: !state.isLoading && !state.isError,
+        isFetching: state.isFetching,
+        refetch: state.refetch,
+        gaps: real.coverageGaps(state.rows),
+        unassignedOpen: state.rows.reduce((n, r) => n + r.unassigned_open, 0),
+        byBuilding: new Map(state.rows.map((r) => [r.building_id, r])),
+      };
+    },
   };
 });
 
@@ -42,6 +49,8 @@ beforeEach(() => {
   state.isLoading = false;
   state.isError = false;
   state.isFetching = false;
+  state.isAdminOrManager = true;
+  state.enabledArgs = [];
   state.refetch.mockClear();
 });
 
@@ -75,7 +84,18 @@ describe('CoverageWidget', () => {
     state.rows = Array.from({ length: 8 }, (_, i) => row({ building_id: `b${i}`, building_name: `Building ${i}`, field_members: 0 }));
     renderWidget();
     expect(screen.getAllByRole('link', { name: /Building \d/i })).toHaveLength(6);
-    expect(screen.getByRole('link', { name: 'View all 8 in Buildings' })).toHaveAttribute('href', '/buildings');
+    // The link says how many are not listed here, not "view all N": the Buildings page only
+    // badges no-field-staff buildings, while this list also counts missing daily-task defaults.
+    expect(screen.getByRole('link', { name: '2 more need attention · open Buildings' })).toHaveAttribute('href', '/buildings');
+  });
+
+  it('passes the viewer role to the hook so field users never query coverage', () => {
+    renderWidget();
+    expect(state.enabledArgs[0]).toBe(true);
+    state.enabledArgs = [];
+    state.isAdminOrManager = false;
+    renderWidget();
+    expect(state.enabledArgs[0]).toBe(false);
   });
 
   it('renders skeletons while loading', () => {

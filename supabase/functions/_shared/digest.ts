@@ -131,12 +131,19 @@ export function composeDigest(input: DigestInput): DigestSection[] | null {
   }
   const c = input.coverage;
   if (c && (c.noTeam.length || c.unassignedOpen || c.silentYesterday.length)) {
+    // Both building lists are capped like every other section; the heading carries the true
+    // counts so a cap never hides how big the gap is.
     const lines: string[] = capLines(c.noTeam.map((name) => `${name} has no field team`));
     if (c.unassignedOpen) {
       lines.push(`${c.unassignedOpen} open ${plural(c.unassignedOpen, 'task has', 'tasks have')} nobody assigned`);
     }
-    for (const name of c.silentYesterday) lines.push(`Nothing was logged yesterday at ${name}`);
-    sections.push({ heading: 'Coverage', lines });
+    lines.push(...capLines(c.silentYesterday.map((name) => `Nothing was logged yesterday at ${name}`)));
+    const counts: string[] = [];
+    if (c.noTeam.length) {
+      counts.push(`${c.noTeam.length} ${plural(c.noTeam.length, 'building', 'buildings')} with no field team`);
+    }
+    if (c.silentYesterday.length) counts.push(`${c.silentYesterday.length} silent yesterday`);
+    sections.push({ heading: counts.length ? `Coverage: ${counts.join(', ')}` : 'Coverage', lines });
   }
   if (input.unread) {
     sections.push({

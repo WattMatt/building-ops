@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { formatBuildingName } from '@/lib/buildingName';
+import { useAuth } from '@/contexts/AuthContext';
 import { usePortfolioCoverage, type CoverageRow } from '@/hooks/usePortfolioCoverage';
 
 /** Most buildings the widget lists; the heading badge carries the true count. */
@@ -29,9 +30,13 @@ export function unassignedLine(n: number): string {
 }
 
 export default function CoverageWidget() {
-  const query = usePortfolioCoverage();
+  // The hook is gated on the role here as well as at the Dashboard mount: coverage rows are
+  // RLS-scoped and meaningless for field users, so the widget never queries for them.
+  const { isAdminOrManager } = useAuth();
+  const query = usePortfolioCoverage(isAdminOrManager);
   const { gaps, unassignedOpen } = query;
   const shown = gaps.slice(0, MAX_ROWS);
+  const notShown = gaps.length - shown.length;
 
   return (
     <Card>
@@ -74,10 +79,12 @@ export default function CoverageWidget() {
                     </div>
                   </Link>
                 ))}
-                {gaps.length > shown.length && (
+                {notShown > 0 && (
+                  // No "view all N" claim: the Buildings page only badges buildings with no field
+                  // staff, while this list also counts missing daily-task defaults.
                   <div className="text-center pt-1">
                     <Button variant="outline" size="sm" asChild>
-                      <Link to="/buildings">View all {gaps.length} in Buildings</Link>
+                      <Link to="/buildings">{notShown} more {notShown === 1 ? 'needs' : 'need'} attention · open Buildings</Link>
                     </Button>
                   </div>
                 )}

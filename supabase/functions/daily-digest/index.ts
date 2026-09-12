@@ -116,8 +116,9 @@ serve(async (req: Request): Promise<Response> => {
     // Portfolio expiry counts for admins and managers (site users see only their buildings, and the
     // per-person RLS view is not worth a query each; they get the widget in the app).
     const { data: adminRoleRows, error: adminRoleErr } = await supabase.from("user_roles").select("user_id").in("role", ["admin", "manager"]);
-    // Not fatal: the digest still goes out, but nobody gets the expiry section this run — say so.
-    if (adminRoleErr) console.error("daily-digest: user_roles read failed; no expiry section this run", adminRoleErr);
+    // Not fatal: the digest still goes out, but nobody gets the expiry or coverage sections this
+    // run (both are gated on this admin/manager set) — say so.
+    if (adminRoleErr) console.error("daily-digest: user_roles read failed; no expiry or coverage section this run", adminRoleErr);
     const adminIds = new Set((adminRoleRows ?? []).map((r: { user_id: string }) => r.user_id));
     let expiring: ExpiryBuckets | null = null;
     try {
