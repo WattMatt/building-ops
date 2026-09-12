@@ -667,7 +667,9 @@ function photoRows(photos: EmbeddedPhoto[]): Content[] {
       columns: slice.map((p) => ({
         width: 'auto',
         stack: [
-          { image: p.dataUrl, fit: [PHOTO_W, PHOTO_W * 0.75] },
+          // A photo that could not be fetched has no data URL (same rule as the evidence pack's
+          // photoGrid): never hand pdfmake an empty image; the caption still marks its place.
+          ...(p.dataUrl ? [{ image: p.dataUrl, fit: [PHOTO_W, PHOTO_W * 0.75] } as Content] : []),
           ...(p.caption ? [{ text: p.caption, fontSize: 7, color: '#6b7280', width: PHOTO_W } as Content] : []),
         ],
       })),

@@ -103,6 +103,17 @@ describe('buildReportDoc — annual_inspection', () => {
     expect(text).toContain('Capex Register');
     expect(text).toContain('Roof replacement');
   });
+  it('a photo without a data URL keeps its caption but never becomes a pdfmake image', () => {
+    const doc = buildReportDoc(
+      { title: 'Annual — Test', report_period: '2025-12-01', report_type: 'annual_inspection', managers: [] },
+      { annualSections: [{ title: 'Roof', items: [{ label: 'Gutters', rating: 'fair', applicable: true, photos: [{ dataUrl: '', caption: 'missing one' }, { dataUrl: PHOTO, caption: 'present one' }] }] }], capex: [] },
+      { color: '#2563eb', orgName: 'Org' },
+    );
+    const { images, text } = collect(doc);
+    expect(images).toEqual([PHOTO]);
+    expect(text).toContain('missing one');
+    expect(text).toContain('present one');
+  });
 });
 
 describe('buildReportDoc — prepared for', () => {

@@ -10,6 +10,7 @@ import pdfFonts from 'pdfmake/build/vfs_fonts';
 import { fdb, type ReportType } from '@/integrations/supabase/fortress-db';
 import { supabase } from '@/integrations/supabase/client';
 import { resolveStorageUrl } from '@/integrations/supabase/storage';
+import { bitmapFromBlob, fetchImageBlob } from '@/lib/imageFetch';
 import { buildReportDoc, MARK, type ReportData, type EmbeddedPhoto, type AnnualItem } from '@/lib/fortressReportDoc';
 import { ANNUAL_FIELD_SETS } from '@/lib/annualFieldSets';
 import { doneMonthsFromGrid, fiscalWindow, gridHasData } from '@/lib/ppmGrid';
@@ -49,36 +50,43 @@ const PHOTO_QUALITY = 0.62;
 
 type PhotoRef = { ref?: string; path: string; caption?: string };
 
-/** Resolve a stored photo path to a downscaled JPEG data URL (browser only). */
+/**
+ * Resolve a stored photo path to a downscaled JPEG data URL (browser only). Null on ANY failure —
+ * a bad photo is skipped and counted under "not embedded" (annualPhotosOmitted), never allowed to
+ * fail the export, and never handed to pdfmake as a base64'd error body. There is deliberately no
+ * FileReader fallback here: if the browser cannot decode it, pdfmake cannot either.
+ */
 async function embedPhoto(path: string): Promise<string | null> {
   try {
     const signed = await resolveStorageUrl('/object/tenant-documents/' + path);
     if (!signed) return null;
-    const blob = await (await fetch(signed)).blob();
+    const blob = await fetchImageBlob(signed);
     return await downscaleToDataUrl(blob);
-  } catch {
+  } catch (e) {
+    if (import.meta.env.DEV) console.warn('report photo skipped:', path, (e as Error)?.message ?? String(e));
     return null;
   }
 }
 
 async function downscaleToDataUrl(blob: Blob): Promise<string> {
-  try {
-    const bmp = await createImageBitmap(blob);
-    const scale = Math.min(1, PHOTO_MAX_DIM / Math.max(bmp.width, bmp.height));
-    const w = Math.max(1, Math.round(bmp.width * scale));
-    const h = Math.max(1, Math.round(bmp.height * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('no 2d ctx');
-    ctx.drawImage(bmp, 0, 0, w, h);
-    bmp.close?.();
-    return canvas.toDataURL('image/jpeg', PHOTO_QUALITY);
-  } catch {
-    return blobToDataUrl(blob);
-  }
+  const bmp = await bitmapFromBlob(blob);
+  const scale = Math.min(1, PHOTO_MAX_DIM / Math.max(bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * scale));
+  const h = Math.max(1, Math.round(bmp.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('no 2d ctx');
+  ctx.drawImage(bmp, 0, 0, w, h);
+  bmp.close?.();
+  return canvas.toDataURL('image/jpeg', PHOTO_QUALITY);
 }
 
+/**
+ * LOGO ONLY. The logo is embedded as-is (pdfmake fits it to 130×40; no canvas pass, so a PNG keeps
+ * its transparency). It is safe only because fetchImageBlob has already refused a non-2xx, a
+ * non-image and an SVG before this reads the body. Photos never come through here.
+ */
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -151,8 +159,12 @@ export async function generateReportPdf(
   if (branding.logoUrl) {
     try {
       const signed = await resolveStorageUrl(branding.logoUrl);
-      if (signed) logoDataUrl = await blobToDataUrl(await (await fetch(signed)).blob());
-    } catch { /* logo optional */ }
+      // pdfmake embeds PNG and JPEG only: an SVG logo (accepted by Settings before S2) is skipped
+      // and the org name prints in its place, exactly as when no logo is set.
+      if (signed) logoDataUrl = await blobToDataUrl(await fetchImageBlob(signed, { rejectSvg: true }));
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('report logo skipped:', (e as Error)?.message ?? String(e));
+    }
   }
 
   const data: ReportData = {};
