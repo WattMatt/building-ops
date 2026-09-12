@@ -57,10 +57,9 @@ export default function ConditionInspectionSection({ reportId, buildingId, readO
     } finally {
       URL.revokeObjectURL(photo.preview);
     }
-    // append_inspection_photo is not yet in the generated types; regenerate after the migration ships.
-    const { data, error } = await supabase.rpc('append_inspection_photo' as never, {
-      p_inspection: inspectionId, p_template_item: it.id, p_path: path, p_caption: it.item_label, p_section_no: String(it.section_no),
-    } as never);
+    const { data, error } = await supabase.rpc('append_inspection_photo', {
+      p_inspection: inspectionId, p_template_item: it.id, p_path: path, p_caption: it.item_label ?? '', p_section_no: String(it.section_no),
+    });
     if (error) {
       if (import.meta.env.DEV) console.error('append_inspection_photo:', error);
       // Guardrail, not a hint: the file IS in storage, the row does not point at it.

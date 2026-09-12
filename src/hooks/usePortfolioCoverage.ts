@@ -42,8 +42,7 @@ export function usePortfolioCoverage(enabled = true) {
     enabled,
     staleTime: 60 * 1000,
     queryFn: async (): Promise<CoverageRow[]> => {
-      // portfolio_coverage is not yet in the generated types; regenerate after the migration ships.
-      const { data, error } = await (supabase.rpc as unknown as (fn: string) => Promise<{ data: CoverageRow[] | null; error: { message: string } | null }>)('portfolio_coverage');
+      const { data, error } = await supabase.rpc('portfolio_coverage');
       if (error) throw new Error(error.message);
       return data ?? [];
     },

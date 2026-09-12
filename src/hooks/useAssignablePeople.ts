@@ -32,8 +32,7 @@ export function useAssignablePeople(enabled = true) {
     enabled,
     staleTime: 60 * 1000,
     queryFn: async (): Promise<AssignablePerson[]> => {
-      // assignable_people is not yet in the generated types; regenerate after the migration ships.
-      const { data, error } = await (supabase.rpc as unknown as (fn: string) => Promise<{ data: AssignablePerson[] | null; error: { message: string } | null }>)('assignable_people');
+      const { data, error } = await supabase.rpc('assignable_people');
       if (error) throw new Error(error.message);
       return data ?? [];
     },
