@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { formatBuildingName } from '@/lib/buildingName';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
@@ -25,6 +25,7 @@ import { toastForOutcome } from '@/lib/offline/outcomeToast';
 import { toast } from 'sonner';
 import { parseCost } from '@/lib/money';
 import { readLastBuilding, writeLastBuilding } from '@/lib/lastBuilding';
+import { useIssueDraft } from '@/hooks/useIssueDraft';
 
 export default function NewIssue() {
   const navigate = useNavigate();
@@ -45,6 +46,14 @@ export default function NewIssue() {
   const [estimatedCost, setEstimatedCost] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
+  // Draft (spec §8): the form must survive the camera app and a reload. `hydrated` is set once
+  // the read has settled and any draft has been applied; the save effect waits for it so the
+  // empty first render never overwrites what the store holds.
+  const { restored, ready: draftReady, save: saveDraft, clear: clearDraft } = useIssueDraft(user?.id);
+  const [hydrated, setHydrated] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const hadContent = useRef(false);
+
   // Building precedence (spec §8): ?building= → the user's only building → the building they
   // last reported from → empty. Decided once the roster has loaded and only while nothing is
   // chosen, so a roster refetch never overrides what the user picked. A remembered building the
@@ -58,6 +67,47 @@ export default function NewIssue() {
     const last = readLastBuilding(user.id);
     if (last && buildings.some((b) => b.id === last)) setBuildingId(last);
   }, [buildings, buildingsLoading, buildingId, searchParams, user]);
+
+  useEffect(() => {
+    if (!draftReady || hydrated) return;
+    if (restored) {
+      setTitle(restored.title);
+      setDescription(restored.description);
+      if (restored.buildingId) setBuildingId(restored.buildingId);
+      setPriority(restored.priority);
+      setPhotos(restored.photos.map((file) => ({ file, preview: URL.createObjectURL(file) })));
+      setDraftRestored(true);
+    }
+    setHydrated(true);
+  }, [draftReady, hydrated, restored]);
+
+  // Save on every change. Building and priority alone are not a draft (they are derived or
+  // defaults), so a form the user has typed nothing into is never stored — and a form they
+  // emptied again is cleared rather than kept as a blank record.
+  useEffect(() => {
+    if (!hydrated) return;
+    const hasContent = title.trim() !== '' || description.trim() !== '' || photos.length > 0;
+    if (hasContent) {
+      hadContent.current = true;
+      saveDraft({ title, description, buildingId, priority, photos: photos.map((p) => p.file) });
+    } else if (hadContent.current) {
+      hadContent.current = false;
+      clearDraft();
+    }
+  }, [hydrated, title, description, buildingId, priority, photos, saveDraft, clearDraft]);
+
+  const discardDraft = () => {
+    for (const p of photos) URL.revokeObjectURL(p.preview);
+    hadContent.current = false;
+    clearDraft();
+    setTitle('');
+    setDescription('');
+    setPriority('medium');
+    setPhotos([]);
+    // The building goes back through the precedence rule (URL, only building, last used).
+    setBuildingId('');
+    setDraftRestored(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -121,6 +171,7 @@ export default function NewIssue() {
       // way; both outcomes mean the building was a real choice worth remembering next time.
       if (outcome.status !== 'failed') {
         writeLastBuilding(user.id, buildingId);
+        clearDraft();
         navigate('/issues');
       }
     } catch (error) {
@@ -152,6 +203,19 @@ export default function NewIssue() {
           </p>
         </div>
       </div>
+
+      {/* Guardrail, not a <Hint>: a data-loss cue must show however experienced the user is. */}
+      {draftRestored && (
+        <div
+          role="status"
+          className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-warning/50 bg-warning/10 px-3 py-2 text-sm"
+        >
+          <span>Draft restored</span>
+          <Button type="button" variant="ghost" size="sm" className="min-h-11 sm:min-h-9" onClick={discardDraft} disabled={submitting}>
+            Discard
+          </Button>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit}>
         <Card>

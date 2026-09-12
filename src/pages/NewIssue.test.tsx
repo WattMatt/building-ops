@@ -20,7 +20,21 @@ const bld = vi.hoisted(() => ({
 vi.mock('@/hooks/useBuildings', () => ({
   useBuildings: () => ({ buildings: bld.value, loading: bld.loading }),
 }));
-vi.mock('@/components/ui/photo-capture', () => ({ PhotoCapture: () => null }));
+vi.mock('@/components/ui/photo-capture', () => ({
+  PhotoCapture: ({ photos }: { photos: unknown[] }) => <div data-testid="photo-capture">{photos.length}</div>,
+}));
+const draft = vi.hoisted(() => ({
+  restored: null as null | { title: string; description: string; buildingId: string; priority: 'low' | 'medium' | 'high' | 'critical'; photos: File[]; savedAt: number },
+  ready: true,
+  save: vi.fn(),
+  clear: vi.fn(),
+}));
+vi.mock('@/hooks/useIssueDraft', () => ({ useIssueDraft: () => draft }));
+// jsdom has no object URLs; restoring a draft recreates previews through them.
+const createObjectURL = vi.hoisted(() => vi.fn((_file: Blob) => 'blob:fake'));
+const revokeObjectURL = vi.hoisted(() => vi.fn());
+Object.defineProperty(URL, 'createObjectURL', { configurable: true, writable: true, value: createObjectURL });
+Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, writable: true, value: revokeObjectURL });
 
 import NewIssue from './NewIssue';
 
@@ -46,6 +60,12 @@ describe('NewIssue', () => {
     bld.value = [{ id: 'b1', name: 'North Tower' }];
     bld.loading = false;
     window.localStorage.clear();
+    draft.restored = null;
+    draft.ready = true;
+    draft.save.mockClear();
+    draft.clear.mockClear();
+    createObjectURL.mockClear();
+    revokeObjectURL.mockClear();
     toast.mockClear(); toast.success.mockClear(); toast.error.mockClear();
   });
 
@@ -186,6 +206,97 @@ describe('NewIssue', () => {
       renderAt();
       await submit();
       expect(window.localStorage.getItem('fortress.lastBuilding.u1')).toBeNull();
+    });
+  });
+
+  describe('draft (spec §8)', () => {
+    const photo = new File(['x'], 'fault.jpg', { type: 'image/jpeg' });
+    const stored = { title: 'Lift', description: 'Stuck on 3', buildingId: 'b2', priority: 'high' as const, photos: [photo], savedAt: 1 };
+
+    it('restores the fields and photos and shows the guardrail bar', async () => {
+      bld.value = two;
+      draft.restored = stored;
+      renderAt();
+      expect(screen.getByLabelText(/issue title/i)).toHaveValue('Lift');
+      expect(screen.getByLabelText(/^description/i)).toHaveValue('Stuck on 3');
+      expect(screen.getByTestId('photo-capture')).toHaveTextContent('1');
+      expect(createObjectURL).toHaveBeenCalledWith(photo);
+      expect(screen.getByRole('status')).toHaveTextContent('Draft restored');
+      fireEvent.click(screen.getByRole('button', { name: /report issue/i }));
+      await waitFor(() => expect(enqueueAndRun).toHaveBeenCalledTimes(1));
+      const [, payload, photos] = enqueueAndRun.mock.calls[0];
+      expect(payload.row).toMatchObject({ title: 'Lift', description: 'Stuck on 3', building_id: 'b2', priority: 'high' });
+      expect(photos).toEqual([{ file: photo }]);
+    });
+
+    it('a draft without a building leaves the precedence choice alone', async () => {
+      draft.restored = { ...stored, buildingId: '' };
+      renderAt();
+      fireEvent.click(screen.getByRole('button', { name: /report issue/i }));
+      await waitFor(() => expect(enqueueAndRun).toHaveBeenCalledTimes(1));
+      expect(enqueueAndRun.mock.calls[0][1].row.building_id).toBe('b1');
+    });
+
+    it('does not restore or show the bar while the store is still being read', () => {
+      draft.restored = stored;
+      draft.ready = false;
+      renderAt();
+      expect(screen.getByLabelText(/issue title/i)).toHaveValue('');
+      expect(screen.queryByRole('status')).toBeNull();
+    });
+
+    it('saves on every change once ready', async () => {
+      renderAt();
+      fireEvent.change(screen.getByLabelText(/issue title/i), { target: { value: 'Broken door' } });
+      await waitFor(() => expect(draft.save).toHaveBeenLastCalledWith(
+        expect.objectContaining({ title: 'Broken door', description: '', buildingId: 'b1', priority: 'medium', photos: [] }),
+      ));
+      expect(draft.clear).not.toHaveBeenCalled();
+    });
+
+    it('an empty form is never saved as a draft', async () => {
+      renderAt();
+      await new Promise((r) => setTimeout(r, 0));
+      expect(draft.save).not.toHaveBeenCalled();
+    });
+
+    it('Discard empties the form, revokes the previews and clears the store', async () => {
+      bld.value = two;
+      draft.restored = stored;
+      renderAt();
+      // The restore itself is content, so the page has already saved it once; Discard must
+      // not save again.
+      const savesBefore = draft.save.mock.calls.length;
+      fireEvent.click(screen.getByRole('button', { name: /discard/i }));
+      expect(screen.getByLabelText(/issue title/i)).toHaveValue('');
+      expect(screen.getByLabelText(/^description/i)).toHaveValue('');
+      expect(screen.getByTestId('photo-capture')).toHaveTextContent('0');
+      expect(screen.queryByRole('status')).toBeNull();
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:fake');
+      expect(draft.clear).toHaveBeenCalledTimes(1);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(draft.save).toHaveBeenCalledTimes(savesBefore);
+    });
+
+    it('a successful or queued submit clears the draft; a rejected one keeps it', async () => {
+      const first = renderAt();
+      await submit();
+      expect(draft.clear).toHaveBeenCalledTimes(1);
+      expect(draft.clear.mock.invocationCallOrder[0]).toBeGreaterThan(enqueueAndRun.mock.invocationCallOrder[0]);
+      first.unmount();
+
+      draft.clear.mockClear();
+      enqueueAndRun.mockReset().mockResolvedValueOnce({ status: 'queued' });
+      const second = renderAt();
+      await submit();
+      expect(draft.clear).toHaveBeenCalledTimes(1);
+      second.unmount();
+
+      draft.clear.mockClear();
+      enqueueAndRun.mockReset().mockResolvedValueOnce({ status: 'failed', error: 'permission denied' });
+      renderAt();
+      await submit();
+      expect(draft.clear).not.toHaveBeenCalled();
     });
   });
 });
