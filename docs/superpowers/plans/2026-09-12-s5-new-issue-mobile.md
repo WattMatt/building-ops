@@ -1427,7 +1427,7 @@ Expected: `✓ src/pages/NewIssue.test.tsx (23 tests)`.
 **Files:**
 - Modify: `src/pages/MyDay.tsx`, `src/pages/MyDay.test.tsx`
 
-- [ ] **Step 1: Failing test** — in `src/pages/MyDay.test.tsx`:
+- [x] **Step 1: Failing test** — in `src/pages/MyDay.test.tsx`:
 
 Change line 1 to add `afterEach`:
 
@@ -1469,7 +1469,7 @@ Append inside `describe('MyDay', …)` after the `'routes the section coaching c
 Run: `npx vitest run src/pages/MyDay.test.tsx`
 Expected: that test fails with `Unable to find an accessible element with the role "link" and name "Report issue"`; the other 16 pass.
 
-- [ ] **Step 2: The button** — in `src/pages/MyDay.tsx`:
+- [x] **Step 2: The button** — in `src/pages/MyDay.tsx`:
 
 Add after line 40 (`import { track } from '@/lib/analytics';`):
 
@@ -1511,7 +1511,7 @@ Insert before the closing `</div>` of that wrapper (after the `{issueToOpen && (
 Run: `npx vitest run src/pages/MyDay.test.tsx`
 Expected: `✓ src/pages/MyDay.test.tsx (17 tests)`.
 
-- [ ] **Step 3: gate, tests, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'MyDay'` prints nothing; global count ≤ 46; `git add src/pages/MyDay.tsx src/pages/MyDay.test.tsx && git commit -m "My Day: floating Report issue button on phones"` (+ trailer).
+- [x] **Step 3: gate, tests, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'MyDay'` prints nothing; global count ≤ 46; `git add src/pages/MyDay.tsx src/pages/MyDay.test.tsx && git commit -m "My Day: floating Report issue button on phones"` (+ trailer).
 
 ---
 

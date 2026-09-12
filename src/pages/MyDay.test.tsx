@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { mockViewport } from '@/test/mobile';
 import type { useMyWork } from '@/hooks/useMyWork';
 import type { QueuedOp } from '@/lib/offline/types';
 
@@ -159,6 +160,8 @@ describe('MyDay', () => {
     state.queuedOps = [];
     state.work = baseWork();
   });
+
+  afterEach(() => mockViewport(1024));
 
   it('greets the signed-in person by first name', () => {
     renderPage();
@@ -324,5 +327,20 @@ describe('MyDay', () => {
     const strip = screen.getByText('This week');
     // DOCUMENT_POSITION_FOLLOWING: the strip comes after the card in document order.
     expect(card.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('offers a floating Report issue button on a phone only (spec §8)', () => {
+    mockViewport(375);
+    const { unmount } = renderPage();
+    const fab = screen.getByRole('link', { name: 'Report issue' });
+    expect(fab).toHaveAttribute('href', '/issues/new');
+    expect(fab.className).toMatch(/\bfixed\b/);
+    expect(fab.className).toMatch(/\bh-14\b/);
+    expect(fab.className).toMatch(/\bw-14\b/);
+    unmount();
+
+    mockViewport(1024);
+    renderPage();
+    expect(screen.queryByRole('link', { name: 'Report issue' })).toBeNull();
   });
 });
