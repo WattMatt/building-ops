@@ -68,6 +68,28 @@ async function embedPhoto(path: string): Promise<string | null> {
   }
 }
 
+/**
+ * Display name for the inspector. `profiles` is readable only by the person themselves and by
+ * admins/managers (p_select), so a field user exporting a colleague's inspection would read
+ * nothing from the table; the `building_members` RPC (security definer, scoped by
+ * can_access_building) is the path the evidence pack already uses for names. Non-fatal — the
+ * name is provenance, not the inspection itself: on any failure, or an inspector no longer a
+ * member of the building, fall back to the denormalised report author name when the ids match,
+ * else null (the doc then prints the date alone).
+ */
+async function inspectorName(buildingId: string, userId: string, fallback: string | null): Promise<string | null> {
+  try {
+    const { data, error } = await supabase.rpc('building_members', { b: buildingId });
+    if (error) throw error;
+    const row = ((data ?? []) as { id: string; full_name: string | null }[]).find((m) => m.id === userId);
+    const name = row?.full_name?.trim();
+    if (name) return name;
+  } catch (e) {
+    if (import.meta.env.DEV) console.warn('Inspector name lookup failed:', e);
+  }
+  return fallback?.trim() || null;
+}
+
 async function downscaleToDataUrl(blob: Blob): Promise<string> {
   const bmp = await bitmapFromBlob(blob);
   const scale = Math.min(1, PHOTO_MAX_DIM / Math.max(bmp.width, bmp.height));
@@ -561,7 +583,7 @@ export async function generateReportPdf(
     // one row per template version for a single report, so fetch a list and use the
     // newest row that actually holds responses. The old maybeSingle() here returned
     // null on duplicates, which silently blanked the whole condition inspection.
-    const inspRows = unwrap(await fdb.from('building_inspections').select('id,template_id')
+    const inspRows = unwrap(await fdb.from('building_inspections').select('id,template_id,inspected_by,inspection_date')
       .eq('report_id', reportId).order('created_at', { ascending: false }), 'the building inspection') ?? [];
     for (const insp of inspRows) {
       if (!insp.template_id) continue;
@@ -635,6 +657,12 @@ export async function generateReportPdf(
       data.annualCapexTotal = capexTotal || null;
       data.annualPhotosTotal = totalPhotoRefs;
       if (totalPhotoRefs > embedded) data.annualPhotosOmitted = totalPhotoRefs - embedded;
+      // Provenance off the winning row (S3): defaults stamp both columns at insert; the backfill
+      // attributed older rows to the report author, so author_name is the right fallback when the ids match.
+      data.annualInspectionDate = insp.inspection_date ?? null;
+      data.annualInspectedBy = insp.inspected_by
+        ? await inspectorName(report.building_id, insp.inspected_by, insp.inspected_by === report.author_id ? report.author_name : null)
+        : null;
       break;
     }
     // The column is `item`, not `description` - selecting a column that does not exist

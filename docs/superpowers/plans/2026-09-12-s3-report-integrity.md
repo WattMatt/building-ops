@@ -992,7 +992,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Modify: `src/lib/fortressReportDoc.test.ts` (new `describe` appended)
 - Wait for: the controller's go-ahead that S2's commits to `fortressReportPdf.ts` / `fortressReportDoc.ts` are on the branch (see the shared-file caveat in the header). Re-read both files at their current HEAD before editing; the line numbers above are from `4df8a6b` and shift after S2.
 
-- [ ] **Step 1: Write the failing test.** Append to `src/lib/fortressReportDoc.test.ts` (after the last `describe`), adding `inspectionProvenance` to the import at line 2 (`import { buildReportDoc, inspectionProvenance, type ReportData } from './fortressReportDoc';`):
+- [x] **Step 1: Write the failing test.** Append to `src/lib/fortressReportDoc.test.ts` (after the last `describe`), adding `inspectionProvenance` to the import at line 2 (`import { buildReportDoc, inspectionProvenance, type ReportData } from './fortressReportDoc';`):
 
 ```ts
 describe('buildReportDoc — inspection provenance (S3)', () => {
@@ -1027,7 +1027,7 @@ describe('buildReportDoc — inspection provenance (S3)', () => {
 
 Run `npx vitest run src/lib/fortressReportDoc.test.ts`. Expected: **3 failed** in the new block, every pre-existing test still passing — the first with `AssertionError: expected '…' to contain 'Inspected by Thandi Mokoena on 12 September 2026'` (the fields are ignored by the builder), the second with the same shape for `'Inspected on 12 September 2026'`, the third with `TypeError: inspectionProvenance is not a function` (vite-node resolves a missing named export to `undefined`, not a link error).
 
-- [ ] **Step 2: Doc builder.** In `src/lib/fortressReportDoc.ts`, add to `ReportData` directly after `annualPhotosOmitted?: number;` (`:127`):
+- [x] **Step 2: Doc builder.** In `src/lib/fortressReportDoc.ts`, add to `ReportData` directly after `annualPhotosOmitted?: number;` (`:127`):
 
 ```ts
   /** Who carried out the condition inspection (building_inspections.inspected_by, resolved to a name). */
@@ -1070,7 +1070,7 @@ In the annual branch, directly after the summary line push (`content.push({ text
     if (provenance) content.push({ text: provenance, fontSize: 9, color: '#6b7280', margin: [0, 0, 0, 8] });
 ```
 
-- [ ] **Step 3: Loader.** In `src/lib/fortressReportPdf.ts`, add below `embedPhoto` (after its closing brace, before `downscaleToDataUrl`):
+- [x] **Step 3: Loader.** In `src/lib/fortressReportPdf.ts`, add below `embedPhoto` (after its closing brace, before `downscaleToDataUrl`):
 
 ```ts
 /**
@@ -1120,14 +1120,14 @@ and replace the tail of the loop body (`:620-626`, from `data.annualSections = �
       break;
 ```
 
-- [ ] **Step 4: Gate.**
+- [x] **Step 4: Gate.**
 ```bash
 npx vitest run src/lib/fortressReportDoc.test.ts src/lib/fortressReportPdf.test.ts
 npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'fortressReportDoc|fortressReportPdf'
 ```
 Expected: every test in both files passes (the PDF test's `supabase` mock has no `rpc`, which `inspectorName` swallows — no annual export is exercised there anyway); the grep prints nothing.
 
-- [ ] **Step 5: Commit.**
+- [x] **Step 5: Commit.**
 ```bash
 git add src/lib/fortressReportDoc.ts src/lib/fortressReportDoc.test.ts src/lib/fortressReportPdf.ts
 git commit -m "Annual PDF: print who inspected and when under the Condition Inspection heading
