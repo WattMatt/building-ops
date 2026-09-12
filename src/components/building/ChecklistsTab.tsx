@@ -409,9 +409,9 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
         </div>
       </div>
 
-      {/* Who does what here — the panel renders nothing for non-managers; the guard here only skips its queries. */}
+      {/* Who does what here — read-only since S1 (edited on the Team tab); the panel renders nothing for non-managers, the guard here only skips its queries. */}
       {isAdminOrManager && (
-        <RoleAssignmentsPanel buildingId={buildingId} buildingName={buildingName} onApplied={fetchTasks} />
+        <RoleAssignmentsPanel buildingId={buildingId} />
       )}
 
       {/* Mobile: the horizon view sits above the strip, one column, no tab to find it under. */}
