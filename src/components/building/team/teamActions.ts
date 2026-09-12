@@ -10,6 +10,9 @@ import { supabase } from '@/integrations/supabase/client';
 /** Tasks a leaving member must not keep: not yet done, whether or not already late. */
 export const OPEN_STATUSES = ['pending', 'overdue'] as const;
 
+/** Postgres unique_violation — the (building_id, role) primary key already has a row. */
+const UNIQUE_VIOLATION = '23505';
+
 export async function countOpenTasksFor(buildingId: string, userId: string): Promise<number> {
   const { count, error } = await supabase
     .from('task_instances')
@@ -23,13 +26,13 @@ export async function countOpenTasksFor(buildingId: string, userId: string): Pro
 
 export type AddOutcome = { ok: true } | { ok: false; step: 'membership' | 'default_rule'; message: string };
 
-/** Insert the user_buildings row; when asked, make the person the building's 'user' rule. */
-export async function addMember(
-  buildingId: string,
-  userId: string,
-  makeDefault: boolean,
-  setRule: (role: string, userId: string | null) => Promise<void>,
-): Promise<AddOutcome> {
+/**
+ * Insert the user_buildings row; when asked, make the person the building's 'user' rule.
+ * The rule is a plain INSERT, never an upsert: the dialog only offers the default when it saw no
+ * 'user' rule, and if one appeared meanwhile (another manager, or a stale view) it must not be
+ * overwritten — the unique violation is reported instead.
+ */
+export async function addMember(buildingId: string, userId: string, makeDefault: boolean): Promise<AddOutcome> {
   const { data, error } = await supabase
     .from('user_buildings')
     .insert({ user_id: userId, building_id: buildingId })
@@ -37,11 +40,16 @@ export async function addMember(
   if (error) return { ok: false, step: 'membership', message: error.message };
   if (!data?.length) return { ok: false, step: 'membership', message: 'no access row was written' };
   if (!makeDefault) return { ok: true };
-  try {
-    await setRule('user', userId);
-  } catch (e) {
-    return { ok: false, step: 'default_rule', message: e instanceof Error ? e.message : 'unknown error' };
+
+  const { data: rule, error: ruleErr } = await supabase
+    .from('building_role_assignments')
+    .insert({ building_id: buildingId, role: 'user', user_id: userId })
+    .select('role');
+  if (ruleErr) {
+    const message = ruleErr.code === UNIQUE_VIOLATION ? 'someone already holds the daily-task default here' : ruleErr.message;
+    return { ok: false, step: 'default_rule', message };
   }
+  if (!rule?.length) return { ok: false, step: 'default_rule', message: 'no rule row was written' };
   return { ok: true };
 }
 
@@ -51,7 +59,15 @@ export interface RemoveOutcome {
   done: RemoveStep[];
   failed?: RemoveStep;
   message?: string;
+  /** Rows the unassign step actually touched. */
   tasksUnassigned: number;
+  /** What the confirm dialog promised; fewer touched than promised is reported, not hidden. */
+  expectedOpenTasks: number;
+}
+
+/** True when the unassign step ran but touched fewer rows than the dialog showed. */
+export function isUnderCount(o: RemoveOutcome): boolean {
+  return o.done.includes('tasks') && o.tasksUnassigned < o.expectedOpenTasks;
 }
 
 /**
@@ -68,7 +84,7 @@ export async function removeMember(
 ): Promise<RemoveOutcome> {
   const done: RemoveStep[] = [];
   let tasksUnassigned = 0;
-  const fail = (failed: RemoveStep, message: string): RemoveOutcome => ({ ok: false, done, failed, message, tasksUnassigned });
+  const fail = (failed: RemoveStep, message: string): RemoveOutcome => ({ ok: false, done, failed, message, tasksUnassigned, expectedOpenTasks });
 
   if (rulesHeld.length > 0) {
     const { data, error } = await supabase
@@ -104,12 +120,17 @@ export async function removeMember(
   if (!access?.length) return fail('membership', 'no access row was removed');
   done.push('membership');
 
-  return { ok: true, done, tasksUnassigned };
+  return { ok: true, done, tasksUnassigned, expectedOpenTasks };
 }
+
+const tasksText = (o: RemoveOutcome) =>
+  isUnderCount(o)
+    ? `${o.tasksUnassigned} of ${o.expectedOpenTasks} open tasks were unassigned`
+    : `${o.tasksUnassigned} task${o.tasksUnassigned === 1 ? ' was' : 's were'} unassigned`;
 
 const STEP_DONE: Record<RemoveStep, (o: RemoveOutcome) => string> = {
   rules: () => 'their rules here were removed',
-  tasks: (o) => `${o.tasksUnassigned} task${o.tasksUnassigned === 1 ? ' was' : 's were'} unassigned`,
+  tasks: tasksText,
   membership: () => 'building access was removed',
 };
 const STEP_NOT_DONE: Record<RemoveStep, string> = {
@@ -118,9 +139,16 @@ const STEP_NOT_DONE: Record<RemoveStep, string> = {
   membership: 'building access was not removed',
 };
 
-/** Plain sentence for the failure toast: what happened, what did, what did not. */
+/**
+ * Plain sentence for the toast: what happened, what did, what did not. A success that touched
+ * fewer tasks than promised says so — the caller shows it as a warning, not a plain success.
+ */
 export function describeRemoveOutcome(name: string, o: RemoveOutcome): string {
-  if (o.ok) return `Removed ${name} from this building`;
+  if (o.ok) {
+    return isUnderCount(o)
+      ? `Removed ${name} from this building, but only ${tasksText(o)}. Check the open tasks here.`
+      : `Removed ${name} from this building`;
+  }
   const steps: RemoveStep[] = ['rules', 'tasks', 'membership'];
   const doneText = o.done.length ? o.done.map((s) => STEP_DONE[s](o)).join(', ') : 'nothing';
   const notDone = steps.filter((s) => !o.done.includes(s)).map((s) => STEP_NOT_DONE[s]).join(', ');

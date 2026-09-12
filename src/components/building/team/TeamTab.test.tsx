@@ -10,8 +10,11 @@ const state = vi.hoisted(() => ({
     { id: 'u1', full_name: 'Thabo M', avatar_url: null, role: 'user' },
     { id: 'u2', full_name: 'Ayanda D', avatar_url: null, role: 'user' },
   ],
+  membersLoading: false,
   membersError: false,
   rules: new Map<string, string>([['user', 'u1']]),
+  rulesLoading: false,
+  rulesError: false,
   roles: ['user', 'manager', 'HVAC Contractor'],
   pendingByRole: new Map<string, number>([['user', 3]]),
   people: [
@@ -21,7 +24,7 @@ const state = vi.hoisted(() => ({
   ],
   setRule: vi.fn(async () => {}),
   applyToPending: vi.fn(async () => 0),
-  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
   // Untyped vi.fn() on purpose: beforeEach sets the resolved values, and single tests override
   // them with shapes (partial failures) an inferred success type would reject.
   actions: {
@@ -31,14 +34,17 @@ const state = vi.hoisted(() => ({
   },
 }));
 
+/** What TeamTab passes for a partial outcome: the toast must not auto-dismiss. */
+const STICKY = { duration: Infinity, closeButton: true };
+
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ isAdminOrManager: state.isAdminOrManager, user: { id: 'me' } }) }));
 vi.mock('sonner', () => ({ toast: state.toast }));
 vi.mock('@/hooks/useBuildingMembers', async (orig) => ({
   ...(await orig<typeof import('@/hooks/useBuildingMembers')>()),
   useBuildingMembers: () => ({
-    data: state.membersError ? undefined : state.members,
+    data: state.membersError || state.membersLoading ? undefined : state.members,
     byId: new Map(state.members.map((m) => [m.id, m])),
-    isLoading: false,
+    isLoading: state.membersLoading,
     isError: state.membersError,
     refetch: vi.fn(),
   }),
@@ -49,8 +55,8 @@ vi.mock('@/hooks/useBuildingRoleAssignments', async (orig) => ({
     rules: state.rules,
     roles: state.roles,
     pendingByRole: state.pendingByRole,
-    isLoading: false,
-    isError: false,
+    isLoading: state.rulesLoading,
+    isError: state.rulesError,
     setRule: state.setRule,
     applyToPending: state.applyToPending,
   }),
@@ -74,14 +80,17 @@ const renderTab = () => render(<TeamTab buildingId="b1" buildingName="Fortress M
 
 beforeEach(() => {
   state.isAdminOrManager = true;
+  state.membersLoading = false;
   state.membersError = false;
   state.rules = new Map([['user', 'u1']]);
+  state.rulesLoading = false;
+  state.rulesError = false;
   state.pendingByRole = new Map([['user', 3]]);
   state.setRule.mockClear();
   state.applyToPending.mockClear().mockResolvedValue(0);
   state.actions.countOpenTasksFor.mockClear().mockResolvedValue(2);
   state.actions.addMember.mockClear().mockResolvedValue({ ok: true });
-  state.actions.removeMember.mockClear().mockResolvedValue({ ok: true, done: ['rules', 'tasks', 'membership'], tasksUnassigned: 2 });
+  state.actions.removeMember.mockClear().mockResolvedValue({ ok: true, done: ['rules', 'tasks', 'membership'], tasksUnassigned: 2, expectedOpenTasks: 2 });
   Object.values(state.toast).forEach((f) => f.mockClear());
 });
 
@@ -133,8 +142,9 @@ describe('TeamTab', () => {
     expect(screen.queryByLabelText('Also make them the default for daily tasks')).toBeNull();
     fireEvent.click(within(list).getByText('Sipho N'));
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    await waitFor(() => expect(state.actions.addMember).toHaveBeenCalledWith('b1', 'u3', false, state.setRule));
+    await waitFor(() => expect(state.actions.addMember).toHaveBeenCalledWith('b1', 'u3', false));
     await waitFor(() => expect(state.toast.success).toHaveBeenCalledWith('Added Sipho N to Fortress Mall'));
+    await waitFor(() => expect(screen.queryByRole('listbox', { name: 'People' })).toBeNull());
   });
 
   it('with no user rule, Add person offers the daily-task default checked by default and writes both', async () => {
@@ -145,18 +155,66 @@ describe('TeamTab', () => {
     expect(box).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(screen.getByText('Sipho N'));
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    await waitFor(() => expect(state.actions.addMember).toHaveBeenCalledWith('b1', 'u3', true, state.setRule));
+    await waitFor(() => expect(state.actions.addMember).toHaveBeenCalledWith('b1', 'u3', true));
     await waitFor(() => expect(state.toast.success).toHaveBeenCalledWith('Added Sipho N to Fortress Mall and made them the default for daily tasks'));
   });
 
-  it('reports a rule failure after access was granted', async () => {
+  it('never offers the default while the rules are still loading — an empty Map says nothing yet', async () => {
     state.rules = new Map();
-    state.actions.addMember.mockResolvedValueOnce({ ok: false, step: 'default_rule', message: 'rls' });
+    state.rulesLoading = true;
+    renderTab();
+    fireEvent.click(screen.getByRole('button', { name: /Add person/ }));
+    await screen.findByRole('listbox', { name: 'People' });
+    expect(screen.queryByLabelText('Also make them the default for daily tasks')).toBeNull();
+    fireEvent.click(screen.getByText('Sipho N'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(state.actions.addMember).toHaveBeenCalledWith('b1', 'u3', false));
+  });
+
+  it('never offers the default when the rules failed to load', async () => {
+    state.rules = new Map();
+    state.rulesError = true;
+    renderTab();
+    fireEvent.click(screen.getByRole('button', { name: /Add person/ }));
+    await screen.findByRole('listbox', { name: 'People' });
+    expect(screen.queryByLabelText('Also make them the default for daily tasks')).toBeNull();
+  });
+
+  it('reports a rule failure after access was granted with a toast that stays until dismissed, and closes the dialog', async () => {
+    state.rules = new Map();
+    state.actions.addMember.mockResolvedValueOnce({ ok: false, step: 'default_rule', message: 'someone already holds the daily-task default here' });
     renderTab();
     fireEvent.click(screen.getByRole('button', { name: /Add person/ }));
     fireEvent.click(await screen.findByText('Sipho N'));
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith('Added Sipho N to Fortress Mall, but could not make them the default for daily tasks: rls'));
+    await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith(
+      'Added Sipho N to Fortress Mall, but could not make them the default for daily tasks: someone already holds the daily-task default here',
+      STICKY,
+    ));
+    await waitFor(() => expect(screen.queryByRole('listbox', { name: 'People' })).toBeNull());
+  });
+
+  it('keeps the dialog open with the pick when the access row could not be written, so retry is one tap', async () => {
+    state.actions.addMember.mockResolvedValueOnce({ ok: false, step: 'membership', message: 'rls' });
+    renderTab();
+    fireEvent.click(screen.getByRole('button', { name: /Add person/ }));
+    fireEvent.click(await screen.findByText('Sipho N'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith('Could not add Sipho N: rls'));
+    expect(screen.getByRole('listbox', { name: 'People' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Sipho N' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('button', { name: 'Add' })).toBeEnabled();
+  });
+
+  it('disables Add person while the member list is loading or failed', () => {
+    state.membersLoading = true;
+    const { unmount } = renderTab();
+    expect(screen.getByRole('button', { name: /Add person/ })).toBeDisabled();
+    unmount();
+    state.membersLoading = false;
+    state.membersError = true;
+    renderTab();
+    expect(screen.getByRole('button', { name: /Add person/ })).toBeDisabled();
   });
 
   it('Remove asks with the open-task count, then runs the three-step removal', async () => {
@@ -169,15 +227,29 @@ describe('TeamTab', () => {
     await waitFor(() => expect(state.toast.success).toHaveBeenCalledWith('Removed Thabo M from this building'));
   });
 
-  it('a partial removal failure says what was and was not undone', async () => {
-    state.actions.removeMember.mockResolvedValueOnce({ ok: false, done: ['rules', 'tasks'], failed: 'membership', message: 'no access row was removed', tasksUnassigned: 2 });
+  it('a partial removal failure says what was and was not undone, and stays until dismissed', async () => {
+    state.actions.removeMember.mockResolvedValueOnce({ ok: false, done: ['rules', 'tasks'], failed: 'membership', message: 'no access row was removed', tasksUnassigned: 2, expectedOpenTasks: 2 });
     renderTab();
     fireEvent.click(screen.getByRole('button', { name: 'Remove Thabo M' }));
     await screen.findByText(/2 open tasks/);
     fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(state.toast.error).toHaveBeenCalledWith(
       'Could not finish removing Thabo M: no access row was removed. Done: their rules here were removed, 2 tasks were unassigned. Not done: building access was not removed.',
+      STICKY,
     ));
+  });
+
+  it('a removal that unassigned fewer tasks than promised is a sticky warning, not a success', async () => {
+    state.actions.removeMember.mockResolvedValueOnce({ ok: true, done: ['rules', 'tasks', 'membership'], tasksUnassigned: 1, expectedOpenTasks: 2 });
+    renderTab();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Thabo M' }));
+    await screen.findByText(/2 open tasks/);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(state.toast.warning).toHaveBeenCalledWith(
+      'Removed Thabo M from this building, but only 1 of 2 open tasks were unassigned. Check the open tasks here.',
+      STICKY,
+    ));
+    expect(state.toast.success).not.toHaveBeenCalled();
   });
 
   it('Apply to existing pending tasks counts only ruled roles and reports the total', async () => {

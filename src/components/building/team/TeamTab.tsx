@@ -14,19 +14,24 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useBuildingMembers, memberDisplayName, type BuildingMember } from '@/hooks/useBuildingMembers';
-import { useBuildingRoleAssignments, buildingRolesKey } from '@/hooks/useBuildingRoleAssignments';
+import { useBuildingRoleAssignments, buildingRolesKey, roleLabel } from '@/hooks/useBuildingRoleAssignments';
 import { useAssignablePeople, addablePeople } from '@/hooks/useAssignablePeople';
 import { portfolioCoverageKey } from '@/hooks/usePortfolioCoverage';
-import { roleLabel } from '@/components/building/RoleAssignmentsPanel';
 import { MemberRow } from './MemberRow';
 import { AddPersonDialog } from './AddPersonDialog';
 import { RemoveMemberDialog } from './RemoveMemberDialog';
-import { addMember, countOpenTasksFor, removeMember, describeRemoveOutcome } from './teamActions';
+import { addMember, countOpenTasksFor, removeMember, describeRemoveOutcome, isUnderCount, type AddOutcome } from './teamActions';
 
 interface TeamTabProps {
   buildingId: string;
   buildingName?: string;
 }
+
+/**
+ * A partial outcome (something was written, something was not) must not vanish after four
+ * seconds: the manager has to read what was and was not undone and dismiss it themselves.
+ */
+const STICKY = { duration: Infinity, closeButton: true } as const;
 
 const isManagerRole = (m: BuildingMember) => m.role === 'admin' || m.role === 'manager';
 
@@ -47,7 +52,9 @@ export default function TeamTab({ buildingId, buildingName }: TeamTabProps) {
   const managers = useMemo(() => all.filter(isManagerRole), [all]);
   const field = useMemo(() => all.filter((m) => !isManagerRole(m)), [all]);
   const addable = useMemo(() => addablePeople(people.data ?? [], new Set(all.map((m) => m.id))), [people.data, all]);
-  const hasUserRule = rules.has('user');
+  // Only a LOADED rule set with no 'user' entry may offer the default: while loading (or after an
+  // error) `rules` is an empty Map that says nothing about what is really there.
+  const offerDefault = !rulesLoading && !rulesError && !rules.has('user');
   const applicable = roles.reduce((n, role) => n + (rules.has(role) ? pendingByRole.get(role) ?? 0 : 0), 0);
 
   if (!isAdminOrManager) return null;
@@ -72,18 +79,19 @@ export default function TeamTab({ buildingId, buildingName }: TeamTabProps) {
     }
   };
 
-  const handleAdd = async (personId: string, makeDefault: boolean) => {
+  const handleAdd = async (personId: string, makeDefault: boolean): Promise<AddOutcome> => {
     const person = addable.find((p) => p.id === personId);
     const who = person?.full_name?.trim() || 'Unnamed user';
-    const out = await addMember(buildingId, personId, makeDefault, setRule);
+    const out = await addMember(buildingId, personId, makeDefault);
     if (out.ok) {
       toast.success(makeDefault ? `Added ${who} to ${name} and made them the default for daily tasks` : `Added ${who} to ${name}`);
     } else if (out.step === 'membership') {
       toast.error(`Could not add ${who}: ${out.message}`);
     } else {
-      toast.error(`Added ${who} to ${name}, but could not make them the default for daily tasks: ${out.message}`);
+      toast.error(`Added ${who} to ${name}, but could not make them the default for daily tasks: ${out.message}`, STICKY);
     }
     await refresh();
+    return out;
   };
 
   const openRemove = async (member: BuildingMember) => {
@@ -105,7 +113,9 @@ export default function TeamTab({ buildingId, buildingName }: TeamTabProps) {
     try {
       const out = await removeMember(buildingId, member.id, held, openTasks);
       const text = describeRemoveOutcome(memberDisplayName(member), out);
-      if (out.ok) toast.success(text); else toast.error(text);
+      if (!out.ok) toast.error(text, STICKY);
+      else if (isUnderCount(out)) toast.warning(text, STICKY);
+      else toast.success(text);
     } finally {
       setRemoveBusy(false);
       setRemoving(null);
@@ -138,7 +148,8 @@ export default function TeamTab({ buildingId, buildingName }: TeamTabProps) {
               </CardTitle>
               <CardDescription>Who works here and what each person does. New tasks are assigned from these roles every night.</CardDescription>
             </div>
-            <Button onClick={() => setAddOpen(true)} className="min-h-11 w-full sm:w-auto">
+            {/* Without the member list the picker cannot exclude current members; wait for it. */}
+            <Button onClick={() => setAddOpen(true)} disabled={members.isLoading || members.isError} className="min-h-11 w-full sm:w-auto">
               <UserPlus className="h-4 w-4 mr-2" aria-hidden="true" />
               Add person
             </Button>
@@ -208,7 +219,7 @@ export default function TeamTab({ buildingId, buildingName }: TeamTabProps) {
         people={addable}
         isLoading={people.isLoading}
         isError={people.isError}
-        offerDefault={!hasUserRule}
+        offerDefault={offerDefault}
         onAdd={handleAdd}
       />
       <RemoveMemberDialog

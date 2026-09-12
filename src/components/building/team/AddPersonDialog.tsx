@@ -1,6 +1,8 @@
 /**
  * Pick one person who is not yet a member. When the building has no 'user' rule yet, offer to
  * make them the daily-task default (checked by default) — one action, both tables (spec §4.2).
+ * The dialog stays open when the access row itself could not be written, so a retry is one tap;
+ * once access is granted (even if the rule then failed) the person is a member and it closes.
  */
 import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
@@ -9,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import type { AssignablePerson } from '@/hooks/useAssignablePeople';
+import type { AddOutcome } from './teamActions';
 
 interface AddPersonDialogProps {
   open: boolean;
@@ -17,9 +20,12 @@ interface AddPersonDialogProps {
   people: AssignablePerson[];
   isLoading: boolean;
   isError: boolean;
-  /** True when the building has no 'user' rule yet, so the default-for-daily-tasks offer is shown. */
+  /**
+   * True only when the rules have loaded and none is 'user'; while they load (or failed) the
+   * offer is withheld so a stale empty view can never try to write over an existing default.
+   */
   offerDefault: boolean;
-  onAdd: (personId: string, makeDefault: boolean) => Promise<void>;
+  onAdd: (personId: string, makeDefault: boolean) => Promise<AddOutcome>;
 }
 
 export function AddPersonDialog({ open, onOpenChange, buildingName, people, isLoading, isError, offerDefault, onAdd }: AddPersonDialogProps) {
@@ -36,8 +42,9 @@ export function AddPersonDialog({ open, onOpenChange, buildingName, people, isLo
     if (!selected) return;
     setSaving(true);
     try {
-      await onAdd(selected, offerDefault && makeDefault);
-      close(false);
+      const out = await onAdd(selected, offerDefault && makeDefault);
+      // Membership failed: nothing changed, keep the pick so a retry is one tap.
+      if (out.ok || out.step !== 'membership') close(false);
     } finally {
       setSaving(false);
     }
@@ -77,10 +84,12 @@ export function AddPersonDialog({ open, onOpenChange, buildingName, people, isLo
           </ul>
         )}
         {offerDefault && people.length > 0 && (
-          <label className="flex items-start gap-3 min-h-11 cursor-pointer">
+          // A div, not a <label>: the Radix checkbox is a button and <Label htmlFor> already targets it —
+          // wrapping both in a <label> fired the toggle twice per tap.
+          <div className="flex items-start gap-3 min-h-11">
             <Checkbox id="add-person-default" checked={makeDefault} onCheckedChange={(v) => setMakeDefault(v === true)} className="mt-1" />
             <Label htmlFor="add-person-default" className="font-normal cursor-pointer leading-snug">Also make them the default for daily tasks</Label>
-          </label>
+          </div>
         )}
         <DialogFooter>
           <Button variant="outline" onClick={() => close(false)} disabled={saving} className="min-h-11">Cancel</Button>

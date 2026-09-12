@@ -11,15 +11,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { useBuildingMembers, memberDisplayName } from '@/hooks/useBuildingMembers';
 import { useBuildingRoleAssignments } from '@/hooks/useBuildingRoleAssignments';
 
+/** `roleLabel` lives with the hook now; re-exported so existing importers keep working. */
+export { roleLabel } from '@/hooks/useBuildingRoleAssignments';
+
 interface RoleAssignmentsPanelProps {
   buildingId: string;
-}
-
-/** `user`/`manager` are stored lower-case; template labels are already title-case. */
-export function roleLabel(role: string): string {
-  if (role === 'user') return 'User (default)';
-  if (role === 'manager') return 'Manager';
-  return role;
 }
 
 export const NO_DAILY_OWNER_WARNING = 'Nobody is assigned to daily tasks here. New tasks land with no owner.';

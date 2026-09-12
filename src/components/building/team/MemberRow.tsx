@@ -3,7 +3,7 @@ import { UserMinus } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { memberDisplayName, type BuildingMember } from '@/hooks/useBuildingMembers';
-import { roleLabel } from '@/components/building/RoleAssignmentsPanel';
+import { roleLabel } from '@/hooks/useBuildingRoleAssignments';
 
 interface MemberRowProps {
   member: BuildingMember;

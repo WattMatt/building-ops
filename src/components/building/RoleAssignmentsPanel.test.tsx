@@ -11,7 +11,9 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ isAdminOrManager: state.isAdminOrManager, user: { id: 'me' } }) }));
-vi.mock('@/hooks/useBuildingRoleAssignments', () => ({
+// Spread the real module: the panel re-exports its `roleLabel`, which this file also tests.
+vi.mock('@/hooks/useBuildingRoleAssignments', async (orig) => ({
+  ...(await orig<typeof import('@/hooks/useBuildingRoleAssignments')>()),
   useBuildingRoleAssignments: () => ({
     rules: state.rules,
     roles: ['user', 'manager'],
