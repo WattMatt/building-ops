@@ -57,7 +57,7 @@
 - Create: `../GMI/sql/2026-09-15_03_inspection_provenance.sql` (then `npm run schema:vendor` → `supabase/schema/2026-09-15_03_inspection_provenance.sql` + `supabase/schema/.source`)
 - Scratch only (not committed): `<scratchpad>/s3-local-stub.sql`, `<scratchpad>/s3-local-verify.sql`
 
-- [ ] **Step 1: Write the migration** at `../GMI/sql/2026-09-15_03_inspection_provenance.sql`:
+- [x] **Step 1: Write the migration** at `../GMI/sql/2026-09-15_03_inspection_provenance.sql`:
 
 ```sql
 -- 2026-09-15_03_inspection_provenance.sql — S3 "Report data integrity" (spec 2026-09-12-field-readiness-design.md §6).
@@ -128,7 +128,7 @@ commit;
 --   Then: node scripts/rls-smoke.mjs; node scripts/fortress-smoke.mjs.
 ```
 
-- [ ] **Step 2: Verify on a throwaway local Postgres 17.** Supabase's `auth` schema and the base tables are not in the vendored migrations, so stand up stubs with exactly the columns the migration touches, seed the "no provenance" state prod is in today, apply the real file twice, then assert the backfill and the defaults. Write `<scratchpad>/s3-local-stub.sql`:
+- [x] **Step 2: Verify on a throwaway local Postgres 17.** Supabase's `auth` schema and the base tables are not in the vendored migrations, so stand up stubs with exactly the columns the migration touches, seed the "no provenance" state prod is in today, apply the real file twice, then assert the backfill and the defaults. Write `<scratchpad>/s3-local-stub.sql`:
 
 ```sql
 -- Throwaway stub of the surface 2026-09-15_03 depends on. Never applied anywhere real.
@@ -263,7 +263,7 @@ docker rm -f s3-pg
 ```
 Expected: the first migration apply prints `BEGIN`, `ALTER TABLE`, `ALTER TABLE`, `UPDATE 1` (f1 — f2's report has no author), `UPDATE 2` (both dates), `UPDATE 1` (c1), `COMMIT`; the second apply prints `UPDATE 0` three times. The verify prints `NOTICE:  backfill ok`, `NOTICE:  defaults ok`, `NOTICE:  no-jwt ok`, the two-row `column_default` table (`auth.uid()` and `(timezone('Africa/Johannesburg'::text, now()))::date`) and `ALL LOCAL CHECKS PASSED`. If `psql` is not on PATH use `docker exec -i s3-pg psql -U postgres -v ON_ERROR_STOP=1 < file`. Fix the migration until both applies and the verify pass.
 
-- [ ] **Step 3: Commit the canonical SQL in GMI**, then vendor:
+- [x] **Step 3: Commit the canonical SQL in GMI**, then vendor:
 
 ```bash
 cd ../GMI && git add sql/2026-09-15_03_inspection_provenance.sql && git commit -m "S3: inspection provenance defaults + backfill (2026-09-15_03)" && cd -
