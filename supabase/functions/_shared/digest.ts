@@ -26,6 +26,36 @@ export interface DigestIssue {
 /** Portfolio-wide expiry counts by window (expiring_items(90) bucketed by days_left). */
 export interface ExpiryBuckets { expired: number; d30: number; d60: number; d90: number }
 
+/** One row of `portfolio_coverage()` (the columns the digest reads; the full row has more). */
+export interface CoverageRow {
+  building_id: string;
+  building_name: string;
+  field_members: number;
+  unassigned_open: number;
+  due_yesterday: number;
+  completed_yesterday: number;
+}
+
+/** What the Coverage section says, shaped once per run from the service-role call. */
+export interface CoverageSummary {
+  /** Buildings with no active field member. */
+  noTeam: string[];
+  /** Open (pending or overdue) tasks across the portfolio with nobody assigned. */
+  unassignedOpen: number;
+  /** Buildings that had daily tasks due yesterday and completed none of them. */
+  silentYesterday: string[];
+}
+
+/** Pure shaping of the RPC rows; null when every line would be empty so the caller can pass nothing. */
+export function coverageSummary(rows: CoverageRow[]): CoverageSummary | null {
+  const s: CoverageSummary = {
+    noTeam: rows.filter((r) => r.field_members === 0).map((r) => r.building_name),
+    unassignedOpen: rows.reduce((n, r) => n + r.unassigned_open, 0),
+    silentYesterday: rows.filter((r) => r.due_yesterday > 0 && r.completed_yesterday === 0).map((r) => r.building_name),
+  };
+  return s.noTeam.length || s.unassignedOpen || s.silentYesterday.length ? s : null;
+}
+
 export interface DigestInput {
   /** Today in the operating timezone, `YYYY-MM-DD`. */
   today: string;
@@ -33,6 +63,8 @@ export interface DigestInput {
   issues: DigestIssue[];
   /** Portfolio-wide expiry counts; only admins and managers get this section. */
   expiring?: ExpiryBuckets | null;
+  /** Portfolio coverage gaps; only admins and managers get this section. */
+  coverage?: CoverageSummary | null;
   unread: number;
 }
 
@@ -59,9 +91,10 @@ function capLines(lines: string[]): string[] {
 
 /**
  * Build the digest sections for one person, in reading order: overdue tasks, tasks due
- * today, open issues assigned to them, the portfolio expiry counts (admins and managers
- * only — the caller passes null for everyone else), then the unread-inbox count. Returns
- * `null` when there is nothing to say, so the caller can skip the send entirely.
+ * today, open issues assigned to them, the portfolio expiry counts and the coverage gaps
+ * (admins and managers only — the caller passes null for everyone else), then the
+ * unread-inbox count. Returns `null` when there is nothing to say, so the caller can skip
+ * the send entirely.
  */
 export function composeDigest(input: DigestInput): DigestSection[] | null {
   const overdue = input.tasks.filter((t) => t.due_date < input.today);
@@ -95,6 +128,15 @@ export function composeDigest(input: DigestInput): DigestSection[] | null {
     if (e.d90) lines.push(`${e.d90} within 61–90 days`);
     const total = e.expired + e.d30 + e.d60 + e.d90;
     sections.push({ heading: `${total} expiring ${plural(total, 'document, warranty or service', 'documents, warranties and services')}`, lines });
+  }
+  const c = input.coverage;
+  if (c && (c.noTeam.length || c.unassignedOpen || c.silentYesterday.length)) {
+    const lines: string[] = capLines(c.noTeam.map((name) => `${name} has no field team`));
+    if (c.unassignedOpen) {
+      lines.push(`${c.unassignedOpen} open ${plural(c.unassignedOpen, 'task has', 'tasks have')} nobody assigned`);
+    }
+    for (const name of c.silentYesterday) lines.push(`Nothing was logged yesterday at ${name}`);
+    sections.push({ heading: 'Coverage', lines });
   }
   if (input.unread) {
     sections.push({

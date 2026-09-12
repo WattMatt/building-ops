@@ -1,7 +1,8 @@
 // Opt-in daily digest: one email per person who set `profiles.daily_digest`, summarising the
 // tasks they owe (overdue + due today), the issues assigned to them, for admins and managers
-// the portfolio's expiry counts (expiring_items(90), R4a §5.6), and how much is unread in
-// their inbox. Cron-triggered (pg_cron -> pg_net), so it is guarded by a shared secret rather
+// the portfolio's expiry counts (expiring_items(90), R4a §5.6) and the portfolio's coverage
+// gaps (`portfolio_coverage()`, S1 §4.4), and how much is unread in their inbox.
+// Cron-triggered (pg_cron -> pg_net), so it is guarded by a shared secret rather
 // than a user JWT — the same shape as `signoff-reminders`.
 //
 // The same run also raises one `task_due_today` notification (inbox row + push, never an email
@@ -18,7 +19,10 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { APP_URL, createNotifications, senderName, sendEmail } from "../_shared/notify.ts";
 import {
   composeDigest,
+  coverageSummary,
   dueTodayPush,
+  type CoverageRow,
+  type CoverageSummary,
   type DigestIssue,
   type DigestSection,
   type DigestTask,
@@ -124,6 +128,18 @@ serve(async (req: Request): Promise<Response> => {
     } catch (e) {
       // The digest still goes out without the expiry line; the widget and the alerts cron cover it.
       console.error("daily-digest: expiring_items failed", e);
+    }
+
+    // Coverage gaps for admins and managers, one service-role call per run (S1 §4.4). The service
+    // role bypasses RLS, so this is the whole portfolio; site users never receive this section.
+    let coverage: CoverageSummary | null = null;
+    try {
+      const { data: covRows, error: covErr } = await supabase.rpc("portfolio_coverage");
+      if (covErr) throw covErr;
+      coverage = coverageSummary((covRows ?? []) as CoverageRow[]);
+    } catch (e) {
+      // The digest still goes out without the coverage lines; the dashboard widget covers it.
+      console.error("daily-digest: portfolio_coverage failed", e);
     }
 
     // ---- Push pass: one task_due_today per person with a live device --------------------
@@ -280,8 +296,12 @@ serve(async (req: Request): Promise<Response> => {
           }),
         );
 
+        const isManager = adminIds.has(p.id);
         const sections = composeDigest({
-          today, tasks, issues, expiring: adminIds.has(p.id) ? expiring : null, unread: unreadCount ?? 0,
+          today, tasks, issues,
+          expiring: isManager ? expiring : null,
+          coverage: isManager ? coverage : null,
+          unread: unreadCount ?? 0,
         });
         if (!sections) { skipped++; continue; }
 

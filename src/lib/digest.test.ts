@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PUSH_NAME_MAX, SECTION_MAX, composeDigest, dueTodayPush } from '../../supabase/functions/_shared/digest';
+import { PUSH_NAME_MAX, SECTION_MAX, composeDigest, coverageSummary, dueTodayPush, type CoverageRow } from '../../supabase/functions/_shared/digest';
 
 const TODAY = '2026-09-11';
 
@@ -184,5 +184,65 @@ describe('dueTodayPush', () => {
   it('ignores future tasks when counting and naming', () => {
     const tasks = [task('t1', 'Now', TODAY), task('t2', 'Later', '2026-09-20')];
     expect(dueTodayPush(tasks, TODAY)).toEqual({ title: '1 task due today', body: 'Now' });
+  });
+});
+
+describe('coverage section', () => {
+  // Only the columns the digest reads (its CoverageRow is a subset of the RPC row on purpose).
+  const cov = (over: Partial<CoverageRow>): CoverageRow => ({
+    building_id: 'b', building_name: 'B', field_members: 1,
+    unassigned_open: 0, due_yesterday: 0, completed_yesterday: 0, ...over,
+  });
+
+  it('coverageSummary names no-team buildings, totals unassigned work and finds silent buildings', () => {
+    expect(coverageSummary([
+      cov({ building_name: 'Alpha Court', field_members: 0, unassigned_open: 2 }),
+      cov({ building_name: 'Beta Place', unassigned_open: 3, due_yesterday: 4, completed_yesterday: 0 }),
+      cov({ building_name: 'Gamma House', due_yesterday: 2, completed_yesterday: 1 }),
+      cov({ building_name: 'Delta Row', due_yesterday: 0, completed_yesterday: 0 }),
+    ])).toEqual({ noTeam: ['Alpha Court'], unassignedOpen: 5, silentYesterday: ['Beta Place'] });
+  });
+
+  it('coverageSummary is null when there is nothing to say', () => {
+    expect(coverageSummary([cov({}), cov({ building_name: 'C' })])).toBeNull();
+    expect(coverageSummary([])).toBeNull();
+  });
+
+  it('composeDigest adds a Coverage section between expiring and unread, worded per line', () => {
+    const sections = composeDigest({
+      ...empty,
+      unread: 1,
+      expiring: { expired: 1, d30: 0, d60: 0, d90: 0 },
+      coverage: { noTeam: ['Alpha Court', 'Beta Place'], unassignedOpen: 5, silentYesterday: ['Gamma House'] },
+    });
+    expect(sections!.map((s) => s.heading)).toEqual([
+      '1 expiring document, warranty or service',
+      'Coverage',
+      '1 unread notification',
+    ]);
+    expect(sections![1].lines).toEqual([
+      'Alpha Court has no field team',
+      'Beta Place has no field team',
+      '5 open tasks have nobody assigned',
+      'Nothing was logged yesterday at Gamma House',
+    ]);
+  });
+
+  it('singularises the unassigned line and omits it at zero', () => {
+    expect(composeDigest({ ...empty, coverage: { noTeam: [], unassignedOpen: 1, silentYesterday: [] } })![0].lines).toEqual(['1 open task has nobody assigned']);
+    expect(composeDigest({ ...empty, coverage: { noTeam: ['A'], unassignedOpen: 0, silentYesterday: [] } })![0].lines).toEqual(['A has no field team']);
+  });
+
+  it('caps the no-team list at SECTION_MAX and still appends the other lines', () => {
+    const noTeam = Array.from({ length: SECTION_MAX + 2 }, (_, i) => `Building ${i}`);
+    const lines = composeDigest({ ...empty, coverage: { noTeam, unassignedOpen: 2, silentYesterday: ['Z'] } })![0].lines;
+    expect(lines).toHaveLength(SECTION_MAX + 3);
+    expect(lines[SECTION_MAX]).toBe('…and 2 more');
+    expect(lines.slice(-2)).toEqual(['2 open tasks have nobody assigned', 'Nothing was logged yesterday at Z']);
+  });
+
+  it('adds no section for null or all-empty coverage (site users pass null)', () => {
+    expect(composeDigest({ ...empty, coverage: null })).toBeNull();
+    expect(composeDigest({ ...empty, coverage: { noTeam: [], unassignedOpen: 0, silentYesterday: [] } })).toBeNull();
   });
 });

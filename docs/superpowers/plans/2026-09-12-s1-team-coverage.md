@@ -2544,7 +2544,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Modify: `src/lib/digest.test.ts` (append a `describe`)
 - Modify: `supabase/functions/daily-digest/index.ts` (import `:19-26`; after the expiring block `:127`; the `composeDigest` call `:283-285`) — read-verified; the controller deploys
 
-- [ ] **Step 1: Failing tests** — append to `src/lib/digest.test.ts` (and add `coverageSummary`, `type CoverageRow` to the import on line 2):
+- [x] **Step 1: Failing tests** — append to `src/lib/digest.test.ts` (and add `coverageSummary`, `type CoverageRow` to the import on line 2):
 
 ```ts
 describe('coverage section', () => {
@@ -2607,9 +2607,9 @@ describe('coverage section', () => {
 });
 ```
 
-- [ ] **Step 2: Run** `npm run test -- src/lib/digest.test.ts` → FAIL (`coverageSummary` not exported; no Coverage section).
+- [x] **Step 2: Run** `npm run test -- src/lib/digest.test.ts` → FAIL (`coverageSummary` not exported; no Coverage section).
 
-- [ ] **Step 3: Implement in `_shared/digest.ts`.** After line 27 (`ExpiryBuckets`):
+- [x] **Step 3: Implement in `_shared/digest.ts`.** After line 27 (`ExpiryBuckets`):
 
 ```ts
 /** One row of `portfolio_coverage()` (the columns the digest reads; the full row has more). */
@@ -2661,9 +2661,9 @@ In `composeDigest`, after the expiring block (after line 98's `}`) and before `i
 ```
 Update the `composeDigest` doc comment (`:60-65`) to read "…the portfolio expiry counts and the coverage gaps (admins and managers only — the caller passes null for everyone else), then the unread-inbox count."
 
-- [ ] **Step 4: Run** `npm run test -- src/lib/digest.test.ts` → PASS (all prior tests plus 6 new).
+- [x] **Step 4: Run** `npm run test -- src/lib/digest.test.ts` → PASS (all prior tests plus 6 new).
 
-- [ ] **Step 5: `daily-digest/index.ts`** (read-verified). The import block `:19-26` gains `coverageSummary`, `type CoverageRow`, `type CoverageSummary`:
+- [x] **Step 5: `daily-digest/index.ts`** (read-verified). The import block `:19-26` gains `coverageSummary`, `type CoverageRow`, `type CoverageSummary`:
 
 ```ts
 import {
@@ -2710,9 +2710,9 @@ with
 ```
 Also extend the header comment (`:1-5`) with "for admins and managers the portfolio's coverage gaps (`portfolio_coverage()`, S1 §4.4)".
 
-- [ ] **Step 6: Gate.** `npm run test -- src/lib/digest.test.ts` PASS; `git diff --stat supabase/functions/daily-digest/index.ts` shows one file, ~25 insertions; `grep -c 'coverage' supabase/functions/daily-digest/index.ts` ≥ 6.
+- [x] **Step 6: Gate.** `npm run test -- src/lib/digest.test.ts` PASS; `git diff --stat supabase/functions/daily-digest/index.ts` shows one file, ~25 insertions; `grep -c 'coverage' supabase/functions/daily-digest/index.ts` ≥ 6.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add supabase/functions/_shared/digest.ts src/lib/digest.test.ts supabase/functions/daily-digest/index.ts
