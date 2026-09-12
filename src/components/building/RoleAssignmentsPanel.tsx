@@ -11,9 +11,6 @@ import { Card, CardContent } from '@/components/ui/card';
 import { useBuildingMembers, memberDisplayName } from '@/hooks/useBuildingMembers';
 import { useBuildingRoleAssignments } from '@/hooks/useBuildingRoleAssignments';
 
-/** `roleLabel` lives with the hook now; re-exported so existing importers keep working. */
-export { roleLabel } from '@/hooks/useBuildingRoleAssignments';
-
 interface RoleAssignmentsPanelProps {
   buildingId: string;
 }

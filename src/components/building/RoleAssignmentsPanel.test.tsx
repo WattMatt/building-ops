@@ -11,7 +11,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ isAdminOrManager: state.isAdminOrManager, user: { id: 'me' } }) }));
-// Spread the real module: the panel re-exports its `roleLabel`, which this file also tests.
+// Spread the real module: only the hook is stubbed; `roleLabel`, which this file also tests, stays real.
 vi.mock('@/hooks/useBuildingRoleAssignments', async (orig) => ({
   ...(await orig<typeof import('@/hooks/useBuildingRoleAssignments')>()),
   useBuildingRoleAssignments: () => ({
@@ -35,7 +35,8 @@ vi.mock('@/hooks/useBuildingMembers', async (orig) => {
   };
 });
 
-import { RoleAssignmentsPanel, roleLabel, summaryLine, NO_DAILY_OWNER_WARNING } from './RoleAssignmentsPanel';
+import { RoleAssignmentsPanel, summaryLine, NO_DAILY_OWNER_WARNING } from './RoleAssignmentsPanel';
+import { roleLabel } from '@/hooks/useBuildingRoleAssignments';
 
 const renderPanel = () => render(<MemoryRouter><RoleAssignmentsPanel buildingId="b1" /></MemoryRouter>);
 
