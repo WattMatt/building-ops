@@ -20,11 +20,12 @@
  */
 import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-const PROD_REF = 'qdzgkttiosahdfqresvz';
+export const PROD_REF = 'qdzgkttiosahdfqresvz';
 const API = 'https://api.supabase.com/v1/projects';
 
-const VERIFY = {
+export const VERIFY = {
   '2026-09-15_01_team_coverage.sql': [
     { sql: `select policyname, cmd from pg_policies where tablename = 'user_buildings' order by 1`, expect: 'ub_select SELECT, ub_write_managed ALL' },
     { sql: `select proname, prosecdef from pg_proc where pronamespace = 'public'::regnamespace and proname in ('assignable_people','portfolio_coverage') order by 1`, expect: 'assignable_people t, portfolio_coverage f' },
@@ -47,14 +48,14 @@ const VERIFY = {
   ],
   '2026-09-15_04_overdue_notify.sql': [
     { sql: `select pg_get_constraintdef(oid) ~ 'task_overdue' as has_kind from pg_constraint where conname = 'notifications_kind_check'`, expect: 'true' },
-    { sql: `select prosecdef, prolang::regtype::text as lang from pg_proc where pronamespace = 'public'::regnamespace and proname = 'mark_overdue_tasks'`, expect: 'prosecdef true' },
+    { sql: `select p.prosecdef, l.lanname from pg_proc p join pg_language l on l.oid = p.prolang where p.pronamespace = 'public'::regnamespace and p.proname = 'mark_overdue_tasks'`, expect: 'prosecdef true, plpgsql' },
     { sql: `select has_function_privilege('anon','public.mark_overdue_tasks()','execute') as anon_can, has_function_privilege('authenticated','public.mark_overdue_tasks()','execute') as auth_can, has_function_privilege('service_role','public.mark_overdue_tasks()','execute') as svc_can`, expect: 'false, false, true' },
     { sql: `select jobname, schedule, command from cron.job where jobname = 'task-overdue-sweep'`, expect: '5 22 * * *, select public.mark_overdue_tasks()' },
   ],
 };
 
 /** Read before S4 on prod: how many assignees the first sweep would write to. */
-const PRE_APPLY = {
+export const PRE_APPLY = {
   '2026-09-15_04_overdue_notify.sql': [
     { sql: `select count(*) as would_notify from public.task_instances where status = 'pending' and assigned_to is not null and due_date < (now() at time zone 'Africa/Johannesburg')::date`, expect: '0 or today\'s few; STOP if large' },
   ],
@@ -66,6 +67,11 @@ function usage(msg) {
   process.exit(2);
 }
 
+// Importable: `import { VERIFY, PRE_APPLY } from './apply-migrations.mjs'` reuses the query blocks
+// with another transport; only a direct `node scripts/apply-migrations.mjs …` runs the apply.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) await main();
+
+async function main() {
 const args = process.argv.slice(2);
 const ref = args.shift();
 if (!ref || !/^[a-z]{20}$/.test(ref)) usage('first argument must be a 20-letter project ref');
@@ -130,3 +136,4 @@ for (const file of files) {
   else console.log(`(no verification block for ${name})`);
 }
 console.log('\ndone.');
+}
