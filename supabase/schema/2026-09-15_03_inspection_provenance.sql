@@ -12,6 +12,18 @@
 -- the columns stay nullable). The backfill attributes existing rows to the report's author and to the
 -- report's creation day in SAST — the best evidence on file. Seeded reports with no author keep a null
 -- inspector / assessor; their inspection_date is still filled from created_at.
+--
+-- Also (S3 §6, OHS comment): the client now saves a compliance_responses row with response = null when the
+-- inspector types a comment before picking an answer. The three score views counted every joined response
+-- row in their denominators — compliance_scores (2026-06-19_02:10-32) and compliance_section_scores /
+-- compliance_critical_scores (2026-06-13_08:63-71, :75-83) all divide `count(*) filter (where response in
+-- ('yes','na'))` by a count with no null filter — so a comment-only item scored as a FAIL until answered.
+-- Each view is re-created below with `and r.response is not null`, so an unanswered item is simply not yet
+-- part of the score (the same way an unscored item is not). Every column, its order and type, and the
+-- Yarona `reports.meta->>'ohs_stated_pct'` override in compliance_scores are preserved verbatim.
+-- `create or replace view` REPLACES the view's storage options with whatever the statement names, so each
+-- one restates `with (security_invoker = on)` — omitting it is how compliance_scores lost the option in
+-- 2026-06-19_02 (the A-01 RLS bypass fixed in 2026-08-04_01). Grants are untouched by a replace.
 begin;
 
 alter table public.building_inspections
@@ -41,6 +53,63 @@ update public.compliance_assessments ca
    and ca.assessed_by is null
    and r.author_id is not null;
 
+-- ------------------------------------------------------------------------------------------
+-- Score views: an unanswered (response is null) row is neither a pass nor a fail.
+-- ------------------------------------------------------------------------------------------
+-- compliance_scores: 2026-06-19_02 definition + the null filter. Column list unchanged:
+-- (assessment_id, report_id, building_id, compliance_pct).
+create or replace view public.compliance_scores
+  with (security_invoker = on) as
+ WITH per_group AS (
+         SELECT a.id AS assessment_id,
+            a.report_id,
+            a.building_id,
+            i.group_code,
+            max(i.group_weight) AS group_weight,
+            count(*) FILTER (WHERE r.response = ANY (ARRAY['yes'::text, 'na'::text]))::numeric / NULLIF(count(*), 0)::numeric AS ratio
+           FROM public.compliance_assessments a
+             JOIN public.compliance_responses r ON r.assessment_id = a.id
+             JOIN public.compliance_template_items i ON i.id = r.template_item_id
+          WHERE i.is_scored
+            AND r.response IS NOT NULL
+          GROUP BY a.id, a.report_id, a.building_id, i.group_code
+        )
+ SELECT assessment_id,
+    report_id,
+    building_id,
+    COALESCE(
+      round((SELECT (rep.meta->>'ohs_stated_pct')::numeric FROM public.reports rep WHERE rep.id = per_group.report_id), 2),
+      round(sum(group_weight * ratio) / NULLIF(sum(group_weight), 0::numeric) * 100::numeric, 1)
+    ) AS compliance_pct
+   FROM per_group
+  GROUP BY assessment_id, report_id, building_id;
+
+-- compliance_section_scores: 2026-06-13_08 definition + the null filter. Column list unchanged:
+-- (assessment_id, building_id, section_no, section_title, section_pct).
+create or replace view public.compliance_section_scores
+  with (security_invoker = on) as
+select a.id as assessment_id, a.building_id, i.section_no, i.section_title,
+       round(100.0 * count(*) filter (where r.response in ('yes','na') and i.is_scored)
+             / nullif(count(*) filter (where i.is_scored),0), 1) as section_pct
+from public.compliance_assessments a
+join public.compliance_responses r       on r.assessment_id = a.id
+join public.compliance_template_items i  on i.id = r.template_item_id
+where r.response is not null
+group by a.id, a.building_id, i.section_no, i.section_title;
+
+-- compliance_critical_scores: 2026-06-13_08 definition + the null filter. Column list unchanged:
+-- (assessment_id, building_id, critical_pct).
+create or replace view public.compliance_critical_scores
+  with (security_invoker = on) as
+select a.id as assessment_id, a.building_id,
+       round(100.0 * count(*) filter (where r.response in ('yes','na') and i.is_scored)
+             / nullif(count(*) filter (where i.is_scored),0), 1) as critical_pct
+from public.compliance_assessments a
+join public.compliance_responses r       on r.assessment_id = a.id
+join public.compliance_template_items i  on i.id = r.template_item_id and i.is_critical
+where r.response is not null
+group by a.id, a.building_id;
+
 commit;
 
 -- Verify (run after applying, staging then prod):
@@ -65,4 +134,10 @@ commit;
 --   select count(*) filter (where ca.assessed_by is null) as no_assessor, count(*) as rows_with_author
 --     from public.compliance_assessments ca join public.reports r on r.id = ca.report_id
 --    where r.author_id is not null;                                   -- 0 | n
+--   select c.relname, c.reloptions from pg_class c join pg_namespace n on n.oid = c.relnamespace
+--    where n.nspname = 'public' and c.relname in ('compliance_scores','compliance_section_scores','compliance_critical_scores')
+--    order by 1;                                                       -- each {security_invoker=on}
+--   select pg_get_viewdef('public.compliance_scores'::regclass) ~* 'response is not null';           -- true
+--   select pg_get_viewdef('public.compliance_section_scores'::regclass) ~* 'response is not null';   -- true
+--   select pg_get_viewdef('public.compliance_critical_scores'::regclass) ~* 'response is not null';  -- true
 --   Then: node scripts/rls-smoke.mjs; node scripts/fortress-smoke.mjs.
