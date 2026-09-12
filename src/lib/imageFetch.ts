@@ -11,16 +11,21 @@
  */
 
 export interface FetchImageOptions {
-  /** pdfmake embeds PNG and JPEG only; a caller that feeds pdfmake directly rejects SVG here. */
-  rejectSvg?: boolean;
+  /**
+   * Content types the caller can actually embed, compared without parameters (e.g. 'image/png').
+   * pdfmake takes PNG and JPEG only, so a caller that hands it the bytes as-is lists those two —
+   * an SVG or a WebP would otherwise reach it and throw "Unknown image format", failing the whole
+   * export. Absent = any image/* (the photo path, which re-encodes through a canvas anyway).
+   */
+  allow?: string[];
 }
 
 /**
  * Resolves the image body as a Blob (its `type` carries the response's content type, so a caller
  * that needs png-vs-jpg reads `blob.type`). Throws:
- *   `unreadable (HTTP <n>)`   — non-2xx; the body is never read
- *   `not an image (<type>)`   — content type does not start with image/ ("unknown" when absent)
- *   `svg not embeddable`      — image/svg+xml with `rejectSvg`
+ *   `unreadable (HTTP <n>)`     — non-2xx; the body is never read
+ *   `not an image (<type>)`     — content type does not start with image/ ("unknown" when absent)
+ *   `not embeddable (<type>)`   — an image, but not one of `allow`
  */
 export async function fetchImageBlob(signedUrl: string, opts: FetchImageOptions = {}): Promise<Blob> {
   const res = await fetch(signedUrl);
@@ -28,7 +33,7 @@ export async function fetchImageBlob(signedUrl: string, opts: FetchImageOptions 
   const raw = res.headers.get('content-type') ?? '';
   const type = raw.split(';')[0].trim().toLowerCase();
   if (!type.startsWith('image/')) throw new Error(`not an image (${type || 'unknown'})`);
-  if (opts.rejectSvg && type === 'image/svg+xml') throw new Error('svg not embeddable');
+  if (opts.allow && !opts.allow.includes(type)) throw new Error(`not embeddable (${type})`);
   return res.blob();
 }
 

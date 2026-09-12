@@ -56,11 +56,28 @@ describe('fetchImageBlob', () => {
     expect(blob.type).toBe('image/png; charset=binary');
   });
 
-  it('rejects SVG only when asked to', async () => {
-    fetchMock.mockResolvedValue(response({ ok: true, type: 'image/svg+xml', body: '<svg/>' }));
-    await expect(fetchImageBlob('https://signed.example/logo.svg', { rejectSvg: true })).rejects.toThrow('svg not embeddable');
+  it('with `allow`, refuses any image type outside the list before reading the body, naming the type', async () => {
+    const allow = ['image/png', 'image/jpeg'];
+    const svg = response({ ok: true, type: 'image/svg+xml', body: '<svg/>' });
+    fetchMock.mockResolvedValue(svg);
+    await expect(fetchImageBlob('https://signed.example/logo.svg', { allow })).rejects.toThrow('not embeddable (image/svg+xml)');
+    expect(svg.blob).not.toHaveBeenCalled();
+    const webp = response({ ok: true, type: 'image/webp', body: 'RIFF' });
+    fetchMock.mockResolvedValue(webp);
+    await expect(fetchImageBlob('https://signed.example/logo.webp', { allow })).rejects.toThrow('not embeddable (image/webp)');
+    expect(webp.blob).not.toHaveBeenCalled();
+  });
+
+  it('`allow` matches on the bare type, ignoring parameters and case', async () => {
+    fetchMock.mockResolvedValue(response({ ok: true, type: 'Image/PNG; charset=binary' }));
+    await expect(fetchImageBlob('https://signed.example/logo.png', { allow: ['image/png', 'image/jpeg'] })).resolves.toBeInstanceOf(Blob);
+  });
+
+  it('without `allow`, any image/* passes — SVG and WebP included', async () => {
     fetchMock.mockResolvedValue(response({ ok: true, type: 'image/svg+xml', body: '<svg/>' }));
     await expect(fetchImageBlob('https://signed.example/logo.svg')).resolves.toBeInstanceOf(Blob);
+    fetchMock.mockResolvedValue(response({ ok: true, type: 'image/webp', body: 'RIFF' }));
+    await expect(fetchImageBlob('https://signed.example/a.webp')).resolves.toBeInstanceOf(Blob);
   });
 
   it('a network-level rejection propagates as-is', async () => {

@@ -262,7 +262,19 @@ describe('generateReportPdf — a bad photo or logo is skipped, never allowed to
     const content = JSON.stringify(pdf.docs[0].content);
     expect(content).not.toContain('"image"');
     expect(content).toContain('"text":"Fortress"');
-    expect(warn).toHaveBeenCalledWith('report logo skipped:', 'svg not embeddable');
+    expect(warn).toHaveBeenCalledWith('report logo skipped:', 'not embeddable (image/svg+xml)');
+  });
+
+  it('a WebP logo (accepted by Settings before S2) is skipped the same way — pdfmake would throw on it', async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url === 'signed:https://cdn.example/logo.webp'
+        ? response({ ok: true, type: 'image/webp', body: 'RIFF' })
+        : response({ ok: false, status: 404, type: 'text/html' }));
+    await generateReportPdf('rep2', { name: 'Fortress', primaryColor: '#2563eb', logoUrl: 'https://cdn.example/logo.webp' });
+    const content = JSON.stringify(pdf.docs[0].content);
+    expect(content).not.toContain('"image"');
+    expect(content).toContain('"text":"Fortress"');
+    expect(warn).toHaveBeenCalledWith('report logo skipped:', 'not embeddable (image/webp)');
   });
 
   it('a PNG logo is embedded as-is (no canvas pass) after the same checks', async () => {

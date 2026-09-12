@@ -107,7 +107,8 @@ async function downscaleToDataUrl(blob: Blob): Promise<string> {
 /**
  * LOGO ONLY. The logo is embedded as-is (pdfmake fits it to 130×40; no canvas pass, so a PNG keeps
  * its transparency). It is safe only because fetchImageBlob has already refused a non-2xx, a
- * non-image and an SVG before this reads the body. Photos never come through here.
+ * non-image and anything but PNG/JPEG (SVG, WebP) before this reads the body. Photos never come
+ * through here.
  */
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -181,9 +182,10 @@ export async function generateReportPdf(
   if (branding.logoUrl) {
     try {
       const signed = await resolveStorageUrl(branding.logoUrl);
-      // pdfmake embeds PNG and JPEG only: an SVG logo (accepted by Settings before S2) is skipped
-      // and the org name prints in its place, exactly as when no logo is set.
-      if (signed) logoDataUrl = await blobToDataUrl(await fetchImageBlob(signed, { rejectSvg: true }));
+      // pdfmake embeds PNG and JPEG only: an SVG or WebP logo (both accepted by Settings before S2,
+      // so existing orgs may have one) is skipped and the org name prints in its place, exactly as
+      // when no logo is set. Anything else would throw "Unknown image format" and fail the export.
+      if (signed) logoDataUrl = await blobToDataUrl(await fetchImageBlob(signed, { allow: ['image/png', 'image/jpeg'] }));
     } catch (e) {
       if (import.meta.env.DEV) console.warn('report logo skipped:', (e as Error)?.message ?? String(e));
     }
