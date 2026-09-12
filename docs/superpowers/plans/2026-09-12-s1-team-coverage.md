@@ -477,7 +477,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Create: `src/hooks/usePortfolioCoverage.ts`
 - Create: `src/hooks/usePortfolioCoverage.test.ts`
 
-- [ ] **Step 1: Failing test for `useAssignablePeople`**
+- [x] **Step 1: Failing test for `useAssignablePeople`**
 
 ```ts
 // src/hooks/useAssignablePeople.test.ts
@@ -537,9 +537,9 @@ describe('addablePeople', () => {
 });
 ```
 
-- [ ] **Step 2: Run** `npm run test -- src/hooks/useAssignablePeople.test.ts` → FAIL (`Cannot find module './useAssignablePeople'`).
+- [x] **Step 2: Run** `npm run test -- src/hooks/useAssignablePeople.test.ts` → FAIL (`Cannot find module './useAssignablePeople'`).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```ts
 // src/hooks/useAssignablePeople.ts
@@ -586,9 +586,9 @@ export function useAssignablePeople(enabled = true) {
 }
 ```
 
-- [ ] **Step 4: Run** `npm run test -- src/hooks/useAssignablePeople.test.ts` → PASS (5 tests).
+- [x] **Step 4: Run** `npm run test -- src/hooks/useAssignablePeople.test.ts` → PASS (5 tests).
 
-- [ ] **Step 5: Failing test for `usePortfolioCoverage`**
+- [x] **Step 5: Failing test for `usePortfolioCoverage`**
 
 ```ts
 // src/hooks/usePortfolioCoverage.test.ts
@@ -657,9 +657,9 @@ describe('needsTeam / coverageGaps', () => {
 });
 ```
 
-- [ ] **Step 6: Run** `npm run test -- src/hooks/usePortfolioCoverage.test.ts` → FAIL (module missing).
+- [x] **Step 6: Run** `npm run test -- src/hooks/usePortfolioCoverage.test.ts` → FAIL (module missing).
 
-- [ ] **Step 7: Implement**
+- [x] **Step 7: Implement**
 
 ```ts
 // src/hooks/usePortfolioCoverage.ts
@@ -722,9 +722,9 @@ export function usePortfolioCoverage(enabled = true) {
 }
 ```
 
-- [ ] **Step 8: Run** `npm run test -- src/hooks/usePortfolioCoverage.test.ts` → PASS (5 tests). Gate: `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'useAssignablePeople|usePortfolioCoverage'` prints nothing.
+- [x] **Step 8: Run** `npm run test -- src/hooks/usePortfolioCoverage.test.ts` → PASS (5 tests). Gate: `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'useAssignablePeople|usePortfolioCoverage'` prints nothing.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/hooks/useAssignablePeople.ts src/hooks/useAssignablePeople.test.ts src/hooks/usePortfolioCoverage.ts src/hooks/usePortfolioCoverage.test.ts
