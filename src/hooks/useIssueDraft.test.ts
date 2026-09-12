@@ -79,6 +79,18 @@ describe('useIssueDraft', () => {
     expect(store.save).toHaveBeenCalledTimes(1);
   });
 
+  it('save → clear → unmount writes nothing: clear() empties the slot the unmount flush reads', async () => {
+    const { result, unmount } = renderHook(() => useIssueDraft('u1'));
+    await waitFor(() => expect(result.current.ready).toBe(true));
+    vi.useFakeTimers();
+    act(() => { result.current.save(input); });
+    act(() => { result.current.clear(); });
+    unmount();
+    act(() => { vi.advanceTimersByTime(DRAFT_DEBOUNCE_MS * 2); });
+    expect(store.save).not.toHaveBeenCalled();
+    expect(store.clear).toHaveBeenCalledTimes(1);
+  });
+
   it('a save that fails (quota, private mode) is swallowed', async () => {
     store.save.mockRejectedValue(new Error('QuotaExceededError'));
     const { result } = renderHook(() => useIssueDraft('u1'));

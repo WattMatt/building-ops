@@ -33,10 +33,31 @@ import { cn } from '@/lib/utils';
 /** 44 px tap target on phones (spec §8), the shared component's 40 px from `sm` up. */
 const CONTROL = 'min-h-11 sm:min-h-10';
 
+/**
+ * Focus on one of these raises the software keyboard (or, for a native select / date input, the
+ * bottom picker). The Radix select trigger is deliberately not one: it opens a popover above
+ * the bar, and flipping the bar on every tap of it would only make the layout jump.
+ */
+function raisesKeyboard(target: EventTarget | null): boolean {
+  if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
+  if (target instanceof HTMLInputElement) {
+    return !['button', 'submit', 'reset', 'file', 'checkbox', 'radio', 'range', 'color'].includes(target.type);
+  }
+  return false;
+}
+
 export default function NewIssue() {
+  const { user, isAdminOrManager } = useAuth();
+  // Keyed on the user: a session change while the form is open (another tab's sign-in, an
+  // expired token) remounts the form with the new user's draft. Without the key, the save
+  // effect would rebind to the new uid and write A's fields and photos into B's store, and B's
+  // own draft would never be restored because the hydration flag had already been set.
+  return <NewIssueForm key={user?.id ?? ''} uid={user?.id} isAdminOrManager={isAdminOrManager} />;
+}
+
+function NewIssueForm({ uid, isAdminOrManager }: { uid: string | undefined; isAdminOrManager: boolean }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user, isAdminOrManager } = useAuth();
   const { buildings, loading: buildingsLoading } = useBuildings();
   // The app's phone test (same breakpoint as ResponsiveDialog). The action bar is pinned by
   // this decision rather than a CSS-only class so a test can observe it; the heights above use
@@ -55,41 +76,74 @@ export default function NewIssue() {
   // entered on the issue when the work is done.
   const [estimatedCost, setEstimatedCost] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // iOS does not shrink the layout viewport for the keyboard, so a fixed bottom bar would sit
+  // on top of the field being typed into. While a keyboard-raising field has focus the bar
+  // renders inline instead, and returns to the thumb zone on blur.
+  const [typing, setTyping] = useState(false);
 
   // Draft (spec §8): the form must survive the camera app and a reload. `hydrated` is set once
   // the read has settled and any draft has been applied; the save effect waits for it so the
   // empty first render never overwrites what the store holds.
-  const { restored, ready: draftReady, save: saveDraft, clear: clearDraft } = useIssueDraft(user?.id);
+  const { restored, ready: draftReady, save: saveDraft, clear: clearDraft } = useIssueDraft(uid);
   const [hydrated, setHydrated] = useState(false);
   const [draftRestored, setDraftRestored] = useState(false);
   const hadContent = useRef(false);
 
+  // Previews are object URLs — made here on restore, or by PhotoCapture, which revokes only
+  // the ones the user removes. Whatever is still on screen when the page unmounts (submit,
+  // Cancel, Back) is released here. Read through a ref so the cleanup sees the final list.
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
+  useEffect(() => () => {
+    for (const p of photosRef.current) URL.revokeObjectURL(p.preview);
+  }, []);
+
   // Building precedence (spec §8): ?building= → the user's only building → the building they
   // last reported from → empty. Decided once the roster has loaded and only while nothing is
-  // chosen, so a roster refetch never overrides what the user picked. A remembered building the
-  // user can no longer access (revoked, removed) is ignored rather than submitted blind.
+  // chosen, so a roster refetch never overrides what the user picked. An id the roster does not
+  // contain — a stale link, a remembered building since revoked or removed — falls through to
+  // the next rule rather than being submitted blind to fail at RLS.
   useEffect(() => {
     if (buildingsLoading || buildingId) return;
+    const known = (id: string) => buildings.some((b) => b.id === id);
     const fromUrl = searchParams.get('building');
-    if (fromUrl) { setBuildingId(fromUrl); return; }
+    if (fromUrl && known(fromUrl)) { setBuildingId(fromUrl); return; }
     if (buildings.length === 1) { setBuildingId(buildings[0].id); return; }
-    if (!user) return;
-    const last = readLastBuilding(user.id);
-    if (last && buildings.some((b) => b.id === last)) setBuildingId(last);
-  }, [buildings, buildingsLoading, buildingId, searchParams, user]);
+    if (!uid) return;
+    const last = readLastBuilding(uid);
+    if (last && known(last)) setBuildingId(last);
+  }, [buildings, buildingsLoading, buildingId, searchParams, uid]);
 
+  // Restore, once the roster is known (the draft's building is checked against it like every
+  // other id). Coerced field by field: a record written by an older build or damaged on disk
+  // restores what it can and never throws at `title.trim()` on the next render.
   useEffect(() => {
-    if (!draftReady || hydrated) return;
+    if (!draftReady || buildingsLoading || hydrated) return;
     if (restored) {
-      setTitle(restored.title);
-      setDescription(restored.description);
-      if (restored.buildingId) setBuildingId(restored.buildingId);
-      setPriority(restored.priority);
-      setPhotos(restored.photos.map((file) => ({ file, preview: URL.createObjectURL(file) })));
-      setDraftRestored(true);
+      const title = typeof restored.title === 'string' ? restored.title : '';
+      const description = typeof restored.description === 'string' ? restored.description : '';
+      const files = Array.isArray(restored.photos)
+        ? restored.photos.filter((f): f is File => f instanceof File)
+        : [];
+      const priority = PRIORITY_OPTIONS.some((o) => o.value === restored.priority) ? restored.priority : 'medium';
+      const building =
+        typeof restored.buildingId === 'string' && buildings.some((b) => b.id === restored.buildingId)
+          ? restored.buildingId
+          : '';
+      if (title.trim() !== '' || description.trim() !== '' || files.length > 0) {
+        setTitle(title);
+        setDescription(description);
+        setPriority(priority);
+        if (building) setBuildingId(building);
+        setPhotos(files.map((file) => ({ file, preview: URL.createObjectURL(file) })));
+        setDraftRestored(true);
+      } else {
+        // Nothing worth restoring: drop the record rather than show an empty "Draft restored" bar.
+        clearDraft();
+      }
     }
     setHydrated(true);
-  }, [draftReady, hydrated, restored]);
+  }, [draftReady, buildingsLoading, buildings, hydrated, restored, clearDraft]);
 
   // Save on every change. Building and priority alone are not a draft (they are derived or
   // defaults), so a form the user has typed nothing into is never stored — and a form they
@@ -137,7 +191,7 @@ export default function NewIssue() {
       return;
     }
 
-    if (!user) {
+    if (!uid) {
       toast.error('You must be logged in to report an issue');
       return;
     }
@@ -154,7 +208,7 @@ export default function NewIssue() {
       // The insert and its photo upload run in the offline queue handler, now (online) or on
       // replay (offline); photos land under photos/<uid>/… (see src/lib/photos.ts). The
       // client-generated issue id makes a retry collide rather than duplicate.
-      const outcome = await enqueueAndRun(user.id, {
+      const outcome = await enqueueAndRun(uid, {
         kind: 'issue_create',
         issueId: crypto.randomUUID(),
         row: {
@@ -165,7 +219,7 @@ export default function NewIssue() {
           building_id: buildingId,
           deadline: deadline || null,
           corrective_action: correctiveAction.trim() || null,
-          reported_by: user.id,
+          reported_by: uid,
           assigned_to: null,
           task_instance_id: null,
           // Only admin/manager may write a cost; everyone else's row omits the column.
@@ -180,7 +234,7 @@ export default function NewIssue() {
       // A queued issue already shows on the list with a "Queued" chip, so leave the form either
       // way; both outcomes mean the building was a real choice worth remembering next time.
       if (outcome.status !== 'failed') {
-        writeLastBuilding(user.id, buildingId);
+        writeLastBuilding(uid, buildingId);
         clearDraft();
         navigate('/issues');
       }
@@ -196,9 +250,12 @@ export default function NewIssue() {
     return <PageLoading text="Loading buildings..." />;
   }
 
+  // Pinned to the bottom on a phone, except while the keyboard is up (see `typing`).
+  const pinned = isMobile && !typing;
+
   return (
-    // pb-28 on a phone keeps the last field clear of the fixed action bar.
-    <div className={cn('space-y-6 max-w-2xl mx-auto', isMobile && 'pb-28')}>
+    // pb-28 while the bar is pinned keeps the last field clear of it.
+    <div className={cn('space-y-6 max-w-2xl mx-auto', pinned && 'pb-28')}>
       {/* Header */}
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" className="h-11 w-11 sm:h-10 sm:w-10" onClick={() => navigate(-1)} aria-label="Back">
@@ -228,7 +285,15 @@ export default function NewIssue() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit}>
+      <form
+        onSubmit={handleSubmit}
+        onFocusCapture={(e) => { if (raisesKeyboard(e.target)) setTyping(true); }}
+        onBlurCapture={(e) => {
+          // Moving straight from one text field to another keeps the bar inline: no flash of
+          // the pinned bar between the two focus events.
+          if (raisesKeyboard(e.target) && !raisesKeyboard(e.relatedTarget)) setTyping(false);
+        }}
+      >
         <Card>
           <CardHeader>
             <CardTitle>Issue Details</CardTitle>
@@ -264,7 +329,7 @@ export default function NewIssue() {
                 maxPhotos={5}
                 disabled={submitting}
               />
-              <Hint>One clear photo of the fault is worth more than a paragraph.</Hint>
+              <Hint>One clear photo of the fault is worth more than a paragraph</Hint>
             </div>
 
             {/* Title */}
@@ -362,7 +427,7 @@ export default function NewIssue() {
               data-testid="issue-actions"
               className={cn(
                 'flex gap-3',
-                isMobile
+                pinned
                   ? 'fixed inset-x-0 bottom-0 z-30 border-t bg-background p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]'
                   : 'pt-4',
               )}

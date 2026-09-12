@@ -159,6 +159,14 @@ describe('NewIssue', () => {
       expect(enqueueAndRun.mock.calls[0][1].row.building_id).toBe('b2');
     });
 
+    it('a ?building= id the roster does not contain falls through to the next rule', async () => {
+      bld.value = two;
+      window.localStorage.setItem('fortress.lastBuilding.u1', 'b1');
+      renderAt('/issues/new?building=b9');
+      await submit();
+      expect(enqueueAndRun.mock.calls[0][1].row.building_id).toBe('b1');
+    });
+
     it('a single building is pre-selected', async () => {
       window.localStorage.setItem('fortress.lastBuilding.u1', 'b9');
       renderAt();
@@ -244,6 +252,55 @@ describe('NewIssue', () => {
       expect(enqueueAndRun.mock.calls[0][1].row.building_id).toBe('b1');
     });
 
+    it('a draft naming a building the user can no longer access falls through to the next rule', async () => {
+      bld.value = two;
+      window.localStorage.setItem('fortress.lastBuilding.u1', 'b1');
+      draft.restored = { ...stored, buildingId: 'b9' };
+      renderAt();
+      fireEvent.click(screen.getByRole('button', { name: /report issue/i }));
+      await waitFor(() => expect(enqueueAndRun).toHaveBeenCalledTimes(1));
+      expect(enqueueAndRun.mock.calls[0][1].row.building_id).toBe('b1');
+    });
+
+    it('a malformed record restores what it can instead of throwing', () => {
+      draft.restored = { ...stored, title: undefined, photos: undefined } as unknown as typeof stored;
+      renderAt();
+      expect(screen.getByLabelText(/issue title/i)).toHaveValue('');
+      expect(screen.getByLabelText(/^description/i)).toHaveValue('Stuck on 3');
+      expect(screen.getByTestId('photo-capture')).toHaveTextContent('0');
+      expect(screen.getByRole('status')).toHaveTextContent('Draft restored');
+    });
+
+    it('the guardrail bar stays with hints off — it is not a Hint', () => {
+      hints.enabled = false;
+      bld.value = two;
+      draft.restored = stored;
+      renderAt();
+      expect(screen.getByRole('status')).toHaveTextContent('Draft restored');
+      expect(screen.queryByText('One clear photo of the fault is worth more than a paragraph')).toBeNull();
+    });
+
+    it('releases the restored previews when the page unmounts', () => {
+      draft.restored = stored;
+      const { unmount } = renderAt();
+      expect(revokeObjectURL).not.toHaveBeenCalled();
+      unmount();
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:fake');
+    });
+
+    it('a user switch while mounted starts a fresh form for the new user', () => {
+      const { rerender } = renderAt();
+      fireEvent.change(screen.getByLabelText(/issue title/i), { target: { value: 'Broken door' } });
+      expect(screen.getByLabelText(/issue title/i)).toHaveValue('Broken door');
+      const saves = draft.save.mock.calls.length;
+
+      auth.value = { user: { id: 'u2' }, isAdminOrManager: false };
+      rerender(<MemoryRouter initialEntries={['/issues/new']}><NewIssue /></MemoryRouter>);
+      // The form is keyed on the user, so A's fields never carry over into B's draft store.
+      expect(screen.getByLabelText(/issue title/i)).toHaveValue('');
+      expect(draft.save.mock.calls.length).toBe(saves);
+    });
+
     it('does not restore or show the bar while the store is still being read', () => {
       draft.restored = stored;
       draft.ready = false;
@@ -326,6 +383,18 @@ describe('NewIssue', () => {
       expect(screen.getByTestId('issue-actions').className).not.toMatch(/\bfixed\b/);
     });
 
+    it('drops the bar inline while a text field has focus, so the iOS keyboard cannot cover it', () => {
+      mockViewport(375);
+      renderAt();
+      const bar = () => screen.getByTestId('issue-actions').className;
+      const title = screen.getByLabelText(/issue title/i);
+      expect(bar()).toMatch(/\bfixed\b/);
+      fireEvent.focus(title);
+      expect(bar()).not.toMatch(/\bfixed\b/);
+      fireEvent.blur(title);
+      expect(bar()).toMatch(/\bfixed\b/);
+    });
+
     it('puts the photo control directly under the building select, before the title', () => {
       renderAt();
       const building = screen.getByLabelText(/building/i);
@@ -352,7 +421,7 @@ describe('NewIssue', () => {
     });
 
     it('routes the photo coaching line through the hints toggle', () => {
-      const line = 'One clear photo of the fault is worth more than a paragraph.';
+      const line = 'One clear photo of the fault is worth more than a paragraph';
       const { unmount } = renderAt();
       expect(screen.getByText(line)).toBeInTheDocument();
       unmount();
