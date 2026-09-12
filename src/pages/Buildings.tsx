@@ -31,6 +31,7 @@ import BuildingImportDialog from '@/components/building/BuildingImportDialog';
 import { BuildingScoreChips } from '@/components/building/BuildingScoreChips';
 import { chipValues, useBuildingsScores } from '@/hooks/useBuildingsScores';
 import { useBuildingsTrends } from '@/hooks/useBuildingTrend';
+import { usePortfolioCoverage } from '@/hooks/usePortfolioCoverage';
 import { ExportCsvButton } from '@/components/ui/export-csv-button';
 import { csvText, type CsvColumn } from '@/lib/exportCsv';
 import type { Tables } from '@/integrations/supabase/types';
@@ -55,6 +56,8 @@ export default function Buildings() {
   // the live scores are only the fallback for buildings the snapshot does not cover yet.
   const { scores } = useBuildingsScores();
   const trends = useBuildingsTrends(30);
+  // Coverage rows are RLS-scoped and only meaningful for managers; the hook is disabled for everyone else.
+  const coverage = usePortfolioCoverage(isAdminOrManager);
   const [searchQuery, setSearchQuery] = useState('');
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [avatarDialogBuilding, setAvatarDialogBuilding] = useState<{
@@ -176,7 +179,7 @@ export default function Buildings() {
             const chips = chipValues(trends.latest[building.id], scores[building.id]);
 
             return (
-              <Card key={building.id} className="group hover:shadow-md transition-shadow relative overflow-hidden">
+              <Card key={building.id} data-testid={`building-card-${building.id}`} className="group hover:shadow-md transition-shadow relative overflow-hidden">
                 {/* Top-center logo banner */}
                 {position === 'top-center' && (
                   <div className="flex justify-center pt-4 pb-2">
@@ -231,7 +234,12 @@ export default function Buildings() {
                       </div>
                     )}
                     <div>
-                      <CardTitle className="text-base">{formatBuildingName(building.name)}</CardTitle>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <CardTitle className="text-base">{formatBuildingName(building.name)}</CardTitle>
+                        {isAdminOrManager && coverage.byBuilding.get(building.id)?.field_members === 0 && (
+                          <Badge variant="destructive" className="text-xs">No team</Badge>
+                        )}
+                      </div>
                       <CardDescription className="flex items-center gap-1 mt-1">
                         <MapPin className="h-3 w-3" />
                         {building.city}

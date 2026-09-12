@@ -2024,7 +2024,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Modify: `src/pages/Buildings.tsx` (import after `:33`; hook after `:57`; card title `:233-239`)
 - Create: `src/pages/Buildings.test.tsx`
 
-- [ ] **Step 1: Failing widget test**
+- [x] **Step 1: Failing widget test**
 
 ```tsx
 // src/components/dashboard/CoverageWidget.test.tsx
@@ -2131,9 +2131,9 @@ describe('CoverageWidget', () => {
 });
 ```
 
-- [ ] **Step 2: Run** `npm run test -- src/components/dashboard/CoverageWidget.test.tsx` → FAIL (module missing).
+- [x] **Step 2: Run** `npm run test -- src/components/dashboard/CoverageWidget.test.tsx` → FAIL (module missing).
 
-- [ ] **Step 3: Implement the widget**
+- [x] **Step 3: Implement the widget**
 
 ```tsx
 // src/components/dashboard/CoverageWidget.tsx
@@ -2231,9 +2231,9 @@ export default function CoverageWidget() {
 }
 ```
 
-- [ ] **Step 4: Run** `npm run test -- src/components/dashboard/CoverageWidget.test.tsx` → PASS (6 tests).
+- [x] **Step 4: Run** `npm run test -- src/components/dashboard/CoverageWidget.test.tsx` → PASS (6 tests).
 
-- [ ] **Step 5: Mount on the dashboard.** `Dashboard.tsx`: after line 33 add `import CoverageWidget from '@/components/dashboard/CoverageWidget';`. Replace lines 246-257 with:
+- [x] **Step 5: Mount on the dashboard.** `Dashboard.tsx`: after line 33 add `import CoverageWidget from '@/components/dashboard/CoverageWidget';`. Replace lines 246-257 with:
 
 ```tsx
       {/* The manager's own queues, directly under the portfolio numbers and side by side:
@@ -2254,7 +2254,7 @@ export default function CoverageWidget() {
 ```
 (The page has no test of its own — the three widgets are each tested; the mount is covered by the typecheck gate and `grep -n 'CoverageWidget' src/pages/Dashboard.tsx` printing two lines.)
 
-- [ ] **Step 6: Failing Buildings-page test**
+- [x] **Step 6: Failing Buildings-page test**
 
 ```tsx
 // src/pages/Buildings.test.tsx
@@ -2329,9 +2329,9 @@ describe('Buildings "No team" badge', () => {
 });
 ```
 
-- [ ] **Step 7: Run** `npm run test -- src/pages/Buildings.test.tsx` → FAIL (no badge, no `data-testid`).
+- [x] **Step 7: Run** `npm run test -- src/pages/Buildings.test.tsx` → FAIL (no badge, no `data-testid`).
 
-- [ ] **Step 8: Add the badge.** `Buildings.tsx`: after line 33 add `import { usePortfolioCoverage } from '@/hooks/usePortfolioCoverage';`. After line 57 (`const trends = …`) add:
+- [x] **Step 8: Add the badge.** `Buildings.tsx`: after line 33 add `import { usePortfolioCoverage } from '@/hooks/usePortfolioCoverage';`. After line 57 (`const trends = …`) add:
 
 ```tsx
   // Coverage rows are RLS-scoped and only meaningful for managers; the hook is disabled for everyone else.
@@ -2357,9 +2357,9 @@ Replace lines 233-239 with:
                     </div>
 ```
 
-- [ ] **Step 9: Run** `npm run test -- src/pages/Buildings.test.tsx src/components/dashboard/CoverageWidget.test.tsx` → PASS. Gate: `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'CoverageWidget|Dashboard.tsx|Buildings'` prints nothing.
+- [x] **Step 9: Run** `npm run test -- src/pages/Buildings.test.tsx src/components/dashboard/CoverageWidget.test.tsx` → PASS. Gate: `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'CoverageWidget|Dashboard.tsx|Buildings'` prints nothing.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add src/components/dashboard/CoverageWidget.tsx src/components/dashboard/CoverageWidget.test.tsx src/pages/Dashboard.tsx src/pages/Buildings.tsx src/pages/Buildings.test.tsx

@@ -31,6 +31,7 @@ import HsComplianceWidget from '@/components/dashboard/HsComplianceWidget';
 import PendingSubmissionsWidget from '@/components/dashboard/PendingSubmissionsWidget';
 import BuildingAlertsWidget from '@/components/dashboard/BuildingAlertsWidget';
 import WaitingOnYouWidget from '@/components/dashboard/WaitingOnYouWidget';
+import CoverageWidget from '@/components/dashboard/CoverageWidget';
 import ActivityFeedCard from '@/components/dashboard/ActivityFeedCard';
 
 const priorityColors: Record<string, string> = {
@@ -244,13 +245,16 @@ export default function Dashboard() {
       </Card>
 
       {/* The manager's own queues, directly under the portfolio numbers and side by side:
-          these are the only two blocks on this page that are work *for the viewer*, and
-          they were previously below three portfolio-wide widgets and a week of activity —
-          off-screen on a laptop, so the things actually blocking other people went unseen. */}
+          these are the only blocks on this page that are work *for the viewer*, and they were
+          previously below three portfolio-wide widgets and a week of activity — off-screen on a
+          laptop, so the things actually blocking other people went unseen. Coverage sits with
+          them because a building with nobody on it is the manager's to fix, not a statistic. */}
       {isAdminOrManager && (
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
           {/* Reports and sign-offs waiting on this manager specifically */}
           <WaitingOnYouWidget />
+          {/* Buildings where a task would reach nobody */}
+          <CoverageWidget />
           {/* Pending Form Submissions for Managers */}
           <PendingSubmissionsWidget />
         </div>
