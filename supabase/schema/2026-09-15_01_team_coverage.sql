@@ -14,7 +14,8 @@
 --     and profiles RLS (p_select: own row or admin/manager) plus user_roles RLS mean a manager can
 --     read them, but building_members(b) deliberately returns only members. SECURITY DEFINER,
 --     gated on is_admin_or_manager() — anyone else gets an error, not an empty list, so a client
---     cannot mistake "forbidden" for "nobody".
+--     cannot mistake "forbidden" for "nobody". Granted to authenticated only: a service_role grant
+--     would be dead, because is_admin_or_manager() is false when auth.uid() is null.
 --  3) portfolio_coverage(): one row per building with the counts every coverage surface needs
 --     (dashboard widget, Buildings badge, digest). SECURITY INVOKER on purpose: RLS scopes it to
 --     the caller's buildings (b_select / ti_select / ub_select / ur_select / p_select), and the
@@ -67,7 +68,7 @@ begin
 end $$;
 revoke all on function public.assignable_people() from public;
 revoke execute on function public.assignable_people() from anon;
-grant execute on function public.assignable_people() to authenticated, service_role;
+grant execute on function public.assignable_people() to authenticated;
 
 -- ------------------------------------------------------------------------------------------
 -- 3) portfolio_coverage(): one row per building the caller can see.
@@ -78,9 +79,15 @@ grant execute on function public.assignable_people() to authenticated, service_r
 --    unassigned_open    task_instances pending or overdue with assigned_to null
 --    overdue_open       task_instances in status 'overdue'
 --    due_yesterday      daily task_instances (frequency = 'daily') due yesterday, SAST
---    completed_yesterday  of those, status 'completed'
+--    completed_yesterday  of those, status 'completed' OR 'issue_logged' — a caretaker who
+--                       walked the round and logged an issue on a task did the work; the
+--                       building is not "silent" because the answer was a problem.
 --    "Yesterday" is the Africa/Johannesburg calendar date minus one, the same clock
 --    generate_scheduled_tasks and mark_overdue_tasks use.
+--    The task_instances counts come from ONE lateral aggregate per building and the
+--    building_role_assignments counts from another: with SECURITY INVOKER every candidate row
+--    is filtered by ti_select / bra_select, which call the definer can_access_building(); four
+--    correlated subqueries would run that filter over the same rows four times per building.
 -- ------------------------------------------------------------------------------------------
 create or replace function public.portfolio_coverage()
 returns table (
@@ -109,17 +116,29 @@ as $$
              and (select r.role from public.user_roles r where r.user_id = p.id
                    order by case r.role when 'admin' then 0 when 'manager' then 1 else 3 end limit 1) = 'user'
          ) as field_members,
-         (select count(*)::int from public.building_role_assignments bra where bra.building_id = b.id) as role_rules,
-         exists (select 1 from public.building_role_assignments bra where bra.building_id = b.id and bra.role = 'user') as has_user_rule,
-         (select count(*)::int from public.task_instances t
-           where t.building_id = b.id and t.status in ('pending','overdue') and t.assigned_to is null) as unassigned_open,
-         (select count(*)::int from public.task_instances t
-           where t.building_id = b.id and t.status = 'overdue') as overdue_open,
-         (select count(*)::int from public.task_instances t, yday
-           where t.building_id = b.id and t.frequency = 'daily' and t.due_date = yday.d) as due_yesterday,
-         (select count(*)::int from public.task_instances t, yday
-           where t.building_id = b.id and t.frequency = 'daily' and t.due_date = yday.d and t.status = 'completed') as completed_yesterday
+         bra.role_rules,
+         bra.has_user_rule,
+         ti.unassigned_open,
+         ti.overdue_open,
+         ti.due_yesterday,
+         ti.completed_yesterday
     from public.buildings b
+   cross join yday
+    left join lateral (
+      select count(*)::int                              as role_rules,
+             coalesce(bool_or(x.role = 'user'), false)  as has_user_rule
+        from public.building_role_assignments x
+       where x.building_id = b.id
+    ) bra on true
+    left join lateral (
+      select count(*) filter (where t.status in ('pending','overdue') and t.assigned_to is null)::int as unassigned_open,
+             count(*) filter (where t.status = 'overdue')::int                                      as overdue_open,
+             count(*) filter (where t.frequency = 'daily' and t.due_date = yday.d)::int              as due_yesterday,
+             count(*) filter (where t.frequency = 'daily' and t.due_date = yday.d
+                                and t.status in ('completed','issue_logged'))::int                   as completed_yesterday
+        from public.task_instances t
+       where t.building_id = b.id
+    ) ti on true
    order by b.name nulls last, b.id;
 $$;
 revoke all on function public.portfolio_coverage() from public;

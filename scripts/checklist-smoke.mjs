@@ -24,7 +24,9 @@
  * the rest of the journey still runs:
  *   - the overdue sweep calls `mark_overdue_tasks` as the service role, which flips EVERY
  *     genuinely back-dated pending task on the target project, not just the fixture, and (S4)
- *     writes a task_overdue inbox row to each flipped task's assignee;
+ *     writes a task_overdue inbox row to each flipped task's assignee — on staging those are
+ *     REAL inbox rows for real staging users whose back-dated tasks the sweep flips, not only
+ *     the fixture user's (the fixture's own rows are deleted in teardown);
  *   - `reschedule_template` regenerates into every building the template applies to. The
  *     fixture template is scoped to a building type only the fixture building carries
  *     (asserted first, service role), so on staging the fan-out stays inside the fixture.
@@ -76,7 +78,7 @@ async function svcSelect(table, filter) {
   return res.json();
 }
 
-const cleanup = [];       // [table, filter] LIFO
+const cleanup = [];       // [table, filter] FIFO — teardown walks it front to back, so children are unshift()ed in front of their parents
 const storageCleanup = [];
 const userIds = [];       // disposable site users, torn down after the rows that reference them
 let building = null;
@@ -261,7 +263,7 @@ try {
     const o = overdueRows[0] ?? {};
     assert('  → shaped for My Day: kind, entity, building, title, body, url, unread, no actor',
       o.kind === 'task_overdue' && o.entity_type === 'task' && o.building_id === building && o.actor_id === null
-        && o.title === `Overdue: ZZTEST-late-${RUN}` && o.body === 'Was due 1 Jan' && o.url === '/my-day' && o.read_at === null,
+        && o.title === `Overdue: ZZTEST-late-${RUN}` && o.body === 'Was due 1 Jan 2020' /* year printed: not the current SAST year */ && o.url === '/my-day' && o.read_at === null,
       JSON.stringify(o));
     r = await fetch(`${URL_BASE}/rest/v1/rpc/mark_overdue_tasks`, { method: 'POST', headers: SVC, body: '{}' });
     assert('a second sweep runs', r.ok, `HTTP ${r.status}`);

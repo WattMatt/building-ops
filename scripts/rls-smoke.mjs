@@ -1052,7 +1052,7 @@ try {
   // ── S1 "Team & coverage": assignable_people admin/manager only, portfolio_coverage scoped by RLS ──
   {
     const apUser = await rpcCall(personas.userA.jwt, 'assignable_people', {});
-    assert('assignable_people refused for a site user', !apUser.ok, `expected an error, got HTTP ${apUser.status} with ${apUser.rows.length} rows`);
+    assert('assignable_people refused for a site user (42501)', !apUser.ok && apUser.code === '42501', `expected 42501, got HTTP ${apUser.status} code ${apUser.code} with ${apUser.rows.length} rows`);
     const apAnon = await rpcCall(null, 'assignable_people', {});
     assert('assignable_people not executable by anon', apAnon.status === 401 || apAnon.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${apAnon.status}`);
     const apMgr = await rpcCall(personas.manager.jwt, 'assignable_people', {});

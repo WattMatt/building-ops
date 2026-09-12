@@ -18,6 +18,8 @@
 --      overdue count). No preference check here for the same reason mark_sla_breaches has none: an
 --      inbox row is the record, and the row is read only by its recipient (n_select_own).
 --      Idempotent by construction: a task flips once, so it notifies once.
+--      Caller guard as in mark_sla_breaches: a signed-in caller who is not an admin or manager is
+--      refused with 42501; a null auth.uid() (pg_cron as postgres, the service role) passes.
 --
 -- No new tables, no new columns, no new RLS surface. notifications keeps its owner-only policies and
 -- no insert policy; the function is security definer with search_path '' and is revoked from public,
@@ -41,8 +43,12 @@ alter table public.notifications add constraint notifications_kind_check check (
 -- ============================================================
 -- 2) The overdue sweep, now telling the assignee.
 -- ============================================================
--- Runs from pg_cron as postgres (auth.uid() is null) and from the smokes as the service role; nothing
--- else may call it, so unlike mark_sla_breaches there is no caller check to make.
+-- Runs from pg_cron as postgres (auth.uid() is null) and from the smokes as the service role. The
+-- grants already keep sessions out; the caller guard below is the same belt-and-braces line
+-- mark_sla_breaches carries (2026-09-14_01), so a signed-in caller who is not an admin or manager
+-- is refused even if a grant ever drifts.
+-- The body prints the due date as "1 Jan" while it is in the current SAST year and "1 Jan 2025"
+-- once it is not, so a task that slept across New Year is not read as a fresh miss.
 create or replace function public.mark_overdue_tasks()
 returns integer
 language plpgsql security definer
@@ -50,8 +56,12 @@ set search_path = ''
 as $$
 declare
   v_count integer := 0;
+  v_year  integer := extract(year from (now() at time zone 'Africa/Johannesburg'))::int;
   r record;
 begin
+  if auth.uid() is not null and not public.is_admin_or_manager() then
+    raise exception 'mark_overdue_tasks: admin or manager only' using errcode = '42501';
+  end if;
   for r in
     update public.task_instances t
        set status = 'overdue'
@@ -66,7 +76,7 @@ begin
     insert into public.notifications (recipient_id, actor_id, actor_name, kind, entity_type, entity_id, building_id, title, body, url)
     select p.id, null, null, 'task_overdue', 'task', r.id, r.building_id,
            left('Overdue: ' || r.task_name, 200),
-           'Was due ' || to_char(r.due_date, 'FMDD Mon'),
+           'Was due ' || to_char(r.due_date, case when extract(year from r.due_date)::int = v_year then 'FMDD Mon' else 'FMDD Mon YYYY' end),
            '/my-day'
       from public.profiles p
      where p.id = r.assigned_to
