@@ -38,6 +38,14 @@ export interface InspectionResponsePatch {
   photo_urls?: PhotoRef[];
 }
 
+/** What the section query holds. Named so `mergeResponse` can update it through setQueryData. */
+export interface InspectionSectionData {
+  template: InspectionTemplate | null;
+  items: InspectionTemplateItem[];
+  inspectionId: string | null;
+  responses: Record<string, InspectionResponse>;
+}
+
 export function useInspectionSection(
   reportId: string | undefined,
   buildingId: string | undefined,
@@ -48,10 +56,10 @@ export function useInspectionSection(
   const qc = useQueryClient();
   const key = ['fortress-inspection', cadence, reportId, readOnly];
 
-  const query = useQuery({
+  const query = useQuery<InspectionSectionData>({
     queryKey: key,
     enabled: !!reportId && !!buildingId,
-    queryFn: async () => {
+    queryFn: async (): Promise<InspectionSectionData> => {
       const { data: tpl, error: tErr } = await fdb
         .from('inspection_templates')
         .select('*')
@@ -142,6 +150,21 @@ export function useInspectionSection(
     [query.data, qc, key],
   );
 
+  /**
+   * Put a server-returned row into the cached responses NOW, then invalidate. Used after an RPC
+   * that has already changed the row (append_inspection_photo): the UI shows the real row at once,
+   * and a second rapid add sees the appended list rather than a stale copy. No-op when nothing is
+   * cached yet (the invalidation still runs and is harmless).
+   */
+  const mergeResponse = useCallback(
+    (row: InspectionResponse) => {
+      qc.setQueryData<InspectionSectionData>(key, (old) =>
+        old ? { ...old, responses: { ...old.responses, [row.template_item_id]: row } } : old);
+      qc.invalidateQueries({ queryKey: key });
+    },
+    [qc, key],
+  );
+
   return {
     template: query.data?.template ?? null,
     items: query.data?.items ?? [],
@@ -149,5 +172,6 @@ export function useInspectionSection(
     inspectionId: query.data?.inspectionId ?? null,
     isLoading: query.isLoading,
     setResponse,
+    mergeResponse,
   };
 }
