@@ -30,11 +30,32 @@ interface PushSwitchProps {
  */
 export function PushSwitch({ userId }: PushSwitchProps) {
   if (!PUSH_ENABLED) return null;
-  return <PushSwitchRow userId={userId} />;
+  return <PushSwitchOwned userId={userId} />;
 }
 
-function PushSwitchRow({ userId }: PushSwitchProps) {
+function PushSwitchOwned({ userId }: PushSwitchProps) {
   const { status, enable, disable } = usePushSubscription(userId);
+  return <PushSwitchRow status={status} enable={enable} disable={disable} />;
+}
+
+export interface PushSwitchRowProps {
+  status: PushStatus;
+  enable: () => Promise<void>;
+  disable: () => Promise<void>;
+  /**
+   * Whether the plain "off" state carries its own <Hint>. The My Day prompt card owns the
+   * subscription state and its own coaching line, so it passes false; guardrail copy
+   * (blocked, unsupported, install first) is shown either way.
+   */
+  coaching?: boolean;
+}
+
+/**
+ * The switch itself, driven by whoever owns the `usePushSubscription` instance. Shared by
+ * the Profile switch and the My Day prompt card so there is exactly one subscribe path,
+ * one set of guardrail copy and one 44 px target.
+ */
+export function PushSwitchRow({ status, enable, disable, coaching = true }: PushSwitchRowProps) {
   const disabled = status === 'busy' || status === 'denied' || status === 'unsupported' || status === 'ios-not-installed';
   const checked = status === 'on';
   const copy = STATUS_COPY[status];
@@ -60,7 +81,7 @@ function PushSwitchRow({ userId }: PushSwitchProps) {
         </Label>
         {copy ? (
           <p className="text-sm text-muted-foreground">{copy}</p>
-        ) : status === 'off' ? (
+        ) : status === 'off' && coaching ? (
           <Hint icon={false} className="text-sm">
             Turn this on to get urgent alerts on this device even when the app is closed.
           </Hint>

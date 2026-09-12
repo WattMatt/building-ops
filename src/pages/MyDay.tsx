@@ -33,6 +33,7 @@ import { failedTaskIds, queuedTaskIds } from '@/lib/offline/pendingOverlay';
 import { greetingFor, type MyTask } from '@/lib/myWork';
 import CompleteTaskDialog from '@/components/checklists/CompleteTaskDialog';
 import { InstallCard } from '@/components/pwa/InstallCard';
+import { PushPromptCard } from '@/components/pwa/PushPromptCard';
 import { WeekStrip } from '@/components/myday/WeekStrip';
 import IssueDetailDialog from '@/components/issues/IssueDetailDialog';
 import { formatBuildingName } from '@/lib/buildingName';
@@ -116,7 +117,7 @@ function Row({ children, action }: { children: ReactNode; action: ReactNode }) {
 }
 
 export default function MyDay() {
-  const { isAdminOrManager } = useAuth();
+  const { isAdminOrManager, user } = useAuth();
   const { profile } = useUserProfile();
   const {
     today,
@@ -209,6 +210,7 @@ export default function MyDay() {
       </div>
 
       <InstallCard />
+      <PushPromptCard userId={user?.id} />
 
       {/* The week at a glance, built from the same data as the sections below — so it appears
           only once that data is real. While loading or after a failure there is nothing honest
