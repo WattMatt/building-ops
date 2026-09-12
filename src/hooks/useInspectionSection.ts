@@ -25,18 +25,23 @@ export interface PhotoRef {
   path: string;
 }
 
-export interface InspectionResponsePatch {
-  acceptable?: YesNoNa | null;
-  condition_rating?: ConditionRating | null;
-  action_required?: ActionRequired | null;
-  recommendation?: string | null;
-  comment?: string | null;
-  capex_estimate?: number | null;
-  applicable?: boolean;
-  next_service_due?: string | null;
-  detail?: Record<string, unknown>;
-  photo_urls?: PhotoRef[];
-}
+/**
+ * A partial write to one response row. A key ABSENT from the patch keeps the stored value; a key
+ * PRESENT with `null` clears it. The nullable columns say so explicitly; `applicable` is NOT NULL
+ * and the two JSON columns are replaced whole.
+ */
+export type InspectionResponsePatch = Partial<{
+  acceptable: YesNoNa | null;
+  condition_rating: ConditionRating | null;
+  action_required: ActionRequired | null;
+  recommendation: string | null;
+  comment: string | null;
+  capex_estimate: number | null;
+  applicable: boolean;
+  next_service_due: string | null;
+  detail: Record<string, unknown>;
+  photo_urls: PhotoRef[];
+}>;
 
 /** What the section query holds. Named so `mergeResponse` can update it through setQueryData. */
 export interface InspectionSectionData {
@@ -122,21 +127,26 @@ export function useInspectionSection(
       const inspectionId = query.data?.inspectionId;
       if (!inspectionId) return;
       const existing = query.data?.responses[templateItemId];
+      // A key absent from the patch keeps the stored value; a key present with null clears it.
+      // `??` used to collapse the two, so clearing a capex estimate or a comment silently re-saved
+      // the old value. An explicit `undefined` counts as absent (TS lets optional fields spread in).
+      const pick = <K extends keyof InspectionResponsePatch, V>(k: K, current: V) =>
+        (k in patch && patch[k] !== undefined ? patch[k] : current) as Exclude<InspectionResponsePatch[K], undefined> | V;
       const { error } = await fdb.from('inspection_responses').upsert(
         {
           id: existing?.id ?? crypto.randomUUID(),
           inspection_id: inspectionId,
           template_item_id: templateItemId,
-          acceptable: patch.acceptable ?? existing?.acceptable ?? null,
-          condition_rating: patch.condition_rating ?? existing?.condition_rating ?? null,
-          action_required: patch.action_required ?? existing?.action_required ?? null,
-          recommendation: patch.recommendation ?? existing?.recommendation ?? null,
-          comment: patch.comment ?? existing?.comment ?? null,
-          capex_estimate: patch.capex_estimate ?? existing?.capex_estimate ?? null,
-          applicable: patch.applicable ?? existing?.applicable ?? true,
-          next_service_due: patch.next_service_due ?? existing?.next_service_due ?? null,
-          detail: (patch.detail ?? existing?.detail ?? {}) as never,
-          photo_urls: (patch.photo_urls ?? (existing?.photo_urls as unknown[]) ?? []) as never,
+          acceptable: pick('acceptable', existing?.acceptable ?? null),
+          condition_rating: pick('condition_rating', existing?.condition_rating ?? null),
+          action_required: pick('action_required', existing?.action_required ?? null),
+          recommendation: pick('recommendation', existing?.recommendation ?? null),
+          comment: pick('comment', existing?.comment ?? null),
+          capex_estimate: pick('capex_estimate', existing?.capex_estimate ?? null),
+          applicable: pick('applicable', existing?.applicable ?? true),
+          next_service_due: pick('next_service_due', existing?.next_service_due ?? null),
+          detail: pick('detail', (existing?.detail ?? {}) as Record<string, unknown>) as never,
+          photo_urls: pick('photo_urls', (existing?.photo_urls as unknown as PhotoRef[] | null) ?? []) as never,
         },
         { onConflict: 'inspection_id,template_item_id' },
       );

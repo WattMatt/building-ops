@@ -101,3 +101,68 @@ describe('useInspectionSection.mergeResponse', () => {
     expect(qc.getQueryData(['fortress-inspection', 'annual', undefined, false])).toBeUndefined();
   });
 });
+
+/** The row and options handed to the most recent inspection_responses upsert. */
+const upsertPayload = () => {
+  const q = state.queries.filter((x) => x.table === 'inspection_responses' && x.calls.some((c) => c.method === 'upsert')).pop();
+  const call = q?.calls.find((c) => c.method === 'upsert');
+  return { row: call?.args[0] as Record<string, unknown>, opts: call?.args[1] };
+};
+
+describe('useInspectionSection.setResponse — a key absent keeps the stored value, a key present with null clears it', () => {
+  it('{ capex_estimate: null } writes null and leaves every other column as stored', async () => {
+    const { result } = mount();
+    await waitFor(() => expect(result.current.inspectionId).toBe('i1'));
+    await act(async () => { await result.current.setResponse('it1', { capex_estimate: null }); });
+
+    const { row, opts } = upsertPayload();
+    expect(opts).toEqual({ onConflict: 'inspection_id,template_item_id' });
+    expect(row.id).toBe('r1');
+    expect(row.inspection_id).toBe('i1');
+    expect(row.template_item_id).toBe('it1');
+    expect(row.capex_estimate).toBeNull();
+    expect(row.comment).toBe('old comment');
+    expect(row.recommendation).toBe('Fix the gutter');
+    expect(row.condition_rating).toBe('fair');
+    expect(row.applicable).toBe(true);
+    expect(row.detail).toEqual({ size: '5' });
+    expect(row.photo_urls).toEqual(existing.photo_urls);
+  });
+
+  it('{ comment: "x" } keeps the existing capex estimate', async () => {
+    const { result } = mount();
+    await waitFor(() => expect(result.current.inspectionId).toBe('i1'));
+    await act(async () => { await result.current.setResponse('it1', { comment: 'x' }); });
+
+    const { row } = upsertPayload();
+    expect(row.comment).toBe('x');
+    expect(row.capex_estimate).toBe(500);
+    expect(row.recommendation).toBe('Fix the gutter');
+  });
+
+  it('clearing a text and a date both write null; an explicit undefined counts as absent', async () => {
+    const { result } = mount();
+    await waitFor(() => expect(result.current.inspectionId).toBe('i1'));
+    await act(async () => { await result.current.setResponse('it1', { recommendation: null, next_service_due: null, comment: undefined }); });
+
+    const { row } = upsertPayload();
+    expect(row.recommendation).toBeNull();
+    expect(row.next_service_due).toBeNull();
+    expect(row.comment).toBe('old comment');
+  });
+
+  it('a first response for an item (nothing stored) gets a fresh id and the column defaults', async () => {
+    state.rows = [];
+    const { result } = mount();
+    await waitFor(() => expect(result.current.inspectionId).toBe('i1'));
+    await act(async () => { await result.current.setResponse('it1', { condition_rating: 'poor' }); });
+
+    const { row } = upsertPayload();
+    expect(row.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(row.condition_rating).toBe('poor');
+    expect(row.capex_estimate).toBeNull();
+    expect(row.applicable).toBe(true);
+    expect(row.detail).toEqual({});
+    expect(row.photo_urls).toEqual([]);
+  });
+});

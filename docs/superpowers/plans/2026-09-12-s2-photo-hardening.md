@@ -23,7 +23,7 @@
 **Files:**
 - Create: `src/lib/imageFetch.ts`, `src/lib/imageFetch.test.ts`
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```ts
 // src/lib/imageFetch.test.ts
@@ -134,7 +134,7 @@ describe('bitmapFromBlob', () => {
 Run: `npm run test -- src/lib/imageFetch.test.ts`
 Expected: `FAIL  src/lib/imageFetch.test.ts` with `Error: Failed to resolve import "./imageFetch"` (the module does not exist yet).
 
-- [ ] **Step 2: Implementation**
+- [x] **Step 2: Implementation**
 
 ```ts
 // src/lib/imageFetch.ts
@@ -188,7 +188,7 @@ export async function bitmapFromBlob(blob: Blob): Promise<ImageBitmap> {
 Run: `npm run test -- src/lib/imageFetch.test.ts`
 Expected: `Test Files  1 passed (1)`, `Tests  10 passed (10)`.
 
-- [ ] **Step 3: Gate and commit**
+- [x] **Step 3: Gate and commit**
 
 ```bash
 npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'src/lib/imageFetch' ; echo "(nothing above = clean)"
@@ -209,14 +209,14 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Modify: `src/lib/evidencePackData.ts` (`downscaleToDataUrl` :86-103, `PhotoCollector.fetchOne` :150-170, import block :14-18)
 - Test (unchanged, must stay green): `src/lib/evidencePackData.test.ts`
 
-- [ ] **Step 1: Confirm the existing tests are the failing-first contract.** The evidence pack already has the status/content-type checks inline (`fetchOne` :159-165) and its tests already pin them (`PhotoCollector.run — an unusable response is not a photo`). This task moves the checks into the shared helper; the tests are the regression net. Run them first so you know the baseline:
+- [x] **Step 1: Confirm the existing tests are the failing-first contract.** The evidence pack already has the status/content-type checks inline (`fetchOne` :159-165) and its tests already pin them (`PhotoCollector.run — an unusable response is not a photo`). This task moves the checks into the shared helper; the tests are the regression net. Run them first so you know the baseline:
 
 ```bash
 npm run test -- src/lib/evidencePackData.test.ts
 ```
 Expected: `Tests  13 passed (13)`.
 
-- [ ] **Step 2: The diff.** Apply exactly this (context lines are the current file):
+- [x] **Step 2: The diff.** Apply exactly this (context lines are the current file):
 
 ```diff
 --- a/src/lib/evidencePackData.ts
@@ -264,7 +264,7 @@ Expected: `Tests  13 passed (13)`.
 
 What deliberately does NOT change: the `blobToDataUrl` FileReader fallback inside `downscaleToDataUrl` stays. The pack's contract is "a fetched image is always embedded, downscaled when the browser can decode it" and its tests rely on that (`vi.stubGlobal('createImageBitmap', undefined)` in the good-path cases expects a `data:` URL). The PDF module makes the opposite choice in Task 3, and says why.
 
-- [ ] **Step 3: Tests still green, gate, commit**
+- [x] **Step 3: Tests still green, gate, commit**
 
 ```bash
 npm run test -- src/lib/evidencePackData.test.ts      # Tests  13 passed (13)
@@ -289,7 +289,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 The existing `fortressReportPdf.test.ts` already mocks `pdfmake/build/pdfmake` (records every doc passed to `createPdf`), `@/integrations/supabase/client` (a recording PostgREST chain driven by `state.result(table, calls)`), `@/integrations/supabase/storage` (`resolveStorageUrl` → `null`), `@/lib/analytics` and `@/integrations/supabase/insight-linker`. The new block reuses all of it and only adds a stubbed global `fetch`; that is the mocking style to follow.
 
-- [ ] **Step 1: Failing tests.** In `src/lib/fortressReportPdf.test.ts`, change the first line to import `afterEach` and the `MockInstance` type too, add one import after the existing `reportError` import, and append the describe block at the end of the file. (Test files are inside `tsconfig.app.json`'s `include`, so they count toward the typecheck baseline — keep them type-clean.)
+- [x] **Step 1: Failing tests.** In `src/lib/fortressReportPdf.test.ts`, change the first line to import `afterEach` and the `MockInstance` type too, add one import after the existing `reportError` import, and append the describe block at the end of the file. (Test files are inside `tsconfig.app.json`'s `include`, so they count toward the typecheck baseline — keep them type-clean.)
 
 ```ts
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
@@ -440,7 +440,7 @@ In `src/lib/fortressReportDoc.test.ts`, inside `describe('buildReportDoc — ann
 Run: `npm run test -- src/lib/fortressReportPdf.test.ts src/lib/fortressReportDoc.test.ts`
 Expected: the doc test fails with `expected [ '', 'data:image/jpeg;base64,AAAA' ] to deeply equal [ 'data:image/jpeg;base64,AAAA' ]`; in the PDF file the 403-photo, XML-photo, SVG-logo and 403-logo cases all fail on `not.toContain('"image"')` (today `embedPhoto`'s `blobToDataUrl` fallback base64s the error body, and the logo path base64s whatever it gets), the "readable photo" case fails on `expect(cib.mock.calls[0][1]).toEqual({ imageOrientation: 'from-image' })` (called with one argument today), the "cannot decode" case fails on `not.toContain('"image"')` (the fallback embeds the raw JPEG bytes), and the PNG-logo case passes.
 
-- [ ] **Step 2: `fortressReportPdf.ts`.** Add the import after the `resolveStorageUrl` import (line 12):
+- [x] **Step 2: `fortressReportPdf.ts`.** Add the import after the `resolveStorageUrl` import (line 12):
 
 ```ts
 import { bitmapFromBlob, fetchImageBlob } from '@/lib/imageFetch';
@@ -514,7 +514,7 @@ Replace the logo block (lines 150–156) with:
 
 Decision recorded: `blobToDataUrl` is kept for the logo only. Reason: the logo must not go through the JPEG canvas pass (it would lose PNG transparency and get re-encoded at 0.62), and the helper's checks make the FileReader read safe. The photo path no longer references it.
 
-- [ ] **Step 3: `fortressReportDoc.ts`.** In `photoRows` (line 661), replace the `stack` with:
+- [x] **Step 3: `fortressReportDoc.ts`.** In `photoRows` (line 661), replace the `stack` with:
 
 ```ts
         stack: [
@@ -530,7 +530,7 @@ The logo is already truthiness-guarded at :178 (`opts.logoDataUrl ? { image: …
 Run: `npm run test -- src/lib/fortressReportPdf.test.ts src/lib/fortressReportDoc.test.ts`
 Expected: both files pass; the PDF file reports `Tests  15 passed (15)` (8 existing + 7 new).
 
-- [ ] **Step 4: Gate and commit**
+- [x] **Step 4: Gate and commit**
 
 ```bash
 npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'src/lib/fortressReport(Pdf|Doc)' ; echo "(nothing above = clean)"
@@ -552,7 +552,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Modify: `src/pages/Settings.tsx` (`handleLogoUpload` validTypes/toast :109-114, `<input accept>` :295, helper copy :313)
 - Create: `src/pages/Settings.test.tsx` (no Settings test exists; this is a focused render test of the logo control)
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```tsx
 // src/pages/Settings.test.tsx
@@ -634,7 +634,7 @@ describe('Settings — logo upload', () => {
 Run: `npm run test -- src/pages/Settings.test.tsx`
 Expected: `FAIL` — first test: `Unable to find an element with the text: Recommended: 200x200px, PNG or JPEG. SVG logos cannot be printed into PDF reports.`; second test: `expected "error" to be called with arguments: [ 'Please upload a PNG, JPEG, or WebP image. SVG logos …' ]` (the SVG is accepted today, so `upload` IS called); third passes.
 
-- [ ] **Step 2: Implementation.** Three edits in `src/pages/Settings.tsx`.
+- [x] **Step 2: Implementation.** Three edits in `src/pages/Settings.tsx`.
 
 Lines 109–114 become:
 
@@ -667,7 +667,7 @@ Lines 312–314 (the helper `<p>`) become:
 Run: `npm run test -- src/pages/Settings.test.tsx`
 Expected: `Tests  3 passed (3)`.
 
-- [ ] **Step 3: Gate and commit**
+- [x] **Step 3: Gate and commit**
 
 ```bash
 npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'src/pages/Settings' ; echo "(nothing above = clean)"
@@ -689,7 +689,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **What the test relies on from `src/test/setup.ts`:** the jsdom environment (`vitest.config.ts`), `@testing-library/jest-dom` matchers, the `window.matchMedia` stub (irrelevant here because `useIsMobile` is mocked), the `VITE_SUPABASE_*` env stubs (irrelevant — the Supabase client is never imported because every hook that would import it is mocked). setup.ts provides **no canvas, no `Image` loading and no `URL.createObjectURL`**. jsdom without the `canvas` package never fires `img.onload`, so any test that let `compressImage` run would hang. The tests therefore render with `enableCompression={false}` and `caption={{ time: false }}`, which makes `captionOn` false and `compressImage` return the file untouched (:150-152) — the HEIC detection, the size gate and the accept path are all reachable without a canvas. `URL.createObjectURL` is defined on `URL` in the test the way `src/lib/exportCsv.test.ts` does it.
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```tsx
 // src/components/ui/photo-capture.test.tsx
@@ -797,7 +797,7 @@ describe('PhotoCapture', () => {
 Run: `npm run test -- src/components/ui/photo-capture.test.tsx`
 Expected: `FAIL` — `SyntaxError: The requested module './photo-capture' does not provide an export named 'MAX_SOURCE_BYTES'` (every test in the file errors on the import).
 
-- [ ] **Step 2: Implementation.** In `src/components/ui/photo-capture.tsx`, after `import heic2any from 'heic2any';` (line 10) add:
+- [x] **Step 2: Implementation.** In `src/components/ui/photo-capture.tsx`, after `import heic2any from 'heic2any';` (line 10) add:
 
 ```ts
 /**
@@ -823,7 +823,7 @@ At the top of `validateAndProcessFile` (line 228, before `// Validate file type 
 Run: `npm run test -- src/components/ui/photo-capture.test.tsx`
 Expected: `Tests  5 passed (5)`.
 
-- [ ] **Step 3: Gate and commit**
+- [x] **Step 3: Gate and commit**
 
 ```bash
 npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'src/components/ui/photo-capture' ; echo "(nothing above = clean)"
@@ -1142,7 +1142,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 Task 8 edits the same hook and the same hook test. Run Task 8 only after this task's commit.
 
-- [ ] **Step 1: Failing tests.** Hook test first (mocking style is `src/hooks/useBuildingRoleAssignments.test.ts`: a recording PostgREST chain over `@/integrations/supabase/client`, which is what `fdb` wraps):
+- [x] **Step 1: Failing tests.** Hook test first (mocking style is `src/hooks/useBuildingRoleAssignments.test.ts`: a recording PostgREST chain over `@/integrations/supabase/client`, which is what `fdb` wraps):
 
 ```ts
 // src/hooks/useInspectionSection.test.ts
@@ -1383,7 +1383,7 @@ describe('ConditionInspectionSection.addPhoto', () => {
 Run: `npm run test -- src/hooks/useInspectionSection.test.ts src/components/reports/fortress/sections/ConditionInspectionSection.test.tsx`
 Expected: hook file — `TypeError: result.current.mergeResponse is not a function` (both cases); section file — first case times out on `expect(state.mergeResponse).toHaveBeenCalledTimes(1)` (today `addPhoto` calls `setResponse` with a rebuilt `photo_urls`), the failed-append case times out on the toast, the upload-failure case passes, the no-inspection case fails because today's `addPhoto` uploads regardless.
 
-- [ ] **Step 2: Hook — `mergeResponse` and a named data type.** In `src/hooks/useInspectionSection.ts`:
+- [x] **Step 2: Hook — `mergeResponse` and a named data type.** In `src/hooks/useInspectionSection.ts`:
 
 After the `InspectionResponsePatch` interface (line 36) add:
 
@@ -1420,7 +1420,7 @@ After `setResponse` (before `return {`, line 145) add:
 
 and add `mergeResponse,` to the returned object after `setResponse,`.
 
-- [ ] **Step 3: Section — `addPhoto` through the RPC.** In `src/components/reports/fortress/sections/ConditionInspectionSection.tsx`:
+- [x] **Step 3: Section — `addPhoto` through the RPC.** In `src/components/reports/fortress/sections/ConditionInspectionSection.tsx`:
 
 Imports: add after line 14 (`import { openStorageFile } …`):
 
@@ -1482,7 +1482,7 @@ Replace `addPhoto` (lines 37–54, including its leading comment) with:
 Run: `npm run test -- src/hooks/useInspectionSection.test.ts src/components/reports/fortress/sections/ConditionInspectionSection.test.tsx`
 Expected: `Test Files  2 passed (2)`, `Tests  6 passed (6)`.
 
-- [ ] **Step 4: Gate and commit**
+- [x] **Step 4: Gate and commit**
 
 ```bash
 npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'src/hooks/useInspectionSection|src/components/reports/fortress/sections/ConditionInspectionSection' ; echo "(nothing above = clean)"
@@ -1506,7 +1506,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 Runs after Task 7 has been committed (same files).
 
-- [ ] **Step 1: Failing test.** Append to `src/hooks/useInspectionSection.test.ts`:
+- [x] **Step 1: Failing test.** Append to `src/hooks/useInspectionSection.test.ts`:
 
 ```ts
 describe('useInspectionSection.setResponse — a key absent keeps the stored value, a key present with null clears it', () => {
@@ -1571,7 +1571,7 @@ describe('useInspectionSection.setResponse — a key absent keeps the stored val
 Run: `npm run test -- src/hooks/useInspectionSection.test.ts`
 Expected: the first case fails with `expected 500 to be null` (today's `patch.capex_estimate ?? existing?.capex_estimate` re-saves 500); the third fails with `expected 'Fix the gutter' to be null`; the second and fourth pass.
 
-- [ ] **Step 2: Implementation.** In `src/hooks/useInspectionSection.ts` replace the `InspectionResponsePatch` interface (lines 25–36) with:
+- [x] **Step 2: Implementation.** In `src/hooks/useInspectionSection.ts` replace the `InspectionResponsePatch` interface (lines 25–36) with:
 
 ```ts
 /**
@@ -1628,7 +1628,7 @@ Every caller in `ConditionInspectionSection.tsx` already passes concrete values 
 Run: `npm run test -- src/hooks/useInspectionSection.test.ts`
 Expected: `Tests  6 passed (6)`.
 
-- [ ] **Step 3: Gate and commit**
+- [x] **Step 3: Gate and commit**
 
 ```bash
 npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'src/hooks/useInspectionSection|src/components/reports/fortress/sections/(Condition|Building)InspectionSection' ; echo "(nothing above = clean)"
