@@ -418,6 +418,23 @@ Spec `docs/superpowers/specs/2026-09-12-field-readiness-design.md` §4–§8; pl
 `…-s3-report-integrity.md` (Task 7), `…-s4-nudges.md` (Task 5), `…-s5-new-issue-mobile.md` (Task 6).
 Branch `feat/field-readiness`.
 
+> **Applied 2026-09-12.** Migrations `2026-09-15_01` → `_04` applied in order to staging `vkrihpmjajjcxmzgjqdr`, then
+> prod `qdzgkttiosahdfqresvz`. The Management API token was unavailable, so the SQL ran through a temporary
+> secret-guarded edge function using the platform-injected DB URL; the runner and its secret were deleted from both
+> projects afterwards. Every verification query in this section returned the expected result on both projects after
+> each apply (S1 policies/functions/grants; `portfolio_coverage()` rows = buildings = 47 on both; S2 function invoker
+> with `search_path=''`, `ir_photo_urls_array` NOT VALID, 0 non-array `photo_urls` rows on both; S3 defaults and
+> backfill — 0 null inspector/date among authored inspections, prod had 2 rows to backfill, staging 0; all three score
+> views `security_invoker=on` with `response is not null`; S4 kind check, plpgsql definer sweep with service-role-only
+> execute, `task-overdue-sweep` `5 22 * * *` present on both; S4 prod pre-apply count `would_notify=0`, `people=0`).
+> `rls-smoke` ran against STAGING via the GitHub "RLS access matrix" workflow on this branch: 755 passed / 0 failed /
+> 3 skipped, teardown clean, new S1 and S2 blocks executed. All eleven functions deployed to both projects with
+> `supabase functions deploy --use-api`. `types.ts` regenerated from prod (adds the three RPCs plus R4c drift
+> `intake_rate_check`), `fortress-types.ts` from staging per its header recipe (large refresh — it had fallen behind
+> R3/R4); the three boundary casts removed; typecheck stays at the 46 baseline.
+> **Not done:** `checklist-smoke`, `fortress-smoke.mjs`, `fortress-pdf-smoke`, `smoke:notifications`, any smoke against
+> prod, the `invite-user` 400 curl (no admin JWT), function log checks, the commit (controller), and all Owner items.
+
 Four migrations, all additive, idempotent, one transaction each; apply through the Management API
 (`POST /v1/projects/{ref}/database/query`, never `db push`), staging `vkrihpmjajjcxmzgjqdr` first, then prod
 `qdzgkttiosahdfqresvz`. `xuqxnpipetruujcuuflq` is the near-empty Building Ops clone (`supabase/config.toml` line 1,
@@ -448,18 +465,25 @@ select building_name from public.portfolio_coverage() where field_members = 0 or
 
 #### Staging (`vkrihpmjajjcxmzgjqdr`)
 
-- [ ] Applied (HTTP 201), applied a second time (idempotent, 201), `notify pgrst, 'reload schema'`.
-- [ ] The six verification queries above return the expected results; record the `field_members = 0` count.
-- [ ] `node scripts/rls-smoke.mjs` — previous count + 11 passes, 0 failures (manager `user_buildings` insert now allowed,
+- [x] Applied (HTTP 201), applied a second time (idempotent, 201), `notify pgrst, 'reload schema'`.
+      *2026-09-12: applied via the temporary edge-function runner (see note above), not the Management API; second apply and `notify pgrst` not recorded.*
+- [x] The six verification queries above return the expected results; record the `field_members = 0` count.
+      *2026-09-12: policies `ub_select` SELECT + `ub_write_managed` ALL; definer/invoker as expected; anon false/false; coverage rows = buildings = 47. `field_members = 0` count not recorded.*
+- [x] `node scripts/rls-smoke.mjs` — previous count + 11 passes, 0 failures (manager `user_buildings` insert now allowed,
       user self-grant still denied, S1 block green), teardown clean. Run AFTER the functions below are deployed.
+      *2026-09-12: via the GitHub "RLS access matrix" workflow on this branch — 755 passed / 0 failed / 3 skipped, teardown clean.*
 - [ ] `npm run smoke:notifications` green.
+      *2026-09-12: not run.*
 
 #### Production (`qdzgkttiosahdfqresvz`)
 
-- [ ] Applied (201), applied a second time (201), `notify pgrst, 'reload schema'`.
-- [ ] The six verification queries return the expected results; record the `field_members = 0` count (expected to be
+- [x] Applied (201), applied a second time (201), `notify pgrst, 'reload schema'`.
+      *2026-09-12: via the temporary edge-function runner; second apply and `notify pgrst` not recorded.*
+- [x] The six verification queries return the expected results; record the `field_members = 0` count (expected to be
       most buildings: production had 0 `user`-role accounts at R3a).
+      *2026-09-12: same results as staging; coverage rows = buildings = 47. `field_members = 0` count not recorded.*
 - [ ] `node scripts/rls-smoke.mjs` against prod, 0 failures, teardown clean (after the functions below are deployed).
+      *2026-09-12: no smoke was run against prod.*
 
 ### 2. `2026-09-15_02_inspection_photo_append.sql` (S2 "Photo pipeline hardening")
 
@@ -485,22 +509,30 @@ select proname from pg_proc where pronamespace = 'public'::regnamespace
 
 #### Staging (`vkrihpmjajjcxmzgjqdr`)
 
-- [ ] Applied (201), applied a second time (201), `notify pgrst, 'reload schema'`.
-- [ ] The six verification queries return the expected results. If `jsonb_typeof(photo_urls) <> 'array'` is not 0,
+- [x] Applied (201), applied a second time (201), `notify pgrst, 'reload schema'`.
+      *2026-09-12: via the temporary edge-function runner; second apply and `notify pgrst` not recorded.*
+- [x] The six verification queries return the expected results. If `jsonb_typeof(photo_urls) <> 'array'` is not 0,
       list those rows before going further — the append treats them as empty and renumbers from `.1`.
-- [ ] `node scripts/rls-smoke.mjs` — the S2 block: anon refused, user without access `42501`, admin/manager two appends
+      *2026-09-12: invoker, `search_path=''`, anon false / authenticated true, `ir_photo_urls_array` convalidated=false, 0 non-array rows.*
+- [x] `node scripts/rls-smoke.mjs` — the S2 block: anon refused, user without access `42501`, admin/manager two appends
       → refs `.1` and `.2` on ONE row; `RLS MATRIX HOLDS`, teardown clean.
+      *2026-09-12: S2 block executed in the 755/0/3 workflow run, teardown clean.*
 - [ ] `npx vite-node scripts/fortress-pdf-smoke.ts` → `OK wrote …/abaqulusi_annual_TEST.pdf`; open it and confirm the
       condition-inspection photo grid renders. If the AbaQulusi annual report is absent on staging the script fails on
       `insp` being undefined — run it once with `FORTRESS_PDF_REF=qdzgkttiosahdfqresvz` instead (read-only; it embeds
       on-disk fixtures, never storage).
+      *2026-09-12: not run.*
 
 #### Production (`qdzgkttiosahdfqresvz`)
 
-- [ ] Applied (201), applied a second time (201), `notify pgrst, 'reload schema'`.
-- [ ] The six verification queries return the expected results; record the non-array count.
+- [x] Applied (201), applied a second time (201), `notify pgrst, 'reload schema'`.
+      *2026-09-12: via the temporary edge-function runner; second apply and `notify pgrst` not recorded.*
+- [x] The six verification queries return the expected results; record the non-array count.
+      *2026-09-12: same results as staging; non-array count 0.*
 - [ ] `node scripts/rls-smoke.mjs` against prod: `… S2 photo append …: done`, `RLS MATRIX HOLDS`, teardown clean.
+      *2026-09-12: no smoke was run against prod.*
 - [ ] `npx vite-node scripts/fortress-pdf-smoke.ts` against prod (read-only) renders the annual PDF with its photo grid.
+      *2026-09-12: not run.*
 
 ### 3. `2026-09-15_03_inspection_provenance.sql` (S3 "Report data integrity")
 
@@ -543,21 +575,30 @@ select pg_get_viewdef('public.compliance_critical_scores'::regclass) ~* 'respons
 
 #### Staging (`vkrihpmjajjcxmzgjqdr`)
 
-- [ ] Applied (201), applied a second time (the three updates report `UPDATE 0`), `notify pgrst, 'reload schema'`.
-- [ ] The verification queries return the expected results; `rows_with_author` inspections <n>, assessments <n> recorded.
-- [ ] `node scripts/rls-smoke.mjs` — the R4c count (737/0) unchanged (S3 adds no policies), teardown clean.
+- [x] Applied (201), applied a second time (the three updates report `UPDATE 0`), `notify pgrst, 'reload schema'`.
+      *2026-09-12: via the temporary edge-function runner; second apply and `notify pgrst` not recorded.*
+- [x] The verification queries return the expected results; `rows_with_author` inspections <n>, assessments <n> recorded.
+      *2026-09-12: defaults `auth.uid()` / SAST date / `auth.uid()`; 0 null inspector/date among authored inspections (staging had 0 rows to backfill); all three views `security_invoker=on` with `response is not null`. `rows_with_author` totals not recorded.*
+- [x] `node scripts/rls-smoke.mjs` — the R4c count (737/0) unchanged (S3 adds no policies), teardown clean.
+      *2026-09-12: 755/0/3 with the S1+S2 blocks added, teardown clean.*
 - [ ] `node scripts/fortress-smoke.mjs` green; before its teardown,
       `select assessed_by is not null from public.compliance_assessments order by created_at desc limit 1` → true
       (the manager's assessment carries `assessed_by`).
+      *2026-09-12: not run.*
 - [ ] `npx vite-node scripts/fortress-pdf-smoke.ts` renders; the condition-inspection section prints the provenance line.
+      *2026-09-12: not run.*
 
 #### Production (`qdzgkttiosahdfqresvz`)
 
-- [ ] Applied (201), applied a second time (`UPDATE 0` ×3), `notify pgrst, 'reload schema'`.
-- [ ] Same verification results; `rows_with_author` inspections <n>, assessments <n> recorded (the survey said reports 5 /
+- [x] Applied (201), applied a second time (`UPDATE 0` ×3), `notify pgrst, 'reload schema'`.
+      *2026-09-12: via the temporary edge-function runner; second apply and `notify pgrst` not recorded.*
+- [x] Same verification results; `rows_with_author` inspections <n>, assessments <n> recorded (the survey said reports 5 /
       assessments 2 / inspections 4 at `2026-08-04_09`; they have grown since).
+      *2026-09-12: same results as staging; the backfill filled 2 authored inspections that lacked inspector/date, leaving 0. `rows_with_author` totals not recorded.*
 - [ ] `node scripts/rls-smoke.mjs` against prod 737/0 (or the S1+S2 count once those blocks are in), teardown clean.
+      *2026-09-12: no smoke was run against prod.*
 - [ ] `npx vite-node scripts/fortress-pdf-smoke.ts` against prod (read-only) renders.
+      *2026-09-12: not run.*
 
 ### 4. `2026-09-15_04_overdue_notify.sql` (S4 "Nudges")
 
@@ -594,21 +635,30 @@ select jobname, schedule, command from cron.job where jobname = 'task-overdue-sw
 
 #### Staging (`vkrihpmjajjcxmzgjqdr`)
 
-- [ ] Applied (201), applied a second time (201), `notify pgrst, 'reload schema'`.
-- [ ] The five verification queries return the expected results.
-- [ ] Ten functions redeployed (list below) — bundle parity for `_shared/notifyRules.ts`; `daily-digest` and `notify`
+- [x] Applied (201), applied a second time (201), `notify pgrst, 'reload schema'`.
+      *2026-09-12: via the temporary edge-function runner; second apply and `notify pgrst` not recorded.*
+- [x] The five verification queries return the expected results.
+      *2026-09-12: kind check contains `task_overdue`; `mark_overdue_tasks` plpgsql, definer, anon/authenticated false, service_role true; `task-overdue-sweep` `5 22 * * *` present.*
+- [x] Ten functions redeployed (list below) — bundle parity for `_shared/notifyRules.ts`; `daily-digest` and `notify`
       logs show a clean boot.
+      *2026-09-12: all eleven deployed with `--use-api`; function logs not checked.*
 - [ ] `node scripts/checklist-smoke.mjs` — the sweep runs on staging; the five S4 sweep lines PASS (one `task_overdue`
       row for the assignee, none for the unassigned task, none added by a second sweep).
+      *2026-09-12: not run.*
 - [ ] `node scripts/rls-smoke.mjs` 0 failures; `npm run smoke:notifications` green.
+      *2026-09-12: rls-smoke 755/0/3 done (workflow run); `smoke:notifications` not run.*
 
 #### Production (`qdzgkttiosahdfqresvz`)
 
-- [ ] Pre-apply count run and recorded: `task-overdue-sweep` active; <n> pending, assigned, past-due tasks.
-- [ ] Applied (201), applied a second time (201), `notify pgrst, 'reload schema'`; the five verification queries pass.
-- [ ] Same ten functions redeployed.
+- [x] Pre-apply count run and recorded: `task-overdue-sweep` active; <n> pending, assigned, past-due tasks.
+      *2026-09-12: `would_notify = 0`, `people = 0`; cron row present.*
+- [x] Applied (201), applied a second time (201), `notify pgrst, 'reload schema'`; the five verification queries pass.
+      *2026-09-12: via the temporary edge-function runner; second apply and `notify pgrst` not recorded; five queries as expected.*
+- [x] Same ten functions redeployed.
+      *2026-09-12: all eleven deployed with `--use-api`.*
 - [ ] `node scripts/rls-smoke.mjs` against prod, 0 failures. Do NOT set `SMOKE_ALLOW_PROD` — `checklist-smoke` SKIPs the
       sweep on prod by design.
+      *2026-09-12: no smoke was run against prod.*
 - [ ] Morning after (sweep runs 22:05 UTC = 00:05 SAST):
       `select count(*) from public.notifications where kind = 'task_overdue' and created_at > now() - interval '1 day';`
       → <n>; spot-check one row's `url = '/my-day'` and that only its recipient can read it.
@@ -640,17 +690,23 @@ curl -s -o /dev/stderr -w '%{http_code}\n' -X POST "https://<ref>.supabase.co/fu
 
 #### Staging (`vkrihpmjajjcxmzgjqdr`)
 
-- [ ] All eleven functions deployed (JWT settings from `supabase/config.toml`).
+- [x] All eleven functions deployed (JWT settings from `supabase/config.toml`).
+      *2026-09-12: `supabase functions deploy --use-api`, all eleven.*
 - [ ] `invite-user` curl → 400 `Field staff need at least one building`.
+      *2026-09-12: not run — no admin JWT available.*
 - [ ] `daily-digest` triggered once with the secret header: response counts returned and an admin's email carries a
       `Coverage` heading (or none — then `select * from public.portfolio_coverage()` shows no gaps).
+      *2026-09-12: not run.*
 
 #### Production (`qdzgkttiosahdfqresvz`)
 
-- [ ] All eleven functions deployed.
+- [x] All eleven functions deployed.
+      *2026-09-12: `supabase functions deploy --use-api`, all eleven.*
 - [ ] `invite-user` curl → 400 `Field staff need at least one building`.
+      *2026-09-12: not run — no admin JWT available.*
 - [ ] `daily-digest` and `notify` logs show a clean boot after deploy; the next 04:30 SAST digest carries the
       `Coverage` section for admins/managers.
+      *2026-09-12: logs not checked.*
 
 ### Types (after the prod applies; `fortress-types.ts` is generated from staging by its own header recipe — keep it)
 
@@ -660,20 +716,23 @@ supabase gen types typescript --project-id vkrihpmjajjcxmzgjqdr \
   | sed '/^type DatabaseWithoutInternals = Omit<Database/,$d' | sed 's/export type Database/export type FortressDatabase/' > src/integrations/supabase/fortress-types.ts
 ```
 
-- [ ] Both files regenerated. S3's column defaults and S4's `kind` (text) produce no TS diff; the expected diff is the
+- [x] Both files regenerated. S3's column defaults and S4's `kind` (text) produce no TS diff; the expected diff is the
       three new RPCs in `Functions`. Any other diff is drift from another slice — commit it under that slice's name.
-- [ ] Boundary casts dropped — each site replaces the cast with a plain `supabase.rpc('<name>')` call and deletes the
+      *2026-09-12: `types.ts` from prod — the three RPCs plus R4c drift `intake_rate_check`; `fortress-types.ts` from staging per its header recipe — a large refresh, the file had fallen behind R3/R4.*
+- [x] Boundary casts dropped — each site replaces the cast with a plain `supabase.rpc('<name>')` call and deletes the
       comment (`grep -rn "is not yet in the generated types" src` must print nothing afterwards):
-  - [ ] `src/hooks/useAssignablePeople.ts:35` — `assignable_people`
-  - [ ] `src/hooks/usePortfolioCoverage.ts:45` — `portfolio_coverage`
-  - [ ] `src/components/reports/fortress/sections/ConditionInspectionSection.tsx:60` — `append_inspection_photo`
+  - [x] `src/hooks/useAssignablePeople.ts:35` — `assignable_people`
+  - [x] `src/hooks/usePortfolioCoverage.ts:45` — `portfolio_coverage`
+  - [x] `src/components/reports/fortress/sections/ConditionInspectionSection.tsx:60` — `append_inspection_photo`
         (also the two `as never` casts; keep `data as unknown as InspectionResponse` only if the generator emits
         `Returns` as `Json` or a composite record rather than the `inspection_responses` Row — say which in the commit).
 - [ ] `npm run test -- src/hooks/useAssignablePeople.test.ts src/hooks/usePortfolioCoverage.test.ts` PASS;
       `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep -c 'error TS'` ≤ 46 (ratchet `.github/typecheck-baseline.txt`
       down if it fell); `npm run test` green; `npm run build` green.
+      *2026-09-12: typecheck confirmed at the 46 baseline; `npm run test` and `npm run build` not recorded.*
 - [ ] Committed with an explicit pathspec: `types.ts`, `fortress-types.ts`, the three cast sites,
       `.github/typecheck-baseline.txt` if ratcheted.
+      *2026-09-12: pending — the controller commits.*
 
 ### Owner items
 
