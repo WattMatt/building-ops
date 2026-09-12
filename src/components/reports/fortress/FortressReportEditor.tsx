@@ -108,13 +108,12 @@ export default function FortressReportEditor() {
   };
 
   useEffect(() => { setPreparedFor(report?.prepared_for ?? ''); }, [report?.prepared_for]);
-  useEffect(() => {
-    setManagers({
-      asset_manager: report?.asset_manager ?? '',
-      ops_manager: report?.ops_manager ?? '',
-      centre_manager: report?.centre_manager ?? '',
-    });
-  }, [report?.asset_manager, report?.ops_manager, report?.centre_manager]);
+  // One effect per column. The saves are blur-only and each one refetches the report, so a
+  // single effect keyed on all three would reset the field still being typed to its server
+  // value the moment a neighbour's save landed.
+  useEffect(() => { setManagers((m) => ({ ...m, asset_manager: report?.asset_manager ?? '' })); }, [report?.asset_manager]);
+  useEffect(() => { setManagers((m) => ({ ...m, ops_manager: report?.ops_manager ?? '' })); }, [report?.ops_manager]);
+  useEffect(() => { setManagers((m) => ({ ...m, centre_manager: report?.centre_manager ?? '' })); }, [report?.centre_manager]);
 
   // Row counts per section, so the navigator can show which tabs actually hold anything.
   const { data: counts } = useReportSectionCounts(id, report?.building_id, report?.report_type);
@@ -163,10 +162,15 @@ export default function FortressReportEditor() {
     qc.invalidateQueries({ queryKey: ['fortress-reports'] });
   };
 
+  /** The header saves on blur, and a button click does not blur the field in Safari — so export
+   *  and submit push any pending header text first. Every save is a no-op when unchanged. */
+  const flushHeader = () => Promise.all([savePreparedFor(), ...MANAGER_FIELDS.map((f) => saveManager(f.key))]);
+
   const runExport = async () => {
     if (!id || exporting) return;
     setExporting(true);
     try {
+      await flushHeader();
       // Report header uses the organisation's configured name + logo (Settings).
       const generated = await generateReportPdf(id, { name: organization?.name ?? '', primaryColor: organization?.primary_color ?? '#2563eb', logoUrl: organization?.logo_url ?? null });
       track('report_exported', { reportType: generated.reportType, reportStatus: generated.reportStatus });
@@ -284,6 +288,7 @@ export default function FortressReportEditor() {
     if (anyDirty) { toast.error('Save your changes in this section before submitting.'); return; }
     setSubmitting(true);
     try {
+      await flushHeader();
       const metas = REPORT_SECTIONS[report.report_type as keyof typeof REPORT_SECTIONS] ?? [];
       const missing: string[] = [];
       for (const k of REQUIRED_SECTIONS[report.report_type as keyof typeof REQUIRED_SECTIONS] ?? []) {

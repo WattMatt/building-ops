@@ -9,8 +9,11 @@ const state = vi.hoisted(() => ({
   /** Every reports.update the header sent: payload + the .eq filters it chained. */
   updates: [] as { table: string; payload: Record<string, unknown>; filters: unknown[][] }[],
   updateError: null as { message: string } | null,
+  /** How many header updates had landed when each submit-gate count probe ran. */
+  probes: [] as number[],
 }));
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
+const lifecycle = vi.hoisted(() => ({ mutate: vi.fn(), isPending: false }));
 
 vi.mock('sonner', () => ({ toast }));
 vi.mock('react-router-dom', async (importOriginal) => ({
@@ -27,7 +30,7 @@ vi.mock('@/hooks/useOrgSettings', () => ({ useFeature: () => false }));
 vi.mock('@/hooks/useReportSectionCounts', () => ({ useReportSectionCounts: () => ({ data: undefined }) }));
 vi.mock('@/hooks/useFortressReports', () => ({
   useFortressReport: () => ({ data: state.report, isLoading: false }),
-  useReportLifecycle: () => ({ mutate: vi.fn(), isPending: false }),
+  useReportLifecycle: () => lifecycle,
   useDiscardDraft: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 vi.mock('@/lib/reportArtifacts', () => ({
@@ -55,6 +58,8 @@ vi.mock('@/integrations/supabase/client', () => {
       };
       return chain;
     },
+    // The submit gate's head-count probe: one row, and a note of how many header writes preceded it.
+    select: () => ({ eq: async () => { state.probes.push(state.updates.length); return { count: 1 }; } }),
   });
   return { supabase: { from } };
 });
@@ -71,18 +76,23 @@ const report = (over: Partial<Report> = {}): Report => ({
 
 function renderEditor() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const tree = () => (
     <QueryClientProvider client={qc}>
       <MemoryRouter><FortressReportEditor /></MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const r = render(tree());
+  /** Re-render against the same client — what a refetch of the report looks like from the component. */
+  return { ...r, rerender: () => r.rerender(tree()) };
 }
 
 beforeEach(() => {
   state.report = report();
   state.updates = [];
   state.updateError = null;
+  state.probes = [];
   toast.error.mockClear();
+  lifecycle.mutate.mockClear();
 });
 
 describe('FortressReportEditor — manager names in the header', () => {
@@ -113,6 +123,7 @@ describe('FortressReportEditor — manager names in the header', () => {
   });
 
   it('names the field in the failure toast and restores the saved value', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     state.report = report({ ops_manager: 'Sipho' });
     state.updateError = { message: 'permission denied' };
     renderEditor();
@@ -121,6 +132,31 @@ describe('FortressReportEditor — manager names in the header', () => {
     fireEvent.blur(input);
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Could not save “Operations manager”.'));
     await waitFor(() => expect(input).toHaveValue('Sipho'));
+    error.mockRestore();
+  });
+
+  it('a refetch after saving one manager does not wipe another one still being typed', async () => {
+    const { rerender } = renderEditor();
+    fireEvent.change(screen.getByLabelText('Operations manager'), { target: { value: 'Sipho' } });
+    const asset = screen.getByLabelText('Asset manager');
+    fireEvent.change(asset, { target: { value: 'Naledi' } });
+    fireEvent.blur(asset);
+    await waitFor(() => expect(state.updates).toHaveLength(1));
+    // The invalidated report query refetches and arrives carrying the column just saved.
+    state.report = report({ asset_manager: 'Naledi' });
+    rerender();
+    expect(screen.getByLabelText('Asset manager')).toHaveValue('Naledi');
+    expect(screen.getByLabelText('Operations manager')).toHaveValue('Sipho');
+  });
+
+  it('Submit for review writes an unblurred header edit before the gate counts rows', async () => {
+    renderEditor();
+    fireEvent.change(screen.getByLabelText('Centre manager'), { target: { value: 'Naledi' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Submit for review' }));
+    await waitFor(() => expect(lifecycle.mutate).toHaveBeenCalledTimes(1));
+    expect(state.updates).toEqual([{ table: 'reports', payload: { centre_manager: 'Naledi' }, filters: [['id', 'rep1']] }]);
+    expect(state.probes).toEqual([1]);
+    expect(lifecycle.mutate.mock.calls[0][0]).toEqual({ status: 'submitted', reviewNotes: undefined });
   });
 
   it('prints the names read-only on a locked report, only the ones that are set', () => {
