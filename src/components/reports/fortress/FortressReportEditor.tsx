@@ -24,7 +24,7 @@ import { useReportSectionCounts } from '@/hooks/useReportSectionCounts';
 import { ReportSavedVersions } from '@/components/reports/fortress/ReportSavedVersions';
 import { ShareReportDialog } from '@/components/reports/fortress/ShareReportDialog';
 import { DiscardDraftDialog } from '@/components/reports/fortress/DiscardDraftDialog';
-import { fdb, REPORT_TYPE_LABELS, type ReportStatus, type ReportType } from '@/integrations/supabase/fortress-db';
+import { fdb, REPORT_TYPE_LABELS, type Report, type ReportStatus, type ReportType } from '@/integrations/supabase/fortress-db';
 import { getSectionComponent } from './sections/registry';
 import { dirtySections, useDirtyCount } from './dirtySections';
 import { Hint } from '@/components/ui/hint';
@@ -38,6 +38,15 @@ interface SectionCountClient {
     select(cols: string, opts: { count: 'exact'; head: true }): { eq(col: string, value: string | undefined): Promise<{ count: number | null }> };
   };
 }
+
+/** Header fields that print on the PDF cover (the signature block already reads them). */
+type ManagerField = 'asset_manager' | 'ops_manager' | 'centre_manager';
+const MANAGER_FIELDS: { key: ManagerField; id: string; label: string }[] = [
+  { key: 'asset_manager', id: 'asset-manager', label: 'Asset manager' },
+  { key: 'ops_manager', id: 'ops-manager', label: 'Operations manager' },
+  { key: 'centre_manager', id: 'centre-manager', label: 'Centre manager' },
+];
+const EMPTY_MANAGERS: Record<ManagerField, string> = { asset_manager: '', ops_manager: '', centre_manager: '' };
 
 export default function FortressReportEditor() {
   const { id } = useParams<{ id: string }>();
@@ -64,6 +73,7 @@ export default function FortressReportEditor() {
 
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [preparedFor, setPreparedFor] = useState('');
+  const [managers, setManagers] = useState<Record<ManagerField, string>>(EMPTY_MANAGERS);
   const [reviewOpen, setReviewOpen] = useState<null | ReportStatus>(null);
   const [reviewNotes, setReviewNotes] = useState('');
   const [exporting, setExporting] = useState(false);
@@ -98,6 +108,13 @@ export default function FortressReportEditor() {
   };
 
   useEffect(() => { setPreparedFor(report?.prepared_for ?? ''); }, [report?.prepared_for]);
+  useEffect(() => {
+    setManagers({
+      asset_manager: report?.asset_manager ?? '',
+      ops_manager: report?.ops_manager ?? '',
+      centre_manager: report?.centre_manager ?? '',
+    });
+  }, [report?.asset_manager, report?.ops_manager, report?.centre_manager]);
 
   // Row counts per section, so the navigator can show which tabs actually hold anything.
   const { data: counts } = useReportSectionCounts(id, report?.building_id, report?.report_type);
@@ -123,6 +140,24 @@ export default function FortressReportEditor() {
       if (import.meta.env.DEV) console.error('Update prepared_for failed:', error);
       toast.error('Could not save “Prepared for”.');
       setPreparedFor(report.prepared_for ?? '');
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ['fortress-reports'] });
+  };
+
+  /** Same contract as savePreparedFor: trim → null, no write when unchanged, named toast + restore on failure. */
+  const saveManager = async (field: ManagerField) => {
+    if (!id || !report) return;
+    const label = MANAGER_FIELDS.find((f) => f.key === field)?.label ?? field;
+    const next = managers[field].trim() || null;
+    if (next === (report[field] ?? null)) return;
+    const patch: Partial<Pick<Report, ManagerField>> = {};
+    patch[field] = next;
+    const { error } = await fdb.from('reports').update(patch).eq('id', id);
+    if (error) {
+      if (import.meta.env.DEV) console.error(`Update ${field} failed:`, error);
+      toast.error(`Could not save “${label}”.`);
+      setManagers((m) => ({ ...m, [field]: report[field] ?? '' }));
       return;
     }
     qc.invalidateQueries({ queryKey: ['fortress-reports'] });
@@ -301,23 +336,42 @@ export default function FortressReportEditor() {
           </p>
           {editable ? (
             <div className="mt-2">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="prepared-for" className="text-xs text-muted-foreground">Prepared for</Label>
-                <Input
-                  id="prepared-for"
-                  className="h-8 w-56"
-                  placeholder="e.g. Capital Propfund"
-                  value={preparedFor}
-                  onChange={(e) => setPreparedFor(e.target.value)}
-                  onBlur={savePreparedFor}
-                />
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="prepared-for" className="text-xs text-muted-foreground">Prepared for</Label>
+                  <Input
+                    id="prepared-for"
+                    className="h-8 w-56"
+                    placeholder="e.g. Capital Propfund"
+                    value={preparedFor}
+                    onChange={(e) => setPreparedFor(e.target.value)}
+                    onBlur={savePreparedFor}
+                  />
+                </div>
+                {MANAGER_FIELDS.map((f) => (
+                  <div key={f.key} className="flex items-center gap-2">
+                    <Label htmlFor={f.id} className="text-xs text-muted-foreground">{f.label}</Label>
+                    <Input
+                      id={f.id}
+                      className="h-8 w-44"
+                      value={managers[f.key]}
+                      onChange={(e) => setManagers((m) => ({ ...m, [f.key]: e.target.value }))}
+                      onBlur={() => saveManager(f.key)}
+                    />
+                  </div>
+                ))}
               </div>
-              <Hint icon={false} className="mt-1">Printed on the PDF cover under the managers.</Hint>
+              <Hint icon={false} className="mt-1">The manager names print on the PDF cover, with “Prepared for” under them.</Hint>
             </div>
           ) : (
-            report.prepared_for && (
-              <p className="mt-1 text-sm text-muted-foreground">Prepared for {report.prepared_for}</p>
-            )
+            <>
+              {MANAGER_FIELDS.filter((f) => report[f.key]).map((f) => (
+                <p key={f.key} className="mt-1 text-sm text-muted-foreground">{f.label}: {report[f.key]}</p>
+              ))}
+              {report.prepared_for && (
+                <p className="mt-1 text-sm text-muted-foreground">Prepared for {report.prepared_for}</p>
+              )}
+            </>
           )}
         </div>
         <div className="flex items-center gap-2">

@@ -284,7 +284,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Modify: `src/hooks/useComplianceSection.ts` (`setResponse` signature + comment at `:95-118`; header comment)
 - Create: `src/hooks/useComplianceSection.test.ts`
 
-- [ ] **Step 1: Write the failing test** at `src/hooks/useComplianceSection.test.ts`:
+- [x] **Step 1: Write the failing test** at `src/hooks/useComplianceSection.test.ts`:
 
 ```ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -389,7 +389,7 @@ npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'useCompl
 ```
 Expected: vitest reports **2 passed** — at runtime the current code already forwards whatever `response` it is handed, so the behaviour is not what is red here; the contract is. `tsc` prints `src/hooks/useComplianceSection.test.ts(…): error TS2345: Argument of type 'null' is not assignable to parameter of type 'YesNoNa'.` — that line is the failing check for this task, and it must be gone after Step 2.
 
-- [ ] **Step 2: Widen the hook.** In `src/hooks/useComplianceSection.ts` replace the header comment (`:1-7`) with:
+- [x] **Step 2: Widen the hook.** In `src/hooks/useComplianceSection.ts` replace the header comment (`:1-7`) with:
 
 ```ts
 /**
@@ -439,14 +439,14 @@ and replace `setResponse` (`:95-118`) with:
 
 `responseMap` (`:120-126`) and `answered` (`:133`) stay as they are — `(v.response as YesNoNa | null) ?? undefined` already turns a null response into "unanswered", and `.filter(Boolean)` excludes it; the second test pins that.
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 ```bash
 npx vitest run src/hooks/useComplianceSection.test.ts
 npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'useComplianceSection|ComplianceSection'
 ```
 Expected: 2 passed; the grep prints nothing (note `ComplianceSection.tsx` still compiles — it passes `current` of type `YesNoNa | undefined` only when truthy, so no new error there).
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.** (`e521f94`)
 ```bash
 git add src/hooks/useComplianceSection.ts src/hooks/useComplianceSection.test.ts
 git commit -m "Let an OHS comment be saved without an answer
@@ -463,7 +463,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Create: `src/components/reports/fortress/sections/ComplianceSection.test.tsx`
 - Wait for: Task 2's commit (`until git log --oneline -- src/hooks/useComplianceSection.test.ts | grep -q .; do sleep 30; done`) — the hook signature this component calls with `null`.
 
-- [ ] **Step 1: Write the failing test** at `src/components/reports/fortress/sections/ComplianceSection.test.tsx`:
+- [x] **Step 1: Write the failing test** at `src/components/reports/fortress/sections/ComplianceSection.test.tsx`:
 
 ```tsx
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -545,7 +545,7 @@ describe('ComplianceSection — comment without an answer', () => {
 
 Run `npx vitest run src/components/reports/fortress/sections/ComplianceSection.test.tsx`. Expected: **3 failed, 1 passed** — test 1 fails at `getByText('Answer needed')` (`TestingLibraryElementError: Unable to find an element with the text: Answer needed`), test 2 fails with `expected "spy" to be called with arguments: [ 'i1', 'yes', 'new note' ] … Received: [ 'i1', 'yes', 'old note' ]` (the toggle sends the stale saved comment), test 4 fails at `getByText('Answer needed')`; test 3 passes today.
 
-- [ ] **Step 2: Replace `src/components/reports/fortress/sections/ComplianceSection.tsx`** with:
+- [x] **Step 2: Replace `src/components/reports/fortress/sections/ComplianceSection.tsx`** with:
 
 ```tsx
 /** OHS Act Compliance — rendered entirely from compliance_templates (no hardcoded
@@ -657,14 +657,14 @@ export default function ComplianceSection({ reportId, buildingId, readOnly }: Se
 }
 ```
 
-- [ ] **Step 3: Gate.**
+- [x] **Step 3: Gate.**
 ```bash
 npx vitest run src/components/reports/fortress/sections/ComplianceSection.test.tsx src/hooks/useComplianceSection.test.ts
 npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'ComplianceSection'
 ```
 Expected: 6 passed; the grep prints nothing.
 
-- [ ] **Step 4: Commit.**
+- [x] **Step 4: Commit.** (`43a3a66`)
 ```bash
 git add src/components/reports/fortress/sections/ComplianceSection.tsx src/components/reports/fortress/sections/ComplianceSection.test.tsx
 git commit -m "OHS section: save the comment on blur without an answer, send the live comment with the toggle, name the missing answer
@@ -678,7 +678,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Files:** none modified. This task is a decision record; there is nothing to test or commit.
 
-- [ ] **Step 1: Confirm what the gate counts.** `src/lib/fortressReports.ts:55-70`:
+- [x] **Step 1: Confirm what the gate counts.** — AUDITED 2026-09-12 at `43a3a66`: `REQUIRED_SECTION_TABLE.ohs_compliance` is `'compliance_assessments'` (`fortressReports.ts:63-67`), its only consumer is `FortressReportEditor.validateAndSubmit` (`:254-259`), which does `select('id', { count: 'exact', head: true }).eq('report_id', id)` on that parent table and never reads `compliance_responses`. The brief's condition ("counts compliance rows regardless of response") is NOT met; no code changed. `SECTION_SOURCE.ohs_compliance` (`fortressReports.ts:95`) → `compliance_responses` via the assessment, so a comment-only row now counts toward the navigator badge, as intended. `src/lib/fortressReports.ts:55-70`:
 
 ```ts
 /** Sections that must have at least one saved row before a report can be submitted. */
@@ -719,7 +719,7 @@ and its one consumer, `FortressReportEditor.validateAndSubmit` (`:254-259`):
 - Modify: `src/components/reports/fortress/FortressReportEditor.tsx` (constants above the component; state at `:65-74`; sync effect at `:100`; new `saveManager` after `savePreparedFor` `:117-129`; header JSX `:302-321`)
 - Create: `src/components/reports/fortress/FortressReportEditor.test.tsx`
 
-- [ ] **Step 1: Write the failing test** at `src/components/reports/fortress/FortressReportEditor.test.tsx`:
+- [x] **Step 1: Write the failing test** at `src/components/reports/fortress/FortressReportEditor.test.tsx`: (observed 6 failed / 0 passed — the read-only case is one `it` and fails at its first assertion before reaching the "Prepared for" line; every failure point matched the ones named below)
 
 ```tsx
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -861,7 +861,7 @@ describe('FortressReportEditor — manager names in the header', () => {
 
 Run `npx vitest run src/components/reports/fortress/FortressReportEditor.test.tsx`. Expected: **5 failed, 1 passed** — the three `it.each` cases and the unchanged/cleared case fail with `TestingLibraryElementError: Unable to find a label with the text of: Asset manager` (resp. `Operations manager`, `Centre manager`); the toast case fails the same way; the read-only case fails at `getByText('Asset manager: Thandi M.')`. (If `Prepared for Capital Propfund` is the one that passes, the pre-existing read-only line is intact.)
 
-- [ ] **Step 2: Add the constants** in `src/components/reports/fortress/FortressReportEditor.tsx`, directly below the `SectionCountClient` interface (`:36-40`) and above `export default function FortressReportEditor()`:
+- [x] **Step 2: Add the constants** in `src/components/reports/fortress/FortressReportEditor.tsx`, directly below the `SectionCountClient` interface (`:36-40`) and above `export default function FortressReportEditor()`:
 
 ```ts
 /** Header fields that print on the PDF cover (the signature block already reads them). */
@@ -874,7 +874,7 @@ const MANAGER_FIELDS: { key: ManagerField; id: string; label: string }[] = [
 const EMPTY_MANAGERS: Record<ManagerField, string> = { asset_manager: '', ops_manager: '', centre_manager: '' };
 ```
 
-- [ ] **Step 3: State + sync.** After `const [preparedFor, setPreparedFor] = useState('');` (`:66`) add:
+- [x] **Step 3: State + sync.** After `const [preparedFor, setPreparedFor] = useState('');` (`:66`) add:
 
 ```ts
   const [managers, setManagers] = useState<Record<ManagerField, string>>(EMPTY_MANAGERS);
@@ -893,7 +893,7 @@ and replace the sync effect at `:100` (`useEffect(() => { setPreparedFor(report?
   }, [report?.asset_manager, report?.ops_manager, report?.centre_manager]);
 ```
 
-- [ ] **Step 4: Save on blur.** Directly after `savePreparedFor` (`:117-129`) add:
+- [x] **Step 4: Save on blur.** Directly after `savePreparedFor` (`:117-129`) add:
 
 ```ts
   /** Same contract as savePreparedFor: trim → null, no write when unchanged, named toast + restore on failure. */
@@ -921,7 +921,7 @@ and extend the `fortress-db` import at `:27` to include the `Report` type:
 import { fdb, REPORT_TYPE_LABELS, type Report, type ReportStatus, type ReportType } from '@/integrations/supabase/fortress-db';
 ```
 
-- [ ] **Step 5: Header JSX.** Replace `:302-321` (from `{editable ? (` through the closing `)}` of the read-only branch) with:
+- [x] **Step 5: Header JSX.** Replace `:302-321` (from `{editable ? (` through the closing `)}` of the read-only branch) with:
 
 ```tsx
           {editable ? (
@@ -967,14 +967,14 @@ import { fdb, REPORT_TYPE_LABELS, type Report, type ReportStatus, type ReportTyp
 
 (Inputs stay `h-8` like "Prepared for": the editor header is the desktop authoring surface, not a field flow; the 44 px rule applies to the phone-first screens.)
 
-- [ ] **Step 6: Gate.**
+- [x] **Step 6: Gate.**
 ```bash
 npx vitest run src/components/reports/fortress/FortressReportEditor.test.tsx
 npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'FortressReportEditor'
 ```
 Expected: 6 passed; the grep prints nothing.
 
-- [ ] **Step 7: Commit.**
+- [x] **Step 7: Commit.**
 ```bash
 git add src/components/reports/fortress/FortressReportEditor.tsx src/components/reports/fortress/FortressReportEditor.test.tsx
 git commit -m "Report header: Asset, Operations and Centre manager inputs that save on blur
