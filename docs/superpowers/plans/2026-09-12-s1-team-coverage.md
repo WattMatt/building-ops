@@ -2378,7 +2378,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 - Modify: `src/pages/UserManagement.tsx` (imports `:1-3`; component `:99`; `handleInvite` `:264-309`; dialog `:510-539`; submit `:574-577`)
 - Modify: `supabase/functions/invite-user/index.ts:181` (read-verified; the controller deploys)
 
-- [ ] **Step 1: Failing test for the rule and the copy**
+- [x] **Step 1: Failing test for the rule and the copy**
 
 ```ts
 // src/lib/invite.test.ts
@@ -2409,9 +2409,9 @@ describe('copy and links', () => {
 });
 ```
 
-- [ ] **Step 2: Run** `npm run test -- src/lib/invite.test.ts` → FAIL (module missing).
+- [x] **Step 2: Run** `npm run test -- src/lib/invite.test.ts` → FAIL (module missing).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 ```ts
 // src/lib/invite.ts
@@ -2434,9 +2434,9 @@ export function teamTabUrl(buildingId: string): string {
 }
 ```
 
-- [ ] **Step 4: Run** `npm run test -- src/lib/invite.test.ts` → PASS (4 tests).
+- [x] **Step 4: Run** `npm run test -- src/lib/invite.test.ts` → PASS (4 tests).
 
-- [ ] **Step 5: Wire the dialog.** In `UserManagement.tsx`:
+- [x] **Step 5: Wire the dialog.** In `UserManagement.tsx`:
 
 After line 2 (`import { formatBuildingName } …`):
 ```tsx
@@ -2509,9 +2509,9 @@ with
               <Button onClick={handleInvite} disabled={isInviting || inviteBlockedReason(inviteRole, inviteBuildingIds) !== null}>
 ```
 
-- [ ] **Step 6: Gate.** `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'UserManagement|lib/invite'` prints nothing; `npm run test -- src/lib/invite.test.ts` PASS; `grep -n 'Leave empty for organization-wide' src/pages/UserManagement.tsx` prints nothing.
+- [x] **Step 6: Gate.** `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'UserManagement|lib/invite'` prints nothing; `npm run test -- src/lib/invite.test.ts` PASS; `grep -n 'Leave empty for organization-wide' src/pages/UserManagement.tsx` prints nothing.
 
-- [ ] **Step 7: Edge function.** In `supabase/functions/invite-user/index.ts`, the exact diff:
+- [x] **Step 7: Edge function.** In `supabase/functions/invite-user/index.ts`, the exact diff:
 
 ```diff
 @@ -180,3 +180,7 @@
@@ -2526,7 +2526,7 @@ with
 ```
 `deno` is not installed here: read-verify the diff (`git diff supabase/functions/invite-user/index.ts` shows exactly those five added lines), no local run. The controller deploys it in Task 8 (`supabase functions deploy invite-user`) and proves it with one curl as the admin persona: `{"email":"zztest-nob@buildingops.app","role":"user","buildingIds":[]}` → HTTP 400 `{"error":"Field staff need at least one building"}`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/lib/invite.ts src/lib/invite.test.ts src/pages/UserManagement.tsx supabase/functions/invite-user/index.ts
