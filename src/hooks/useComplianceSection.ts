@@ -6,11 +6,13 @@
  * answers — the persisted compliance_scores view is the source of truth on reload.
  *
  * A response row may carry a comment and no answer (S3): `response` is nullable and its
- * CHECK only constrains non-null values, the score trigger maps null to a null score, and
- * the compliance_scores view sums only 'yes'/'no' — so a comment-only row is stored,
- * never scored, and never counted as answered.
+ * CHECK only constrains non-null values, and the score trigger maps null to a null score —
+ * so a comment-only row is stored, never scored, and never counted as answered here. The
+ * live compliance_scores view (2026-06-19_02) still puts every joined row in its per-group
+ * denominator, null response included; 2026-09-15_03 (canonical in ../GMI/sql) re-creates
+ * the three views with `response is not null` so a comment-only row stops depressing the %.
  */
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -97,29 +99,45 @@ export function useComplianceSection(
     },
   });
 
+  // Writes for one item run in call order. A comment blur (null answer) followed at once by
+  // the answer toggle must not land reversed and put the null back over the answer.
+  const inflight = useRef(new Map<string, Promise<void>>());
+
   const setResponse = useCallback(
     async (templateItemId: string, response: YesNoNa | null, comment?: string) => {
       const assessmentId = query.data?.assessmentId;
       if (!assessmentId) return;
       const existing = query.data?.responses[templateItemId];
-      // `response` null is a legal row: a comment typed before (or without) an answer is
-      // saved instead of thrown away. An undefined `comment` keeps whatever is saved.
-      const { error } = await fdb.from('compliance_responses').upsert(
-        {
-          id: existing?.id ?? crypto.randomUUID(),
-          assessment_id: assessmentId,
-          template_item_id: templateItemId,
-          response,
-          comment: comment ?? existing?.comment ?? null,
-        },
-        { onConflict: 'assessment_id,template_item_id' },
-      );
-      if (error) {
-        if (import.meta.env.DEV) console.error('setResponse failed:', error);
-        toast.error('Could not save that answer.');
-        return;
+      const write = async () => {
+        // `response` null is a legal row: a comment typed before (or without) an answer is
+        // saved instead of thrown away. An undefined `comment` keeps whatever is saved. No
+        // `id`: the column default fills it, and the (assessment_id, template_item_id) key
+        // resolves the conflict — so two fresh writes racing each other cannot each carry a
+        // different primary key for the same row.
+        const { error } = await fdb.from('compliance_responses').upsert(
+          {
+            assessment_id: assessmentId,
+            template_item_id: templateItemId,
+            response,
+            comment: comment ?? existing?.comment ?? null,
+          },
+          { onConflict: 'assessment_id,template_item_id' },
+        );
+        if (error) {
+          if (import.meta.env.DEV) console.error('setResponse failed:', error);
+          toast.error('Could not save that answer.');
+          return;
+        }
+        qc.invalidateQueries({ queryKey: key });
+      };
+      const prev = inflight.current.get(templateItemId) ?? Promise.resolve();
+      const run = prev.then(write, write);
+      inflight.current.set(templateItemId, run);
+      try {
+        await run;
+      } finally {
+        if (inflight.current.get(templateItemId) === run) inflight.current.delete(templateItemId);
       }
-      qc.invalidateQueries({ queryKey: key });
     },
     [query.data, qc, key],
   );

@@ -2,7 +2,7 @@
  *  questions). Live building % updates as items are answered; N/A counts as a pass.
  *  A comment saves on blur whether or not the item is answered (S3): the row is upserted
  *  with a null response, and a plain guardrail line names the missing answer. */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -20,6 +20,20 @@ export default function ComplianceSection({ reportId, buildingId, readOnly }: Se
   // the answer toggle can send what is in the box right now: with an uncontrolled input, picking
   // an answer after typing a comment sent the last SAVED comment and overwrote the new one.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+
+  // A draft has done its job once the server holds the same text: drop it so later changes
+  // from elsewhere show through. A draft whose save failed is left standing — the server
+  // still has the old comment, and the user must keep seeing the text that was not saved.
+  useEffect(() => {
+    setDrafts((d) => {
+      const next = { ...d };
+      let changed = false;
+      for (const [itemId, text] of Object.entries(d)) {
+        if (responses[itemId]?.comment === text) { delete next[itemId]; changed = true; }
+      }
+      return changed ? next : d;
+    });
+  }, [responses]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, ComplianceTemplateItem[]>();
@@ -70,6 +84,7 @@ export default function ComplianceSection({ reportId, buildingId, readOnly }: Se
                       </div>
                       <ToggleGroup
                         type="single"
+                        data-item={it.id}
                         value={current ?? ''}
                         onValueChange={(v) => v && !readOnly && setResponse(it.id, v as YesNoNa, comment)}
                         disabled={readOnly}
@@ -86,8 +101,11 @@ export default function ComplianceSection({ reportId, buildingId, readOnly }: Se
                       value={comment}
                       disabled={readOnly}
                       onChange={(e) => setDrafts((d) => ({ ...d, [it.id]: e.target.value }))}
-                      onBlur={() => {
+                      onBlur={(e) => {
                         if (readOnly || comment === saved) return;
+                        // Focus moving to this item's own answer toggle: the toggle carries the
+                        // live comment itself, so one write instead of two racing ones.
+                        if (e.relatedTarget?.closest(`[data-item="${it.id}"]`)) return;
                         // No answer yet is fine: the row is written with a null response so the
                         // comment survives, and the line below says an answer is still owed.
                         setResponse(it.id, current ?? null, comment);

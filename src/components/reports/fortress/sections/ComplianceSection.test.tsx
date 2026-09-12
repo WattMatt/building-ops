@@ -64,6 +64,43 @@ describe('ComplianceSection — comment without an answer', () => {
     expect(screen.queryByText('Answer needed')).toBeNull();
   });
 
+  it('a blur that only moves focus to the item’s own answer toggle does not write; the toggle does, once', () => {
+    renderSection();
+    fireEvent.change(commentBox(), { target: { value: 'new note' } });
+    const yes = screen.getByRole('radio', { name: 'Yes' });
+    fireEvent.blur(commentBox(), { relatedTarget: yes });
+    expect(state.setResponse).not.toHaveBeenCalled();
+    fireEvent.click(yes);
+    expect(state.setResponse).toHaveBeenCalledTimes(1);
+    expect(state.setResponse).toHaveBeenCalledWith('i1', 'yes', 'new note');
+  });
+
+  it('a saved draft yields to what the server holds afterwards', () => {
+    const { rerender } = renderSection();
+    fireEvent.change(commentBox(), { target: { value: 'note' } });
+    fireEvent.blur(commentBox());
+    expect(state.setResponse).toHaveBeenCalledWith('i1', null, 'note');
+    // The refetch lands with the saved text, then a later edit made elsewhere arrives.
+    state.responses = { i1: { id: 'r1', comment: 'note', response: null } };
+    rerender(<ComplianceSection reportId="rep1" buildingId="b1" readOnly={false} />);
+    expect(commentBox()).toHaveValue('note');
+    state.responses = { i1: { id: 'r1', comment: 'edited elsewhere', response: null } };
+    rerender(<ComplianceSection reportId="rep1" buildingId="b1" readOnly={false} />);
+    expect(commentBox()).toHaveValue('edited elsewhere');
+  });
+
+  it('a draft whose save did not land stays on screen through a refetch', () => {
+    state.responses = { i1: { id: 'r1', comment: 'old', response: null } };
+    const { rerender } = renderSection();
+    fireEvent.change(commentBox(), { target: { value: 'new' } });
+    fireEvent.blur(commentBox());
+    // The write failed server-side: the refetch still carries the old comment.
+    state.responses = { i1: { id: 'r1', comment: 'old', response: null } };
+    rerender(<ComplianceSection reportId="rep1" buildingId="b1" readOnly={false} />);
+    expect(commentBox()).toHaveValue('new');
+    expect(screen.getByText('Answer needed')).toBeInTheDocument();
+  });
+
   it('read-only: never writes, but still names the missing answer', () => {
     state.responses = { i1: { id: 'r1', comment: 'noted on site', response: null } };
     renderSection(true);
