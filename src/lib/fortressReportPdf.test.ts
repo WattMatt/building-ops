@@ -9,6 +9,9 @@ type Chain = Record<string, (...args: unknown[]) => Chain> & {
 const state = vi.hoisted(() => ({
   queries: [] as { table: string; calls: RecordedCall[] }[],
   result: (() => ({ data: [], error: null })) as (table: string, calls: RecordedCall[]) => QueryResult,
+  /** Every supabase.rpc call: [function name, args]. */
+  rpcCalls: [] as [string, unknown][],
+  rpc: (() => ({ data: [], error: null })) as (fn: string, args: unknown) => QueryResult,
 }));
 
 vi.mock('@/integrations/supabase/client', () => {
@@ -25,7 +28,8 @@ vi.mock('@/integrations/supabase/client', () => {
     };
     return chain;
   };
-  return { supabase: { from } };
+  const rpc = async (fn: string, args: unknown) => { state.rpcCalls.push([fn, args]); return state.rpc(fn, args); };
+  return { supabase: { from, rpc } };
 });
 // The PDF module drags in pdfmake and storage at import time; none of that is under test here.
 const pdf = vi.hoisted(() => ({ docs: [] as { content: unknown }[] }));
@@ -53,6 +57,8 @@ beforeEach(() => {
   pdf.docs = [];
   vi.mocked(reportError).mockClear();
   state.result = () => ({ data: [], error: null });
+  state.rpcCalls = [];
+  state.rpc = () => ({ data: [], error: null });
 });
 
 describe('fetchPpmForPdf — the PDF grid reads the merged grid', () => {
@@ -293,5 +299,65 @@ describe('generateReportPdf — a bad photo or logo is skipped, never allowed to
     await generateReportPdf('rep2', { name: 'Fortress', primaryColor: '#2563eb', logoUrl: 'https://cdn.example/logo.png' });
     expect(JSON.stringify(pdf.docs[0].content)).not.toContain('"image"');
     expect(warn).toHaveBeenCalledWith('report logo skipped:', 'unreadable (HTTP 403)');
+  });
+});
+
+describe('generateReportPdf — who inspected, and when (S3 provenance)', () => {
+  const annualReport = { id: 'rep3', building_id: 'b1', report_type: 'annual_inspection', report_period: '2026-09-01', title: 'Annual', status: 'draft', author_id: 'u1', author_name: 'Thandi', asset_manager: null, ops_manager: null, centre_manager: null, prepared_for: null };
+  /** An annual report whose winning inspection row carries the given provenance columns; no photos, so nothing is fetched. */
+  const annualWith = (insp: { inspected_by: string | null; inspection_date: string | null }) => (table: string): QueryResult => {
+    if (table === 'reports') return { data: annualReport, error: null };
+    if (table === 'building_inspections') return { data: [{ id: 'i1', template_id: 't1', ...insp }], error: null };
+    if (table === 'inspection_responses') {
+      return { data: [{ template_item_id: 'it1', condition_rating: 'good', recommendation: null, comment: null, capex_estimate: null, applicable: true, detail: null, photo_urls: [] }], error: null };
+    }
+    if (table === 'inspection_template_items') return { data: [{ id: 'it1', section_no: '1', section_title: 'ROOF', item_label: 'Gutters', sort_order: 1, field_set: 'generic' }], error: null };
+    return { data: [], error: null };
+  };
+  const text = () => JSON.stringify(pdf.docs[0].content);
+  let warn: MockInstance;
+  beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+  afterEach(() => { warn.mockRestore(); });
+
+  it('names the inspector from the building_members RPC, scoped to the report’s building', async () => {
+    state.result = annualWith({ inspected_by: 'u2', inspection_date: '2026-09-12' });
+    state.rpc = () => ({ data: [{ id: 'u1', full_name: 'Thandi', avatar_url: null, role: 'manager' }, { id: 'u2', full_name: 'Naledi Dlamini', avatar_url: null, role: 'user' }], error: null });
+    await generateReportPdf('rep3', { name: 'Org', primaryColor: '#2563eb' });
+    expect(state.rpcCalls).toEqual([['building_members', { b: 'b1' }]]);
+    expect(text()).toContain('Inspected by Naledi Dlamini on 12 September 2026');
+  });
+
+  it('an RPC failure falls back to the report author’s name when the inspector is the author — and never fails the export', async () => {
+    state.result = annualWith({ inspected_by: 'u1', inspection_date: '2026-09-12' });
+    state.rpc = () => ({ data: null, error: { message: 'permission denied' } });
+    await generateReportPdf('rep3', { name: 'Org', primaryColor: '#2563eb' });
+    expect(pdf.docs).toHaveLength(1);
+    expect(text()).toContain('Inspected by Thandi on 12 September 2026');
+    expect(warn).toHaveBeenCalledWith('Inspector name lookup failed:', expect.anything());
+  });
+
+  it('an RPC that does not list the inspector, who is not the author, leaves only the date: "Inspected on …"', async () => {
+    state.result = annualWith({ inspected_by: 'u2', inspection_date: '2026-09-12' });
+    state.rpc = () => ({ data: [], error: null });
+    await generateReportPdf('rep3', { name: 'Org', primaryColor: '#2563eb' });
+    expect(text()).toContain('Inspected on 12 September 2026');
+    expect(text()).not.toContain('Inspected by');
+  });
+
+  it('a row with neither column (pre-backfill data) prints no provenance line and asks the RPC nothing', async () => {
+    state.result = annualWith({ inspected_by: null, inspection_date: null });
+    await generateReportPdf('rep3', { name: 'Org', primaryColor: '#2563eb' });
+    expect(state.rpcCalls).toEqual([]);
+    expect(text()).not.toMatch(/Inspected (by|on)/);
+  });
+
+  it.each(['ops_monthly', 'cm_monthly'])('a %s report never calls the RPC', async (report_type) => {
+    state.result = (table) => (table === 'reports'
+      ? { data: { ...annualReport, id: 'rep4', report_type, title: 'Monthly' }, error: null }
+      : { data: [], error: null });
+    await generateReportPdf('rep4', { name: 'Org', primaryColor: '#2563eb' });
+    expect(pdf.docs).toHaveLength(1);
+    expect(state.rpcCalls).toEqual([]);
+    expect(text()).not.toMatch(/Inspected (by|on)/);
   });
 });
