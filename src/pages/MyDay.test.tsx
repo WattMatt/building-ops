@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { mockViewport } from '@/test/mobile';
 import type { useMyWork } from '@/hooks/useMyWork';
 import type { QueuedOp } from '@/lib/offline/types';
 
@@ -41,8 +42,14 @@ vi.mock('@/hooks/useOfflineQueue', () => ({
     retryAll: vi.fn(),
   }),
 }));
-// The install offer has its own hooks and tests; My Day only needs to mount it.
-vi.mock('@/components/pwa/InstallCard', () => ({ InstallCard: () => null }));
+// The install offer has its own hooks and tests; My Day only needs to mount it. A marker
+// div rather than null so the push prompt's position relative to it can be asserted.
+vi.mock('@/components/pwa/InstallCard', () => ({ InstallCard: () => <div>InstallCard</div> }));
+// The push offer owns its own subscription state and tests; My Day only has to mount it for
+// the signed-in user, above the week strip.
+vi.mock('@/components/pwa/PushPromptCard', () => ({
+  PushPromptCard: ({ userId }: { userId: string | undefined }) => <div>{`PushPromptCard userId=${userId}`}</div>,
+}));
 
 // The dialogs are exercised by their own tests; here we only care that My Day opens them.
 vi.mock('@/components/checklists/CompleteTaskDialog', () => ({
@@ -154,6 +161,8 @@ describe('MyDay', () => {
     state.queuedOps = [];
     state.work = baseWork();
   });
+
+  afterEach(() => mockViewport(1024));
 
   it('greets the signed-in person by first name', () => {
     renderPage();
@@ -311,5 +320,30 @@ describe('MyDay', () => {
     expect(screen.queryByText('Past their due date — clear these first.')).not.toBeInTheDocument();
     expect(screen.getByText('Overdue (1)')).toBeInTheDocument();
     expect(screen.getByText('Check fire extinguishers')).toBeInTheDocument();
+  });
+
+  it('mounts the push prompt for the signed-in user, after the install card and above the week strip', () => {
+    renderPage();
+    const install = screen.getByText('InstallCard');
+    const card = screen.getByText('PushPromptCard userId=u1');
+    const strip = screen.getByText('This week');
+    // DOCUMENT_POSITION_FOLLOWING: the argument comes after the receiver in document order.
+    expect(install.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('offers a floating Report issue button on a phone only (spec §8)', () => {
+    mockViewport(375);
+    const { unmount } = renderPage();
+    const fab = screen.getByRole('link', { name: 'Report issue' });
+    expect(fab).toHaveAttribute('href', '/issues/new');
+    expect(fab.className).toMatch(/\bfixed\b/);
+    expect(fab.className).toMatch(/\bh-14\b/);
+    expect(fab.className).toMatch(/\bw-14\b/);
+    unmount();
+
+    mockViewport(1024);
+    renderPage();
+    expect(screen.queryByRole('link', { name: 'Report issue' })).toBeNull();
   });
 });

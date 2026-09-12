@@ -13,6 +13,7 @@
  */
 import { supabase } from '@/integrations/supabase/client';
 import { resolveStorageUrl } from '@/integrations/supabase/storage';
+import { bitmapFromBlob, fetchImageBlob } from '@/lib/imageFetch';
 import { slaState } from '@/lib/slaState';
 import type { EmbeddedPhoto } from '@/lib/fortressReportDoc';
 import { PACK_PHOTO_CAP, type AssetPack, type EvidencePack, type IssuePack, type PackMeta, type TaskPack } from '@/lib/evidencePack';
@@ -85,7 +86,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 
 async function downscaleToDataUrl(blob: Blob): Promise<string> {
   try {
-    const bmp = await createImageBitmap(blob);
+    const bmp = await bitmapFromBlob(blob);
     const scale = Math.min(1, PHOTO_MAX_DIM / Math.max(bmp.width, bmp.height));
     const w = Math.max(1, Math.round(bmp.width * scale));
     const h = Math.max(1, Math.round(bmp.height * scale));
@@ -150,21 +151,16 @@ export class PhotoCollector {
   }
 
   /**
-   * One photo, or null when it cannot be used. `fetch` only rejects on a NETWORK failure: a 403
-   * from an expired signed URL, a 404 or a 5xx all RESOLVE, and their JSON/XML error body would
-   * otherwise be zipped as `photos/01.jpg` and handed to pdfmake as an image. The status and the
-   * content type are therefore checked before the body is read at all.
+   * One photo, or null when it cannot be used. A 403 from an expired signed URL, a 404, a 5xx or a
+   * non-image body would otherwise be zipped as `photos/01.jpg` and handed to pdfmake as an image;
+   * `fetchImageBlob` refuses all of those before the body is read (see src/lib/imageFetch.ts).
    */
   private async fetchOne(req: PhotoRequest): Promise<FetchedPhoto | null> {
     try {
       const signed = await resolveStorageUrl(req.storedUrl);
       if (!signed) throw new Error('could not sign');
-      const res = await fetch(signed);
-      if (!res.ok) throw new Error(`unreadable (HTTP ${res.status})`);
-      const type = res.headers.get('content-type') ?? '';
-      if (!type.startsWith('image/')) throw new Error(`unreadable (content-type ${type || 'unknown'})`);
-      const blob = await res.blob();
-      return { blob, dataUrl: await downscaleToDataUrl(blob), ext: type.startsWith('image/png') ? 'png' : 'jpg' };
+      const blob = await fetchImageBlob(signed);
+      return { blob, dataUrl: await downscaleToDataUrl(blob), ext: blob.type.startsWith('image/png') ? 'png' : 'jpg' };
     } catch {
       return null;
     }

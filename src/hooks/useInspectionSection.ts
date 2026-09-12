@@ -4,9 +4,10 @@
  * Loads the active template for the cadence + items, ensures one building_inspection
  * per report, and tracks per-item responses.
  */
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { createPerKeyQueue } from '@/lib/perKeyQueue';
 import {
   fdb,
   type InspectionTemplate,
@@ -25,17 +26,30 @@ export interface PhotoRef {
   path: string;
 }
 
-export interface InspectionResponsePatch {
-  acceptable?: YesNoNa | null;
-  condition_rating?: ConditionRating | null;
-  action_required?: ActionRequired | null;
-  recommendation?: string | null;
-  comment?: string | null;
-  capex_estimate?: number | null;
-  applicable?: boolean;
-  next_service_due?: string | null;
-  detail?: Record<string, unknown>;
-  photo_urls?: PhotoRef[];
+/**
+ * A partial write to one response row. A key ABSENT from the patch keeps the stored value; a key
+ * PRESENT with `null` clears it. The nullable columns say so explicitly; `applicable` is NOT NULL
+ * and `detail` is replaced whole. `photo_urls` is deliberately NOT here: that column is written by
+ * append_inspection_photo only (see setResponse).
+ */
+export type InspectionResponsePatch = Partial<{
+  acceptable: YesNoNa | null;
+  condition_rating: ConditionRating | null;
+  action_required: ActionRequired | null;
+  recommendation: string | null;
+  comment: string | null;
+  capex_estimate: number | null;
+  applicable: boolean;
+  next_service_due: string | null;
+  detail: Record<string, unknown>;
+}>;
+
+/** What the section query holds. Named so `mergeResponse` can update it through setQueryData. */
+export interface InspectionSectionData {
+  template: InspectionTemplate | null;
+  items: InspectionTemplateItem[];
+  inspectionId: string | null;
+  responses: Record<string, InspectionResponse>;
 }
 
 export function useInspectionSection(
@@ -48,10 +62,10 @@ export function useInspectionSection(
   const qc = useQueryClient();
   const key = ['fortress-inspection', cadence, reportId, readOnly];
 
-  const query = useQuery({
+  const query = useQuery<InspectionSectionData>({
     queryKey: key,
     enabled: !!reportId && !!buildingId,
-    queryFn: async () => {
+    queryFn: async (): Promise<InspectionSectionData> => {
       const { data: tpl, error: tErr } = await fdb
         .from('inspection_templates')
         .select('*')
@@ -109,37 +123,86 @@ export function useInspectionSection(
     },
   });
 
+  // Per-item write ordering, shared with useComplianceSection (src/lib/perKeyQueue.ts): the
+  // second save to an item is not sent until the first has answered, so they land in call order.
+  const queue = useRef(createPerKeyQueue());
+
   const setResponse = useCallback(
     async (templateItemId: string, patch: InspectionResponsePatch) => {
       const inspectionId = query.data?.inspectionId;
       if (!inspectionId) return;
-      const existing = query.data?.responses[templateItemId];
-      const { error } = await fdb.from('inspection_responses').upsert(
-        {
-          id: existing?.id ?? crypto.randomUUID(),
-          inspection_id: inspectionId,
-          template_item_id: templateItemId,
-          acceptable: patch.acceptable ?? existing?.acceptable ?? null,
-          condition_rating: patch.condition_rating ?? existing?.condition_rating ?? null,
-          action_required: patch.action_required ?? existing?.action_required ?? null,
-          recommendation: patch.recommendation ?? existing?.recommendation ?? null,
-          comment: patch.comment ?? existing?.comment ?? null,
-          capex_estimate: patch.capex_estimate ?? existing?.capex_estimate ?? null,
-          applicable: patch.applicable ?? existing?.applicable ?? true,
-          next_service_due: patch.next_service_due ?? existing?.next_service_due ?? null,
-          detail: (patch.detail ?? existing?.detail ?? {}) as never,
-          photo_urls: (patch.photo_urls ?? (existing?.photo_urls as unknown[]) ?? []) as never,
-        },
-        { onConflict: 'inspection_id,template_item_id' },
-      );
-      if (error) {
-        if (import.meta.env.DEV) console.error('inspection setResponse failed:', error);
-        toast.error('Could not save that item.');
-        return;
+      // The row is read from the CACHE, not from this render's closure: a second blur that lands
+      // before the first has round-tripped must build on the first's optimistic patch (below), or
+      // its payload is assembled without it and the first write is silently lost.
+      const snapshot = qc.getQueryData<InspectionSectionData>(key);
+      const existing = snapshot?.responses[templateItemId] ?? query.data?.responses[templateItemId];
+      // A key absent from the patch keeps the stored value; a key present with null clears it.
+      // `??` used to collapse the two, so clearing a capex estimate or a comment silently re-saved
+      // the old value. An explicit `undefined` counts as absent (TS lets optional fields spread in).
+      const pick = <K extends keyof InspectionResponsePatch, V>(k: K, current: V) =>
+        (k in patch && patch[k] !== undefined ? patch[k] : current) as Exclude<InspectionResponsePatch[K], undefined> | V;
+      // No `id` (the column defaults; on conflict the stored id stays — sending one could rewrite
+      // the PK) and no `photo_urls`: that column is written by append_inspection_photo ONLY. Sending
+      // the cached list here would overwrite a photo appended between the RPC and the refetch —
+      // the orphaned-upload bug by another route. It is `not null default '[]'`, so a first insert
+      // is fine and the on-conflict update leaves it untouched.
+      const row = {
+        inspection_id: inspectionId,
+        template_item_id: templateItemId,
+        acceptable: pick('acceptable', existing?.acceptable ?? null),
+        condition_rating: pick('condition_rating', existing?.condition_rating ?? null),
+        action_required: pick('action_required', existing?.action_required ?? null),
+        recommendation: pick('recommendation', existing?.recommendation ?? null),
+        comment: pick('comment', existing?.comment ?? null),
+        capex_estimate: pick('capex_estimate', existing?.capex_estimate ?? null),
+        applicable: pick('applicable', existing?.applicable ?? true),
+        next_service_due: pick('next_service_due', existing?.next_service_due ?? null),
+        detail: pick('detail', (existing?.detail ?? {}) as Record<string, unknown>),
+      };
+      // Optimistic merge BEFORE the round trip (and before queueing), so the cache — and the next
+      // blur — shows this patch now. On error the cache is deliberately NOT touched: restoring a
+      // snapshot would also revert photo appends and other items' patches taken since; the toast
+      // says the save failed and the invalidation refetches server truth.
+      if (snapshot) {
+        const optimistic = {
+          id: '', risk_level: null, created_at: '', updated_at: '', photo_urls: [],
+          ...existing, ...row,
+        } as unknown as InspectionResponse;
+        qc.setQueryData<InspectionSectionData>(key, { ...snapshot, responses: { ...snapshot.responses, [templateItemId]: optimistic } });
       }
-      qc.invalidateQueries({ queryKey: key });
+      const write = async () => {
+        const { error } = await fdb.from('inspection_responses').upsert(
+          { ...row, detail: row.detail as never },
+          { onConflict: 'inspection_id,template_item_id' },
+        );
+        if (error) {
+          if (import.meta.env.DEV) console.error('inspection setResponse failed:', error);
+          toast.error('Could not save that item.');
+        }
+        qc.invalidateQueries({ queryKey: key });
+      };
+      await queue.current.run(templateItemId, write);
     },
     [query.data, qc, key],
+  );
+
+  /**
+   * Put a server-returned row's photo list into the cached responses NOW, then invalidate. Used
+   * after append_inspection_photo: the UI shows the appended list at once, and a second rapid add
+   * sees it rather than a stale copy. Only `photo_urls` is taken from the returned row — it is the
+   * one column the RPC owns. Replacing the whole row would clobber a field patch still in flight
+   * (setResponse's optimistic merge) and the next blur would re-send the old value. When nothing
+   * is cached for the item yet, the returned row stands in whole. No-op on an empty cache.
+   */
+  const mergeResponse = useCallback(
+    (row: InspectionResponse) => {
+      qc.setQueryData<InspectionSectionData>(key, (old) =>
+        old
+          ? { ...old, responses: { ...old.responses, [row.template_item_id]: { ...(old.responses[row.template_item_id] ?? row), photo_urls: row.photo_urls } } }
+          : old);
+      qc.invalidateQueries({ queryKey: key });
+    },
+    [qc, key],
   );
 
   return {
@@ -149,5 +212,6 @@ export function useInspectionSection(
     inspectionId: query.data?.inspectionId ?? null,
     isLoading: query.isLoading,
     setResponse,
+    mergeResponse,
   };
 }

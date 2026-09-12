@@ -33,11 +33,13 @@ import { failedTaskIds, queuedTaskIds } from '@/lib/offline/pendingOverlay';
 import { greetingFor, type MyTask } from '@/lib/myWork';
 import CompleteTaskDialog from '@/components/checklists/CompleteTaskDialog';
 import { InstallCard } from '@/components/pwa/InstallCard';
+import { PushPromptCard } from '@/components/pwa/PushPromptCard';
 import { WeekStrip } from '@/components/myday/WeekStrip';
 import IssueDetailDialog from '@/components/issues/IssueDetailDialog';
 import { formatBuildingName } from '@/lib/buildingName';
 import { formatPeriodLabel } from '@/lib/fortressReports';
 import { track } from '@/lib/analytics';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 const priorityColors: Record<string, string> = {
   low: 'bg-muted text-muted-foreground',
@@ -116,7 +118,11 @@ function Row({ children, action }: { children: ReactNode; action: ReactNode }) {
 }
 
 export default function MyDay() {
-  const { isAdminOrManager } = useAuth();
+  const { isAdminOrManager, user } = useAuth();
+  // Phone-only quick capture (spec §8). Wider screens have the "+" menu in the top bar; on a
+  // phone the field action sits in the thumb zone instead. Decided by the app's phone test so
+  // the node is not rendered at all on a desktop.
+  const isMobile = useIsMobile();
   const { profile } = useUserProfile();
   const {
     today,
@@ -190,7 +196,7 @@ export default function MyDay() {
   );
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-4">
+    <div className={cn('mx-auto w-full max-w-2xl space-y-4', isMobile && 'pb-24')}>
       <div className="space-y-2">
         <h1 className="flex items-center gap-2 text-2xl font-bold">
           <Sun className="h-6 w-6 text-warning" />
@@ -209,6 +215,7 @@ export default function MyDay() {
       </div>
 
       <InstallCard />
+      <PushPromptCard userId={user?.id} />
 
       {/* The week at a glance, built from the same data as the sections below — so it appears
           only once that data is real. While loading or after a failure there is nothing honest
@@ -446,6 +453,16 @@ export default function MyDay() {
           canManage={isAdminOrManager}
           onUpdated={() => refetch()}
         />
+      )}
+
+      {isMobile && (
+        <Link
+          to="/issues/new"
+          aria-label="Report issue"
+          className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg ring-offset-background transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        >
+          <AlertTriangle className="h-6 w-6" aria-hidden="true" />
+        </Link>
       )}
     </div>
   );

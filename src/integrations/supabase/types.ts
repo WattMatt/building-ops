@@ -4689,6 +4689,49 @@ export type Database = {
     }
     Functions: {
       app_role: { Args: never; Returns: string }
+      append_inspection_photo: {
+        Args: {
+          p_caption: string
+          p_inspection: string
+          p_path: string
+          p_section_no: string
+          p_template_item: string
+        }
+        Returns: {
+          acceptable: string | null
+          action_required: string | null
+          applicable: boolean
+          capex_estimate: number | null
+          comment: string | null
+          condition_rating: string | null
+          created_at: string
+          detail: Json
+          id: string
+          inspection_id: string
+          next_service_due: string | null
+          photo_urls: Json
+          recommendation: string | null
+          risk_level: string | null
+          template_item_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "inspection_responses"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      assignable_people: {
+        Args: never
+        Returns: {
+          avatar_url: string
+          deactivated: boolean
+          full_name: string
+          id: string
+          role: string
+        }[]
+      }
       building_insight_linker: {
         Args: { p_building_id: string }
         Returns: Json
@@ -4762,6 +4805,10 @@ export type Database = {
         }
         Returns: number
       }
+      intake_rate_check: {
+        Args: { p_bucket: string; p_limit: number }
+        Returns: boolean
+      }
       intake_rate_hit: {
         Args: { p_bucket: string; p_limit: number }
         Returns: boolean
@@ -4774,6 +4821,20 @@ export type Database = {
       mark_overdue_tasks: { Args: never; Returns: number }
       mark_sla_breaches: { Args: never; Returns: number }
       org_sla_hours: { Args: { p_priority: string }; Returns: number }
+      portfolio_coverage: {
+        Args: never
+        Returns: {
+          building_id: string
+          building_name: string
+          completed_yesterday: number
+          due_yesterday: number
+          field_members: number
+          has_user_rule: boolean
+          overdue_open: number
+          role_rules: number
+          unassigned_open: number
+        }[]
+      }
       postgres_fdw_disconnect: { Args: { "": string }; Returns: boolean }
       postgres_fdw_disconnect_all: { Args: never; Returns: boolean }
       postgres_fdw_get_connections: {

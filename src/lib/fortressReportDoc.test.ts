@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReportDoc, type ReportData } from './fortressReportDoc';
+import { buildReportDoc, inspectionProvenance, type ReportData } from './fortressReportDoc';
 import { watermarkFor } from './fortressReports';
 
 /** `watermark` on TDocumentDefinitions may be a plain string or a { text, ... } object. */
@@ -102,6 +102,17 @@ describe('buildReportDoc — annual_inspection', () => {
   it('renders the Capex Register table', () => {
     expect(text).toContain('Capex Register');
     expect(text).toContain('Roof replacement');
+  });
+  it('a photo without a data URL keeps its caption but never becomes a pdfmake image', () => {
+    const doc = buildReportDoc(
+      { title: 'Annual — Test', report_period: '2025-12-01', report_type: 'annual_inspection', managers: [] },
+      { annualSections: [{ title: 'Roof', items: [{ label: 'Gutters', rating: 'fair', applicable: true, photos: [{ dataUrl: '', caption: 'missing one' }, { dataUrl: PHOTO, caption: 'present one' }] }] }], capex: [] },
+      { color: '#2563eb', orgName: 'Org' },
+    );
+    const { images, text } = collect(doc);
+    expect(images).toEqual([PHOTO]);
+    expect(text).toContain('missing one');
+    expect(text).toContain('present one');
   });
 });
 
@@ -581,5 +592,34 @@ describe('watermarkFor', () => {
     for (const status of ['draft', 'submitted', 'reviewed', 'rejected', undefined, null]) {
       expect(watermarkFor(status)).toBe('DRAFT');
     }
+  });
+});
+
+describe('buildReportDoc — inspection provenance (S3)', () => {
+  const base: ReportData = {
+    annualSections: [{ title: 'Roof', items: [{ label: 'Gutters', rating: 'good', applicable: true, photos: [] }] }],
+    annualFlagged: 0,
+  };
+  const build = (extra: Partial<ReportData>) =>
+    collect(buildReportDoc({ title: 'Annual — Test', report_period: '2026-09-01', report_type: 'annual_inspection' }, { ...base, ...extra }, { color: '#123456', orgName: 'Acme' }));
+
+  it('prints who inspected and when, directly under the Condition Inspection heading', () => {
+    const { text } = build({ annualInspectedBy: 'Thandi Mokoena', annualInspectionDate: '2026-09-12' });
+    expect(text).toContain('Inspected by Thandi Mokoena on 12 September 2026');
+    expect(text.indexOf('Condition Inspection')).toBeLessThan(text.indexOf('Inspected by Thandi Mokoena'));
+    expect(text.indexOf('Inspected by Thandi Mokoena')).toBeLessThan(text.indexOf('Roof'));
+  });
+
+  it('prints the date alone when the inspector is not on record, and nothing when neither is', () => {
+    expect(build({ annualInspectionDate: '2026-09-12' }).text).toContain('Inspected on 12 September 2026');
+    expect(build({}).text).not.toMatch(/Inspected (by|on)/);
+  });
+
+  it('inspectionProvenance covers every combination', () => {
+    expect(inspectionProvenance('Thandi', '2026-09-12')).toBe('Inspected by Thandi on 12 September 2026');
+    expect(inspectionProvenance('Thandi', null)).toBe('Inspected by Thandi');
+    expect(inspectionProvenance('  ', '2026-09-12')).toBe('Inspected on 12 September 2026');
+    expect(inspectionProvenance('Thandi', 'not-a-date')).toBe('Inspected by Thandi on not-a-date');
+    expect(inspectionProvenance(null, undefined)).toBeNull();
   });
 });

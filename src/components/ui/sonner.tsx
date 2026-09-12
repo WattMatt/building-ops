@@ -10,6 +10,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
+      // Phones stack toasts at the bottom, where they sat on the My Day FAB. Lift them above it
+      // (FAB height + gap) and above the home indicator. sonner >= 1.7 only; we ship 1.7.4.
+      mobileOffset={{ bottom: "calc(5.5rem + env(safe-area-inset-bottom))" }}
       toastOptions={{
         classNames: {
           toast:

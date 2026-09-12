@@ -179,6 +179,11 @@ serve(async (req) => {
     }
 
     if (!VALID_ROLES.includes(role)) return json({ error: "Invalid role" }, 400);
+    // A field-staff account with no building sees nothing and receives nothing (spec §4.3) —
+    // refuse it here too, so a stale client cannot create a zombie.
+    if (role === "user" && buildingIds.length === 0) {
+      return json({ error: "Field staff need at least one building" }, 400);
+    }
     const uuidRe = /^[0-9a-f-]{36}$/i;
     if (buildingIds.some((b) => !uuidRe.test(b))) return json({ error: "Invalid building id" }, 400);
 

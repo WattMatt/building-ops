@@ -12,11 +12,12 @@ import { cn } from '@/lib/utils';
 import { SectionCard } from '../SectionCard';
 import { SignedImage } from '@/components/ui/signed-image';
 import { openStorageFile } from '@/integrations/supabase/storage';
+import { supabase } from '@/integrations/supabase/client';
 import { PhotoCapture, type PhotoFile } from '@/components/ui/photo-capture';
 import { uploadPhotoPaths, inspectionPhotoPrefix } from '@/lib/photos';
 import { toast } from 'sonner';
 import { useInspectionSection, type PhotoRef } from '@/hooks/useInspectionSection';
-import type { ConditionRating, InspectionTemplateItem } from '@/integrations/supabase/fortress-db';
+import type { ConditionRating, InspectionResponse, InspectionTemplateItem } from '@/integrations/supabase/fortress-db';
 import { annualItemFields, type AnnualField } from '@/lib/annualFieldSets';
 import type { SectionProps } from './types';
 
@@ -31,13 +32,20 @@ const detailStr = (v: unknown): string => (v == null ? '' : String(v));
 const isFlagged = (c: unknown) => c === 'poor' || c === 'critical';
 
 export default function ConditionInspectionSection({ reportId, buildingId, readOnly }: SectionProps) {
-  const { items, responses, isLoading, setResponse } = useInspectionSection(reportId, buildingId, 'annual', readOnly);
+  const { items, responses, inspectionId, isLoading, setResponse, mergeResponse } = useInspectionSection(reportId, buildingId, 'annual', readOnly);
   const [active, setActive] = useState<string | null>(null);
 
   // Inspection photos store storage PATHS (not URLs) under documents/<building>/annual/<section>/
   // — written by admins/managers, see src/lib/photos.ts. Upload failures toast rather than throw
   // because this is an auto-saving field, not a submit.
+  //
+  // The append is ONE server statement (append_inspection_photo): the row is upserted and
+  // {ref, caption, path} is appended to photo_urls under the row lock. The old path pushed onto
+  // the cached photo_urls and upserted the whole array, so two rapid adds rebuilt the list from
+  // the same stale copy and the first upload was orphaned in storage.
   const addPhoto = async (it: InspectionTemplateItem, photo: PhotoFile) => {
+    // A read-only view never creates the inspection row; without one there is nothing to attach to.
+    if (!inspectionId) { URL.revokeObjectURL(photo.preview); return; }
     let path: string;
     try {
       // String(): section_no is nullable in the type; the old path interpolated it the same way.
@@ -49,8 +57,16 @@ export default function ConditionInspectionSection({ reportId, buildingId, readO
     } finally {
       URL.revokeObjectURL(photo.preview);
     }
-    const existing = (responses[it.id]?.photo_urls as unknown as PhotoRef[] | undefined) ?? [];
-    await setResponse(it.id, { photo_urls: [...existing, { ref: `${it.section_no}.${existing.length + 1}`, caption: it.item_label, path }] });
+    const { data, error } = await supabase.rpc('append_inspection_photo', {
+      p_inspection: inspectionId, p_template_item: it.id, p_path: path, p_caption: it.item_label ?? '', p_section_no: String(it.section_no),
+    });
+    if (error) {
+      if (import.meta.env.DEV) console.error('append_inspection_photo:', error);
+      // Guardrail, not a hint: the file IS in storage, the row does not point at it.
+      toast.error('Photo uploaded but not attached to the item. Add it again.');
+      return;
+    }
+    mergeResponse(data as unknown as InspectionResponse);
   };
 
   /** Merge a single detail key into the response's existing detail blob. */
@@ -181,12 +197,12 @@ export default function ConditionInspectionSection({ reportId, buildingId, readO
               {RATINGS.map((rt) => <ToggleGroupItem key={rt.value} value={rt.value} className="h-8 px-3 text-xs">{rt.label}</ToggleGroupItem>)}
             </ToggleGroup>
             <Textarea placeholder="Recommendation (optional)" defaultValue={r?.recommendation ?? ''} rows={2} disabled={readOnly}
-              onBlur={(e) => { if (!readOnly && e.target.value !== (r?.recommendation ?? '')) setResponse(it.id, { recommendation: e.target.value }); }} />
+              onBlur={(e) => { if (!readOnly && e.target.value !== (r?.recommendation ?? '')) setResponse(it.id, { recommendation: e.target.value === '' ? null : e.target.value }); }} />
             <div className="flex gap-2">
               <Input type="number" className="h-8 w-44" placeholder="Capex estimate (ZAR)" defaultValue={r?.capex_estimate ?? ''} disabled={readOnly}
                 onBlur={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); if (!readOnly && v !== (r?.capex_estimate ?? null)) setResponse(it.id, { capex_estimate: v }); }} />
               <Input className="h-8 flex-1" placeholder="Comment (optional)" defaultValue={r?.comment ?? ''} disabled={readOnly}
-                onBlur={(e) => { if (!readOnly && e.target.value !== (r?.comment ?? '')) setResponse(it.id, { comment: e.target.value }); }} />
+                onBlur={(e) => { if (!readOnly && e.target.value !== (r?.comment ?? '')) setResponse(it.id, { comment: e.target.value === '' ? null : e.target.value }); }} />
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {((r?.photo_urls as unknown as PhotoRef[] | undefined) ?? []).map((p, idx) => (

@@ -4,6 +4,7 @@ import { persistQueryClientRestore, persistQueryClientSubscribe } from '@tanstac
 import { supabase } from '@/integrations/supabase/client';
 import { queryClient } from '@/lib/queryClient';
 import { clearQueue } from '@/lib/offline/queue';
+import { clearDraftStore } from '@/lib/offline/drafts';
 import {
   createPersisterFor,
   clearPersistedCache,
@@ -40,7 +41,8 @@ import {
  * restoring B's; otherwise B's subscription would dehydrate A's `success` rows into
  * `bo-cache-B`. A's offline write queue (`bo-queue-A`) is dropped in the same step —
  * deliberately: unsynced writes never outlive the session that made them, so on a shared
- * device they can never replay under B. The stop is registered in `src/lib/persist.ts` so `AuthContext.signOut`
+ * device they can never replay under B. The issue draft store (`bo-drafts-A`) goes the same way.
+ * The stop is registered in `src/lib/persist.ts` so `AuthContext.signOut`
  * can halt persistence before its own `queryClient.clear()` (see the ordering note there).
  *
  * Queries that opt in today (`...PERSIST_DEFAULTS`): `useMyWork` (tasks, issues, returned
@@ -79,12 +81,14 @@ export function PersistedQueryProvider({
 
     if (prevUid && prevUid !== uid) {
       // Someone else (or nobody) now owns this tab. Stop first so clear() cannot be
-      // persisted, then drop the previous user's rows from memory and disk — read cache
-      // AND write queue, so A's unsynced ops cannot replay under B's session.
+      // persisted, then drop the previous user's rows from memory and disk — read cache,
+      // write queue AND issue draft, so A's unsynced ops cannot replay under B's session
+      // and A's half-written issue is never offered to B.
       stopPersisting();
       queryClient.clear();
       void clearPersistedCache(prevUid);
       void clearQueue(prevUid);
+      void clearDraftStore(prevUid);
     }
 
     if (uid === null) { setRestoredFor(null); return; } // signed out: nothing to restore or persist

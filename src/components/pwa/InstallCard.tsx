@@ -54,7 +54,8 @@ export function InstallCard() {
         ) : (
           <>
             <Hint icon={false} className="text-sm">
-              In Safari, tap Share, then Add to Home Screen.
+              In Safari, tap Share, then Add to Home Screen. Once installed, you can turn on push
+              notifications under My Profile.
             </Hint>
             <Button variant="outline" className="h-11 w-full" onClick={dismiss}>
               Got it

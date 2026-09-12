@@ -16,11 +16,14 @@ vi.mock('@/hooks/usePushSubscription', () => ({ usePushSubscription: hook.usePus
 vi.mock('sonner', () => ({ toast }));
 vi.mock('@/integrations/supabase/client', () => ({ supabase: { from: vi.fn() } }));
 
-async function loadSwitch(key = 'BTestKey') {
+async function loadModule(key = 'BTestKey') {
   vi.stubEnv('VITE_VAPID_PUBLIC_KEY', key);
   vi.resetModules();
-  const mod = await import('./PushSwitch');
-  return mod.PushSwitch;
+  return import('./PushSwitch');
+}
+
+async function loadSwitch(key = 'BTestKey') {
+  return (await loadModule(key)).PushSwitch;
 }
 
 function status(value: string) {
@@ -53,7 +56,11 @@ describe('PushSwitch', () => {
     render(createElement(PushSwitch, { userId: 'u1' }));
 
     const sw = screen.getByRole('switch', { name: 'Push notifications on this device' });
-    expect(sw).toHaveAttribute('id', 'push-device');
+    // The ids are generated per instance; what matters is that label and switch point at each other.
+    const label = screen.getByText('Push notifications on this device');
+    expect(sw.id).toBeTruthy();
+    expect(label).toHaveAttribute('for', sw.id);
+    expect(sw).toHaveAttribute('aria-labelledby', label.id);
     expect(sw).not.toBeChecked();
     expect(sw).toBeEnabled();
     expect(screen.getByText(/Turn this on to get urgent alerts/)).toBeInTheDocument();
@@ -137,5 +144,41 @@ describe('PushSwitch', () => {
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
     expect(toast.error).toHaveBeenCalledWith("Couldn't turn on push notifications", { description: 'RLS says no' });
+  });
+});
+
+describe('PushSwitchRow', () => {
+  beforeEach(() => {
+    hook.enable.mockReset().mockResolvedValue(undefined);
+    hook.disable.mockReset().mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('drops the off-state coaching when coaching is false, keeping the label and the switch', async () => {
+    const { PushSwitchRow } = await loadModule();
+    render(createElement(PushSwitchRow, { status: 'off', enable: hook.enable, disable: hook.disable, coaching: false }));
+
+    expect(screen.getByRole('switch', { name: 'Push notifications on this device' })).toBeEnabled();
+    expect(screen.queryByText(/Turn this on to get urgent alerts/)).not.toBeInTheDocument();
+  });
+
+  it('still shows the guardrail copy when coaching is false: a requirement is not a tip', async () => {
+    const { PushSwitchRow } = await loadModule();
+    render(createElement(PushSwitchRow, { status: 'denied', enable: hook.enable, disable: hook.disable, coaching: false }));
+
+    expect(screen.getByRole('switch')).toBeDisabled();
+    expect(screen.getByText('Notifications are blocked for this site. Allow them in your browser settings, then try again.')).toBeInTheDocument();
+  });
+
+  it('drives enable() from the props it was given', async () => {
+    const { PushSwitchRow } = await loadModule();
+    render(createElement(PushSwitchRow, { status: 'off', enable: hook.enable, disable: hook.disable }));
+
+    fireEvent.click(screen.getByRole('switch'));
+
+    await waitFor(() => expect(hook.enable).toHaveBeenCalledTimes(1));
   });
 });

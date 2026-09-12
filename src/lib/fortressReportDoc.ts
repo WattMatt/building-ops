@@ -125,6 +125,10 @@ export interface ReportData {
    * Set only when > 0 so the PDF can say so — silent truncation reads as complete.
    */
   annualPhotosOmitted?: number;
+  /** Who carried out the condition inspection (building_inspections.inspected_by, resolved to a name). */
+  annualInspectedBy?: string | null;
+  /** building_inspections.inspection_date as YYYY-MM-DD. */
+  annualInspectionDate?: string | null;
   capex?: { description: string; estimate: number | null; year?: string; priority?: string; status?: string }[];
   electricalCompliance?: {
     shop_number: string; tenant_name: string;
@@ -152,6 +156,26 @@ export interface DocOptions {
 }
 
 export const MARK: Record<string, string> = { yes: 'X', no: '—', na: 'N/A' };
+
+/** "12 September 2026" from a YYYY-MM-DD date; the raw string when it does not parse. */
+function formatDayLabel(day: string): string {
+  const d = new Date(`${day.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return day;
+  return d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+/**
+ * Provenance line for the condition inspection: "Inspected by <name> on <date>", or whichever
+ * half is on record, or null when neither is. Exported so the wording is pinned by a test.
+ */
+export function inspectionProvenance(by: string | null | undefined, date: string | null | undefined): string | null {
+  const name = by?.trim() || null;
+  const day = date ? formatDayLabel(date) : null;
+  if (name && day) return `Inspected by ${name} on ${day}`;
+  if (name) return `Inspected by ${name}`;
+  if (day) return `Inspected on ${day}`;
+  return null;
+}
 const FLAGGED = new Set(['poor', 'critical']);
 const PHOTOS_PER_ROW = 3;
 const PHOTO_W = 150;
@@ -508,6 +532,11 @@ export function buildReportDoc(
     if (data.annualFlagged != null) summary.push(`${data.annualFlagged} flagged (poor/critical)`);
     if (data.annualCapexTotal) summary.push(`Capex estimate: ${formatZAR(data.annualCapexTotal)}`);
     content.push({ text: summary.join('  ·  '), fontSize: 10, color: '#6b7280', margin: [0, 0, 0, 8] });
+    // Provenance is report content: a condition report with no inspector or date on it cannot
+    // be relied on later. Printed only when the row carries it (rows older than the S3 backfill
+    // that had no report author still print without a name).
+    const provenance = inspectionProvenance(data.annualInspectedBy, data.annualInspectionDate);
+    if (provenance) content.push({ text: provenance, fontSize: 9, color: '#6b7280', margin: [0, 0, 0, 8] });
     // Never truncate silently: a capped or unreadable photo set must be named, or the PDF
     // reads as though it embeds everything on file.
     if (data.annualPhotosOmitted) {
@@ -667,7 +696,9 @@ function photoRows(photos: EmbeddedPhoto[]): Content[] {
       columns: slice.map((p) => ({
         width: 'auto',
         stack: [
-          { image: p.dataUrl, fit: [PHOTO_W, PHOTO_W * 0.75] },
+          // A photo that could not be fetched has no data URL (same rule as the evidence pack's
+          // photoGrid): never hand pdfmake an empty image; the caption still marks its place.
+          ...(p.dataUrl ? [{ image: p.dataUrl, fit: [PHOTO_W, PHOTO_W * 0.75] } as Content] : []),
           ...(p.caption ? [{ text: p.caption, fontSize: 7, color: '#6b7280', width: PHOTO_W } as Content] : []),
         ],
       })),

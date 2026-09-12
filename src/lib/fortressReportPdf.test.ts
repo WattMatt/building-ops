@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 
 interface RecordedCall { table: string; method: string; args: unknown[] }
 type QueryResult = { data?: unknown; error: { message: string; code?: string } | null };
@@ -9,6 +9,9 @@ type Chain = Record<string, (...args: unknown[]) => Chain> & {
 const state = vi.hoisted(() => ({
   queries: [] as { table: string; calls: RecordedCall[] }[],
   result: (() => ({ data: [], error: null })) as (table: string, calls: RecordedCall[]) => QueryResult,
+  /** Every supabase.rpc call: [function name, args]. */
+  rpcCalls: [] as [string, unknown][],
+  rpc: (() => ({ data: [], error: null })) as (fn: string, args: unknown) => QueryResult,
 }));
 
 vi.mock('@/integrations/supabase/client', () => {
@@ -25,7 +28,8 @@ vi.mock('@/integrations/supabase/client', () => {
     };
     return chain;
   };
-  return { supabase: { from } };
+  const rpc = async (fn: string, args: unknown) => { state.rpcCalls.push([fn, args]); return state.rpc(fn, args); };
+  return { supabase: { from, rpc } };
 });
 // The PDF module drags in pdfmake and storage at import time; none of that is under test here.
 const pdf = vi.hoisted(() => ({ docs: [] as { content: unknown }[] }));
@@ -39,6 +43,7 @@ vi.mock('@/integrations/supabase/insight-linker', () => ({ fetchReportElectrical
 
 import { fetchPpmForPdf, generateReportPdf } from './fortressReportPdf';
 import { reportError } from '@/lib/analytics';
+import { resolveStorageUrl } from '@/integrations/supabase/storage';
 
 const label = (mk: string) => new Date(`${mk}-01T00:00:00`).toLocaleDateString('en-ZA', { month: 'short', year: 'numeric' });
 const has = (calls: RecordedCall[], method: string, ...args: unknown[]) =>
@@ -52,6 +57,8 @@ beforeEach(() => {
   pdf.docs = [];
   vi.mocked(reportError).mockClear();
   state.result = () => ({ data: [], error: null });
+  state.rpcCalls = [];
+  state.rpc = () => ({ data: [], error: null });
 });
 
 describe('fetchPpmForPdf — the PDF grid reads the merged grid', () => {
@@ -158,5 +165,199 @@ describe('generateReportPdf — the trend section is not allowed to fail the exp
     state.result = withReport((table) => (table === 'compliance_scores' ? { data: null, error: { message: 'permission denied' } } : null));
     await expect(generateReportPdf('rep1', { name: 'Org', primaryColor: '#2563eb' })).rejects.toThrow('Could not load the compliance score for this report: permission denied');
     expect(pdf.docs).toHaveLength(0);
+  });
+});
+
+describe('generateReportPdf — a bad photo or logo is skipped, never allowed to fail the export', () => {
+  const annualReport = { id: 'rep2', building_id: 'b1', report_type: 'annual_inspection', report_period: '2025-12-01', title: 'Annual', status: 'draft', asset_manager: null, ops_manager: null, centre_manager: null, prepared_for: null };
+  /** One template item with one photo on file. */
+  const annualTables = (table: string): QueryResult => {
+    if (table === 'reports') return { data: annualReport, error: null };
+    if (table === 'building_inspections') return { data: [{ id: 'i1', template_id: 't1' }], error: null };
+    if (table === 'inspection_responses') {
+      return { data: [{ template_item_id: 'it1', condition_rating: 'fair', recommendation: null, comment: null, capex_estimate: null, applicable: true, detail: null,
+        photo_urls: [{ ref: '1.1', caption: 'Gutters', path: 'documents/b1/annual/1/a.jpg' }] }], error: null };
+    }
+    if (table === 'inspection_template_items') return { data: [{ id: 'it1', section_no: '1', section_title: 'ROOF', item_label: 'Gutters', sort_order: 1, field_set: 'generic' }], error: null };
+    return { data: [], error: null };
+  };
+  /** A Response-shaped stub: only the members fetchImageBlob reads. */
+  const response = (init: { ok?: boolean; status?: number; type?: string; body?: string }) => ({
+    ok: init.ok ?? true,
+    status: init.status ?? 200,
+    headers: { get: (h: string) => (h.toLowerCase() === 'content-type' ? (init.type ?? null) : null) },
+    blob: async () => new Blob([init.body ?? 'binary'], { type: init.type ?? 'image/jpeg' }),
+  });
+  const fetchMock = vi.fn();
+  let warn: MockInstance;
+
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+    // Every stored path signs to a URL the fetch mock can recognise.
+    vi.mocked(resolveStorageUrl).mockImplementation(async (s) => `signed:${s}`);
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    state.result = annualTables;
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.mocked(resolveStorageUrl).mockImplementation(async () => null);
+    warn.mockRestore();
+  });
+
+  it('a 403 JSON body for a photo is skipped, counted as not embedded, and the PDF still renders', async () => {
+    fetchMock.mockResolvedValue(response({ ok: false, status: 403, type: 'application/json', body: '{"error":"expired"}' }));
+    const out = await generateReportPdf('rep2', { name: 'Org', primaryColor: '#2563eb' });
+    expect(out.fileName).toBe('Annual.pdf');
+    expect(pdf.docs).toHaveLength(1);
+    const content = JSON.stringify(pdf.docs[0].content);
+    expect(content).not.toContain('"image"');
+    expect(content).toContain('1 of 1 photos on file are not embedded in this PDF');
+    expect(content).toContain('Gutters');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe('signed:/object/tenant-documents/documents/b1/annual/1/a.jpg');
+    expect(warn).toHaveBeenCalledWith('report photo skipped:', 'documents/b1/annual/1/a.jpg', 'unreadable (HTTP 403)');
+  });
+
+  it('a 200 that is not an image is skipped the same way, and no FileReader fallback base64s the body', async () => {
+    fetchMock.mockResolvedValue(response({ ok: true, type: 'application/xml', body: '<Error>AccessDenied</Error>' }));
+    await generateReportPdf('rep2', { name: 'Org', primaryColor: '#2563eb' });
+    expect(JSON.stringify(pdf.docs[0].content)).not.toContain('"image"');
+    expect(warn).toHaveBeenCalledWith('report photo skipped:', 'documents/b1/annual/1/a.jpg', 'not an image (application/xml)');
+  });
+
+  it('a readable photo is decoded with EXIF orientation, downscaled on a canvas and embedded', async () => {
+    fetchMock.mockResolvedValue(response({ ok: true, type: 'image/jpeg' }));
+    const bitmap = { width: 2200, height: 1100, close: vi.fn() };
+    // Typed parameters so `mock.calls[0][1]` below is not indexing an empty tuple.
+    const cib = vi.fn(async (_blob: Blob, _opts?: ImageBitmapOptions) => bitmap);
+    vi.stubGlobal('createImageBitmap', cib);
+    const ctx = { drawImage: vi.fn() };
+    const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(ctx as never);
+    const toDataURL = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/jpeg;base64,AAAA');
+    try {
+      await generateReportPdf('rep2', { name: 'Org', primaryColor: '#2563eb' });
+      expect(cib.mock.calls[0][1]).toEqual({ imageOrientation: 'from-image' });
+      expect(ctx.drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 1100, 550);
+      expect(toDataURL).toHaveBeenCalledWith('image/jpeg', 0.62);
+      const content = JSON.stringify(pdf.docs[0].content);
+      expect(content).toContain('"image":"data:image/jpeg;base64,AAAA"');
+      expect(content).not.toContain('photos on file are not embedded');
+      expect(bitmap.close).toHaveBeenCalled();
+    } finally {
+      getContext.mockRestore();
+      toDataURL.mockRestore();
+    }
+  });
+
+  it('a readable photo the browser cannot decode is skipped, not base64d whole', async () => {
+    fetchMock.mockResolvedValue(response({ ok: true, type: 'image/jpeg' }));
+    vi.stubGlobal('createImageBitmap', vi.fn().mockRejectedValue(new DOMException('decode', 'InvalidStateError')));
+    await generateReportPdf('rep2', { name: 'Org', primaryColor: '#2563eb' });
+    const content = JSON.stringify(pdf.docs[0].content);
+    expect(content).not.toContain('"image"');
+    expect(content).toContain('1 of 1 photos on file are not embedded in this PDF');
+  });
+
+  it('an SVG logo is skipped with a DEV warning and the org name prints instead', async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url === 'signed:https://cdn.example/logo.svg'
+        ? response({ ok: true, type: 'image/svg+xml', body: '<svg/>' })
+        : response({ ok: false, status: 404, type: 'text/html' }));
+    await generateReportPdf('rep2', { name: 'Fortress', primaryColor: '#2563eb', logoUrl: 'https://cdn.example/logo.svg' });
+    const content = JSON.stringify(pdf.docs[0].content);
+    expect(content).not.toContain('"image"');
+    expect(content).toContain('"text":"Fortress"');
+    expect(warn).toHaveBeenCalledWith('report logo skipped:', 'not embeddable (image/svg+xml)');
+  });
+
+  it('a WebP logo (accepted by Settings before S2) is skipped the same way — pdfmake would throw on it', async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url === 'signed:https://cdn.example/logo.webp'
+        ? response({ ok: true, type: 'image/webp', body: 'RIFF' })
+        : response({ ok: false, status: 404, type: 'text/html' }));
+    await generateReportPdf('rep2', { name: 'Fortress', primaryColor: '#2563eb', logoUrl: 'https://cdn.example/logo.webp' });
+    const content = JSON.stringify(pdf.docs[0].content);
+    expect(content).not.toContain('"image"');
+    expect(content).toContain('"text":"Fortress"');
+    expect(warn).toHaveBeenCalledWith('report logo skipped:', 'not embeddable (image/webp)');
+  });
+
+  it('a PNG logo is embedded as-is (no canvas pass) after the same checks', async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      url === 'signed:https://cdn.example/logo.png'
+        ? response({ ok: true, type: 'image/png', body: 'png-bytes' })
+        : response({ ok: false, status: 404, type: 'text/html' }));
+    await generateReportPdf('rep2', { name: 'Fortress', primaryColor: '#2563eb', logoUrl: 'https://cdn.example/logo.png' });
+    const content = JSON.stringify(pdf.docs[0].content);
+    expect(content).toContain('"image":"data:image/png;base64,');
+    expect(warn).not.toHaveBeenCalledWith('report logo skipped:', expect.anything());
+  });
+
+  it('a logo whose signed URL answers 403 is skipped with the status in the warning', async () => {
+    fetchMock.mockResolvedValue(response({ ok: false, status: 403, type: 'application/json' }));
+    await generateReportPdf('rep2', { name: 'Fortress', primaryColor: '#2563eb', logoUrl: 'https://cdn.example/logo.png' });
+    expect(JSON.stringify(pdf.docs[0].content)).not.toContain('"image"');
+    expect(warn).toHaveBeenCalledWith('report logo skipped:', 'unreadable (HTTP 403)');
+  });
+});
+
+describe('generateReportPdf — who inspected, and when (S3 provenance)', () => {
+  const annualReport = { id: 'rep3', building_id: 'b1', report_type: 'annual_inspection', report_period: '2026-09-01', title: 'Annual', status: 'draft', author_id: 'u1', author_name: 'Thandi', asset_manager: null, ops_manager: null, centre_manager: null, prepared_for: null };
+  /** An annual report whose winning inspection row carries the given provenance columns; no photos, so nothing is fetched. */
+  const annualWith = (insp: { inspected_by: string | null; inspection_date: string | null }) => (table: string): QueryResult => {
+    if (table === 'reports') return { data: annualReport, error: null };
+    if (table === 'building_inspections') return { data: [{ id: 'i1', template_id: 't1', ...insp }], error: null };
+    if (table === 'inspection_responses') {
+      return { data: [{ template_item_id: 'it1', condition_rating: 'good', recommendation: null, comment: null, capex_estimate: null, applicable: true, detail: null, photo_urls: [] }], error: null };
+    }
+    if (table === 'inspection_template_items') return { data: [{ id: 'it1', section_no: '1', section_title: 'ROOF', item_label: 'Gutters', sort_order: 1, field_set: 'generic' }], error: null };
+    return { data: [], error: null };
+  };
+  const text = () => JSON.stringify(pdf.docs[0].content);
+  let warn: MockInstance;
+  beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
+  afterEach(() => { warn.mockRestore(); });
+
+  it('names the inspector from the building_members RPC, scoped to the report’s building', async () => {
+    state.result = annualWith({ inspected_by: 'u2', inspection_date: '2026-09-12' });
+    state.rpc = () => ({ data: [{ id: 'u1', full_name: 'Thandi', avatar_url: null, role: 'manager' }, { id: 'u2', full_name: 'Naledi Dlamini', avatar_url: null, role: 'user' }], error: null });
+    await generateReportPdf('rep3', { name: 'Org', primaryColor: '#2563eb' });
+    expect(state.rpcCalls).toEqual([['building_members', { b: 'b1' }]]);
+    expect(text()).toContain('Inspected by Naledi Dlamini on 12 September 2026');
+  });
+
+  it('an RPC failure falls back to the report author’s name when the inspector is the author — and never fails the export', async () => {
+    state.result = annualWith({ inspected_by: 'u1', inspection_date: '2026-09-12' });
+    state.rpc = () => ({ data: null, error: { message: 'permission denied' } });
+    await generateReportPdf('rep3', { name: 'Org', primaryColor: '#2563eb' });
+    expect(pdf.docs).toHaveLength(1);
+    expect(text()).toContain('Inspected by Thandi on 12 September 2026');
+    expect(warn).toHaveBeenCalledWith('Inspector name lookup failed:', expect.anything());
+  });
+
+  it('an RPC that does not list the inspector, who is not the author, leaves only the date: "Inspected on …"', async () => {
+    state.result = annualWith({ inspected_by: 'u2', inspection_date: '2026-09-12' });
+    state.rpc = () => ({ data: [], error: null });
+    await generateReportPdf('rep3', { name: 'Org', primaryColor: '#2563eb' });
+    expect(text()).toContain('Inspected on 12 September 2026');
+    expect(text()).not.toContain('Inspected by');
+  });
+
+  it('a row with neither column (pre-backfill data) prints no provenance line and asks the RPC nothing', async () => {
+    state.result = annualWith({ inspected_by: null, inspection_date: null });
+    await generateReportPdf('rep3', { name: 'Org', primaryColor: '#2563eb' });
+    expect(state.rpcCalls).toEqual([]);
+    expect(text()).not.toMatch(/Inspected (by|on)/);
+  });
+
+  it.each(['ops_monthly', 'cm_monthly'])('a %s report never calls the RPC', async (report_type) => {
+    state.result = (table) => (table === 'reports'
+      ? { data: { ...annualReport, id: 'rep4', report_type, title: 'Monthly' }, error: null }
+      : { data: [], error: null });
+    await generateReportPdf('rep4', { name: 'Org', primaryColor: '#2563eb' });
+    expect(pdf.docs).toHaveLength(1);
+    expect(state.rpcCalls).toEqual([]);
+    expect(text()).not.toMatch(/Inspected (by|on)/);
   });
 });

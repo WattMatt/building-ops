@@ -52,6 +52,7 @@ describe('governingFlag', () => {
     report_due_soon: 'issue_updates',
     report_export_needed: 'issue_updates',
     issue_reported: 'issue_updates',
+    task_overdue: 'task_reminders',
   };
 
   it('maps every kind to the flag the design says governs it', () => {
@@ -354,6 +355,16 @@ describe('push', () => {
     expect(shouldPush('issue_sla_breached', on)).toBe(false);
     expect(CLIENT_KINDS.has('issue_sla_breached')).toBe(false);
     expect(parseNotifyBody({ ...input(), kind: 'issue_sla_breached' })).toEqual({ ok: false, reason: 'Unsupported notification kind' });
+  });
+  it('task_overdue is inbox only: written by mark_overdue_tasks(), no email, no push, not client-sendable', () => {
+    const on = { email_notifications: true, issue_updates: true, task_reminders: true, overdue_alerts: true, daily_digest: true };
+    expect(NOTIFICATION_KINDS).toContain('task_overdue');
+    expect(governingFlag('task_overdue')).toBe('task_reminders');
+    expect(shouldEmail('task_overdue', on)).toBe(false);
+    expect(shouldPush('task_overdue', on)).toBe(false);
+    expect(PUSH_KINDS.has('task_overdue')).toBe(false);
+    expect(CLIENT_KINDS.has('task_overdue')).toBe(false);
+    expect(parseNotifyBody({ ...input(), kind: 'task_overdue' })).toEqual({ ok: false, reason: 'Unsupported notification kind' });
   });
   it('R4b kinds are server-only: report-distribution raises them, they email per item, never push, never from the client', () => {
     const on = { email_notifications: true, issue_updates: true, task_reminders: true, overdue_alerts: true, daily_digest: true };

@@ -10,7 +10,7 @@
  *
  * Matrix encoded from production pg_policies as of 2026-06-12:
  *   admin/manager  → all buildings; manager lacks admin-only ops
- *                    (user_roles/user_buildings writes, profile/org deletes)
+ *                    (user_roles writes, profile/org deletes; user_buildings writes are admin+manager since S1)
  *   user           → restricted to user_buildings assignments
  *   storage        → prefix-scoped paths in tenant-documents; deletes
  *                    admin/manager only; avatars self-scoped
@@ -49,6 +49,9 @@
  *                    signed-in writers; form_templates select any active user, write admin, version
  *                    bumps on content only; form_submissions snapshot columns follow fs_insert;
  *                    storage intake/<building> read by access, never written by a session
+ *   S1 "Team"      → user_buildings writes admin+manager (scoped by access), user self-grant still denied;
+ *                    assignable_people admin/manager only, never anon; portfolio_coverage RLS-scoped
+ *                    (userA sees A only), never anon
  *
  * Personas: admin, manager, userA (user role, assigned building A only),
  * userB (user role, assigned building B only). userA probing building B
@@ -354,7 +357,8 @@ try {
 
   const userAUB = await (await fetch(`${URL_BASE}/rest/v1/user_buildings?user_id=eq.${personas.userA.id}&select=id`, { headers: SVC })).json();
   await probeMatrix('user_buildings(userA) select', { admin: true, manager: true, userA: true, userB: false }, (jwt) => canSelect(jwt, 'user_buildings', userAUB[0].id));
-  assert('user_buildings insert as manager (admin-only)', (await canInsert(personas.manager.jwt, 'user_buildings', { user_id: personas.norole.id, building_id: A })) === false, 'manager wrote an assignment');
+  // S1: managers may grant building access (ub_write_managed); a manager can access every building today.
+  assert('user_buildings insert as manager (S1: managed)', (await canInsert(personas.manager.jwt, 'user_buildings', { user_id: personas.norole.id, building_id: A })) === true, 'manager could not grant building access');
   assert('user_buildings self-grant as userA', (await canInsert(personas.userA.jwt, 'user_buildings', { user_id: personas.userA.id, building_id: B })) === false, 'PRIVILEGE ESCALATION: user granted self building B');
   assert('user_buildings insert as admin', (await canInsert(personas.admin.jwt, 'user_buildings', { user_id: personas.norole.id, building_id: A })) === true, 'admin assignment insert failed');
 
@@ -1044,6 +1048,71 @@ try {
     }
   }
   console.log('  R4c intake & forms (intake_tokens, intake_rate + RPCs, issues guard, form_templates, snapshot columns, storage intake/): done');
+
+  // ── S1 "Team & coverage": assignable_people admin/manager only, portfolio_coverage scoped by RLS ──
+  {
+    const apUser = await rpcCall(personas.userA.jwt, 'assignable_people', {});
+    assert('assignable_people refused for a site user (42501)', !apUser.ok && apUser.code === '42501', `expected 42501, got HTTP ${apUser.status} code ${apUser.code} with ${apUser.rows.length} rows`);
+    const apAnon = await rpcCall(null, 'assignable_people', {});
+    assert('assignable_people not executable by anon', apAnon.status === 401 || apAnon.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${apAnon.status}`);
+    const apMgr = await rpcCall(personas.manager.jwt, 'assignable_people', {});
+    assert('assignable_people lists every role-holding persona for a manager',
+      apMgr.ok && ['admin', 'manager', 'userA', 'userB'].every((k) => apMgr.rows.some((r) => r.id === personas[k].id)), `HTTP ${apMgr.status}`);
+    assert('assignable_people omits the role-less persona', !apMgr.rows.some((r) => r.id === personas.norole.id), 'profile with no user_roles row offered as assignable');
+    assert('assignable_people resolves a role and a deactivated flag for everyone',
+      apMgr.rows.every((r) => typeof r.role === 'string' && r.role.length > 0 && typeof r.deactivated === 'boolean'), 'null role or flag returned');
+
+    const covUser = await rpcCall(personas.userA.jwt, 'portfolio_coverage', {});
+    assert('portfolio_coverage as userA returns building A and never B',
+      covUser.ok && covUser.rows.some((r) => r.building_id === A) && !covUser.rows.some((r) => r.building_id === B),
+      `HTTP ${covUser.status} ${JSON.stringify(covUser.rows.map((r) => r.building_id))}`);
+    const covAdmin = await rpcCall(personas.admin.jwt, 'portfolio_coverage', {});
+    assert('portfolio_coverage as admin includes both fixture buildings',
+      covAdmin.ok && [A, B].every((id) => covAdmin.rows.some((r) => r.building_id === id)), `HTTP ${covAdmin.status}`);
+    const covA = covAdmin.rows.find((r) => r.building_id === A);
+    assert('portfolio_coverage counts userA as a field member of A', !!covA && covA.field_members >= 1, JSON.stringify(covA));
+    assert('portfolio_coverage row carries every spec column',
+      !!covA && ['role_rules', 'has_user_rule', 'unassigned_open', 'overdue_open', 'due_yesterday', 'completed_yesterday'].every((k) => k in covA), JSON.stringify(covA));
+    const covAnon = await rpcCall(null, 'portfolio_coverage', {});
+    assert('portfolio_coverage not executable by anon', covAnon.status === 401 || covAnon.status === 403, `expected HTTP 401/403 (revoked grant), got HTTP ${covAnon.status}`);
+  }
+  console.log('  S1 team & coverage (user_buildings managed, assignable_people, portfolio_coverage): done');
+
+  // ════ S2: append_inspection_photo — security invoker, RLS-scoped through building_inspections, atomic append ════
+  {
+    // A throwaway INACTIVE annual template so the fixture never becomes the app's live template on this project.
+    const tpl = (await svcInsert('inspection_templates', { name: `ZZTEST-RLS-${RUN}`, cadence: 'annual', version: 1, active: false })).id;
+    cleanup.push(['inspection_templates', tpl]);
+    const item = (await svcInsert('inspection_template_items', { template_id: tpl, section_no: '7', section_title: 'ROOF', item_label: 'Gutters', rating_type: 'condition_scale', sort_order: 1 })).id;
+    cleanup.push(['inspection_template_items', item]);
+    // inspection_responses rows the calls create are removed by the cascade from building_inspections (LIFO: these go before item/tpl).
+    const inspA = (await svcInsert('building_inspections', { building_id: A, template_id: tpl })).id;
+    cleanup.push(['building_inspections', inspA]);
+    const inspB = (await svcInsert('building_inspections', { building_id: B, template_id: tpl })).id;
+    cleanup.push(['building_inspections', inspB]);
+    const args = (insp, n) => ({ p_inspection: insp, p_template_item: item, p_path: `documents/${insp}/annual/7/${RUN}-${n}.jpg`, p_caption: 'Gutters', p_section_no: '7' });
+    const responsesOf = async (insp) => (await (await fetch(`${URL_BASE}/rest/v1/inspection_responses?inspection_id=eq.${insp}&select=id,photo_urls`, { headers: SVC })).json());
+
+    const anon = await rpcCall(null, 'append_inspection_photo', args(inspB, 0));
+    assert('append_inspection_photo not executable by anon', anon.status === 401 || anon.status === 403, `expected HTTP 401/403, got ${anon.status}`);
+
+    // userA is assigned to building A only: on B the with-check fails as 42501 and nothing is written.
+    const denied = await rpcCall(personas.userA.jwt, 'append_inspection_photo', args(inspB, 0));
+    assert('append_inspection_photo refused (42501) for a user without access to the building', !denied.ok && denied.code === '42501', `HTTP ${denied.status} ${JSON.stringify(denied.body).slice(0, 160)}`);
+    assert('a refused append wrote nothing', (await responsesOf(inspB)).length === 0, 'an inspection_responses row exists after the refusal');
+
+    const first = await rpcCall(personas.admin.jwt, 'append_inspection_photo', args(inspB, 1));
+    assert('append_inspection_photo runs for admin and returns the row', first.ok && first.rows[0]?.inspection_id === inspB && first.rows[0]?.template_item_id === item, `HTTP ${first.status} ${JSON.stringify(first.body).slice(0, 160)}`);
+    assert('first append inserts the row with ref 7.1', first.rows[0]?.photo_urls?.length === 1 && first.rows[0]?.photo_urls?.[0]?.ref === '7.1' && first.rows[0]?.photo_urls?.[0]?.path === args(inspB, 1).p_path, JSON.stringify(first.rows[0]?.photo_urls));
+    const second = await rpcCall(personas.manager.jwt, 'append_inspection_photo', args(inspB, 2));
+    assert('second append (manager) appends ref 7.2 to the SAME row and keeps the first path', second.ok && second.rows[0]?.id === first.rows[0]?.id && second.rows[0]?.photo_urls?.length === 2 && second.rows[0]?.photo_urls?.[0]?.path === args(inspB, 1).p_path && second.rows[0]?.photo_urls?.[1]?.ref === '7.2', JSON.stringify(second.rows[0]?.photo_urls));
+    assert('exactly one inspection_responses row after two appends', (await responsesOf(inspB)).length === 1, `${(await responsesOf(inspB)).length} rows`);
+
+    // Invoker, not admin-only: a field user WITH access appends on their own building.
+    const own = await rpcCall(personas.userA.jwt, 'append_inspection_photo', args(inspA, 1));
+    assert('append_inspection_photo runs for a user with access to the building', own.ok && own.rows[0]?.photo_urls?.[0]?.ref === '7.1', `HTTP ${own.status} ${JSON.stringify(own.body).slice(0, 160)}`);
+  }
+  console.log('  S2 photo append (append_inspection_photo: anon/no-access refused, refs .1/.2 on one row, invoker for field users): done');
 
 } catch (e) {
   fail('smoke run', e.message);

@@ -18,6 +18,13 @@ import { notify } from '@/lib/notify';
 /** Labels every building can rule on, whatever its templates say. Always listed first, in this order. */
 export const FIXED_ROLES: readonly string[] = ['user', 'manager'];
 
+/** `user`/`manager` are stored lower-case; template labels are already title-case. */
+export function roleLabel(role: string): string {
+  if (role === 'user') return 'User (default)';
+  if (role === 'manager') return 'Manager';
+  return role;
+}
+
 interface RuleRow { role: string; user_id: string }
 
 export const buildingRolesKey = (buildingId: string | undefined) => ['building-roles', buildingId] as const;

@@ -1,126 +1,71 @@
 /**
- * "Who does what here" — one person per role label for this building. Admin/manager only:
- * the table's RLS rejects writes from anyone else, so the card is not rendered for them.
- * The nightly generator applies these rules to new tasks; "Apply to existing pending tasks"
- * is the one-off catch-up for what is already on the board.
+ * Read-only "who does what here" line on the Checklists tab. Since S1 the rules are edited on
+ * the Team tab; this card tells a manager at a glance who catches daily tasks ('user' rule) and
+ * issues ('issue' rule — what tenant-intake assigns to), links there, and warns when daily tasks
+ * have no owner while work is pending. The warning is a guardrail: plain text, never <Hint>.
  */
-import { useState } from 'react';
-import { Loader2, Users, UserCheck } from 'lucide-react';
-import { toast } from 'sonner';
+import { Link } from 'react-router-dom';
+import { AlertTriangle, Users } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Hint } from '@/components/ui/hint';
-import { AssigneePicker } from '@/components/people/AssigneePicker';
+import { Card, CardContent } from '@/components/ui/card';
 import { useBuildingMembers, memberDisplayName } from '@/hooks/useBuildingMembers';
 import { useBuildingRoleAssignments } from '@/hooks/useBuildingRoleAssignments';
 
 interface RoleAssignmentsPanelProps {
   buildingId: string;
-  buildingName?: string;
-  /** Called after "apply" assigned at least one task, so the owner can refetch its task list. */
-  onApplied?: (count: number) => void;
 }
 
-/** `user`/`manager` are stored lower-case; template labels are already title-case. */
-export function roleLabel(role: string): string {
-  if (role === 'user') return 'User (default)';
-  if (role === 'manager') return 'Manager';
-  return role;
+export const NO_DAILY_OWNER_WARNING = 'Nobody is assigned to daily tasks here. New tasks land with no owner.';
+
+/** "Daily tasks: Thandi · Issues: Nobody" — the 'user' and 'issue' rules. */
+export function summaryLine(rules: Map<string, string>, nameFor: (userId: string) => string): string {
+  const who = (role: string) => {
+    const id = rules.get(role);
+    return id ? nameFor(id) : 'Nobody';
+  };
+  return `Daily tasks: ${who('user')} · Issues: ${who('issue')}`;
 }
 
-const idFor = (role: string) => `role-rule-${role.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-
-export function RoleAssignmentsPanel({ buildingId, buildingName, onApplied }: RoleAssignmentsPanelProps) {
+export function RoleAssignmentsPanel({ buildingId }: RoleAssignmentsPanelProps) {
   const { isAdminOrManager } = useAuth();
   const { byId } = useBuildingMembers(buildingId);
-  const { rules, roles, pendingByRole, isLoading, isError, setRule, applyToPending } = useBuildingRoleAssignments(buildingId);
-  const [applying, setApplying] = useState(false);
-  const [saving, setSaving] = useState<string | null>(null);
+  const { rules, pendingByRole, isLoading, isError } = useBuildingRoleAssignments(buildingId);
 
   if (!isAdminOrManager) return null;
 
-  const applicable = roles.reduce((n, role) => n + (rules.has(role) ? pendingByRole.get(role) ?? 0 : 0), 0);
-
-  const handleSet = async (role: string, userId: string | null) => {
-    setSaving(role);
-    try {
-      await setRule(role, userId);
-      const member = userId ? byId.get(userId) : undefined;
-      toast.success(userId ? `${roleLabel(role)}: ${member ? memberDisplayName(member) : 'assigned'}` : `${roleLabel(role)}: nobody`);
-    } catch (e) {
-      toast.error(`Could not save the rule: ${e instanceof Error ? e.message : 'unknown error'}`);
-    } finally {
-      setSaving(null);
-    }
+  const nameFor = (id: string) => {
+    const m = byId.get(id);
+    return m ? memberDisplayName(m) : 'Assigned user';
   };
-
-  const handleApply = async () => {
-    setApplying(true);
-    try {
-      const n = await applyToPending();
-      if (n > 0) {
-        toast.success(`Assigned ${n} pending task${n === 1 ? '' : 's'} at ${buildingName ?? 'this building'}`);
-        onApplied?.(n);
-      } else {
-        toast.info('No unassigned pending tasks match these rules');
-      }
-    } catch (e) {
-      toast.error(`Could not apply the rules: ${e instanceof Error ? e.message : 'unknown error'}`);
-    } finally {
-      setApplying(false);
-    }
-  };
+  const pending = [...pendingByRole.values()].reduce((a, b) => a + b, 0);
+  const warn = !isLoading && !isError && !rules.has('user') && pending > 0;
 
   return (
     <Card data-testid="role-assignments-panel">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
-          <Users className="h-4 w-4" aria-hidden="true" />
-          Who does what here
-        </CardTitle>
-        <Hint>New tasks are assigned automatically from these rules every night.</Hint>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {isLoading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground" role="status">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            Loading roles…
+      <CardContent className="py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-2 min-w-0">
+          {warn ? (
+            <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0 text-destructive" aria-hidden="true" />
+          ) : (
+            <Users className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          )}
+          <div className="text-sm space-y-1">
+            {isLoading ? (
+              <span role="status" className="text-muted-foreground">Loading roles…</span>
+            ) : isError ? (
+              <span className="text-destructive">Could not load the rules for this building.</span>
+            ) : (
+              <span>{summaryLine(rules, nameFor)}</span>
+            )}
+            {warn && <p role="alert" className="font-medium text-destructive">{NO_DAILY_OWNER_WARNING}</p>}
           </div>
-        ) : (
-          <>
-            {isError && <p className="text-sm text-destructive">Could not load the rules for this building.</p>}
-            <ul className="space-y-3">
-              {roles.map((role) => (
-                <li key={role} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-                  <Label htmlFor={idFor(role)} className="text-sm font-medium sm:w-44 sm:shrink-0">
-                    {roleLabel(role)}
-                  </Label>
-                  {/* The picker's trigger is 40 px by default; lift it to the 44 px touch target. */}
-                  <AssigneePicker
-                    id={idFor(role)}
-                    buildingId={buildingId}
-                    value={rules.get(role) ?? null}
-                    onChange={(id) => handleSet(role, id)}
-                    disabled={saving === role}
-                    placeholder="Nobody"
-                    className="flex-1 [&_[role=combobox]]:min-h-11"
-                  />
-                </li>
-              ))}
-            </ul>
-            <Button
-              variant="secondary"
-              onClick={handleApply}
-              disabled={applying || applicable === 0}
-              className="min-h-11 w-full sm:w-auto"
-            >
-              {applying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : <UserCheck className="mr-2 h-4 w-4" aria-hidden="true" />}
-              Apply to existing pending tasks ({applicable})
-            </Button>
-          </>
-        )}
+        </div>
+        <Link
+          to={`/buildings/${buildingId}?tab=team`}
+          className="inline-flex items-center min-h-11 shrink-0 text-sm font-medium underline-offset-4 hover:underline"
+        >
+          Manage team
+        </Link>
       </CardContent>
     </Card>
   );

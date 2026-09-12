@@ -1,6 +1,8 @@
 /** OHS Act Compliance — rendered entirely from compliance_templates (no hardcoded
- *  questions). Live building % updates as items are answered; N/A counts as a pass. */
-import { useMemo } from 'react';
+ *  questions). Live building % updates as items are answered; N/A counts as a pass.
+ *  A comment saves on blur whether or not the item is answered (S3): the row is upserted
+ *  with a null response, and a plain guardrail line names the missing answer. */
+import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
@@ -13,6 +15,25 @@ import type { SectionProps } from './types';
 export default function ComplianceSection({ reportId, buildingId, readOnly }: SectionProps) {
   const { items, responses, responseMap, isLoading, setResponse, liveBuildingPct, answered, scoredTotal } =
     useComplianceSection(reportId, buildingId, readOnly);
+
+  // Comment text as typed, per item, until it is saved. Controlled rather than defaultValue so
+  // the answer toggle can send what is in the box right now: with an uncontrolled input, picking
+  // an answer after typing a comment sent the last SAVED comment and overwrote the new one.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+
+  // A draft has done its job once the server holds the same text: drop it so later changes
+  // from elsewhere show through. A draft whose save failed is left standing — the server
+  // still has the old comment, and the user must keep seeing the text that was not saved.
+  useEffect(() => {
+    setDrafts((d) => {
+      const next = { ...d };
+      let changed = false;
+      for (const [itemId, text] of Object.entries(d)) {
+        if (responses[itemId]?.comment === text) { delete next[itemId]; changed = true; }
+      }
+      return changed ? next : d;
+    });
+  }, [responses]);
 
   const grouped = useMemo(() => {
     const map = new Map<string, ComplianceTemplateItem[]>();
@@ -28,7 +49,7 @@ export default function ComplianceSection({ reportId, buildingId, readOnly }: Se
   return (
     <SectionCard
       title="OHS Act Compliance"
-      hint="Weighted compliance scored live from the active template. N/A counts as compliant. Answers save automatically as you click — there is no Save button here."
+      hint="Weighted compliance scored live from the active template. N/A counts as compliant. Answers and comments save automatically — there is no Save button here."
       headerAccessory={
         <div className="text-right">
           <Badge variant={liveBuildingPct != null && liveBuildingPct >= 90 ? 'default' : 'secondary'} className="text-sm">
@@ -50,7 +71,9 @@ export default function ComplianceSection({ reportId, buildingId, readOnly }: Se
               <h4 className="text-sm font-semibold text-muted-foreground">{section}</h4>
               {secItems.map((it) => {
                 const current = responseMap[it.id];
-                const comment = responses[it.id]?.comment ?? '';
+                const saved = responses[it.id]?.comment ?? '';
+                const comment = drafts[it.id] ?? saved;
+                const needsAnswer = comment.trim() !== '' && !current;
                 return (
                   <div key={it.id} className="rounded-md border p-3">
                     <div className="flex items-start justify-between gap-3">
@@ -61,6 +84,7 @@ export default function ComplianceSection({ reportId, buildingId, readOnly }: Se
                       </div>
                       <ToggleGroup
                         type="single"
+                        data-item={it.id}
                         value={current ?? ''}
                         onValueChange={(v) => v && !readOnly && setResponse(it.id, v as YesNoNa, comment)}
                         disabled={readOnly}
@@ -74,13 +98,21 @@ export default function ComplianceSection({ reportId, buildingId, readOnly }: Se
                     <Input
                       className="mt-2 h-8"
                       placeholder="Comment (optional)"
-                      defaultValue={comment}
+                      value={comment}
                       disabled={readOnly}
+                      onChange={(e) => setDrafts((d) => ({ ...d, [it.id]: e.target.value }))}
                       onBlur={(e) => {
-                        if (readOnly || !current) return;
-                        if (e.target.value !== comment) setResponse(it.id, current, e.target.value);
+                        if (readOnly || comment === saved) return;
+                        // Focus moving to this item's own answer toggle: the toggle carries the
+                        // live comment itself, so one write instead of two racing ones.
+                        if (e.relatedTarget?.closest(`[data-item="${it.id}"]`)) return;
+                        // No answer yet is fine: the row is written with a null response so the
+                        // comment survives, and the line below says an answer is still owed.
+                        setResponse(it.id, current ?? null, comment);
                       }}
                     />
+                    {/* Guardrail, not coaching — never routed through <Hint>, visible with hints off. */}
+                    {needsAnswer && <p className="mt-1 text-xs text-destructive">Answer needed</p>}
                   </div>
                 );
               })}

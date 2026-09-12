@@ -10,6 +10,7 @@ import pdfFonts from 'pdfmake/build/vfs_fonts';
 import { fdb, type ReportType } from '@/integrations/supabase/fortress-db';
 import { supabase } from '@/integrations/supabase/client';
 import { resolveStorageUrl } from '@/integrations/supabase/storage';
+import { bitmapFromBlob, fetchImageBlob } from '@/lib/imageFetch';
 import { buildReportDoc, MARK, type ReportData, type EmbeddedPhoto, type AnnualItem } from '@/lib/fortressReportDoc';
 import { ANNUAL_FIELD_SETS } from '@/lib/annualFieldSets';
 import { doneMonthsFromGrid, fiscalWindow, gridHasData } from '@/lib/ppmGrid';
@@ -49,36 +50,66 @@ const PHOTO_QUALITY = 0.62;
 
 type PhotoRef = { ref?: string; path: string; caption?: string };
 
-/** Resolve a stored photo path to a downscaled JPEG data URL (browser only). */
+/**
+ * Resolve a stored photo path to a downscaled JPEG data URL (browser only). Null on ANY failure —
+ * a bad photo is skipped and counted under "not embedded" (annualPhotosOmitted), never allowed to
+ * fail the export, and never handed to pdfmake as a base64'd error body. There is deliberately no
+ * FileReader fallback here: if the browser cannot decode it, pdfmake cannot either.
+ */
 async function embedPhoto(path: string): Promise<string | null> {
   try {
     const signed = await resolveStorageUrl('/object/tenant-documents/' + path);
     if (!signed) return null;
-    const blob = await (await fetch(signed)).blob();
+    const blob = await fetchImageBlob(signed);
     return await downscaleToDataUrl(blob);
-  } catch {
+  } catch (e) {
+    if (import.meta.env.DEV) console.warn('report photo skipped:', path, (e as Error)?.message ?? String(e));
     return null;
   }
 }
 
-async function downscaleToDataUrl(blob: Blob): Promise<string> {
+/**
+ * Display name for the inspector. `profiles` is readable only by the person themselves and by
+ * admins/managers (p_select), so a field user exporting a colleague's inspection would read
+ * nothing from the table; the `building_members` RPC (security definer, scoped by
+ * can_access_building) is the path the evidence pack already uses for names. Non-fatal — the
+ * name is provenance, not the inspection itself: on any failure, or an inspector no longer a
+ * member of the building, fall back to the denormalised report author name when the ids match,
+ * else null (the doc then prints the date alone).
+ */
+async function inspectorName(buildingId: string, userId: string, fallback: string | null): Promise<string | null> {
   try {
-    const bmp = await createImageBitmap(blob);
-    const scale = Math.min(1, PHOTO_MAX_DIM / Math.max(bmp.width, bmp.height));
-    const w = Math.max(1, Math.round(bmp.width * scale));
-    const h = Math.max(1, Math.round(bmp.height * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('no 2d ctx');
-    ctx.drawImage(bmp, 0, 0, w, h);
-    bmp.close?.();
-    return canvas.toDataURL('image/jpeg', PHOTO_QUALITY);
-  } catch {
-    return blobToDataUrl(blob);
+    const { data, error } = await supabase.rpc('building_members', { b: buildingId });
+    if (error) throw error;
+    const row = ((data ?? []) as { id: string; full_name: string | null }[]).find((m) => m.id === userId);
+    const name = row?.full_name?.trim();
+    if (name) return name;
+  } catch (e) {
+    if (import.meta.env.DEV) console.warn('Inspector name lookup failed:', e);
   }
+  return fallback?.trim() || null;
 }
 
+async function downscaleToDataUrl(blob: Blob): Promise<string> {
+  const bmp = await bitmapFromBlob(blob);
+  const scale = Math.min(1, PHOTO_MAX_DIM / Math.max(bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * scale));
+  const h = Math.max(1, Math.round(bmp.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('no 2d ctx');
+  ctx.drawImage(bmp, 0, 0, w, h);
+  bmp.close?.();
+  return canvas.toDataURL('image/jpeg', PHOTO_QUALITY);
+}
+
+/**
+ * LOGO ONLY. The logo is embedded as-is (pdfmake fits it to 130×40; no canvas pass, so a PNG keeps
+ * its transparency). It is safe only because fetchImageBlob has already refused a non-2xx, a
+ * non-image and anything but PNG/JPEG (SVG, WebP) before this reads the body. Photos never come
+ * through here.
+ */
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -151,8 +182,13 @@ export async function generateReportPdf(
   if (branding.logoUrl) {
     try {
       const signed = await resolveStorageUrl(branding.logoUrl);
-      if (signed) logoDataUrl = await blobToDataUrl(await (await fetch(signed)).blob());
-    } catch { /* logo optional */ }
+      // pdfmake embeds PNG and JPEG only: an SVG or WebP logo (both accepted by Settings before S2,
+      // so existing orgs may have one) is skipped and the org name prints in its place, exactly as
+      // when no logo is set. Anything else would throw "Unknown image format" and fail the export.
+      if (signed) logoDataUrl = await blobToDataUrl(await fetchImageBlob(signed, { allow: ['image/png', 'image/jpeg'] }));
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('report logo skipped:', (e as Error)?.message ?? String(e));
+    }
   }
 
   const data: ReportData = {};
@@ -549,7 +585,7 @@ export async function generateReportPdf(
     // one row per template version for a single report, so fetch a list and use the
     // newest row that actually holds responses. The old maybeSingle() here returned
     // null on duplicates, which silently blanked the whole condition inspection.
-    const inspRows = unwrap(await fdb.from('building_inspections').select('id,template_id')
+    const inspRows = unwrap(await fdb.from('building_inspections').select('id,template_id,inspected_by,inspection_date')
       .eq('report_id', reportId).order('created_at', { ascending: false }), 'the building inspection') ?? [];
     for (const insp of inspRows) {
       if (!insp.template_id) continue;
@@ -623,6 +659,12 @@ export async function generateReportPdf(
       data.annualCapexTotal = capexTotal || null;
       data.annualPhotosTotal = totalPhotoRefs;
       if (totalPhotoRefs > embedded) data.annualPhotosOmitted = totalPhotoRefs - embedded;
+      // Provenance off the winning row (S3): defaults stamp both columns at insert; the backfill
+      // attributed older rows to the report author, so author_name is the right fallback when the ids match.
+      data.annualInspectionDate = insp.inspection_date ?? null;
+      data.annualInspectedBy = insp.inspected_by
+        ? await inspectorName(report.building_id, insp.inspected_by, insp.inspected_by === report.author_id ? report.author_name : null)
+        : null;
       break;
     }
     // The column is `item`, not `description` - selecting a column that does not exist

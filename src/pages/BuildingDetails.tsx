@@ -17,6 +17,7 @@ import BuildingCalendarTab from '@/components/building/BuildingCalendarTab';
 import NotesTab from '@/components/building/NotesTab';
 import OverviewWidgets from '@/components/building/OverviewWidgets';
 import ChecklistsTab from '@/components/building/ChecklistsTab';
+import TeamTab from '@/components/building/team/TeamTab';
 import FormsTab from '@/components/building/FormsTab';
 import ReportsTab from '@/components/building/ReportsTab';
 import InsightLinkerTab from '@/components/building/InsightLinkerTab';
@@ -199,7 +200,8 @@ export default function BuildingDetails() {
       </div>
 
       {/* Tabs - Mobile optimized with icons */}
-      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+      {/* `team` exists for admins and managers only; a field user following that deep link lands on Overview. */}
+      <Tabs value={activeTab === 'team' && !isAdminOrManager ? 'overview' : activeTab} onValueChange={handleTabChange} className="w-full">
         <TabsList ref={tabsRef} className="w-full flex-nowrap justify-start overflow-x-auto overflow-y-hidden whitespace-nowrap snap-x scroll-px-3 sm:flex-wrap sm:overflow-visible [&::-webkit-scrollbar]:hidden">
           <TabsTrigger value="overview" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
             <span className="hidden sm:inline">Overview</span>
@@ -209,6 +211,9 @@ export default function BuildingDetails() {
             <span className="hidden sm:inline">Checklists</span>
             <span className="sm:hidden">Tasks</span>
           </TabsTrigger>
+          {isAdminOrManager && (
+            <TabsTrigger value="team" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Team</TabsTrigger>
+          )}
           <TabsTrigger value="forms" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Forms</TabsTrigger>
           <TabsTrigger value="reports" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Reports</TabsTrigger>
           <TabsTrigger value="tenants" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Tenants</TabsTrigger>
@@ -342,6 +347,12 @@ export default function BuildingDetails() {
         <TabsContent value="checklists" className="mt-6">
           <ChecklistsTab buildingId={building.id} buildingName={building.name} />
         </TabsContent>
+
+        {isAdminOrManager && (
+          <TabsContent value="team" className="mt-6">
+            <TeamTab buildingId={building.id} buildingName={building.name} />
+          </TabsContent>
+        )}
 
         <TabsContent value="forms" className="mt-6">
           <FormsTab buildingId={building.id} buildingName={building.name} />

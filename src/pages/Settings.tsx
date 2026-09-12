@@ -106,10 +106,12 @@ export default function Settings() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Validate file type
-    const validTypes = ['image/png', 'image/svg+xml', 'image/jpeg', 'image/webp'];
+    // Validate file type. SVG and WebP are out: pdfmake embeds only PNG and JPEG, so such a logo
+    // never reaches a report PDF (the exporter skips it and prints the org name). Existing SVG
+    // and WebP logos keep working in the app header; they are simply not printed.
+    const validTypes = ['image/png', 'image/jpeg'];
     if (!validTypes.includes(file.type)) {
-      toast.error('Please upload a PNG, SVG, JPEG, or WebP image');
+      toast.error('Please upload a PNG or JPEG image. SVG and WebP logos cannot be printed into PDF reports.');
       return;
     }
 
@@ -292,7 +294,7 @@ export default function Settings() {
                       <input
                         ref={fileInputRef}
                         type="file"
-                        accept="image/png,image/svg+xml,image/jpeg,image/webp"
+                        accept="image/png,image/jpeg"
                         onChange={handleLogoUpload}
                         className="hidden"
                       />
@@ -309,8 +311,9 @@ export default function Settings() {
                         {isUploading ? 'Uploading...' : 'Upload Logo'}
                       </Button>
                     </div>
+                    {/* Constraint, not coaching: stays visible with hints off. */}
                     <p className="text-sm text-muted-foreground">
-                      Recommended: 200x200px, PNG or SVG
+                      Recommended: 200x200px, PNG or JPEG. SVG and WebP logos cannot be printed into PDF reports.
                     </p>
                   </div>
 
