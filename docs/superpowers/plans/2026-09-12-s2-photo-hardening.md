@@ -860,7 +860,7 @@ create policy ir_write on public.inspection_responses for all
 
 and reads pass `ir_read` (:98-101, `can_access_building(bi.building_id)`), scoped through the parent row, whose own read policy is `building_inspections_read … using ( can_access_building(building_id) )` (:84-86). An INVOKER function's `insert … on conflict do update` is evaluated as the caller: the INSERT arm is checked against `ir_write`'s `with check`, the UPDATE arm against its `using` and `with check`. A `user` with no access to the building fails `with check` and Postgres raises `42501` (`new row violates row-level security policy for table "inspection_responses"`); nothing is written. Admins and managers pass on `is_admin_or_manager()`; a field user passes on `can_access_building`. No new policy is needed and none is added. The style model for an invoker RPC with grants is `complete_task` in `supabase/schema/2026-09-12_01_r2_field.sql`.
 
-- [ ] **Step 1: Write the migration** at `../GMI/sql/2026-09-15_02_inspection_photo_append.sql`:
+- [x] **Step 1: Write the migration** at `../GMI/sql/2026-09-15_02_inspection_photo_append.sql`:
 
 ```sql
 -- 2026-09-15_02_inspection_photo_append.sql
@@ -937,7 +937,7 @@ commit;
 
 Notes baked in: `coalesce(p_section_no, '')` — `section_no` is nullable on the template table; the old client string-interpolated it (`"null.1"`); an empty prefix is the lesser evil and every real template item has one. `updated_at = now()` is stated even though `trg_inspection_responses_touch` would set it, because the spec names it and the row's freshness is what the client shows. A `photo_urls` that is not a JSON array (never written by this app; the default is `'[]'`) would make `jsonb_array_length` raise, which fails the call loudly rather than silently dropping the photo.
 
-- [ ] **Step 2: Verify on a throwaway Postgres 17.** Supabase's base tables are not in the vendored migrations; stand up stubs with exactly the columns the function touches, apply the real file twice (idempotent), then assert. Write both scratch files to the scratchpad, never the repo. `SCRATCH` is your session's scratchpad directory (given in your system prompt).
+- [x] **Step 2: Verify on a throwaway Postgres 17.** Supabase's base tables are not in the vendored migrations; stand up stubs with exactly the columns the function touches, apply the real file twice (idempotent), then assert. Write both scratch files to the scratchpad, never the repo. `SCRATCH` is your session's scratchpad directory (given in your system prompt).
 
 `$SCRATCH/s2-stub.sql`:
 
@@ -1061,7 +1061,7 @@ Expected output of the last psql: `NOTICE:  append_inspection_photo ok: signed-o
 
 **Concurrent-safety note (record it in the commit message, no extra test):** `INSERT … ON CONFLICT DO UPDATE` takes the conflicting row's lock; under READ COMMITTED a concurrent second call blocks on that lock, then re-evaluates `ir.photo_urls` against the committed tuple, so it sees the first append and numbers itself `n+2`. Two concurrent first-ever inserts for the same `(inspection_id, template_item_id)` resolve the same way through the unique index's speculative insertion: one inserts, the other takes the UPDATE arm. The update is atomic per row; no read-modify-write window exists on the server. (The client-side window that existed — reading `photo_urls` from the query cache — is what Task 7 removes.)
 
-- [ ] **Step 3: Commit the canonical SQL in GMI, then vendor**
+- [x] **Step 3: Commit the canonical SQL in GMI, then vendor**
 
 ```bash
 git -C ../GMI add sql/2026-09-15_02_inspection_photo_append.sql && git -C ../GMI commit -m "S2: append_inspection_photo — atomic per-row photo append, security invoker (2026-09-15_02)"
@@ -1071,7 +1071,7 @@ git status --short supabase/schema     # ONLY: ?? supabase/schema/2026-09-15_02_
 
 If `git status` shows any other vendored `.sql` as changed, GMI has drifted (or S1 vendored first and its file is uncommitted here) — stop and tell the controller; do not stage it.
 
-- [ ] **Step 4: RLS smoke assertions.** In `scripts/rls-smoke.mjs`, after the last `console.log('  … : done');` inside the `try` (today `console.log('  R4c intake & forms …: done');` at :1046) and before `} catch (e) {`, append. `svcInsert`, `rpcCall`, `assert`, `cleanup`, `personas`, `A`, `B`, `RUN`, `URL_BASE`, `SVC` all exist:
+- [x] **Step 4: RLS smoke assertions.** In `scripts/rls-smoke.mjs`, after the last `console.log('  … : done');` inside the `try` (today `console.log('  R4c intake & forms …: done');` at :1046) and before `} catch (e) {`, append. `svcInsert`, `rpcCall`, `assert`, `cleanup`, `personas`, `A`, `B`, `RUN`, `URL_BASE`, `SVC` all exist:
 
 ```js
   // ════ S2: append_inspection_photo — security invoker, RLS-scoped through building_inspections, atomic append ════
@@ -1113,7 +1113,7 @@ If `git status` shows any other vendored `.sql` as changed, GMI has drifted (or 
 
 `node --check scripts/rls-smoke.mjs` must print nothing.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 node --check scripts/rls-smoke.mjs

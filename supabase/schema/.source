@@ -1,5 +1,5 @@
 source_repo: GMI (../GMI/sql)
-source_commit: 8f089ac40cbe2849813984416d48eeedfdffa1e6
-source_commit_date: 2026-09-12 09:47:06 +0200
-vendored_files: 105
+source_commit: 32edee95a989209c208e70699dcc7b4cc871a663
+source_commit_date: 2026-09-12 09:48:33 +0200
+vendored_files: 106
 note: read-only mirror — edit policies in the GMI repo, then run `npm run schema:vendor`

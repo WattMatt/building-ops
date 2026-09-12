@@ -1078,6 +1078,42 @@ try {
   }
   console.log('  S1 team & coverage (user_buildings managed, assignable_people, portfolio_coverage): done');
 
+  // ════ S2: append_inspection_photo — security invoker, RLS-scoped through building_inspections, atomic append ════
+  {
+    // A throwaway INACTIVE annual template so the fixture never becomes the app's live template on this project.
+    const tpl = (await svcInsert('inspection_templates', { name: `ZZTEST-RLS-${RUN}`, cadence: 'annual', version: 1, active: false })).id;
+    cleanup.push(['inspection_templates', tpl]);
+    const item = (await svcInsert('inspection_template_items', { template_id: tpl, section_no: '7', section_title: 'ROOF', item_label: 'Gutters', rating_type: 'condition_scale', sort_order: 1 })).id;
+    cleanup.push(['inspection_template_items', item]);
+    // inspection_responses rows the calls create are removed by the cascade from building_inspections (LIFO: these go before item/tpl).
+    const inspA = (await svcInsert('building_inspections', { building_id: A, template_id: tpl })).id;
+    cleanup.push(['building_inspections', inspA]);
+    const inspB = (await svcInsert('building_inspections', { building_id: B, template_id: tpl })).id;
+    cleanup.push(['building_inspections', inspB]);
+    const args = (insp, n) => ({ p_inspection: insp, p_template_item: item, p_path: `documents/${insp}/annual/7/${RUN}-${n}.jpg`, p_caption: 'Gutters', p_section_no: '7' });
+    const responsesOf = async (insp) => (await (await fetch(`${URL_BASE}/rest/v1/inspection_responses?inspection_id=eq.${insp}&select=id,photo_urls`, { headers: SVC })).json());
+
+    const anon = await rpcCall(null, 'append_inspection_photo', args(inspB, 0));
+    assert('append_inspection_photo not executable by anon', anon.status === 401 || anon.status === 403, `expected HTTP 401/403, got ${anon.status}`);
+
+    // userA is assigned to building A only: on B the with-check fails as 42501 and nothing is written.
+    const denied = await rpcCall(personas.userA.jwt, 'append_inspection_photo', args(inspB, 0));
+    assert('append_inspection_photo refused (42501) for a user without access to the building', !denied.ok && denied.code === '42501', `HTTP ${denied.status} ${JSON.stringify(denied.body).slice(0, 160)}`);
+    assert('a refused append wrote nothing', (await responsesOf(inspB)).length === 0, 'an inspection_responses row exists after the refusal');
+
+    const first = await rpcCall(personas.admin.jwt, 'append_inspection_photo', args(inspB, 1));
+    assert('append_inspection_photo runs for admin and returns the row', first.ok && first.rows[0]?.inspection_id === inspB && first.rows[0]?.template_item_id === item, `HTTP ${first.status} ${JSON.stringify(first.body).slice(0, 160)}`);
+    assert('first append inserts the row with ref 7.1', first.rows[0]?.photo_urls?.length === 1 && first.rows[0]?.photo_urls?.[0]?.ref === '7.1' && first.rows[0]?.photo_urls?.[0]?.path === args(inspB, 1).p_path, JSON.stringify(first.rows[0]?.photo_urls));
+    const second = await rpcCall(personas.manager.jwt, 'append_inspection_photo', args(inspB, 2));
+    assert('second append (manager) appends ref 7.2 to the SAME row and keeps the first path', second.ok && second.rows[0]?.id === first.rows[0]?.id && second.rows[0]?.photo_urls?.length === 2 && second.rows[0]?.photo_urls?.[0]?.path === args(inspB, 1).p_path && second.rows[0]?.photo_urls?.[1]?.ref === '7.2', JSON.stringify(second.rows[0]?.photo_urls));
+    assert('exactly one inspection_responses row after two appends', (await responsesOf(inspB)).length === 1, `${(await responsesOf(inspB)).length} rows`);
+
+    // Invoker, not admin-only: a field user WITH access appends on their own building.
+    const own = await rpcCall(personas.userA.jwt, 'append_inspection_photo', args(inspA, 1));
+    assert('append_inspection_photo runs for a user with access to the building', own.ok && own.rows[0]?.photo_urls?.[0]?.ref === '7.1', `HTTP ${own.status} ${JSON.stringify(own.body).slice(0, 160)}`);
+  }
+  console.log('  S2 photo append (append_inspection_photo: anon/no-access refused, refs .1/.2 on one row, invoker for field users): done');
+
 } catch (e) {
   fail('smoke run', e.message);
 } finally {
