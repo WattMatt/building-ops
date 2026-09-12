@@ -4,6 +4,11 @@
  * per-item responses, and computes the live building % using the group-weighted,
  * N/A-is-pass model (11_MARKING_AND_PERCENTAGES.md) so the score updates as the user
  * answers — the persisted compliance_scores view is the source of truth on reload.
+ *
+ * A response row may carry a comment and no answer (S3): `response` is nullable and its
+ * CHECK only constrains non-null values, the score trigger maps null to a null score, and
+ * the compliance_scores view sums only 'yes'/'no' — so a comment-only row is stored,
+ * never scored, and never counted as answered.
  */
 import { useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -93,10 +98,12 @@ export function useComplianceSection(
   });
 
   const setResponse = useCallback(
-    async (templateItemId: string, response: YesNoNa, comment?: string) => {
+    async (templateItemId: string, response: YesNoNa | null, comment?: string) => {
       const assessmentId = query.data?.assessmentId;
       if (!assessmentId) return;
       const existing = query.data?.responses[templateItemId];
+      // `response` null is a legal row: a comment typed before (or without) an answer is
+      // saved instead of thrown away. An undefined `comment` keeps whatever is saved.
       const { error } = await fdb.from('compliance_responses').upsert(
         {
           id: existing?.id ?? crypto.randomUUID(),
