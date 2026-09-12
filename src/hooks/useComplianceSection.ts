@@ -23,6 +23,7 @@ import {
   type YesNoNa,
 } from '@/integrations/supabase/fortress-db';
 import { computeBuildingPct } from '@/lib/fortressReports';
+import { createPerKeyQueue } from '@/lib/perKeyQueue';
 
 const OHS_TEMPLATE_NAME = 'OHS Act Report';
 
@@ -101,7 +102,8 @@ export function useComplianceSection(
 
   // Writes for one item run in call order. A comment blur (null answer) followed at once by
   // the answer toggle must not land reversed and put the null back over the answer.
-  const inflight = useRef(new Map<string, Promise<void>>());
+  // Per-item write ordering, shared with useInspectionSection (src/lib/perKeyQueue.ts).
+  const queue = useRef(createPerKeyQueue());
 
   const setResponse = useCallback(
     async (templateItemId: string, response: YesNoNa | null, comment?: string) => {
@@ -130,14 +132,7 @@ export function useComplianceSection(
         }
         qc.invalidateQueries({ queryKey: key });
       };
-      const prev = inflight.current.get(templateItemId) ?? Promise.resolve();
-      const run = prev.then(write, write);
-      inflight.current.set(templateItemId, run);
-      try {
-        await run;
-      } finally {
-        if (inflight.current.get(templateItemId) === run) inflight.current.delete(templateItemId);
-      }
+      await queue.current.run(templateItemId, write);
     },
     [query.data, qc, key],
   );

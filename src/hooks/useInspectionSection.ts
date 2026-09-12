@@ -4,9 +4,10 @@
  * Loads the active template for the cadence + items, ensures one building_inspection
  * per report, and tracks per-item responses.
  */
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { createPerKeyQueue } from '@/lib/perKeyQueue';
 import {
   fdb,
   type InspectionTemplate,
@@ -122,6 +123,10 @@ export function useInspectionSection(
     },
   });
 
+  // Per-item write ordering, shared with useComplianceSection (src/lib/perKeyQueue.ts): the
+  // second save to an item is not sent until the first has answered, so they land in call order.
+  const queue = useRef(createPerKeyQueue());
+
   const setResponse = useCallback(
     async (templateItemId: string, patch: InspectionResponsePatch) => {
       const inspectionId = query.data?.inspectionId;
@@ -154,8 +159,10 @@ export function useInspectionSection(
         next_service_due: pick('next_service_due', existing?.next_service_due ?? null),
         detail: pick('detail', (existing?.detail ?? {}) as Record<string, unknown>),
       };
-      // Optimistic merge BEFORE the round trip, so the cache (and the next blur) shows this patch
-      // now. Rolled back to the snapshot on error; the invalidation then refetches server truth.
+      // Optimistic merge BEFORE the round trip (and before queueing), so the cache — and the next
+      // blur — shows this patch now. On error the cache is deliberately NOT touched: restoring a
+      // snapshot would also revert photo appends and other items' patches taken since; the toast
+      // says the save failed and the invalidation refetches server truth.
       if (snapshot) {
         const optimistic = {
           id: '', risk_level: null, created_at: '', updated_at: '', photo_urls: [],
@@ -163,32 +170,36 @@ export function useInspectionSection(
         } as unknown as InspectionResponse;
         qc.setQueryData<InspectionSectionData>(key, { ...snapshot, responses: { ...snapshot.responses, [templateItemId]: optimistic } });
       }
-      const { error } = await fdb.from('inspection_responses').upsert(
-        { ...row, detail: row.detail as never },
-        { onConflict: 'inspection_id,template_item_id' },
-      );
-      if (error) {
-        if (import.meta.env.DEV) console.error('inspection setResponse failed:', error);
-        toast.error('Could not save that item.');
-        if (snapshot) qc.setQueryData<InspectionSectionData>(key, snapshot);
+      const write = async () => {
+        const { error } = await fdb.from('inspection_responses').upsert(
+          { ...row, detail: row.detail as never },
+          { onConflict: 'inspection_id,template_item_id' },
+        );
+        if (error) {
+          if (import.meta.env.DEV) console.error('inspection setResponse failed:', error);
+          toast.error('Could not save that item.');
+        }
         qc.invalidateQueries({ queryKey: key });
-        return;
-      }
-      qc.invalidateQueries({ queryKey: key });
+      };
+      await queue.current.run(templateItemId, write);
     },
     [query.data, qc, key],
   );
 
   /**
-   * Put a server-returned row into the cached responses NOW, then invalidate. Used after an RPC
-   * that has already changed the row (append_inspection_photo): the UI shows the real row at once,
-   * and a second rapid add sees the appended list rather than a stale copy. No-op when nothing is
-   * cached yet (the invalidation still runs and is harmless).
+   * Put a server-returned row's photo list into the cached responses NOW, then invalidate. Used
+   * after append_inspection_photo: the UI shows the appended list at once, and a second rapid add
+   * sees it rather than a stale copy. Only `photo_urls` is taken from the returned row — it is the
+   * one column the RPC owns. Replacing the whole row would clobber a field patch still in flight
+   * (setResponse's optimistic merge) and the next blur would re-send the old value. When nothing
+   * is cached for the item yet, the returned row stands in whole. No-op on an empty cache.
    */
   const mergeResponse = useCallback(
     (row: InspectionResponse) => {
       qc.setQueryData<InspectionSectionData>(key, (old) =>
-        old ? { ...old, responses: { ...old.responses, [row.template_item_id]: row } } : old);
+        old
+          ? { ...old, responses: { ...old.responses, [row.template_item_id]: { ...(old.responses[row.template_item_id] ?? row), photo_urls: row.photo_urls } } }
+          : old);
       qc.invalidateQueries({ queryKey: key });
     },
     [qc, key],

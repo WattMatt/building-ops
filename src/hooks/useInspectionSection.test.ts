@@ -19,7 +19,8 @@ const state = vi.hoisted(() => ({
   queries: [] as { table: string; calls: RecordedCall[] }[],
   /** What inspection_responses SELECT answers with; a test changes it before a refetch. */
   rows: [] as unknown[],
-  result: (() => ({ data: [], error: null })) as (table: string, calls: RecordedCall[]) => QueryResult,
+  /** May answer with a Promise so a test can hold one upsert in flight and release it later. */
+  result: (() => ({ data: [], error: null })) as (table: string, calls: RecordedCall[]) => QueryResult | Promise<QueryResult>,
 }));
 
 vi.mock('@/integrations/supabase/client', () => {
@@ -192,14 +193,23 @@ describe('useInspectionSection.setResponse — two blurs before a refetch', () =
     expect(rows[1]).toMatchObject({ comment: 'A', capex_estimate: 7 });
   });
 
-  it('the cache shows the patch before the round trip, and a failed upsert rolls it back', async () => {
-    state.result = (table, calls) =>
-      table === 'inspection_responses' && calls.some((c) => c.method === 'upsert')
-        ? { data: null, error: { message: 'permission denied' } }
-        : tables(table, calls);
+  it('the cache shows the patch before the round trip; a failed upsert leaves the cache alone and invalidates', async () => {
+    // The upsert fails; the refetch the failure triggers is HELD behind a gate so the cache can be
+    // inspected in the window between the error coming back and server truth arriving.
+    let release!: (r: QueryResult) => void;
+    const gate = new Promise<QueryResult>((r) => { release = r; });
+    let loaded = false;
+    state.result = (table, calls) => {
+      if (table !== 'inspection_responses') return tables(table, calls);
+      if (calls.some((c) => c.method === 'upsert')) return { data: null, error: { message: 'permission denied' } };
+      if (!loaded) { loaded = true; return { data: state.rows, error: null }; }
+      return gate;
+    };
     const { qc, result } = mount();
     await waitFor(() => expect(result.current.inspectionId).toBe('i1'));
     const cachedComment = () => qc.getQueryData<{ responses: Record<string, InspectionResponse> }>(KEY)?.responses.it1.comment;
+    const selects = () => state.queries.filter((q) => q.table === 'inspection_responses' && !q.calls.some((c) => c.method === 'upsert')).length;
+    const selectsBefore = selects();
 
     let seenDuringFlight: string | null | undefined;
     await act(async () => {
@@ -208,8 +218,59 @@ describe('useInspectionSection.setResponse — two blurs before a refetch', () =
       await p;
     });
     expect(seenDuringFlight).toBe('B');
-    // Rolled back to the snapshot the moment the error came back (the refetch is still pending).
-    expect(cachedComment()).toBe('old comment');
     expect(upsertRows()).toHaveLength(1);
+    // NOT rolled back: restoring a snapshot would also revert photo appends and other items'
+    // patches taken since. The toast reports the failure; server truth comes from the refetch.
+    expect(cachedComment()).toBe('B');
+    await waitFor(() => expect(selects()).toBe(selectsBefore + 1)); // invalidateQueries issued it
+    expect(cachedComment()).toBe('B'); // still untouched while that refetch is in flight
+    release({ data: [{ ...existing, comment: 'server truth' }], error: null });
+    await waitFor(() => expect(cachedComment()).toBe('server truth')); // and only the server's row replaces it
+  });
+
+  it('a photo append landing mid-flight keeps the optimistic field patch and takes only photo_urls', async () => {
+    const { qc, result } = mount();
+    await waitFor(() => expect(result.current.inspectionId).toBe('i1'));
+    const cached = () => qc.getQueryData<{ responses: Record<string, InspectionResponse> }>(KEY)?.responses.it1;
+
+    // The RPC answers with the SERVER row: two photos, but the comment as it was before the blur.
+    const fromRpc: InspectionResponse = { ...existing, photo_urls: [...(existing.photo_urls as unknown[]), { ref: '7.2', caption: 'Gutters', path: 'documents/b1/annual/7/two.jpg' }] as never };
+    let seen: InspectionResponse | undefined;
+    await act(async () => {
+      const p = result.current.setResponse('it1', { comment: 'typed while uploading' });
+      result.current.mergeResponse(fromRpc);
+      seen = cached(); // synchronously: after the merge, before either round trip answers
+      await p;
+    });
+    expect(seen?.comment).toBe('typed while uploading');
+    expect(seen?.photo_urls).toHaveLength(2);
+    // And the blur's own payload was built before the merge, so it never re-sent the old comment.
+    expect(upsertRows()).toHaveLength(1);
+    expect(upsertRows()[0]).toMatchObject({ comment: 'typed while uploading' });
+  });
+
+  it('the second upsert for an item is not issued until the first has answered', async () => {
+    let release!: (r: QueryResult) => void;
+    const gate = new Promise<QueryResult>((r) => { release = r; });
+    let held = false;
+    state.result = (table, calls) => {
+      if (table === 'inspection_responses' && calls.some((c) => c.method === 'upsert') && !held) { held = true; return gate; }
+      return tables(table, calls);
+    };
+    const { result } = mount();
+    await waitFor(() => expect(result.current.inspectionId).toBe('i1'));
+
+    let a!: Promise<void>; let b!: Promise<void>;
+    act(() => {
+      a = result.current.setResponse('it1', { comment: 'A' });
+      b = result.current.setResponse('it1', { capex_estimate: 7 });
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(upsertRows()).toHaveLength(1); // B is queued behind A, not on the wire
+    expect(upsertRows()[0]).toMatchObject({ comment: 'A' });
+    release({ data: null, error: null });
+    await act(async () => { await Promise.all([a, b]); });
+    expect(upsertRows()).toHaveLength(2);
+    expect(upsertRows()[1]).toMatchObject({ comment: 'A', capex_estimate: 7 });
   });
 });
