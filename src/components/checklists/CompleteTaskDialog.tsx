@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { enqueueAndRun } from '@/lib/offline/enqueueAndRun';
 import { toastForOutcome } from '@/lib/offline/outcomeToast';
 import { useAuth } from '@/contexts/AuthContext';
+import { queryClient } from '@/lib/queryClient';
 import {
   ResponsiveDialog,
   ResponsiveDialogContent,
@@ -98,6 +99,16 @@ export default function CompleteTaskDialog({
         });
       }
       if (outcome.status !== 'failed') {
+        // Synced now: the rows My Day and the building overview show have changed on the
+        // server, so refetch them — the same two keys OfflineQueueRunner.replayAndRefresh
+        // invalidates after a replay. A queued write is left to the runner, which refetches
+        // once the replay actually lands; until then the pending overlay marks the row.
+        if (outcome.status === 'synced') {
+          void Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['my-work'] }),
+            queryClient.invalidateQueries({ queryKey: ['building-overview'] }),
+          ]);
+        }
         resetForm();
         onOpenChange(false);
         onSuccess?.();

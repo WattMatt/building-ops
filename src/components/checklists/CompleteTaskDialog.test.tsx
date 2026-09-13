@@ -4,7 +4,9 @@ import { mockViewport } from '@/test/mobile';
 
 const enqueueAndRun = vi.hoisted(() => vi.fn());
 const toast = vi.hoisted(() => Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }));
+const invalidateQueries = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('@/lib/offline/enqueueAndRun', () => ({ enqueueAndRun }));
+vi.mock('@/lib/queryClient', () => ({ queryClient: { invalidateQueries } }));
 vi.mock('sonner', () => ({ toast }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u1' }, isAdminOrManager: true }) }));
 vi.mock('@/components/ui/photo-capture', () => ({ PhotoCapture: () => null }));
@@ -40,6 +42,7 @@ describe('CompleteTaskDialog', () => {
   beforeEach(() => {
     enqueueAndRun.mockReset().mockResolvedValue({ status: 'synced', result: {} });
     toast.mockClear(); toast.success.mockClear(); toast.error.mockClear(); toast.info.mockClear();
+    invalidateQueries.mockClear();
   });
   afterEach(() => mockViewport(1024));
 
@@ -64,6 +67,23 @@ describe('CompleteTaskDialog', () => {
     expect(toast.success).toHaveBeenCalledWith('Task completed successfully');
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(onSuccess).toHaveBeenCalled();
+  });
+
+  // Regression: only the queue replay used to refetch, so a completion made while online left
+  // My Day and the building overview showing the task as still due until the next reload.
+  it('refetches My Day and the building overview once the completion has synced', async () => {
+    renderDialog();
+    await submit();
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['my-work'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['building-overview'] });
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
+  });
+
+  it('leaves the refetch to the queue runner while the write is still queued', async () => {
+    enqueueAndRun.mockResolvedValueOnce({ status: 'queued' });
+    renderDialog();
+    await submit();
+    expect(invalidateQueries).not.toHaveBeenCalled();
   });
 
   it('says so when the server reports the task was already completed', async () => {
@@ -91,5 +111,6 @@ describe('CompleteTaskDialog', () => {
     expect(toast.error).toHaveBeenCalledWith('Task status was not updated — your role does not permit it.');
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
     expect(onSuccess).not.toHaveBeenCalled();
+    expect(invalidateQueries).not.toHaveBeenCalled();
   });
 });
