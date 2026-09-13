@@ -327,7 +327,7 @@ export async function loadTaskPack(taskId: string, meta: PackMeta, onProgress?: 
   const task = need(taskRes.data, taskRes.error, 'the task');
   const completionsRes = await supabase
     .from('task_completions')
-    .select('completed_by, created_at, notes, photo_urls, signature_confirmed')
+    .select('completed_by, created_at, notes, photo_urls, signature_confirmed, outcome, reason')
     .eq('task_instance_id', taskId)
     .order('created_at', { ascending: false });
   const completions = need(completionsRes.data, completionsRes.error, 'the task completion');
@@ -344,17 +344,22 @@ export async function loadTaskPack(taskId: string, meta: PackMeta, onProgress?: 
       completedAt: instant(row.created_at) ?? '—',
       notes: row.notes,
       signatureConfirmed: !!row.signature_confirmed,
+      outcome: row.outcome === 'wont_do' ? 'wont_do' : 'completed',
+      reason: row.reason,
       photos: photos.request(photoUrlList(row.photo_urls), (i) => `Completion photo ${i + 1}`, 'completion'),
       source: 'task_completions',
     };
   } else if (task.completed_at) {
     // Denormalised fallback: the task carries a copy of the completion but no `task_completions`
-    // row exists. The pack prints the source, so a reader can tell the two apart.
+    // row exists. The pack prints the source, so a reader can tell the two apart. The RPC always
+    // writes the completion row for a can't-do, so the status is the only trace here.
     completion = {
       completedBy: nameOf(task.completed_by) ?? 'Unknown',
       completedAt: instant(task.completed_at) ?? '—',
       notes: task.completion_notes,
       signatureConfirmed: !!task.signature_url,
+      outcome: task.status === 'wont_do' ? 'wont_do' : 'completed',
+      reason: null,
       photos: photos.request(photoUrlList(task.photo_urls), (i) => `Completion photo ${i + 1}`, 'task'),
       source: 'task_instances',
     };

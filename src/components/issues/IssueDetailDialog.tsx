@@ -295,7 +295,8 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
             {issue.deadline && (
               <span className="flex items-center gap-1 text-xs"><Clock className="h-3 w-3" />Due {format(new Date(issue.deadline), 'MMM d')}</span>
             )}
-            <SlaChip issue={issue} now={now} />
+            {/* The SLA clock is a manager's instrument (spec pilot-field §4.3): chip and line below gate on canManage. */}
+            {canManage && <SlaChip issue={issue} now={now} />}
           </ResponsiveDialogDescription>
           {/* Anyone who can open this issue may hand it over as evidence: RLS already decides
               what they can read, and the pack holds nothing they are not looking at. */}
@@ -321,7 +322,7 @@ export default function IssueDetailDialog({ issue, open, onOpenChange, canManage
               </p>
             </div>
           )}
-          {issue.sla_target_hours != null && (
+          {canManage && issue.sla_target_hours != null && (
             <p className="text-xs text-muted-foreground">
               SLA target {issue.sla_target_hours} h
               {issue.first_response_at ? ` · first response ${formatSlaInstant(new Date(issue.first_response_at))}` : ' · no response yet'}

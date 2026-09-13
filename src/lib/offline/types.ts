@@ -1,4 +1,5 @@
 import type { IssuePriority } from '@/lib/constants';
+import type { TaskOutcome } from '@/lib/wontDo';
 
 /** A photo held in the queue until it can be uploaded. Files survive structured clone, so the File itself is stored. */
 export interface QueuedPhoto { file: File }
@@ -10,6 +11,13 @@ export interface TaskCompletePayload {
   taskName: string;               // for the queue sheet only
   notes: string | null;
   signatureConfirmed: boolean;
+  /**
+   * S6b. Optional on purpose: an op persisted in IndexedDB before this field existed replays as a
+   * plain completion (the handler defaults `outcome` to 'completed'). A can't-do carries
+   * `reason` as `<code>` or `other: <text>` (src/lib/wontDo.ts); the RPC refuses it without one.
+   */
+  outcome?: TaskOutcome;
+  reason?: string | null;
 }
 export interface IssueCreatePayload {
   kind: 'issue_create';

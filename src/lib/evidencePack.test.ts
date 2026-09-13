@@ -10,6 +10,7 @@ import {
   starLine,
   NOT_COMPLETED_COPY,
   NO_PHOTOS_COPY,
+  OUTCOME_COPY,
   SOURCE_COPY,
   PACK_PHOTO_CAP,
   type AssetPack,
@@ -17,6 +18,7 @@ import {
   type PackMeta,
   type TaskPack,
 } from '@/lib/evidencePack';
+import { TASK_STATUS_LABELS } from '@/lib/constants';
 
 const meta: PackMeta = {
   orgName: 'Watson Mattheus',
@@ -90,6 +92,8 @@ const taskPack = (over: Partial<TaskPack> = {}): TaskPack => ({
     completedAt: '01 Sept 2026, 10:12',
     notes: 'All units green.',
     signatureConfirmed: true,
+    outcome: 'completed',
+    reason: null,
     photos: [{ dataUrl: 'data:image/jpeg;base64,CCC', caption: 'Extinguisher gauge' }],
     source: 'task_completions',
   },
@@ -193,6 +197,34 @@ describe('buildTaskPackDoc', () => {
   it('says "Not completed" when there is no completion at all', () => {
     const out = text(buildTaskPackDoc(taskPack({ completion: null })));
     expect(out).toContain(NOT_COMPLETED_COPY);
+  });
+
+  it('prints the outcome, and for a can\'t-do the reason label', () => {
+    const pack = taskPack({ task: { ...taskPack().task, status: 'wont_do' } });
+    const out = text(buildTaskPackDoc({ ...pack, completion: { ...pack.completion!, outcome: 'wont_do', reason: 'load_shedding' } }));
+    expect(out).toContain(OUTCOME_COPY.wont_do);
+    expect(out).toContain('Reason');
+    expect(out).toContain('Load shedding');
+    // The Outcome cell itself must not read "Completed" ("Completed by" / "Completed at" are other rows).
+    expect(out).not.toContain(`"text":"${OUTCOME_COPY.completed}"`);
+  });
+
+  it('prints the task status as its label, never the raw enum', () => {
+    const wontDo = text(buildTaskPackDoc(taskPack({ task: { ...taskPack().task, status: 'wont_do' } })));
+    expect(wontDo).toContain(`"text":"${TASK_STATUS_LABELS.wont_do}"`);
+    expect(wontDo).not.toContain('"text":"wont_do"');
+    const done = text(buildTaskPackDoc(taskPack()));
+    expect(done).toContain(`"text":"${TASK_STATUS_LABELS.completed}"`);
+    // A value the label map does not know still prints, as itself.
+    expect(text(buildTaskPackDoc(taskPack({ task: { ...taskPack().task, status: 'mystery' } })))).toContain('"text":"mystery"');
+  });
+
+  it('prints the free text of an "other" reason, and no Reason row for a completion', () => {
+    const pack = taskPack();
+    expect(text(buildTaskPackDoc({ ...pack, completion: { ...pack.completion!, outcome: 'wont_do', reason: 'other: gate welded shut' } }))).toContain('gate welded shut');
+    const done = text(buildTaskPackDoc(pack));
+    expect(done).toContain(OUTCOME_COPY.completed);
+    expect(done).not.toContain('"Reason"');
   });
 });
 

@@ -91,6 +91,8 @@ export async function runOp(op: QueuedOp): Promise<unknown> {
         p_notes: p.notes ?? undefined,
         p_signature_confirmed: p.signatureConfirmed,
         p_photo_urls: photoUrls,
+        p_outcome: p.outcome ?? 'completed',
+        p_reason: p.reason ?? undefined,
       });
       if (error) throw error;
       return data?.[0] ?? { completion_id: p.completionId, already_completed: false };

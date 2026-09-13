@@ -517,6 +517,23 @@ try {
     const r = await rpcCall(personas.manager.jwt, 'generate_scheduled_tasks', {});
     assert('generate_scheduled_tasks refused without a building for a signed-in manager', r.status === 403, `expected HTTP 403 (raised 42501), got HTTP ${r.status}`);
   }
+  // ── S6b: a can't-do is written through the same policies as a completion ──
+  // complete_task is security invoker: userB's completion insert for a building-A task fails tc_insert
+  // (42501 → HTTP 403) and the instance stays pending; userA's lands with the reason. A completion-free
+  // task is needed — rows.task_instances.A already has tcA and would report already_completed.
+  {
+    const taskA3 = (await svcInsert('task_instances', { building_id: A, task_name: `ZZTEST-RLS-wontdo-${RUN}`, due_date: '2030-01-04' })).id;
+    cleanup.push(['task_instances', taskA3]);
+    cleanup.push(['task_completions', null, `task_instance_id=eq.${taskA3}`]);
+    const denied = await rpcCall(personas.userB.jwt, 'complete_task', { p_completion_id: crypto.randomUUID(), p_task_instance_id: taskA3, p_outcome: 'wont_do', p_reason: 'area_locked' });
+    assert('complete_task wont_do on building A refused for userB', denied.status === 403, `expected HTTP 403 (tc_insert / 42501), got HTTP ${denied.status} ${JSON.stringify(denied.body)}`);
+    const untouched = await fetch(`${URL_BASE}/rest/v1/task_instances?id=eq.${taskA3}&select=status`, { headers: SVC }).then((r) => r.json());
+    assert('  → and the task stays pending with no completion row', untouched[0]?.status === 'pending' && (await canSelectF(personas.admin.jwt, 'task_completions', `task_instance_id=eq.${taskA3}`)) === false, JSON.stringify(untouched));
+    const allowed = await rpcCall(personas.userA.jwt, 'complete_task', { p_completion_id: crypto.randomUUID(), p_task_instance_id: taskA3, p_outcome: 'wont_do', p_reason: 'area_locked' });
+    assert('complete_task wont_do on building A allowed for userA', allowed.ok && allowed.rows[0]?.already_completed === false, `HTTP ${allowed.status} ${JSON.stringify(allowed.body)}`);
+    const landed = await fetch(`${URL_BASE}/rest/v1/task_instances?id=eq.${taskA3}&select=status`, { headers: SVC }).then((r) => r.json());
+    assert('  → and the task is wont_do', landed[0]?.status === 'wont_do', JSON.stringify(landed[0]));
+  }
   // Inserts real task_instances for building A from every active unscoped template on the
   // project; the teardown deletes generated rows for A/B before the buildings themselves.
   assert('generate_scheduled_tasks runs for admin', (await rpcCall(personas.admin.jwt, 'generate_scheduled_tasks', { p_building: A })).status === 200, 'admin generate failed');

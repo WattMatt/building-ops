@@ -9,7 +9,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fdb } from '@/integrations/supabase/fortress-db';
 import { supabase } from '@/integrations/supabase/client';
-import { taskCompletionPct } from '@/lib/buildingScore';
+import { countForScore, taskCompletionPct } from '@/lib/buildingScore';
 import { todayInOperatingTz } from '@/lib/myWork';
 import { SNAPSHOT_FRESH_DAYS, daysAgo, num, snapshotQueryDefaults, snapshotRowsOrEmpty, snapshots } from '@/lib/snapshotClient';
 
@@ -42,11 +42,8 @@ async function liveScore(bid: string): Promise<BuildingScoreData> {
     ohsPeriod = (report.report_period as string | null) ?? null;
   }
   const tasks = (taskRes.data ?? []) as { status: string | null }[];
-  const counts = {
-    completed: tasks.filter((t) => t.status === 'completed').length,
-    pending: tasks.filter((t) => t.status === 'pending').length,
-    overdue: tasks.filter((t) => t.status === 'overdue').length,
-  };
+  // issue_logged and wont_do are not scored (buildingScore.ts says which and why).
+  const counts = countForScore(tasks.map((t) => t.status));
   return { ohsPct, ohsPeriod, taskPct: taskCompletionPct(counts), asOf: null, source: 'live' };
 }
 

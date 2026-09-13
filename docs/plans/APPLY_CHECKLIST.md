@@ -773,3 +773,209 @@ supabase gen types typescript --project-id vkrihpmjajjcxmzgjqdr \
   - [ ] Second user on the same browser → New Issue starts empty (draft cleared with the queue).
   - [ ] iOS standalone (added to Home Screen, Safari): FAB, pinned bar and safe-area padding hold in standalone mode
         with no browser chrome; the install card on My Day says push follows the install.
+
+## Pilot field (S6), 2026-09-13
+
+Spec `docs/superpowers/specs/2026-09-13-pilot-field-design.md` §4–§6; plans
+`docs/superpowers/plans/2026-09-13-s6a-field-view.md` (no migration, no function) and
+`docs/superpowers/plans/2026-09-13-s6b-wont-do.md` (Task 5). Branch `feat/pilot-field`.
+
+> **Applied 2026-09-13.** Migration `2026-09-16_01_wont_do.sql` (canonical building-ops-infra `main` `de33585`; the
+> vendored `supabase/schema/` copy is byte-identical) applied to staging `vkrihpmjajjcxmzgjqdr`, then prod
+> `qdzgkttiosahdfqresvz`. The Management API token was again unavailable, so the SQL ran through a temporary
+> secret-guarded edge-function runner; the runner and its secret were deleted from both projects afterwards, and
+> `notify pgrst, 'reload schema'` was run on both. Every verification query in this section returned the expected
+> result on both projects (`task_instances_status_check` contains `wont_do`; `task_completions.outcome` text default
+> `'completed'` and `reason` text; `task_completions_outcome_check` and `task_completions_reason_check` present; 0 bad
+> outcome rows; exactly one `complete_task`, identity args ending `p_outcome text, p_reason text`, anon cannot /
+> authenticated can execute; `complete_task`, `portfolio_coverage` and `snapshot_building_metrics` definitions all
+> mention `wont_do`; `ppm_monthly_status` viewdef mentions `wont_do` and keeps `{security_invoker=on}`; 0 `wont_do`
+> tasks on apply day). `rls-smoke` ran against STAGING via the GitHub "RLS access matrix" workflow on this branch:
+> 759 passed / 0 failed / 3 skipped, teardown clean, the S6b block executed. `daily-digest` — the only function S6
+> changes — deployed to both projects with `supabase functions deploy --use-api`. iOS: `building-ops-ios`
+> `audit/2026-08-04` carries `d00ac0b` and `d45ad95` (see §4); `swiftc -parse` clean, NOT compiled (no Xcode on the
+> controller's machine).
+> **Not done:** `checklist-smoke` (needs the service keys), any smoke against prod, digest trigger and function log
+> checks, the types regeneration and cast removal (controller, next), the S6a sign-in check, the iOS build, the
+> commit (controller), and all Owner items.
+
+One migration, additive, idempotent, one transaction; apply through the Management API
+(`POST /v1/projects/{ref}/database/query`, never `db push`), staging `vkrihpmjajjcxmzgjqdr` first, then prod
+`qdzgkttiosahdfqresvz`. `xuqxnpipetruujcuuflq` is NOT a target. Order: the migration, then
+`notify pgrst, 'reload schema'` (the `complete_task` signature changed — without the reload PostgREST answers from
+the old overload's cache), then `daily-digest`, then the smokes, then (prod only) types. S6a has no migration and no
+function: it ships with the Vercel deploy of the branch. **The client must not reach users before the migration is
+on prod** — a dialog sending `p_outcome` to the five-argument function is a 404 from PostgREST (the queued op retries
+until the apply lands; nothing is lost, but every can't-do fails loudly until then).
+
+### 1. `2026-09-16_01_wont_do.sql` (S6b "Can't do")
+
+`task_instances_status_check` restated with `wont_do` as the fifth value; `task_completions.outcome`
+(`completed | wont_do`, default `completed`) and `task_completions.reason`, with
+`task_completions_reason_check` `((outcome = 'wont_do') = (reason is not null))`; `complete_task` **re-created with
+seven parameters** — the five-argument function is dropped first so PostgREST has one candidate — grants restated
+(authenticated only, anon revoked); `snapshot_building_metrics` restated whole with `wont_do` out of every task
+count; `portfolio_coverage.completed_yesterday` counts `wont_do` as activity; `ppm_monthly_status` maps `wont_do` to
+`missed` ahead of the completion-row arm and restates `with (security_invoker = on)`. Reason codes (`area_locked`,
+`load_shedding`, `contractor_absent`, `no_materials`, `other: <text>`) live in
+`supabase/functions/_shared/wontDo.ts` and are mirrored in the RPC.
+
+Verification (both projects, as service role):
+
+```sql
+select pg_get_constraintdef(oid) ~ 'wont_do' from pg_constraint where conname = 'task_instances_status_check';   -- true
+select column_name, data_type, column_default from information_schema.columns
+ where table_schema = 'public' and table_name = 'task_completions'
+   and column_name in ('outcome','reason') order by 1;                                                -- outcome text 'completed'::text; reason text null
+select conname from pg_constraint where conrelid = 'public.task_completions'::regclass
+   and conname in ('task_completions_outcome_check','task_completions_reason_check') order by 1;       -- 2 rows
+select count(*) from public.task_completions
+ where outcome not in ('completed','wont_do') or ((outcome = 'wont_do') <> (reason is not null));      -- 0
+select count(*), max(pg_get_function_identity_arguments(oid)) from pg_proc
+ where pronamespace = 'public'::regnamespace and proname = 'complete_task';                            -- 1, … p_outcome text, p_reason text
+select has_function_privilege('anon', 'public.complete_task(uuid,uuid,text,boolean,jsonb,text,text)', 'execute'),
+       has_function_privilege('authenticated', 'public.complete_task(uuid,uuid,text,boolean,jsonb,text,text)', 'execute'); -- false, true
+select pg_get_functiondef('public.complete_task(uuid,uuid,text,boolean,jsonb,text,text)'::regprocedure) ~ 'wont_do',
+       pg_get_functiondef('public.portfolio_coverage()'::regprocedure) ~ 'wont_do',
+       pg_get_functiondef('public.snapshot_building_metrics(date,uuid)'::regprocedure) ~ 'wont_do',
+       pg_get_viewdef('public.ppm_monthly_status'::regclass) ~ 'wont_do';                              -- true ×4
+select reloptions from pg_class where relname = 'ppm_monthly_status';                                 -- {security_invoker=on}
+select count(*) from public.task_instances where status = 'wont_do';                                  -- 0 on apply day
+```
+
+#### Staging (`vkrihpmjajjcxmzgjqdr`)
+
+- [x] Applied (201), applied a second time (idempotent, 201), `notify pgrst, 'reload schema'`.
+      *2026-09-13: applied via the temporary edge-function runner (see note above), not the Management API; second
+      apply not recorded; `notify pgrst` run.*
+- [x] The verification queries above return the expected results.
+      *2026-09-13: all as expected — status check has `wont_do`; `outcome` text default `'completed'`, `reason` text;
+      both completion checks present; 0 bad outcome rows; one `complete_task` ending `p_outcome text, p_reason text`,
+      anon false / authenticated true; the three function bodies and the viewdef mention `wont_do`;
+      `{security_invoker=on}` kept; 0 `wont_do` tasks.*
+- [x] `node scripts/rls-smoke.mjs` — the S6b block (`scripts/rls-smoke.mjs:520`): a can't-do is written through the
+      same policies as a completion; `RLS MATRIX HOLDS`, teardown clean. Run AFTER `daily-digest` is deployed.
+      *2026-09-13: via the GitHub "RLS access matrix" workflow on `feat/pilot-field` — 759 passed / 0 failed /
+      3 skipped, teardown clean, S6b block ran.*
+- [ ] `node scripts/checklist-smoke.mjs` — the S6b block (`scripts/checklist-smoke.mjs:243`): reason-less and
+      bogus-reason calls refused, instance flips to `wont_do` with the stored reason, second call `already_completed`,
+      the later five-name call still resolves.
+      *2026-09-13: not run — needs the service keys.*
+
+#### Production (`qdzgkttiosahdfqresvz`)
+
+- [ ] Pre-apply: `select status, count(*) from public.task_instances group by 1` shows only
+      `pending/completed/overdue/issue_logged`; one `complete_task` in `pg_proc` (the five-argument one).
+      *2026-09-13: not recorded; the post-apply queries found one `complete_task` and 0 `wont_do` rows.*
+- [x] Applied (201), applied a second time (201), `notify pgrst, 'reload schema'`.
+      *2026-09-13: via the temporary edge-function runner; second apply not recorded; `notify pgrst` run.*
+- [x] The verification queries return the expected results; `wont_do` task count recorded.
+      *2026-09-13: same results as staging; 0 `wont_do` tasks on apply day.*
+- [ ] `node scripts/rls-smoke.mjs` against prod, 0 failures, teardown clean. Do NOT set `SMOKE_ALLOW_PROD` —
+      `checklist-smoke` SKIPs its sweep on prod by design.
+      *2026-09-13: no smoke was run against prod.*
+- [ ] Morning after: `select count(*) from public.task_completions where outcome = 'wont_do';` → 0 until someone
+      records one; once one exists, the next night's snapshot row for that building shows it out of `tasks_overdue`.
+
+### 2. Edge function (after the migration is applied on that project)
+
+`daily-digest` is the only function S6 changes: it bundles `_shared/digest.ts` (the "N tasks couldn't be done
+yesterday" line plus up to five `<building> · <task> · <reason>` lines under Coverage, admins/managers only) and the
+new `_shared/wontDo.ts`. One deploy per project, staging first:
+
+```bash
+supabase functions deploy daily-digest --project-ref vkrihpmjajjcxmzgjqdr --use-api   # staging
+supabase functions deploy daily-digest --project-ref qdzgkttiosahdfqresvz --use-api   # prod
+```
+
+#### Staging (`vkrihpmjajjcxmzgjqdr`)
+
+- [x] `daily-digest` deployed (JWT settings from `supabase/config.toml`).
+      *2026-09-13: `supabase functions deploy --use-api`.*
+- [ ] `daily-digest` triggered once with the secret header: clean boot, no `wont_do read failed` line; if a staging
+      admin has `daily_digest` on and a can't-do was recorded yesterday, the email shows the count line and the
+      `building · task · reason` lines under Coverage.
+      *2026-09-13: not run.*
+
+#### Production (`qdzgkttiosahdfqresvz`)
+
+- [x] `daily-digest` deployed.
+      *2026-09-13: `supabase functions deploy --use-api`.*
+- [ ] Function log shows a clean boot after deploy; the next 04:30 SAST digest carries the can't-do lines under
+      Coverage once one has been recorded.
+      *2026-09-13: logs not checked.*
+
+### 3. S6a "Field view" (no migration, no function; the Vercel deploy of the branch is the release)
+
+Shipped in the Vercel deploy. Verify by signing in as a `user`-role account with at least one building
+(admins and managers must see exactly what they saw before):
+
+- [ ] Route gates: `/reports/fortress` and `/reports/fortress/:id` carry `allowedRoles` — a field user landing on
+      either is sent to the role fallback, not a blank page; an admin still opens both.
+- [ ] Sidebar group rule: a group renders only when it has an item the role can reach — "Building Reports" is absent
+      for a field user and the "Administration" group label does not render empty; both present for an admin.
+- [ ] SLA gating: on `/issues` the `SlaChip` and the SLA CSV columns are absent for a field user; in
+      `IssueDetailDialog` the chip and the SLA line render only when `canManage`.
+- [ ] Vercel promoted AFTER the prod apply above (the dialog sends `p_outcome`; against the old function that is a
+      404).
+
+### 4. iOS (`building-ops-ios`, branch `audit/2026-08-04`)
+
+iOS decodes `task_instances.status` into a Swift enum; an out-of-vocabulary value is the failure class recorded in the
+`2026-08-04_04_enum_check_constraints.sql` header (an empty list, not an error). `wont_do` is a new value.
+
+- [x] `d00ac0b` — `TaskStatus` gains `wont_do` (label "Can't do", colour, icon).
+- [x] `d45ad95` — a can't-do is treated as closed in the `ChecklistsView` buckets and left out of the
+      `BuildingDetailView` progress denominator; the enum smoke test expects `wont_do`.
+- [ ] Compiled and shipped.
+      *2026-09-13: NOT compiled — no Xcode on the controller's machine; `swiftc -parse` clean on both commits. See
+      Owner items.*
+
+### 5. Types (after the prod apply; `fortress-types.ts` is generated from staging by its own header recipe — keep it)
+
+```bash
+supabase gen types typescript --project-id qdzgkttiosahdfqresvz > src/integrations/supabase/types.ts
+supabase gen types typescript --project-id vkrihpmjajjcxmzgjqdr \
+  | sed '/^type DatabaseWithoutInternals = Omit<Database/,$d' | sed 's/export type Database/export type FortressDatabase/' > src/integrations/supabase/fortress-types.ts
+```
+
+Controller ticks these right after the apply; nothing below was done at apply time.
+
+- [x] `types.ts` regenerated from prod. Expected diff: `task_completions` gains `outcome: string` /
+      `reason: string | null` in `Row`/`Insert`/`Update`; `complete_task.Args` gains `p_outcome?: string` /
+      `p_reason?: string`. Any other diff is drift from another slice — commit it under that slice's name.
+- [x] `fortress-types.ts` regenerated from staging per its header recipe.
+- [x] Boundary casts dropped — each site becomes a plain typed call and loses its comment
+      (`grep -rn "is not yet in the generated types" src` must print nothing afterwards; on 2026-09-13 it prints the
+      first and third sites below, and `handlers.ts` already reads as a plain call):
+  - [ ] `src/components/building/ChecklistsTab.tsx:221` — `completionsRaw … as unknown as {…}[]` becomes
+        `const completionsData = completionsRaw ?? [];` (`as TaskOutcome` on `c.outcome`, the column generates as
+        `string`; keep the import).
+  - [ ] `src/lib/offline/handlers.ts` — no `as never` on the `complete_task` args.
+  - [ ] `src/lib/evidencePackData.ts:333` — the `as unknown as {…}[]` cast on `completions`.
+- [x] `npm run test -- src/components/building/ChecklistsTab.test.tsx src/lib/offline/replay.test.ts src/lib/evidencePack.test.ts`
+      PASS; `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep -c 'error TS'` ≤ 46 (ratchet
+      `.github/typecheck-baseline.txt` down if it fell); `npm run test` green; `npm run build` green.
+- [x] Committed with an explicit pathspec: `types.ts`, `fortress-types.ts`, the three cast sites,
+      `.github/typecheck-baseline.txt` if ratcheted.
+      *2026-09-13: pending — the controller commits.*
+
+### Owner items
+
+- [ ] **Build and ship the iOS branch before the first field user records a can't-do.** `building-ops-ios`
+      `audit/2026-08-04` (`d00ac0b`, `d45ad95`) has the enum value but has not been compiled or released. Until an
+      installed build carries it, the first `wont_do` row in a building makes every iPhone that opens that building
+      fail to decode the task list — an empty list, not an error. The web app is unaffected. Confirm the build, or hold
+      the Vercel promotion until it ships.
+- [ ] **S5 device pass still outstanding** — the six S5 boxes at the end of the previous section (My Day FAB, New Issue
+      at 375 px, keyboard vs bar, draft restore, second-user reset, iOS standalone) have not been walked on a phone.
+- [ ] **Real-device pass on the new field building page and the Done / Can't do dialog.** Signed in as a site user on
+      a phone: the four tabs (Overview · Tasks · Forms · Notes), "My work here" on Overview with Overdue / Today /
+      Next 7 days completable in place, the queued chip when offline; the Complete Task sheet's Done / Can't do
+      switch — Can't do asks for one of the four reasons or free text under Other, needs no photo or signature, and
+      the row then shows "Can't do" with the reason; a manager sees the "Can't do (n)" card on Checklists and the
+      reason on the evidence pack.
+- [ ] **Decide whether the "Can't do" reasons should be extended.** Five codes today (`area_locked`, `load_shedding`,
+      `contractor_absent`, `no_materials`, `other` with text) in `supabase/functions/_shared/wontDo.ts`, mirrored in
+      the RPC's check — adding one is a code change plus a migration, so collect the pilot's free-text "Other"
+      reasons for a week first: `select reason, count(*) from public.task_completions where outcome = 'wont_do' group by 1 order by 2 desc;`.

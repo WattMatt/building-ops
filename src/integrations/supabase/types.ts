@@ -3468,7 +3468,9 @@ export type Database = {
           created_at: string | null
           id: string
           notes: string | null
+          outcome: string
           photo_urls: Json | null
+          reason: string | null
           signature_confirmed: boolean | null
           task_instance_id: string
         }
@@ -3477,7 +3479,9 @@ export type Database = {
           created_at?: string | null
           id?: string
           notes?: string | null
+          outcome?: string
           photo_urls?: Json | null
+          reason?: string | null
           signature_confirmed?: boolean | null
           task_instance_id: string
         }
@@ -3486,7 +3490,9 @@ export type Database = {
           created_at?: string | null
           id?: string
           notes?: string | null
+          outcome?: string
           photo_urls?: Json | null
+          reason?: string | null
           signature_confirmed?: boolean | null
           task_instance_id?: string
         }
@@ -4750,7 +4756,9 @@ export type Database = {
         Args: {
           p_completion_id: string
           p_notes?: string
+          p_outcome?: string
           p_photo_urls?: Json
+          p_reason?: string
           p_signature_confirmed?: boolean
           p_task_instance_id: string
         }

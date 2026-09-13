@@ -36,7 +36,13 @@ export interface CoverageRow {
   completed_yesterday: number;
 }
 
-/** What the Coverage section says, shaped once per run from the service-role call. */
+/** Yesterday's can't-dos (S6b), shaped by the caller: `lines` are already "<building> · <task> · <reason>". */
+export interface WontDoYesterday {
+  count: number;
+  lines: string[];
+}
+
+/** What the Coverage section says, shaped once per run from the service-role calls. */
 export interface CoverageSummary {
   /** Buildings with no active field member. */
   noTeam: string[];
@@ -44,16 +50,19 @@ export interface CoverageSummary {
   unassignedOpen: number;
   /** Buildings that had daily tasks due yesterday and completed none of them. */
   silentYesterday: string[];
+  /** Tasks recorded as can't-do yesterday, portfolio-wide. Optional so older callers and tests keep their shape. */
+  wontDoYesterday?: WontDoYesterday | null;
 }
 
-/** Pure shaping of the RPC rows; null when every line would be empty so the caller can pass nothing. */
-export function coverageSummary(rows: CoverageRow[]): CoverageSummary | null {
+/** Pure shaping of the RPC rows (plus yesterday's can't-dos); null when every line would be empty so the caller can pass nothing. */
+export function coverageSummary(rows: CoverageRow[], wontDo: WontDoYesterday | null = null): CoverageSummary | null {
   const s: CoverageSummary = {
     noTeam: rows.filter((r) => r.field_members === 0).map((r) => r.building_name),
     unassignedOpen: rows.reduce((n, r) => n + r.unassigned_open, 0),
     silentYesterday: rows.filter((r) => r.due_yesterday > 0 && r.completed_yesterday === 0).map((r) => r.building_name),
   };
-  return s.noTeam.length || s.unassignedOpen || s.silentYesterday.length ? s : null;
+  if (wontDo && wontDo.count > 0) s.wontDoYesterday = wontDo;
+  return s.noTeam.length || s.unassignedOpen || s.silentYesterday.length || s.wontDoYesterday ? s : null;
 }
 
 export interface DigestInput {
@@ -87,6 +96,17 @@ export const SECTION_MAX = 15;
 function capLines(lines: string[]): string[] {
   if (lines.length <= SECTION_MAX) return lines;
   return [...lines.slice(0, SECTION_MAX), `…and ${lines.length - SECTION_MAX} more`];
+}
+
+/**
+ * Most can't-do lines the coverage section quotes (spec §5.3: "up to five"). The count line above
+ * them carries the true number, so the cap hides nothing.
+ */
+export const WONT_DO_LINES_MAX = 5;
+
+function capWontDoLines(lines: string[]): string[] {
+  if (lines.length <= WONT_DO_LINES_MAX) return lines;
+  return [...lines.slice(0, WONT_DO_LINES_MAX), `…and ${lines.length - WONT_DO_LINES_MAX} more`];
 }
 
 /**
@@ -130,7 +150,8 @@ export function composeDigest(input: DigestInput): DigestSection[] | null {
     sections.push({ heading: `${total} expiring ${plural(total, 'document, warranty or service', 'documents, warranties and services')}`, lines });
   }
   const c = input.coverage;
-  if (c && (c.noTeam.length || c.unassignedOpen || c.silentYesterday.length)) {
+  const wontDo = c?.wontDoYesterday && c.wontDoYesterday.count > 0 ? c.wontDoYesterday : null;
+  if (c && (c.noTeam.length || c.unassignedOpen || c.silentYesterday.length || wontDo)) {
     // Both building lists are capped like every other section; the heading carries the true
     // counts so a cap never hides how big the gap is.
     const lines: string[] = capLines(c.noTeam.map((name) => `${name} has no field team`));
@@ -138,6 +159,11 @@ export function composeDigest(input: DigestInput): DigestSection[] | null {
       lines.push(`${c.unassignedOpen} open ${plural(c.unassignedOpen, 'task has', 'tasks have')} nobody assigned`);
     }
     lines.push(...capLines(c.silentYesterday.map((name) => `Nothing was logged yesterday at ${name}`)));
+    if (wontDo) {
+      // S6b: one count line, then up to WONT_DO_LINES_MAX "<building> · <task> · <reason>" lines.
+      lines.push(`${wontDo.count} ${plural(wontDo.count, 'task', 'tasks')} couldn't be done yesterday`);
+      lines.push(...capWontDoLines(wontDo.lines));
+    }
     const counts: string[] = [];
     if (c.noTeam.length) {
       counts.push(`${c.noTeam.length} ${plural(c.noTeam.length, 'building', 'buildings')} with no field team`);

@@ -60,8 +60,8 @@ import { runOne, replayAll, retryOp, isNetworkError, isDuplicateError, MAX_ATTEM
 import type { IssueCommentPayload, IssueCreatePayload, IssueResolvePayload, TaskCompletePayload } from './types';
 
 const UID = 'u1';
-const complete = (completionId = 'c1', taskInstanceId = 't1'): TaskCompletePayload => ({
-  kind: 'task_complete', completionId, taskInstanceId, taskName: 'Check extinguishers', notes: 'all good', signatureConfirmed: true,
+const complete = (completionId = 'c1', taskInstanceId = 't1', over: Partial<TaskCompletePayload> = {}): TaskCompletePayload => ({
+  kind: 'task_complete', completionId, taskInstanceId, taskName: 'Check extinguishers', notes: 'all good', signatureConfirmed: true, ...over,
 });
 const create = (markTaskIssueLogged: string | null): IssueCreatePayload => ({
   kind: 'issue_create',
@@ -112,6 +112,7 @@ describe('offline replay', () => {
     expect(vi.mocked(uploadPhotos).mock.calls[0][1]).toEqual({ prefix: 'photos/u1' });
     expect(state.rpc).toHaveBeenCalledWith('complete_task', {
       p_completion_id: 'c1', p_task_instance_id: 't1', p_notes: 'all good', p_signature_confirmed: true, p_photo_urls: ['https://x/p.jpg'],
+      p_outcome: 'completed', p_reason: undefined,
     });
     expect(outcome).toEqual({ status: 'synced', result: { completion_id: 'c1', already_completed: false } });
     expect(await listOps(UID)).toEqual([]);
@@ -123,6 +124,24 @@ describe('offline replay', () => {
     const outcome = await runOne(op);
     expect(uploadPhotos).not.toHaveBeenCalled();
     expect(state.rpc).toHaveBeenCalledWith('complete_task', expect.objectContaining({ p_photo_urls: [] }));
+    expect(outcome).toEqual({ status: 'synced', result: { completion_id: 'c1', already_completed: true } });
+    expect(await listOps(UID)).toEqual([]);
+  });
+
+  it('2b. task_complete passes a can\'t-do outcome and reason straight through to the RPC', async () => {
+    const op = await enqueue(UID, complete('c1', 't1', { outcome: 'wont_do', reason: 'area_locked', signatureConfirmed: false }), []);
+    const outcome = await runOne(op);
+    expect(state.rpc).toHaveBeenCalledWith('complete_task', expect.objectContaining({
+      p_completion_id: 'c1', p_task_instance_id: 't1', p_outcome: 'wont_do', p_reason: 'area_locked', p_signature_confirmed: false, p_photo_urls: [],
+    }));
+    expect(outcome).toEqual({ status: 'synced', result: { completion_id: 'c1', already_completed: false } });
+    expect(await listOps(UID)).toEqual([]);
+  });
+
+  it('2c. a can\'t-do already recorded elsewhere replays exactly like a completion: synced, flagged, op dropped', async () => {
+    state.rpc.mockResolvedValue(ok('c1', true));
+    const op = await enqueue(UID, complete('c1', 't1', { outcome: 'wont_do', reason: 'other: gate welded shut' }), []);
+    const outcome = await runOne(op);
     expect(outcome).toEqual({ status: 'synced', result: { completion_id: 'c1', already_completed: true } });
     expect(await listOps(UID)).toEqual([]);
   });
@@ -363,6 +382,21 @@ describe('offline replay', () => {
     const op = await enqueue(UID, complete(), []);
     expect(await runOne(op)).toEqual({ status: 'failed', error: 'permission denied', code: '42501' });
     expect((await listOps(UID))[0]).toMatchObject({ id: op.id, status: 'failed', attempts: 1, lastError: 'permission denied' });
+  });
+
+  it('8a. the RPC refusing a can\'t-do (22023) parks the op failed, with the function-name prefix stripped from the message', async () => {
+    state.rpc.mockResolvedValue({
+      data: null, error: { code: '22023', message: 'complete_task: a reason is required when the outcome is wont_do' },
+    });
+    const op = await enqueue(UID, complete('c1', 't1', { outcome: 'wont_do', reason: null }), []);
+    expect(await runOne(op)).toEqual({ status: 'failed', error: 'a reason is required when the outcome is wont_do', code: '22023' });
+    expect((await listOps(UID))[0]).toMatchObject({
+      id: op.id, status: 'failed', attempts: 1, lastError: 'a reason is required when the outcome is wont_do',
+    });
+    // Only a bare `word: ` prefix is dropped; a message that starts any other way is kept whole.
+    state.rpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'Task status was not updated — your role does not permit it.' } });
+    const other = await enqueue(UID, complete('c2', 't2'), []);
+    expect(await runOne(other)).toMatchObject({ status: 'failed', error: 'Task status was not updated — your role does not permit it.' });
   });
 
   it('8b. an op whose user is no longer signed in is failed (USER_MISMATCH) before anything reaches the backend', async () => {

@@ -15,6 +15,8 @@ import type { TDocumentDefinitions, Content, TableCell } from 'pdfmake/interface
 import type { EmbeddedPhoto } from '@/lib/fortressReportDoc';
 import { runningHeader, safePrimaryColor } from '@/lib/reportDocs';
 import { formatRand } from '@/lib/money';
+import { reasonLabel, type TaskOutcome } from '@/lib/wontDo';
+import { TASK_STATUS_LABELS, type TaskStatus } from '@/lib/constants';
 
 /**
  * How many photos one pack fetches and embeds. A resolved issue with a photo on every comment
@@ -91,6 +93,9 @@ export interface TaskPack {
     completedAt: string;
     notes: string | null;
     signatureConfirmed: boolean;
+    /** S6b: what the row records. A can't-do prints its reason. */
+    outcome: TaskOutcome;
+    reason: string | null;
     photos: EmbeddedPhoto[];
     /**
      * Which row the evidence came from. `task_instances` is the denormalised copy kept on the
@@ -143,6 +148,10 @@ export const NOT_COMPLETED_COPY = 'Not completed';
 export const SOURCE_COPY: Record<'task_completions' | 'task_instances', string> = {
   task_completions: 'Recorded in task_completions',
   task_instances: 'Recorded on the task (no completion row)',
+};
+export const OUTCOME_COPY: Record<TaskOutcome, string> = {
+  completed: 'Completed',
+  wont_do: "Can't do",
 };
 
 const PHOTOS_PER_ROW = 2;
@@ -347,7 +356,8 @@ export function buildTaskPackDoc(p: TaskPack): TDocumentDefinitions {
 
   const instance = keyValues([
     ['Building', p.meta.buildingName],
-    ['Status', task.status],
+    // The label, never the raw enum: a reader gets "Can't do", not "wont_do". Unknown values print as-is.
+    ['Status', TASK_STATUS_LABELS[task.status as TaskStatus] ?? task.status],
     ['Frequency', task.frequency],
     ['Due date', task.dueDate],
     ['Responsible role', task.responsibleRole],
@@ -358,6 +368,10 @@ export function buildTaskPackDoc(p: TaskPack): TDocumentDefinitions {
   const completionBlock: Content[] = completion
     ? [
         keyValues([
+          ['Outcome', OUTCOME_COPY[completion.outcome]],
+          ...(completion.outcome === 'wont_do'
+            ? [['Reason', reasonLabel(completion.reason) || dash(completion.reason)] as [string, string]]
+            : []),
           ['Completed by', completion.completedBy],
           ['Completed at', completion.completedAt],
           ['Signature confirmed', completion.signatureConfirmed ? 'Yes' : 'No'],

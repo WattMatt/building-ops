@@ -162,6 +162,19 @@ describe('IssueDetailDialog', () => {
       expect(screen.queryByText(/SLA target/)).not.toBeInTheDocument();
       expect(document.querySelector('[data-sla]')).toBeNull();
     });
+
+    it('keeps the chip and the line off for someone who cannot manage the issue (spec pilot-field §4.3)', async () => {
+      const created = new Date(Date.now() - 30 * 60_000);
+      render(
+        <IssueDetailDialog
+          issue={{ ...issue, created_at: created.toISOString(), sla_target_hours: 24 }}
+          open onOpenChange={() => {}} canManage={false} onUpdated={() => {}}
+        />,
+      );
+      await screen.findByRole('heading', { name: /leaking tap in kitchen/i });
+      expect(screen.queryByText(/SLA target/)).not.toBeInTheDocument();
+      expect(document.querySelector('[data-sla]')).toBeNull();
+    });
   });
 
   describe('contractor (admin/manager)', () => {

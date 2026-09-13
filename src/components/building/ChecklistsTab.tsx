@@ -13,6 +13,7 @@ import {
   Calendar,
   CalendarDays,
   AlertTriangle,
+  Ban,
   Loader2,
   RefreshCw,
   Plus,
@@ -46,6 +47,7 @@ import { Hint } from '@/components/ui/hint';
 import ReportIssueDialog from '@/components/checklists/ReportIssueDialog';
 import CompleteTaskDialog from '@/components/checklists/CompleteTaskDialog';
 import { TasksList, type TaskInstance, type TaskFrequency, type TaskStatus } from '@/components/building/TasksList';
+import { reasonLabel, type TaskOutcome } from '@/lib/wontDo';
 import { RoleAssignmentsPanel } from '@/components/building/RoleAssignmentsPanel';
 import { UpcomingTasks, HORIZON_DAYS, groupUpcoming } from '@/components/building/UpcomingTasks';
 import { todayInOperatingTz } from '@/lib/myWork';
@@ -202,27 +204,33 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
 
       const tasksData = tasksRaw;
 
-      // Fetch completions for these tasks
+      // Fetch completions for these tasks (S6b: with the outcome and the reason a can't-do carries)
       const taskIds = (tasksData || []).map(t => t.id);
-      const { data: completionsData, error: completionsError } = await supabase
+      const { data: completionsRaw, error: completionsError } = await supabase
         .from('task_completions')
         .select(`
           task_instance_id,
           completed_by,
-          completed_at:created_at
+          completed_at:created_at,
+          outcome,
+          reason
         `)
         .in('task_instance_id', taskIds);
 
       if (completionsError) throw completionsError;
+      // The column is `text` in the schema; the RPC's check narrows it to the two outcomes.
+      const completionsData = (completionsRaw ?? []).map((c) => ({ ...c, outcome: (c.outcome ?? null) as TaskOutcome | null }));
 
       // Map completions to tasks. The completer's name is resolved at render time from the
       // building's member list (`nameOf`) — other users' `profiles` rows are not readable here.
       const completionMap = new Map(
-        (completionsData || []).map(c => [
+        completionsData.map(c => [
           c.task_instance_id,
           {
             completed_by: c.completed_by,
             completed_at: c.completed_at,
+            outcome: c.outcome ?? 'completed',
+            reason: c.reason,
           },
         ])
       );
@@ -354,14 +362,20 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
     { key: 'status', header: 'Status' },
     { header: 'Completed by', format: (_v, row) => (row.completion ? nameOf(row.completion.completed_by) ?? '' : '') },
     { header: 'Completed at', format: (_v, row) => csvInstant(row.completion?.completed_at) },
+    { header: 'Reason', format: (_v, row) => (row.status === 'wont_do' ? reasonLabel(row.completion?.reason) : '') },
   ], [nameOf]);
 
-  // Calculate progress
+  // Calculate progress. A can't-do (S6b) is closed but neither done nor outstanding, so it is out of
+  // the denominator — as it is out of every task count in snapshot_building_metrics. An issue_logged
+  // task STAYS in the denominator here (it is still not done); buildingScore.ts draws a narrower
+  // line and leaves issue_logged unscored too, so the two figures are not the same number.
   const pendingTasks = filteredTasks.filter(t => t.status === 'pending');
   const completedTasksList = filteredTasks.filter(t => t.status === 'completed');
   const issueTasks = filteredTasks.filter(t => t.status === 'issue_logged');
-  const progressPercentage = filteredTasks.length > 0
-    ? Math.round((completedTasksList.length / filteredTasks.length) * 100)
+  const wontDoTasks = filteredTasks.filter(t => t.status === 'wont_do');
+  const scoredTaskCount = filteredTasks.length - wontDoTasks.length;
+  const progressPercentage = scoredTaskCount > 0
+    ? Math.round((completedTasksList.length / scoredTaskCount) * 100)
     : 0;
 
   if (loading) {
@@ -514,7 +528,7 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
                     {frequencyLabels[selectedFrequency]} Progress
                   </p>
                   <p className="text-2xl font-bold">
-                    {completedTasksList.length} / {filteredTasks.length} tasks
+                    {completedTasksList.length} / {scoredTaskCount} tasks
                   </p>
                 </div>
                 <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center">
@@ -535,6 +549,12 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
                   <div className="flex items-center gap-2">
                     <div className="w-3 h-3 rounded-full bg-destructive" />
                     <span>Issues: {issueTasks.length}</span>
+                  </div>
+                )}
+                {wontDoTasks.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-muted-foreground/40" />
+                    <span>Can't do: {wontDoTasks.length}</span>
                   </div>
                 )}
               </div>
@@ -599,6 +619,7 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
                     const hasCompleted = dayTasks.some(t => t.status === 'completed');
                     const hasPending = dayTasks.some(t => t.status === 'pending');
                     const hasIssue = dayTasks.some(t => t.status === 'issue_logged');
+                    const hasWontDo = dayTasks.some(t => t.status === 'wont_do');
                     const isCurrentMonth = isSameMonth(day, currentMonth);
                     const inCurrentPeriod = isDayInCurrentPeriod(day);
                     const inFuturePeriod = isDayInFuturePeriod(day);
@@ -620,6 +641,7 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
                             {hasCompleted && <div className="w-1 h-1 rounded-full bg-success" />}
                             {hasPending && <div className="w-1 h-1 rounded-full bg-warning" />}
                             {hasIssue && <div className="w-1 h-1 rounded-full bg-destructive" />}
+                            {hasWontDo && <div className="w-1 h-1 rounded-full bg-muted-foreground/40" />}
                           </div>
                         )}
                       </div>
@@ -675,6 +697,32 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
                   nameOf={nameOf}
                   canAssign={canAssignTask}
                   onAssign={onAssignTask}
+                />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Can't do (S6b): closed with a reason, never done. The row prints the reason. */}
+          {wontDoTasks.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2 text-muted-foreground">
+                  <Ban className="h-4 w-4" />
+                  Can't do ({wontDoTasks.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <TasksList
+                  tasks={wontDoTasks}
+                  onComplete={handleCompleteTask}
+                  onReportIssue={handleReportIssue}
+                  showDueDate
+                  buildingId={buildingId}
+                  nameOf={nameOf}
+                  canAssign={canAssignTask}
+                  onAssign={onAssignTask}
+                  showEvidencePack
+                  buildingName={buildingName}
                 />
               </CardContent>
             </Card>

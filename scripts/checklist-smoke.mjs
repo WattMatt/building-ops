@@ -6,7 +6,9 @@
  *   active template + item  →  task generated for a building  →
  *   site user uploads completion photo (the EXACT path the web client uses)  →
  *   task_completion row inserted  →  task_instance flips to completed  →
- *   dashboard "completed today" count moves.
+ *   dashboard "completed today" count moves  →  (S6b) a second task is recorded
+ *   as "can't do" with a reason through the same complete_task RPC and never
+ *   counts as completed.
  *
  *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... SUPABASE_ANON_KEY=... \
  *   node scripts/checklist-smoke.mjs
@@ -237,6 +239,38 @@ try {
   assert('task_instances.completed_by still credits the first user', tiB[0]?.status === 'completed' && tiB[0]?.completed_by === userId && tiB[0]?.completed_by !== userB, JSON.stringify(tiB[0]));
   const tcsB = await (await fetch(`${URL_BASE}/rest/v1/task_completions?task_instance_id=eq.${task2}&select=id`, { headers: SVC })).json();
   assert('still exactly one completion row after the second user', tcsB.length === 1, `${tcsB.length} rows`);
+
+  // ── S6b: "Can't do" with a reason through the same RPC ──
+  // wont_do needs a reason (22023, HTTP 400); with one the instance flips to wont_do and the completion row
+  // carries outcome + reason. It never counts as completed. The task2 calls above pass no p_outcome at all,
+  // which is the shipped client's five-argument shape — their PASS proves the wider signature still resolves it.
+  const task3 = (await svcInsert('task_instances', {
+    building_id: building, task_name: `ZZTEST-CHK cantdo ${RUN}`, due_date: today, status: 'pending', frequency: 'daily',
+  })).id;
+  cleanup.unshift(['task_instances', `id=eq.${task3}`]);
+  cleanup.unshift(['task_completions', `task_instance_id=eq.${task3}`]); // in front: child before parent
+  const cid3 = crypto.randomUUID();
+  r = await rpc(jwt, 'complete_task', { p_completion_id: cid3, p_task_instance_id: task3, p_outcome: 'wont_do' });
+  body = await r.json();
+  assert('complete_task refuses wont_do without a reason (22023 → HTTP 400)', r.status === 400 && body?.code === '22023' && /reason is required/.test(body?.message ?? ''), `HTTP ${r.status} ${JSON.stringify(body)}`);
+  r = await rpc(jwt, 'complete_task', { p_completion_id: cid3, p_task_instance_id: task3, p_outcome: 'wont_do', p_reason: 'bogus' });
+  body = await r.json();
+  assert('complete_task refuses a reason outside the code list', r.status === 400 && body?.code === '22023', `HTTP ${r.status} ${JSON.stringify(body)}`);
+  const ti3a = await svcSelect('task_instances', `id=eq.${task3}&select=status`);
+  assert('a refused can\'t-do leaves the task pending', ti3a[0]?.status === 'pending', JSON.stringify(ti3a[0]));
+  r = await rpc(jwt, 'complete_task', { p_completion_id: cid3, p_task_instance_id: task3, p_notes: 'ZZTEST no power', p_outcome: 'wont_do', p_reason: 'load_shedding' });
+  body = await r.json();
+  assert('complete_task records wont_do with a reason as the site user', r.ok && body[0]?.completion_id === cid3 && body[0]?.already_completed === false, `HTTP ${r.status} ${JSON.stringify(body)}`);
+  const ti3 = await svcSelect('task_instances', `id=eq.${task3}&select=status,completed_by,completed_at`);
+  assert('  → the instance is wont_do, closed by the site user, closed-at stamped', ti3[0]?.status === 'wont_do' && ti3[0]?.completed_by === userId && !!ti3[0]?.completed_at, JSON.stringify(ti3[0]));
+  const tc3 = await svcSelect('task_completions', `task_instance_id=eq.${task3}&select=outcome,reason,notes,completed_by`);
+  assert('  → the completion row carries outcome wont_do, the reason and the notes', tc3.length === 1 && tc3[0].outcome === 'wont_do' && tc3[0].reason === 'load_shedding' && tc3[0].notes === 'ZZTEST no power' && tc3[0].completed_by === userId, JSON.stringify(tc3));
+  assert('  → dashboard: completed count unchanged by a can\'t-do', (await countAs('completed')) === completed1, `completed=${await countAs('completed')} expected ${completed1}`);
+  r = await rpc(jwt, 'complete_task', { p_completion_id: crypto.randomUUID(), p_task_instance_id: task3, p_notes: 'ZZTEST retry', p_signature_confirmed: true, p_photo_urls: [] });
+  body = await r.json();
+  assert('  → a later five-argument call on the same task is a no-op reporting already_completed', r.ok && body[0]?.already_completed === true && body[0]?.completion_id === cid3, `HTTP ${r.status} ${JSON.stringify(body)}`);
+  const ti3b = await svcSelect('task_instances', `id=eq.${task3}&select=status`);
+  assert('  → and does not turn the can\'t-do into a completion', ti3b[0]?.status === 'wont_do', JSON.stringify(ti3b[0]));
 
   // Sweep: flips every genuinely back-dated pending task on the project (what the cron does nightly).
   // That is a real side effect on prod, so refuse there unless SMOKE_ALLOW_PROD=1.

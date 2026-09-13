@@ -35,6 +35,7 @@ import CompleteTaskDialog from '@/components/checklists/CompleteTaskDialog';
 import { InstallCard } from '@/components/pwa/InstallCard';
 import { PushPromptCard } from '@/components/pwa/PushPromptCard';
 import { WeekStrip } from '@/components/myday/WeekStrip';
+import { Row, TaskRow, queuedStateFor } from '@/components/myday/TaskRow';
 import IssueDetailDialog from '@/components/issues/IssueDetailDialog';
 import { formatBuildingName } from '@/lib/buildingName';
 import { formatPeriodLabel } from '@/lib/fortressReports';
@@ -47,19 +48,6 @@ const priorityColors: Record<string, string> = {
   high: 'bg-destructive/80 text-destructive-foreground',
   critical: 'bg-destructive text-destructive-foreground',
 };
-
-/**
- * A date-column value (YYYY-MM-DD) read against the operating day, not the browser's.
- * A past due date reads "Was due …": in a list mixing overdue and upcoming rows, a bare
- * "Due Mon 8 Sep" gives the reader no clue that the date has already gone.
- */
-function dueLabel(dueDate: string, today: string): string {
-  if (dueDate === today) return 'Due today';
-  const parsed = new Date(`${dueDate}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return dueDate;
-  const when = format(parsed, 'EEE d MMM');
-  return dueDate < today ? `Was due ${when}` : `Due ${when}`;
-}
 
 function whenLabel(iso: string | null): string | null {
   if (!iso) return null;
@@ -99,21 +87,6 @@ function Section({
       </CardHeader>
       <CardContent className="space-y-2">{children}</CardContent>
     </Card>
-  );
-}
-
-/**
- * Every row is the same shape: what it is, where it is, and one action. Spec §5.3: a 56 px
- * tap target on phones (min-h-14), relaxing to 40 px once the row lays out horizontally.
- */
-function Row({ children, action }: { children: ReactNode; action: ReactNode }) {
-  return (
-    <div className="flex min-h-14 flex-col gap-3 rounded-lg bg-muted/50 p-3 sm:min-h-10 sm:flex-row sm:items-center sm:justify-between">
-      {/* break-words here rather than on each title: long task names and issue titles
-          arrive unhyphenated from the field and would otherwise widen the row on a phone. */}
-      <div className="min-w-0 flex-1 break-words">{children}</div>
-      <div className="shrink-0">{action}</div>
-    </div>
   );
 }
 
@@ -162,37 +135,15 @@ export default function MyDay() {
 
   const greeting = greetingFor(profile?.full_name, new Date().getHours());
 
-  // Guardrail chips, not <Hint>s: the state of a queued write must survive hints being off.
-  const queuedChip = (taskId: string) =>
-    failedTasks.has(taskId) ? (
-      <Badge variant="destructive" className="h-10 w-full justify-center sm:w-auto sm:h-auto">
-        Needs attention
-      </Badge>
-    ) : (
-      <Badge variant="secondary" className="h-10 w-full justify-center sm:w-auto sm:h-auto">
-        Queued
-      </Badge>
-    );
-
   const taskRow = (task: MyTask) => (
-    <Row
+    <TaskRow
       key={task.id}
-      action={
-        queuedTasks.has(task.id) ? (
-          queuedChip(task.id)
-        ) : (
-          <Button className="h-10 w-full sm:w-auto" onClick={() => setTaskToComplete(task)}>
-            <CheckCircle2 className="mr-2 h-4 w-4" />
-            Complete
-          </Button>
-        )
-      }
-    >
-      <p className="font-medium text-sm">{task.task_name}</p>
-      <p className="text-sm text-muted-foreground">
-        {formatBuildingName(task.building_name)} · {dueLabel(task.due_date, today)}
-      </p>
-    </Row>
+      task={task}
+      today={today}
+      queued={queuedStateFor(task.id, queuedTasks, failedTasks)}
+      onComplete={setTaskToComplete}
+      showBuilding
+    />
   );
 
   return (
