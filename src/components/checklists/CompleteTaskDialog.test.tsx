@@ -2,6 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { mockViewport } from '@/test/mobile';
 
+// Radix RadioGroup and Checkbox measure their hidden form input with ResizeObserver, which jsdom lacks.
+if (!('ResizeObserver' in globalThis)) {
+  class RO { observe() {} unobserve() {} disconnect() {} }
+  (globalThis as unknown as { ResizeObserver: typeof RO }).ResizeObserver = RO;
+}
+
 const enqueueAndRun = vi.hoisted(() => vi.fn());
 const toast = vi.hoisted(() => Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn() }));
 const invalidateQueries = vi.hoisted(() => vi.fn(async () => undefined));
@@ -9,13 +15,15 @@ vi.mock('@/lib/offline/enqueueAndRun', () => ({ enqueueAndRun }));
 vi.mock('@/lib/queryClient', () => ({ queryClient: { invalidateQueries } }));
 vi.mock('sonner', () => ({ toast }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ user: { id: 'u1' }, isAdminOrManager: true }) }));
-vi.mock('@/components/ui/photo-capture', () => ({ PhotoCapture: () => null }));
+vi.mock('@/components/ui/photo-capture', () => ({
+  PhotoCapture: ({ label, required }: { label: string; required?: boolean }) => <p>{label}{required ? ' (required)' : ''}</p>,
+}));
 
 import CompleteTaskDialog from './CompleteTaskDialog';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const renderDialog = () => {
+const renderDialog = (over: Partial<{ requiresPhoto: boolean; requiresSignature: boolean }> = {}) => {
   const onOpenChange = vi.fn();
   const onSuccess = vi.fn();
   render(
@@ -27,10 +35,13 @@ const renderDialog = () => {
       taskName="Check fire extinguishers"
       requiresPhoto={false}
       requiresSignature={false}
+      {...over}
     />,
   );
   return { onOpenChange, onSuccess };
 };
+
+const cantDo = () => fireEvent.click(screen.getByRole('radio', { name: /can't do/i }));
 
 const submit = async () => {
   fireEvent.change(screen.getByLabelText(/notes/i), { target: { value: '  All present  ' } });
@@ -61,6 +72,7 @@ describe('CompleteTaskDialog', () => {
     expect(uid).toBe('u1');
     expect(payload).toMatchObject({
       kind: 'task_complete', taskInstanceId: 't1', taskName: 'Check fire extinguishers', notes: 'All present', signatureConfirmed: false,
+      outcome: 'completed', reason: null,
     });
     expect(payload.completionId).toMatch(UUID);
     expect(photos).toEqual([]);
@@ -112,5 +124,80 @@ describe('CompleteTaskDialog', () => {
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
     expect(onSuccess).not.toHaveBeenCalled();
     expect(invalidateQueries).not.toHaveBeenCalled();
+  });
+
+  it('Done is the default: signature asked, photo required, button "Complete Task"', () => {
+    renderDialog({ requiresPhoto: true, requiresSignature: true });
+    expect(screen.getByRole('radio', { name: /done/i })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText('Photo Evidence (required)')).toBeInTheDocument();
+    expect(screen.getByLabelText(/confirm signature/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /complete task/i })).toBeInTheDocument();
+    expect(screen.queryByText(/why can't it be done/i)).toBeNull();
+  });
+
+  it("Can't do: shows the reasons, drops the signature, makes the photo optional, relabels the button Record", () => {
+    renderDialog({ requiresPhoto: true, requiresSignature: true });
+    cantDo();
+    expect(screen.getByRole('radio', { name: /can't do/i })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText(/why can't it be done/i)).toBeInTheDocument();
+    for (const label of ['Area locked', 'Load shedding', 'Contractor absent', 'No materials', 'Other']) {
+      expect(screen.getByRole('radio', { name: label })).toBeInTheDocument();
+    }
+    expect(screen.getByText('Photo (optional)')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/confirm signature/i)).toBeNull();
+    expect(screen.getByRole('button', { name: /^record$/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /complete task/i })).toBeNull();
+  });
+
+  it("refuses to record a Can't do without a reason, and Other without text", async () => {
+    renderDialog();
+    cantDo();
+    fireEvent.click(screen.getByRole('button', { name: /^record$/i }));
+    expect(toast.error).toHaveBeenCalledWith('Choose a reason');
+    fireEvent.click(screen.getByRole('radio', { name: 'Other' }));
+    fireEvent.click(screen.getByRole('button', { name: /^record$/i }));
+    expect(toast.error).toHaveBeenCalledWith("Say what's stopping it");
+    expect(enqueueAndRun).not.toHaveBeenCalled();
+  });
+
+  it("records a Can't do with the reason code in the payload and its own success toast", async () => {
+    const { onOpenChange, onSuccess } = renderDialog({ requiresPhoto: true, requiresSignature: true });
+    cantDo();
+    fireEvent.click(screen.getByRole('radio', { name: 'Load shedding' }));
+    fireEvent.change(screen.getByLabelText(/notes/i), { target: { value: 'Stage 4 all afternoon' } });
+    fireEvent.click(screen.getByRole('button', { name: /^record$/i }));
+    await waitFor(() => expect(enqueueAndRun).toHaveBeenCalledTimes(1));
+    const [uid, payload, photos] = enqueueAndRun.mock.calls[0];
+    expect(uid).toBe('u1');
+    // No photo, no signature: neither is required for a can't-do even when the task asks for both.
+    expect(payload).toMatchObject({
+      kind: 'task_complete', taskInstanceId: 't1', notes: 'Stage 4 all afternoon', signatureConfirmed: false,
+      outcome: 'wont_do', reason: 'load_shedding',
+    });
+    expect(payload.completionId).toMatch(UUID);
+    expect(photos).toEqual([]);
+    expect(toast.success).toHaveBeenCalledWith("Recorded as can't do");
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onSuccess).toHaveBeenCalled();
+  });
+
+  it('stores an Other reason as "other: <text>"', async () => {
+    renderDialog();
+    cantDo();
+    fireEvent.click(screen.getByRole('radio', { name: 'Other' }));
+    fireEvent.change(screen.getByLabelText(/what's stopping it/i), { target: { value: '  Gate welded shut ' } });
+    fireEvent.click(screen.getByRole('button', { name: /^record$/i }));
+    await waitFor(() => expect(enqueueAndRun).toHaveBeenCalledTimes(1));
+    expect(enqueueAndRun.mock.calls[0][1]).toMatchObject({ outcome: 'wont_do', reason: 'other: Gate welded shut' });
+  });
+
+  it("keeps the queued guardrail copy for a Can't do held on the device", async () => {
+    enqueueAndRun.mockResolvedValueOnce({ status: 'queued' });
+    renderDialog();
+    cantDo();
+    fireEvent.click(screen.getByRole('radio', { name: 'Area locked' }));
+    fireEvent.click(screen.getByRole('button', { name: /^record$/i }));
+    await waitFor(() => expect(enqueueAndRun).toHaveBeenCalledTimes(1));
+    expect(toast).toHaveBeenCalledWith("Task saved on this device — it will complete when you're back online");
   });
 });

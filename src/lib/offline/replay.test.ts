@@ -60,8 +60,8 @@ import { runOne, replayAll, retryOp, isNetworkError, isDuplicateError, MAX_ATTEM
 import type { IssueCommentPayload, IssueCreatePayload, IssueResolvePayload, TaskCompletePayload } from './types';
 
 const UID = 'u1';
-const complete = (completionId = 'c1', taskInstanceId = 't1'): TaskCompletePayload => ({
-  kind: 'task_complete', completionId, taskInstanceId, taskName: 'Check extinguishers', notes: 'all good', signatureConfirmed: true,
+const complete = (completionId = 'c1', taskInstanceId = 't1', over: Partial<TaskCompletePayload> = {}): TaskCompletePayload => ({
+  kind: 'task_complete', completionId, taskInstanceId, taskName: 'Check extinguishers', notes: 'all good', signatureConfirmed: true, ...over,
 });
 const create = (markTaskIssueLogged: string | null): IssueCreatePayload => ({
   kind: 'issue_create',
@@ -112,6 +112,7 @@ describe('offline replay', () => {
     expect(vi.mocked(uploadPhotos).mock.calls[0][1]).toEqual({ prefix: 'photos/u1' });
     expect(state.rpc).toHaveBeenCalledWith('complete_task', {
       p_completion_id: 'c1', p_task_instance_id: 't1', p_notes: 'all good', p_signature_confirmed: true, p_photo_urls: ['https://x/p.jpg'],
+      p_outcome: 'completed', p_reason: undefined,
     });
     expect(outcome).toEqual({ status: 'synced', result: { completion_id: 'c1', already_completed: false } });
     expect(await listOps(UID)).toEqual([]);
@@ -123,6 +124,24 @@ describe('offline replay', () => {
     const outcome = await runOne(op);
     expect(uploadPhotos).not.toHaveBeenCalled();
     expect(state.rpc).toHaveBeenCalledWith('complete_task', expect.objectContaining({ p_photo_urls: [] }));
+    expect(outcome).toEqual({ status: 'synced', result: { completion_id: 'c1', already_completed: true } });
+    expect(await listOps(UID)).toEqual([]);
+  });
+
+  it('2b. task_complete passes a can\'t-do outcome and reason straight through to the RPC', async () => {
+    const op = await enqueue(UID, complete('c1', 't1', { outcome: 'wont_do', reason: 'area_locked', signatureConfirmed: false }), []);
+    const outcome = await runOne(op);
+    expect(state.rpc).toHaveBeenCalledWith('complete_task', expect.objectContaining({
+      p_completion_id: 'c1', p_task_instance_id: 't1', p_outcome: 'wont_do', p_reason: 'area_locked', p_signature_confirmed: false, p_photo_urls: [],
+    }));
+    expect(outcome).toEqual({ status: 'synced', result: { completion_id: 'c1', already_completed: false } });
+    expect(await listOps(UID)).toEqual([]);
+  });
+
+  it('2c. a can\'t-do already recorded elsewhere replays exactly like a completion: synced, flagged, op dropped', async () => {
+    state.rpc.mockResolvedValue(ok('c1', true));
+    const op = await enqueue(UID, complete('c1', 't1', { outcome: 'wont_do', reason: 'other: gate welded shut' }), []);
+    const outcome = await runOne(op);
     expect(outcome).toEqual({ status: 'synced', result: { completion_id: 'c1', already_completed: true } });
     expect(await listOps(UID)).toEqual([]);
   });
