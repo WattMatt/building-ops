@@ -46,6 +46,18 @@ export const VERIFY = {
     { sql: `select relname, reloptions from pg_class where relname in ('compliance_scores','compliance_section_scores','compliance_critical_scores') order by 1`, expect: 'all three {security_invoker=on}' },
     { sql: `select viewname, pg_get_viewdef(('public.'||viewname)::regclass) ~* 'response is not null' as null_filtered from pg_views where viewname in ('compliance_scores','compliance_section_scores','compliance_critical_scores') order by 1`, expect: 'true ×3' },
   ],
+  '2026-09-16_01_wont_do.sql': [
+    { sql: `select pg_get_constraintdef(oid) ~ 'wont_do' as has_wont_do from pg_constraint where conname = 'task_instances_status_check'`, expect: 'true' },
+    { sql: `select column_name, data_type, column_default from information_schema.columns where table_schema = 'public' and table_name = 'task_completions' and column_name in ('outcome','reason') order by 1`, expect: "outcome text default 'completed'; reason text" },
+    { sql: `select conname, pg_get_constraintdef(oid) as def from pg_constraint where conrelid = 'public.task_completions'::regclass and conname in ('task_completions_outcome_check','task_completions_reason_check') order by 1`, expect: 'both present; reason check ties outcome = wont_do to reason not null' },
+    { sql: `select count(*) as bad_outcome_rows from public.task_completions where outcome is null or outcome not in ('completed','wont_do')`, expect: '0' },
+    { sql: `select pg_get_function_identity_arguments(oid) as args from pg_proc where pronamespace = 'public'::regnamespace and proname = 'complete_task'`, expect: 'exactly 1 row ending in p_outcome text, p_reason text' },
+    { sql: `select has_function_privilege('anon','public.complete_task(uuid,uuid,text,boolean,jsonb,text,text)','execute') as anon_can, has_function_privilege('authenticated','public.complete_task(uuid,uuid,text,boolean,jsonb,text,text)','execute') as auth_can`, expect: 'false, true' },
+    { sql: `select proname, pg_get_functiondef(oid) ~ 'wont_do' as mentions_wont_do from pg_proc where pronamespace = 'public'::regnamespace and proname in ('snapshot_building_metrics','portfolio_coverage','complete_task') order by 1`, expect: 'three rows, all true' },
+    { sql: `select pg_get_viewdef('public.ppm_monthly_status'::regclass) ~ 'wont_do' as ppm_view`, expect: 'true' },
+    { sql: `select reloptions from pg_class where relname = 'ppm_monthly_status'`, expect: '{security_invoker=on}' },
+    { sql: `select count(*) as wont_do_tasks from public.task_instances where status = 'wont_do'`, expect: '0 on apply day' },
+  ],
   '2026-09-15_04_overdue_notify.sql': [
     { sql: `select pg_get_constraintdef(oid) ~ 'task_overdue' as has_kind from pg_constraint where conname = 'notifications_kind_check'`, expect: 'true' },
     { sql: `select p.prosecdef, l.lanname from pg_proc p join pg_language l on l.oid = p.prolang where p.pronamespace = 'public'::regnamespace and p.proname = 'mark_overdue_tasks'`, expect: 'prosecdef true, plpgsql' },
