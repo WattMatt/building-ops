@@ -55,14 +55,14 @@ For admin and manager the overview is unchanged.
 
 ### 4.3 Manager concepts hidden from field users
 
-- `OverviewWidgets` reads `isAdminOrManager` from `useAuth()`; `MonthCostsCard` and the three
+- `OverviewWidgets` receives `isAdminOrManager` from `BuildingDetails` as a required prop; `MonthCostsCard` and the three
   `AlertWidgets` render only for admin and manager. `TodayTasksWidget` is replaced by
   `MyWorkHere` for field users (it is portfolio-wide "today" for the building, not "mine").
 - `BuildingScoreChips` in the header render only for admin and manager.
 - `App.tsx`: `/reports/fortress` and `/reports/fortress/:id` get
   `allowedRoles={['admin','manager']}`; the "Building Reports" nav item gets `roles:
   ['admin','manager']`.
-- `Issues.tsx`: the `SlaChip` and the three SLA CSV columns render only when `isAdminOrManager`;
+- `Issues.tsx`: the `SlaChip` and every SLA-clock column (five today) render only when `isAdminOrManager`;
   `IssueDetailDialog` shows the SLA block only when `canManage`.
 - `DashboardLayout`: a sidebar group renders only when it has at least one item the user can
   access (fixes the empty "Administration" group; keeps "Reports & Audit" for the Forms Library).
