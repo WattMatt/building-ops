@@ -77,6 +77,17 @@ export default function BuildingDetails() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- sync from the URL only when the param changes
   }, [tabParam]);
 
+  // A field user following a management deep link (?tab=ppm, ?tab=team, …) lands on Overview:
+  // the trigger is not mounted, so the URL value cannot select anything else …
+  const tabValue = !isAdminOrManager && !FIELD_TABS.includes(activeTab) ? 'overview' : activeTab;
+  // … and the URL is rewritten to say so, otherwise a reload or a shared link keeps carrying a
+  // tab this reader cannot open. Runs only while the fallback is engaged; the write makes
+  // activeTab and tabValue agree, so it cannot loop.
+  useEffect(() => {
+    if (tabValue !== activeTab) handleTabChange('overview');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- handleTabChange is recreated each render; the guard is what matters
+  }, [tabValue, activeTab]);
+
   // On phones the tab strip scrolls horizontally; keep the active tab in view
   // (deep links like ?tab=documents land on a tab that starts off-screen).
   // `loading` is a dep because the strip only mounts once the building has loaded.
@@ -126,9 +137,6 @@ export default function BuildingDetails() {
   const contacts = building.emergency_contacts || {};
   const hasCustomLogo = building.logo_url && !building.logo_url.includes('dicebear');
   const logoPosition = building.logo_position || 'top-left';
-  // A field user following a management deep link (?tab=ppm, ?tab=team, …) lands on Overview:
-  // the trigger is not mounted, so the URL value cannot select anything else.
-  const tabValue = !isAdminOrManager && !FIELD_TABS.includes(activeTab) ? 'overview' : activeTab;
 
   return (
     <div className="space-y-4 sm:space-y-6">

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const auth = vi.hoisted(() => ({ isAdminOrManager: false }));
 vi.mock('@/contexts/AuthContext', () => ({ useAuth: () => ({ isAdminOrManager: auth.isAdminOrManager, user: { id: 'u1' } }) }));
@@ -43,8 +43,20 @@ import BuildingDetails from './BuildingDetails';
 
 beforeEach(() => { auth.isAdminOrManager = false; score.calls = []; Element.prototype.scrollIntoView = vi.fn(); });
 
+/** The URL as the page leaves it, so the tests can see what a reload or a shared link would carry. */
+function LocationEcho() {
+  const { pathname, search } = useLocation();
+  return <div data-testid="url">{pathname + search}</div>;
+}
+
 const renderAt = (url: string) =>
-  render(<MemoryRouter initialEntries={[url]}><Routes><Route path="/buildings/:id" element={<BuildingDetails />} /></Routes></MemoryRouter>);
+  render(
+    <MemoryRouter initialEntries={[url]}>
+      <Routes>
+        <Route path="/buildings/:id" element={<><BuildingDetails /><LocationEcho /></>} />
+      </Routes>
+    </MemoryRouter>,
+  );
 
 /** Every tab value a field user must not reach (spec pilot-field §4.1). */
 const MANAGEMENT_TABS = ['team', 'reports', 'tenants', 'assets', 'ppm', 'maintenance', 'electrical', 'documents'];
@@ -68,6 +80,13 @@ describe('BuildingDetails for a field user (spec pilot-field §4)', () => {
       expect(screen.queryByText(MANAGEMENT_CONTENT), tab).toBeNull();
       unmount();
     }
+  });
+
+  it('rewrites a management ?tab= in the URL to overview, so a reload or a shared link cannot carry it', async () => {
+    renderAt('/buildings/b1?tab=ppm');
+    await screen.findByRole('tablist');
+    await waitFor(() => expect(screen.getByTestId('url')).toHaveTextContent('/buildings/b1?tab=overview'));
+    expect(screen.getByRole('tab', { selected: true })).toHaveTextContent('Overview');
   });
 
   it('still deep-links to a field tab', async () => {
@@ -97,6 +116,8 @@ describe('BuildingDetails for a manager (unchanged)', () => {
     ]);
     expect(screen.getByRole('tab', { selected: true })).toHaveTextContent('PPM');
     expect(screen.getByText('PpmTab')).toBeInTheDocument();
+    // The URL rewrite is the field user's fallback only; a manager's deep link is left alone.
+    expect(screen.getByTestId('url')).toHaveTextContent('/buildings/b1?tab=ppm');
     expect(screen.getByText('BuildingScoreChips')).toBeInTheDocument();
     expect(score.calls).toContain('b1');
     // The overview is not mounted while PPM is active; switch to it through the URL.
