@@ -139,6 +139,8 @@ describe('CompleteTaskDialog', () => {
     renderDialog({ requiresPhoto: true, requiresSignature: true });
     cantDo();
     expect(screen.getByRole('radio', { name: /can't do/i })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('heading', { name: /record outcome/i })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /complete task/i })).toBeNull();
     expect(screen.getByText(/why can't it be done/i)).toBeInTheDocument();
     for (const label of ['Area locked', 'Load shedding', 'Contractor absent', 'No materials', 'Other']) {
       expect(screen.getByRole('radio', { name: label })).toBeInTheDocument();
@@ -179,6 +181,19 @@ describe('CompleteTaskDialog', () => {
     expect(toast.success).toHaveBeenCalledWith("Recorded as can't do");
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(onSuccess).toHaveBeenCalled();
+  });
+
+  it('switching back to Done after picking a reason sends a plain completion with no reason', async () => {
+    renderDialog();
+    cantDo();
+    fireEvent.click(screen.getByRole('radio', { name: 'Load shedding' }));
+    fireEvent.click(screen.getByRole('radio', { name: /done/i }));
+    expect(screen.getByRole('heading', { name: /complete task/i })).toBeInTheDocument();
+    expect(screen.queryByText(/why can't it be done/i)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /complete task/i }));
+    await waitFor(() => expect(enqueueAndRun).toHaveBeenCalledTimes(1));
+    expect(enqueueAndRun.mock.calls[0][1]).toMatchObject({ outcome: 'completed', reason: null });
+    expect(toast.success).toHaveBeenCalledWith('Task completed successfully');
   });
 
   it('stores an Other reason as "other: <text>"', async () => {

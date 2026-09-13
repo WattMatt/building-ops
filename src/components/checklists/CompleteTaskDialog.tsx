@@ -153,8 +153,8 @@ export default function CompleteTaskDialog({
       <ResponsiveDialogContent className="max-w-md">
         <ResponsiveDialogHeader>
           <ResponsiveDialogTitle className="flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-success" />
-            Complete Task
+            {wontDo ? <Ban className="h-5 w-5 text-muted-foreground" /> : <CheckCircle2 className="h-5 w-5 text-success" />}
+            {wontDo ? 'Record outcome' : 'Complete Task'}
           </ResponsiveDialogTitle>
           <ResponsiveDialogDescription>
             {taskName}
@@ -186,7 +186,7 @@ export default function CompleteTaskDialog({
 
           {wontDo && (
             <div className="space-y-2">
-              <Label id="wont-do-reason-label">Why can't it be done?</Label>
+              <p id="wont-do-reason-label" className="text-sm font-medium leading-none">Why can't it be done?</p>
               <RadioGroup
                 aria-labelledby="wont-do-reason-label"
                 value={reasonCode}
@@ -195,7 +195,7 @@ export default function CompleteTaskDialog({
               >
                 {WONT_DO_CODES.map((code) => (
                   <div key={code} className="flex items-center gap-3 min-h-11 rounded-lg px-2 hover:bg-muted/50">
-                    <RadioGroupItem value={code} id={`wont-do-${code}`} aria-label={WONT_DO_LABELS[code]} />
+                    <RadioGroupItem value={code} id={`wont-do-${code}`} />
                     <Label htmlFor={`wont-do-${code}`} className="flex-1 cursor-pointer py-3">
                       {WONT_DO_LABELS[code]}
                     </Label>

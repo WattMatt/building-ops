@@ -384,6 +384,21 @@ describe('offline replay', () => {
     expect((await listOps(UID))[0]).toMatchObject({ id: op.id, status: 'failed', attempts: 1, lastError: 'permission denied' });
   });
 
+  it('8a. the RPC refusing a can\'t-do (22023) parks the op failed, with the function-name prefix stripped from the message', async () => {
+    state.rpc.mockResolvedValue({
+      data: null, error: { code: '22023', message: 'complete_task: a reason is required when the outcome is wont_do' },
+    });
+    const op = await enqueue(UID, complete('c1', 't1', { outcome: 'wont_do', reason: null }), []);
+    expect(await runOne(op)).toEqual({ status: 'failed', error: 'a reason is required when the outcome is wont_do', code: '22023' });
+    expect((await listOps(UID))[0]).toMatchObject({
+      id: op.id, status: 'failed', attempts: 1, lastError: 'a reason is required when the outcome is wont_do',
+    });
+    // Only a bare `word: ` prefix is dropped; a message that starts any other way is kept whole.
+    state.rpc.mockResolvedValue({ data: null, error: { code: '42501', message: 'Task status was not updated — your role does not permit it.' } });
+    const other = await enqueue(UID, complete('c2', 't2'), []);
+    expect(await runOne(other)).toMatchObject({ status: 'failed', error: 'Task status was not updated — your role does not permit it.' });
+  });
+
   it('8b. an op whose user is no longer signed in is failed (USER_MISMATCH) before anything reaches the backend', async () => {
     state.getSession.mockResolvedValue({ data: { session: { user: { id: 'u2' } } } });
     const op = await enqueue(UID, complete(), [photo()]);

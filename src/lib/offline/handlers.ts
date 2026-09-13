@@ -85,16 +85,15 @@ export async function runOp(op: QueuedOp): Promise<unknown> {
   const p = op.payload;
   switch (p.kind) {
     case 'task_complete': {
-      // p_outcome and p_reason are not yet in the generated types; regenerate after the migration ships.
       const { data, error } = await supabase.rpc('complete_task', {
         p_completion_id: p.completionId,
         p_task_instance_id: p.taskInstanceId,
         p_notes: p.notes ?? undefined,
         p_signature_confirmed: p.signatureConfirmed,
         p_photo_urls: photoUrls,
-        p_outcome: p.outcome ?? 'completed',
-        p_reason: p.reason ?? undefined,
-      } as never);
+        // p_outcome and p_reason are not yet in the generated types; regenerate after the migration ships.
+        ...({ p_outcome: p.outcome ?? 'completed', p_reason: p.reason ?? undefined } as object),
+      });
       if (error) throw error;
       return data?.[0] ?? { completion_id: p.completionId, already_completed: false };
     }

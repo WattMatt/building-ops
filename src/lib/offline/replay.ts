@@ -19,8 +19,13 @@ export function isDuplicateError(e: unknown): boolean {
   return (e as { code?: string } | null)?.code === '23505';
 }
 
+/**
+ * The message a parked op shows. Our SQL functions prefix every `raise exception` with their own
+ * name (`complete_task: a reason is required …`) for the server log; the sheet drops that prefix.
+ */
 function messageOf(e: unknown): string {
-  return (e as { message?: string })?.message || 'The change was rejected.';
+  const message = (e as { message?: string })?.message || 'The change was rejected.';
+  return message.replace(/^\w+: /, '');
 }
 
 function codeOf(e: unknown): string | undefined {
