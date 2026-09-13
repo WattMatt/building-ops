@@ -28,7 +28,7 @@
 
 Why: `MyDay.tsx:109-118` (`Row`), `:56-62` (`dueLabel`), `:166-175` (`queuedChip`) and `:177-196` (`taskRow`) are the row the building page needs. Moving them to one module means one 56 px row, one Complete button and one queued chip for both pages. `Row` is exported too because My Day's issue, sign-off and returned-report rows use it; keeping a copy in My Day would be the drift this task exists to prevent.
 
-- [ ] **Step 1: Failing component test**
+- [x] **Step 1: Failing component test**
 
 ```tsx
 // src/components/myday/TaskRow.test.tsx
@@ -112,7 +112,7 @@ describe('TaskRow', () => {
 Run: `npx vitest run src/components/myday/TaskRow.test.tsx`
 Expected: `FAIL  src/components/myday/TaskRow.test.tsx` with `Error: Failed to resolve import "./TaskRow"` — `Test Files  1 failed (1)`.
 
-- [ ] **Step 2: The module** — moved verbatim from `MyDay.tsx` (the `Row` and `dueLabel` bodies and comments are unchanged; the queued chip and the row take their inputs as props instead of closing over page state):
+- [x] **Step 2: The module** — moved verbatim from `MyDay.tsx` (the `Row` and `dueLabel` bodies and comments are unchanged; the queued chip and the row take their inputs as props instead of closing over page state):
 
 ```tsx
 // src/components/myday/TaskRow.tsx
@@ -220,7 +220,7 @@ export function TaskRow({ task, today, queued, onComplete, showBuilding }: TaskR
 Run: `npx vitest run src/components/myday/TaskRow.test.tsx`
 Expected: `✓ src/components/myday/TaskRow.test.tsx (8 tests)` — `Test Files  1 passed (1)`.
 
-- [ ] **Step 3: My Day uses it (zero behaviour change)** — in `src/pages/MyDay.tsx`:
+- [x] **Step 3: My Day uses it (zero behaviour change)** — in `src/pages/MyDay.tsx`:
 
 Add after line 37 (`import { WeekStrip } from '@/components/myday/WeekStrip';`):
 
@@ -250,7 +250,7 @@ Nothing else changes: `format`, `CheckCircle2`, `Badge`, `Button`, `formatBuildi
 Run: `npx vitest run src/pages/MyDay.test.tsx src/components/myday`
 Expected: `✓ src/pages/MyDay.test.tsx (17 tests)`, `✓ src/components/myday/TaskRow.test.tsx (8 tests)`, `✓ src/components/myday/WeekStrip.test.tsx` — `Test Files  3 passed (3)`.
 
-- [ ] **Step 4: gate, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'MyDay|TaskRow'` prints nothing; `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep -c 'error TS'` ≤ 46; `git add src/components/myday/TaskRow.tsx src/components/myday/TaskRow.test.tsx src/pages/MyDay.tsx && git commit -m "My Day: extract TaskRow so the building page can share the row"` (+ blank line and trailer `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`).
+- [x] **Step 4: gate, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'MyDay|TaskRow'` prints nothing; `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep -c 'error TS'` ≤ 46; `git add src/components/myday/TaskRow.tsx src/components/myday/TaskRow.test.tsx src/pages/MyDay.tsx && git commit -m "My Day: extract TaskRow so the building page can share the row"` (+ blank line and trailer `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`).
 
 ---
 
@@ -261,7 +261,7 @@ Expected: `✓ src/pages/MyDay.test.tsx (17 tests)`, `✓ src/components/myday/T
 
 Depends on Task 1 (`TaskRow`). Not yet mounted anywhere — Task 3 mounts it.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```tsx
 // src/components/building/MyWorkHere.test.tsx
@@ -478,7 +478,7 @@ describe('MyWorkHere', () => {
 Run: `npx vitest run src/components/building/MyWorkHere.test.tsx`
 Expected: `FAIL  src/components/building/MyWorkHere.test.tsx` with `Error: Failed to resolve import "./MyWorkHere"` — `Test Files  1 failed (1)`.
 
-- [ ] **Step 2: The card**
+- [x] **Step 2: The card**
 
 ```tsx
 // src/components/building/MyWorkHere.tsx
@@ -672,7 +672,7 @@ export default function MyWorkHere({ buildingId }: MyWorkHereProps) {
 Run: `npx vitest run src/components/building/MyWorkHere.test.tsx`
 Expected: `✓ src/components/building/MyWorkHere.test.tsx (9 tests)` — `Test Files  1 passed (1)`.
 
-- [ ] **Step 3: gate, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'MyWorkHere'` prints nothing; global count ≤ 46; `git add src/components/building/MyWorkHere.tsx src/components/building/MyWorkHere.test.tsx && git commit -m "Building: My work here card (spec pilot-field §4.2)"` (+ trailer).
+- [x] **Step 3: gate, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'MyWorkHere'` prints nothing; global count ≤ 46; `git add src/components/building/MyWorkHere.tsx src/components/building/MyWorkHere.test.tsx && git commit -m "Building: My work here card (spec pilot-field §4.2)"` (+ trailer).
 
 ---
 
@@ -686,7 +686,7 @@ Depends on Task 2.
 
 **Decision — how `OverviewWidgets` learns the role: a required `isAdminOrManager: boolean` prop, passed from `BuildingDetails`.** The spec's wording (§4.3) has the widget read `useAuth()` itself; the behaviour is identical either way, and the prop is chosen for three reasons. (1) `BuildingDetails.tsx:46` is already the page's single role read and drives the tabs, the edit button, the avatar buttons and (now) the chips from it; a second read inside the overview could never disagree, but a reader checking "what does a field user get on this page" should find one decision, not two. (2) `OverviewWidgets` stays a pure function of props: the existing 10 tests keep their harness (no `AuthContext` mock, which would otherwise be forced onto a file that renders real widgets against a Postgrest stub) and the role test is a prop flip. (3) Required, not defaulted: TypeScript makes every future caller decide, so the field layout cannot be reached by omission.
 
-- [ ] **Step 1: Failing page tests** — copy the Team harness and add the field-user cases:
+- [x] **Step 1: Failing page tests** — copy the Team harness and add the field-user cases:
 
 ```tsx
 // src/pages/BuildingDetails.user.test.tsx
@@ -800,7 +800,7 @@ describe('BuildingDetails for a manager (unchanged)', () => {
 Run: `npx vitest run src/pages/BuildingDetails.user.test.tsx`
 Expected: `FAIL` — 4 failures in the field-user describe (the tab strip has 12 entries, `OverviewWidgets isAdminOrManager=undefined`, PPM content mounts, chips present, `score.calls` is `['b1']`); the manager test passes. `Tests  4 failed | 1 passed (5)`.
 
-- [ ] **Step 2: The page** — in `src/pages/BuildingDetails.tsx`:
+- [x] **Step 2: The page** — in `src/pages/BuildingDetails.tsx`:
 
 Add after line 41 (the closing `}` of `interface Building`):
 
@@ -928,7 +928,7 @@ Wrap the contents at lines 361–387 (`reports` through `documents`; `team` at 3
 Run: `npx vitest run src/pages/BuildingDetails`
 Expected: `✓ src/pages/BuildingDetails.user.test.tsx (5 tests)`, `✓ src/pages/BuildingDetails.team.test.tsx (2 tests)`, `✓ src/pages/BuildingDetails.mobile.test.tsx (2 tests)` — `Test Files  3 passed (3)`, `Tests  9 passed (9)`. (vitest does not typecheck: the page now passes `isAdminOrManager` to a widget whose props do not yet declare it, so `tsc` reports one `TS2322` at the `<OverviewWidgets …>` line of `BuildingDetails.tsx` until Step 4 lands. Do not commit between here and Step 4.)
 
-- [ ] **Step 3: Failing widget tests** — in `src/components/building/OverviewWidgets.test.tsx`:
+- [x] **Step 3: Failing widget tests** — in `src/components/building/OverviewWidgets.test.tsx`:
 
 Add after line 69 (the closing `});` of the supabase mock, before `import OverviewWidgets`):
 
@@ -981,7 +981,7 @@ describe('OverviewWidgets — field user (spec pilot-field §4.3)', () => {
 Run: `npx vitest run src/components/building/OverviewWidgets.test.tsx`
 Expected: the first new test fails (`Unable to find an element with the text: MyWorkHere b1`); `Tests  1 failed | 11 passed (12)`.
 
-- [ ] **Step 4: The widget** — in `src/components/building/OverviewWidgets.tsx`:
+- [x] **Step 4: The widget** — in `src/components/building/OverviewWidgets.tsx`:
 
 Add after line 12 (`import MonthCostsCard from './MonthCostsCard';`):
 
@@ -1044,7 +1044,7 @@ export default function OverviewWidgets({ buildingId, onTabChange, isAdminOrMana
 Run: `npx vitest run src/components/building/OverviewWidgets.test.tsx src/pages/BuildingDetails`
 Expected: `✓ src/components/building/OverviewWidgets.test.tsx (12 tests)`, `✓ src/pages/BuildingDetails.user.test.tsx (5 tests)`, `✓ src/pages/BuildingDetails.team.test.tsx (2 tests)`, `✓ src/pages/BuildingDetails.mobile.test.tsx (2 tests)` — `Test Files  4 passed (4)`.
 
-- [ ] **Step 5: gate, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'BuildingDetails|OverviewWidgets'` prints nothing; global count ≤ 46; `git add src/pages/BuildingDetails.tsx src/pages/BuildingDetails.user.test.tsx src/components/building/OverviewWidgets.tsx src/components/building/OverviewWidgets.test.tsx && git commit -m "Building Details: four-tab field view with My work here (spec pilot-field §4.1-4.3)"` (+ trailer).
+- [x] **Step 5: gate, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'BuildingDetails|OverviewWidgets'` prints nothing; global count ≤ 46; `git add src/pages/BuildingDetails.tsx src/pages/BuildingDetails.user.test.tsx src/components/building/OverviewWidgets.tsx src/components/building/OverviewWidgets.test.tsx && git commit -m "Building Details: four-tab field view with My work here (spec pilot-field §4.1-4.3)"` (+ trailer).
 
 ---
 
