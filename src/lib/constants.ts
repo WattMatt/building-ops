@@ -19,7 +19,7 @@ export const ROLE_PRECEDENCE: readonly AppRole[] = ['admin', 'manager', 'user'] 
 // check constraints (supabase/schema/2026-08-04_04_enum_check_constraints.sql). The literal
 // unions below mirror those constraints; a Database['public']['Enums'] lookup collapses to `any`.
 export type TaskFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually';
-export type TaskStatus = 'pending' | 'completed' | 'overdue' | 'issue_logged';
+export type TaskStatus = 'pending' | 'completed' | 'overdue' | 'issue_logged' | 'wont_do';
 export type IssuePriority = 'low' | 'medium' | 'high' | 'critical';
 export type IssueStatus = 'open' | 'in_progress' | 'escalated' | 'resolved';
 
@@ -79,14 +79,17 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   completed: 'Completed',
   overdue: 'Overdue',
   issue_logged: 'Issue Logged',
+  wont_do: "Can't do",
 };
 
-// Task status badge colors - using semantic design tokens
+// Task status badge colors - using semantic design tokens. wont_do is muted on purpose: it is a
+// closed task that was neither done nor failed, and must not read as either green or red.
 export const TASK_STATUS_COLORS: Record<TaskStatus, string> = {
   pending: 'bg-warning/10 text-warning border-warning/20',
   completed: 'bg-success/10 text-success border-success/20',
   overdue: 'bg-destructive/20 text-destructive border-destructive/30',
   issue_logged: 'bg-destructive/10 text-destructive border-destructive/20',
+  wont_do: 'bg-muted text-muted-foreground border-border',
 };
 
 // Role display labels

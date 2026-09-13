@@ -27,8 +27,10 @@ import {
   type DigestSection,
   type DigestTask,
   type ExpiryBuckets,
+  type WontDoYesterday,
 } from "../_shared/digest.ts";
 import { countBuckets } from "../_shared/expiry.ts";
+import { reasonLabel } from "../_shared/wontDo.ts";
 
 const DIGEST_SECRET = Deno.env.get("DAILY_DIGEST_SECRET");
 
@@ -49,6 +51,13 @@ function todayInJohannesburg(): string {
  */
 function startOfDayJohannesburgIso(today: string): string {
   return new Date(`${today}T00:00:00+02:00`).toISOString();
+}
+
+/** `days` before a `YYYY-MM-DD`, as `YYYY-MM-DD`. Date-only arithmetic in UTC, so no DST or offset can shift it. */
+function daysBeforeIso(day: string, days: number): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
 }
 
 /** A push subscription that has failed for this long is dead; the device would re-subscribe. */
@@ -133,11 +142,38 @@ serve(async (req: Request): Promise<Response> => {
 
     // Coverage gaps for admins and managers, one service-role call per run (S1 §4.4). The service
     // role bypasses RLS, so this is the whole portfolio; site users never receive this section.
+    // S6b adds yesterday's can't-dos from task_completions (outcome = 'wont_do', recorded during
+    // yesterday's SAST day), joined to the task for its name and building. Same non-fatal shape:
+    // a failed read logs and the section goes out without those lines.
+    let wontDoYesterday: WontDoYesterday | null = null;
+    try {
+      const yesterday = daysBeforeIso(today, 1);
+      const { data: wdRows, error: wdErr } = await supabase
+        .from("task_completions")
+        .select("reason, created_at, task_instances!inner(task_name, building_id)")
+        .eq("outcome", "wont_do")
+        .gte("created_at", startOfDayJohannesburgIso(yesterday))
+        .lt("created_at", startOfDayJohannesburgIso(today))
+        .order("created_at");
+      if (wdErr) throw wdErr;
+      const rows = (wdRows ?? []) as {
+        reason: string | null;
+        task_instances: { task_name: string | null; building_id: string | null } | null;
+      }[];
+      wontDoYesterday = {
+        count: rows.length,
+        lines: rows.map((r) =>
+          `${nameFor(r.task_instances?.building_id ?? null) ?? "Unknown building"} · ${r.task_instances?.task_name ?? "Untitled task"} · ${reasonLabel(r.reason) || "No reason given"}`
+        ),
+      };
+    } catch (e) {
+      console.error("daily-digest: wont_do read failed; no can't-do lines this run", e);
+    }
     let coverage: CoverageSummary | null = null;
     try {
       const { data: covRows, error: covErr } = await supabase.rpc("portfolio_coverage");
       if (covErr) throw covErr;
-      coverage = coverageSummary((covRows ?? []) as CoverageRow[]);
+      coverage = coverageSummary((covRows ?? []) as CoverageRow[], wontDoYesterday);
     } catch (e) {
       // The digest still goes out without the coverage lines; the dashboard widget covers it.
       console.error("daily-digest: portfolio_coverage failed", e);

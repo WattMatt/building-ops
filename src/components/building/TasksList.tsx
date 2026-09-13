@@ -2,6 +2,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
+  Ban,
   Calendar,
   Clock,
   CheckCircle2,
@@ -12,11 +13,12 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { categoryMeta } from '@/lib/compliance';
+import { reasonLabel, type TaskOutcome } from '@/lib/wontDo';
 import { AssigneePicker } from '@/components/people/AssigneePicker';
 import { EvidencePackMenu } from '@/components/evidence/EvidencePackMenu';
 
 export type TaskFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually';
-export type TaskStatus = 'pending' | 'completed' | 'overdue' | 'issue_logged';
+export type TaskStatus = 'pending' | 'completed' | 'overdue' | 'issue_logged' | 'wont_do';
 
 export interface TaskInstance {
   id: string;
@@ -34,6 +36,9 @@ export interface TaskInstance {
   completion?: {
     completed_by: string;
     completed_at: string | null;
+    /** S6b: `wont_do` rows carry the reason; older callers may omit both (a plain completion). */
+    outcome?: TaskOutcome;
+    reason?: string | null;
   };
 }
 
@@ -42,6 +47,7 @@ export const statusColors: Record<TaskStatus, string> = {
   completed: 'bg-success text-success-foreground',
   overdue: 'bg-destructive text-destructive-foreground',
   issue_logged: 'bg-destructive/80 text-destructive-foreground',
+  wont_do: 'bg-muted text-muted-foreground',
 };
 
 export interface TasksListProps {
@@ -82,7 +88,7 @@ export function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, vari
           className={`p-3 rounded-lg border ${
             variant === 'issue'
               ? 'border-destructive/50 bg-destructive/5'
-              : task.status === 'completed'
+              : task.status === 'completed' || task.status === 'wont_do'
               ? 'bg-muted/30'
               : ''
           }`}
@@ -90,6 +96,8 @@ export function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, vari
           <div className="flex items-start gap-3">
             {task.status === 'completed' ? (
               <CheckCircle2 className="h-5 w-5 text-success mt-0.5 shrink-0" />
+            ) : task.status === 'wont_do' ? (
+              <Ban className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
             ) : task.status === 'issue_logged' ? (
               <AlertTriangle className="h-5 w-5 text-destructive mt-0.5 shrink-0" />
             ) : (
@@ -100,7 +108,11 @@ export function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, vari
                 <div>
                   <p
                     className={`font-medium text-sm ${
-                      task.status === 'completed' ? 'line-through text-muted-foreground' : ''
+                      task.status === 'completed'
+                        ? 'line-through text-muted-foreground'
+                        : task.status === 'wont_do'
+                        ? 'text-muted-foreground'
+                        : ''
                     }`}
                   >
                     {task.task_name}
@@ -141,11 +153,13 @@ export function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, vari
                   </div>
                 </div>
                 <Badge
-                  variant={task.status === 'completed' ? 'secondary' : 'outline'}
-                  className={`shrink-0 ${task.status === 'completed' ? statusColors.completed : ''}`}
+                  variant={task.status === 'completed' || task.status === 'wont_do' ? 'secondary' : 'outline'}
+                  className={`shrink-0 ${task.status === 'completed' ? statusColors.completed : task.status === 'wont_do' ? statusColors.wont_do : ''}`}
                 >
                   {task.status === 'completed'
                     ? 'Done'
+                    : task.status === 'wont_do'
+                    ? "Can't do"
                     : task.status === 'issue_logged'
                     ? 'Issue'
                     : 'Pending'}
@@ -158,6 +172,14 @@ export function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, vari
                   <User className="h-3 w-3" />
                   {nameOf(task.completion.completed_by) ?? 'Unknown'} •{' '}
                   {task.completion.completed_at ? format(new Date(task.completion.completed_at), 'MMM d, h:mm a') : ''}
+                </p>
+              )}
+
+              {/* Why it could not be done (S6b). The reason lives on the completion row. */}
+              {task.status === 'wont_do' && task.completion?.reason && (
+                <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                  <Ban className="h-3 w-3" />
+                  {reasonLabel(task.completion.reason)}
                 </p>
               )}
 

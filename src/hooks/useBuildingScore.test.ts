@@ -49,7 +49,8 @@ beforeEach(() => {
     if (table === 'reports') return { data: [{ id: 'r1', report_period: '2026-08' }], error: null };
     if (table === 'compliance_scores') return { data: [{ compliance_pct: '92.5' }], error: null };
     if (table === 'task_instances') {
-      return { data: [{ status: 'completed' }, { status: 'completed' }, { status: 'pending' }, { status: 'overdue' }], error: null };
+      // Two unscored rows ride along: the score must still be 2 of 4.
+      return { data: [{ status: 'completed' }, { status: 'completed' }, { status: 'pending' }, { status: 'overdue' }, { status: 'wont_do' }, { status: 'issue_logged' }], error: null };
     }
     return { data: [], error: null };
   };
@@ -73,7 +74,7 @@ describe('useBuildingScore', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.ohsPct).toBe(92.5);
     expect(result.current.ohsPeriod).toBe('2026-08');
-    // 2 completed of 4 in the window.
+    // 2 completed of the 4 scored (the wont_do and issue_logged rows are not scored).
     expect(result.current.taskPct).toBe(50);
     const reports = state.queries.find((q) => q.table === 'reports');
     expect(reports?.client).toBe('fdb');
@@ -96,7 +97,7 @@ describe('useBuildingScore', () => {
       if (table === 'building_metrics_daily') return { data: null, error: { message: 'relation "building_metrics_daily" does not exist' } };
       if (table === 'reports') return { data: [{ id: 'r1', report_period: '2026-08' }], error: null };
       if (table === 'compliance_scores') return { data: [{ compliance_pct: '92.5' }], error: null };
-      if (table === 'task_instances') return { data: [{ status: 'completed' }, { status: 'overdue' }], error: null };
+      if (table === 'task_instances') return { data: [{ status: 'completed' }, { status: 'overdue' }, { status: 'wont_do' }], error: null };
       return { data: [], error: null };
     };
     const { result } = renderHook(() => useBuildingScore('b1'), { wrapper });

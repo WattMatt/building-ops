@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PUSH_NAME_MAX, SECTION_MAX, composeDigest, coverageSummary, dueTodayPush, type CoverageRow } from '../../supabase/functions/_shared/digest';
+import { PUSH_NAME_MAX, SECTION_MAX, WONT_DO_LINES_MAX, composeDigest, coverageSummary, dueTodayPush, type CoverageRow } from '../../supabase/functions/_shared/digest';
 
 const TODAY = '2026-09-11';
 
@@ -258,5 +258,50 @@ describe('coverage section', () => {
   it('adds no section for null or all-empty coverage (site users pass null)', () => {
     expect(composeDigest({ ...empty, coverage: null })).toBeNull();
     expect(composeDigest({ ...empty, coverage: { noTeam: [], unassignedOpen: 0, silentYesterday: [] } })).toBeNull();
+  });
+
+  it('coverageSummary carries yesterday\'s can\'t-dos and says something even when the rows are quiet', () => {
+    const wontDo = { count: 2, lines: ['Alpha Court · Sweep the plant room · Area locked', 'Beta Place · Test the generator · Load shedding'] };
+    expect(coverageSummary([cov({})], wontDo)).toEqual({ noTeam: [], unassignedOpen: 0, silentYesterday: [], wontDoYesterday: wontDo });
+    expect(coverageSummary([cov({})], { count: 0, lines: [] })).toBeNull();
+    expect(coverageSummary([cov({})], null)).toBeNull();
+    expect(coverageSummary([cov({})])).toBeNull();
+  });
+
+  it('composeDigest adds "N tasks couldn\'t be done yesterday" and the lines after the silent buildings', () => {
+    const [section] = composeDigest({
+      ...empty,
+      coverage: {
+        noTeam: [], unassignedOpen: 0, silentYesterday: ['Gamma House'],
+        wontDoYesterday: { count: 2, lines: ['Alpha Court · Sweep the plant room · Area locked', 'Beta Place · Test the generator · Load shedding'] },
+      },
+    })!;
+    expect(section.heading).toBe('Coverage: 1 silent yesterday');
+    expect(section.lines).toEqual([
+      'Nothing was logged yesterday at Gamma House',
+      "2 tasks couldn't be done yesterday",
+      'Alpha Court · Sweep the plant room · Area locked',
+      'Beta Place · Test the generator · Load shedding',
+    ]);
+  });
+
+  it('singularises one can\'t-do and lists at most WONT_DO_LINES_MAX lines with the remainder counted', () => {
+    const one = composeDigest({ ...empty, coverage: { noTeam: [], unassignedOpen: 0, silentYesterday: [], wontDoYesterday: { count: 1, lines: ['A · T · Other'] } } })![0];
+    expect(one.heading).toBe('Coverage');
+    expect(one.lines).toEqual(["1 task couldn't be done yesterday", 'A · T · Other']);
+
+    const lines = Array.from({ length: WONT_DO_LINES_MAX + 3 }, (_, i) => `B${i} · T${i} · No materials`);
+    const many = composeDigest({ ...empty, coverage: { noTeam: [], unassignedOpen: 0, silentYesterday: [], wontDoYesterday: { count: lines.length, lines } } })![0];
+    expect(many.lines).toHaveLength(1 + WONT_DO_LINES_MAX + 1);
+    expect(many.lines[0]).toBe(`${WONT_DO_LINES_MAX + 3} tasks couldn't be done yesterday`);
+    expect(many.lines[WONT_DO_LINES_MAX]).toBe(`B${WONT_DO_LINES_MAX - 1} · T${WONT_DO_LINES_MAX - 1} · No materials`);
+    expect(many.lines[WONT_DO_LINES_MAX + 1]).toBe('…and 3 more');
+  });
+
+  it('an absent or empty wontDoYesterday changes nothing for the existing coverage shape', () => {
+    const before = composeDigest({ ...empty, coverage: { noTeam: ['A'], unassignedOpen: 2, silentYesterday: ['Z'] } })![0];
+    const after = composeDigest({ ...empty, coverage: { noTeam: ['A'], unassignedOpen: 2, silentYesterday: ['Z'], wontDoYesterday: { count: 0, lines: [] } } })![0];
+    expect(after).toEqual(before);
+    expect(composeDigest({ ...empty, coverage: { noTeam: [], unassignedOpen: 0, silentYesterday: [], wontDoYesterday: null } })).toBeNull();
   });
 });

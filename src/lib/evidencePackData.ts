@@ -327,10 +327,14 @@ export async function loadTaskPack(taskId: string, meta: PackMeta, onProgress?: 
   const task = need(taskRes.data, taskRes.error, 'the task');
   const completionsRes = await supabase
     .from('task_completions')
-    .select('completed_by, created_at, notes, photo_urls, signature_confirmed')
+    .select('completed_by, created_at, notes, photo_urls, signature_confirmed, outcome, reason')
     .eq('task_instance_id', taskId)
     .order('created_at', { ascending: false });
-  const completions = need(completionsRes.data, completionsRes.error, 'the task completion');
+  // outcome and reason are not yet in the generated types; regenerate after the migration ships.
+  const completions = need(completionsRes.data, completionsRes.error, 'the task completion') as unknown as {
+    completed_by: string; created_at: string | null; notes: string | null; photo_urls: unknown;
+    signature_confirmed: boolean | null; outcome: string | null; reason: string | null;
+  }[];
 
   const names = await memberNames(task.building_id);
   const nameOf = (id: string | null): string | null => (id ? names.get(id) ?? null : null);
@@ -344,17 +348,22 @@ export async function loadTaskPack(taskId: string, meta: PackMeta, onProgress?: 
       completedAt: instant(row.created_at) ?? '—',
       notes: row.notes,
       signatureConfirmed: !!row.signature_confirmed,
+      outcome: row.outcome === 'wont_do' ? 'wont_do' : 'completed',
+      reason: row.reason,
       photos: photos.request(photoUrlList(row.photo_urls), (i) => `Completion photo ${i + 1}`, 'completion'),
       source: 'task_completions',
     };
   } else if (task.completed_at) {
     // Denormalised fallback: the task carries a copy of the completion but no `task_completions`
-    // row exists. The pack prints the source, so a reader can tell the two apart.
+    // row exists. The pack prints the source, so a reader can tell the two apart. The RPC always
+    // writes the completion row for a can't-do, so the status is the only trace here.
     completion = {
       completedBy: nameOf(task.completed_by) ?? 'Unknown',
       completedAt: instant(task.completed_at) ?? '—',
       notes: task.completion_notes,
       signatureConfirmed: !!task.signature_url,
+      outcome: task.status === 'wont_do' ? 'wont_do' : 'completed',
+      reason: null,
       photos: photos.request(photoUrlList(task.photo_urls), (i) => `Completion photo ${i + 1}`, 'task'),
       source: 'task_instances',
     };
