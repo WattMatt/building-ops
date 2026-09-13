@@ -91,13 +91,6 @@ describe('CompleteTaskDialog', () => {
     expect(invalidateQueries).toHaveBeenCalledTimes(2);
   });
 
-  it('leaves the refetch to the queue runner while the write is still queued', async () => {
-    enqueueAndRun.mockResolvedValueOnce({ status: 'queued' });
-    renderDialog();
-    await submit();
-    expect(invalidateQueries).not.toHaveBeenCalled();
-  });
-
   it('says so when the server reports the task was already completed', async () => {
     enqueueAndRun.mockResolvedValueOnce({ status: 'synced', result: { completion_id: 'c1', already_completed: true } });
     const { onSuccess } = renderDialog();
@@ -107,13 +100,15 @@ describe('CompleteTaskDialog', () => {
     expect(onSuccess).toHaveBeenCalled();
   });
 
-  it('closes with the queued guardrail toast when the write is held on the device', async () => {
+  it('closes with the queued guardrail toast when the write is held on the device, leaving the refetch to the queue runner', async () => {
     enqueueAndRun.mockResolvedValueOnce({ status: 'queued' });
     const { onOpenChange, onSuccess } = renderDialog();
     await submit();
     expect(toast).toHaveBeenCalledWith("Task saved on this device — it will complete when you're back online");
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(onSuccess).toHaveBeenCalled();
+    // The runner refetches once the replay actually lands; until then the pending overlay marks the row.
+    expect(invalidateQueries).not.toHaveBeenCalled();
   });
 
   it('stays open and shows the server message when the write is rejected', async () => {
@@ -181,6 +176,10 @@ describe('CompleteTaskDialog', () => {
     expect(toast.success).toHaveBeenCalledWith("Recorded as can't do");
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(onSuccess).toHaveBeenCalled();
+    // A can't-do changes the same My Day and building-overview rows as a completion: the refetch is not Done-only.
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['my-work'] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['building-overview'] });
+    expect(invalidateQueries).toHaveBeenCalledTimes(2);
   });
 
   it('switching back to Done after picking a reason sends a plain completion with no reason', async () => {
