@@ -144,30 +144,33 @@ serve(async (req: Request): Promise<Response> => {
     // role bypasses RLS, so this is the whole portfolio; site users never receive this section.
     // S6b adds yesterday's can't-dos from task_completions (outcome = 'wont_do', recorded during
     // yesterday's SAST day), joined to the task for its name and building. Same non-fatal shape:
-    // a failed read logs and the section goes out without those lines.
+    // a failed read logs and the section goes out without those lines. Only admins and managers
+    // ever receive the section, so with nobody in that set the read is skipped outright.
     let wontDoYesterday: WontDoYesterday | null = null;
-    try {
-      const yesterday = daysBeforeIso(today, 1);
-      const { data: wdRows, error: wdErr } = await supabase
-        .from("task_completions")
-        .select("reason, created_at, task_instances!inner(task_name, building_id)")
-        .eq("outcome", "wont_do")
-        .gte("created_at", startOfDayJohannesburgIso(yesterday))
-        .lt("created_at", startOfDayJohannesburgIso(today))
-        .order("created_at");
-      if (wdErr) throw wdErr;
-      const rows = (wdRows ?? []) as {
-        reason: string | null;
-        task_instances: { task_name: string | null; building_id: string | null } | null;
-      }[];
-      wontDoYesterday = {
-        count: rows.length,
-        lines: rows.map((r) =>
-          `${nameFor(r.task_instances?.building_id ?? null) ?? "Unknown building"} · ${r.task_instances?.task_name ?? "Untitled task"} · ${reasonLabel(r.reason) || "No reason given"}`
-        ),
-      };
-    } catch (e) {
-      console.error("daily-digest: wont_do read failed; no can't-do lines this run", e);
+    if (adminIds.size > 0) {
+      try {
+        const yesterday = daysBeforeIso(today, 1);
+        const { data: wdRows, error: wdErr } = await supabase
+          .from("task_completions")
+          .select("reason, created_at, task_instances!inner(task_name, building_id)")
+          .eq("outcome", "wont_do")
+          .gte("created_at", startOfDayJohannesburgIso(yesterday))
+          .lt("created_at", startOfDayJohannesburgIso(today))
+          .order("created_at");
+        if (wdErr) throw wdErr;
+        const rows = (wdRows ?? []) as {
+          reason: string | null;
+          task_instances: { task_name: string | null; building_id: string | null } | null;
+        }[];
+        wontDoYesterday = {
+          count: rows.length,
+          lines: rows.map((r) =>
+            `${nameFor(r.task_instances?.building_id ?? null) ?? "Unknown building"} · ${r.task_instances?.task_name ?? "Untitled task"} · ${reasonLabel(r.reason) || "No reason given"}`
+          ),
+        };
+      } catch (e) {
+        console.error("daily-digest: wont_do read failed; no can't-do lines this run", e);
+      }
     }
     let coverage: CoverageSummary | null = null;
     try {
@@ -176,7 +179,9 @@ serve(async (req: Request): Promise<Response> => {
       coverage = coverageSummary((covRows ?? []) as CoverageRow[], wontDoYesterday);
     } catch (e) {
       // The digest still goes out without the coverage lines; the dashboard widget covers it.
+      // The can't-do lines came from a separate read, so they are not lost with the RPC.
       console.error("daily-digest: portfolio_coverage failed", e);
+      coverage = coverageSummary([], wontDoYesterday);
     }
 
     // ---- Push pass: one task_due_today per person with a live device --------------------

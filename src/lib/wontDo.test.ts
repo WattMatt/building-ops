@@ -30,6 +30,13 @@ describe('wontDo vocabulary', () => {
     expect(parseReason('')).toEqual({ code: null, text: '' });
   });
 
+  it('round-trips an "other" text that itself contains ": " (only the first prefix is the separator)', () => {
+    const stored = formatReason('other', 'note: gate: x');
+    expect(stored).toBe(`${OTHER_PREFIX}note: gate: x`);
+    expect(parseReason(stored)).toEqual({ code: 'other', text: 'note: gate: x' });
+    expect(reasonLabel(stored)).toBe('note: gate: x');
+  });
+
   it('reasonLabel prints the label for a code and the text itself for "other"', () => {
     expect(reasonLabel('load_shedding')).toBe('Load shedding');
     expect(reasonLabel('other: gate welded shut')).toBe('gate welded shut');

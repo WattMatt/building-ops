@@ -18,6 +18,7 @@ import {
   type PackMeta,
   type TaskPack,
 } from '@/lib/evidencePack';
+import { TASK_STATUS_LABELS } from '@/lib/constants';
 
 const meta: PackMeta = {
   orgName: 'Watson Mattheus',
@@ -206,6 +207,16 @@ describe('buildTaskPackDoc', () => {
     expect(out).toContain('Load shedding');
     // The Outcome cell itself must not read "Completed" ("Completed by" / "Completed at" are other rows).
     expect(out).not.toContain(`"text":"${OUTCOME_COPY.completed}"`);
+  });
+
+  it('prints the task status as its label, never the raw enum', () => {
+    const wontDo = text(buildTaskPackDoc(taskPack({ task: { ...taskPack().task, status: 'wont_do' } })));
+    expect(wontDo).toContain(`"text":"${TASK_STATUS_LABELS.wont_do}"`);
+    expect(wontDo).not.toContain('"text":"wont_do"');
+    const done = text(buildTaskPackDoc(taskPack()));
+    expect(done).toContain(`"text":"${TASK_STATUS_LABELS.completed}"`);
+    // A value the label map does not know still prints, as itself.
+    expect(text(buildTaskPackDoc(taskPack({ task: { ...taskPack().task, status: 'mystery' } })))).toContain('"text":"mystery"');
   });
 
   it('prints the free text of an "other" reason, and no Reason row for a completion', () => {

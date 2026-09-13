@@ -268,6 +268,16 @@ describe('coverage section', () => {
     expect(coverageSummary([cov({})])).toBeNull();
   });
 
+  it('the can\'t-do line survives an empty coverage rows array (portfolio_coverage failed or returned nothing)', () => {
+    const wontDo = { count: 1, lines: ['Alpha Court · Sweep the plant room · Area locked'] };
+    const summary = coverageSummary([], wontDo);
+    expect(summary).toEqual({ noTeam: [], unassignedOpen: 0, silentYesterday: [], wontDoYesterday: wontDo });
+    const [section] = composeDigest({ ...empty, coverage: summary })!;
+    expect(section.heading).toBe('Coverage');
+    expect(section.lines).toEqual(["1 task couldn't be done yesterday", 'Alpha Court · Sweep the plant room · Area locked']);
+    expect(coverageSummary([], null)).toBeNull();
+  });
+
   it('composeDigest adds "N tasks couldn\'t be done yesterday" and the lines after the silent buildings', () => {
     const [section] = composeDigest({
       ...empty,

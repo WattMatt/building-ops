@@ -16,6 +16,7 @@ import type { EmbeddedPhoto } from '@/lib/fortressReportDoc';
 import { runningHeader, safePrimaryColor } from '@/lib/reportDocs';
 import { formatRand } from '@/lib/money';
 import { reasonLabel, type TaskOutcome } from '@/lib/wontDo';
+import { TASK_STATUS_LABELS, type TaskStatus } from '@/lib/constants';
 
 /**
  * How many photos one pack fetches and embeds. A resolved issue with a photo on every comment
@@ -355,7 +356,8 @@ export function buildTaskPackDoc(p: TaskPack): TDocumentDefinitions {
 
   const instance = keyValues([
     ['Building', p.meta.buildingName],
-    ['Status', task.status],
+    // The label, never the raw enum: a reader gets "Can't do", not "wont_do". Unknown values print as-is.
+    ['Status', TASK_STATUS_LABELS[task.status as TaskStatus] ?? task.status],
     ['Frequency', task.frequency],
     ['Due date', task.dueDate],
     ['Responsible role', task.responsibleRole],
