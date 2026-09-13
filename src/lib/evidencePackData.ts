@@ -330,11 +330,7 @@ export async function loadTaskPack(taskId: string, meta: PackMeta, onProgress?: 
     .select('completed_by, created_at, notes, photo_urls, signature_confirmed, outcome, reason')
     .eq('task_instance_id', taskId)
     .order('created_at', { ascending: false });
-  // outcome and reason are not yet in the generated types; regenerate after the migration ships.
-  const completions = need(completionsRes.data, completionsRes.error, 'the task completion') as unknown as {
-    completed_by: string; created_at: string | null; notes: string | null; photo_urls: unknown;
-    signature_confirmed: boolean | null; outcome: string | null; reason: string | null;
-  }[];
+  const completions = need(completionsRes.data, completionsRes.error, 'the task completion');
 
   const names = await memberNames(task.building_id);
   const nameOf = (id: string | null): string | null => (id ? names.get(id) ?? null : null);

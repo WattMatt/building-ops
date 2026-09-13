@@ -91,8 +91,8 @@ export async function runOp(op: QueuedOp): Promise<unknown> {
         p_notes: p.notes ?? undefined,
         p_signature_confirmed: p.signatureConfirmed,
         p_photo_urls: photoUrls,
-        // p_outcome and p_reason are not yet in the generated types; regenerate after the migration ships.
-        ...({ p_outcome: p.outcome ?? 'completed', p_reason: p.reason ?? undefined } as object),
+        p_outcome: p.outcome ?? 'completed',
+        p_reason: p.reason ?? undefined,
       });
       if (error) throw error;
       return data?.[0] ?? { completion_id: p.completionId, already_completed: false };

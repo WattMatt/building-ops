@@ -218,10 +218,8 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
         .in('task_instance_id', taskIds);
 
       if (completionsError) throw completionsError;
-      // outcome and reason are not yet in the generated types; regenerate after the migration ships.
-      const completionsData = (completionsRaw ?? []) as unknown as {
-        task_instance_id: string; completed_by: string; completed_at: string | null; outcome: TaskOutcome | null; reason: string | null;
-      }[];
+      // The column is `text` in the schema; the RPC's check narrows it to the two outcomes.
+      const completionsData = (completionsRaw ?? []).map((c) => ({ ...c, outcome: (c.outcome ?? null) as TaskOutcome | null }));
 
       // Map completions to tasks. The completer's name is resolved at render time from the
       // building's member list (`nameOf`) — other users' `profiles` rows are not readable here.
