@@ -2,11 +2,13 @@
  * "My work here": the tasks assigned to me in this building — the overview a field user opens
  * the building page for (spec: pilot-field §4.2).
  *
- * Same data as My Day (`useMyWork`, filtered to one building) so the two pages can never
- * disagree about what is mine, and the same row, Complete action and queued chip (`TaskRow`)
- * so completing from here behaves exactly as completing from My Day. The building name is
- * left off the rows because the page is the building. Sign-offs and returned reports are My
- * Day's, not this card's. Mobile-first: one column, nothing side by side.
+ * Same task query as My Day (`useMyTasks`, which `useMyWork` composes; filtered here to one
+ * building) so the two pages can never disagree about what is mine, and the same row, Complete
+ * action and queued chip (`TaskRow`) so completing from here behaves exactly as completing from
+ * My Day. Only the tasks query is read: issues, sign-offs and returned reports are My Day's,
+ * not this card's, so their loading and failure states do not reach it and an Overview visit
+ * costs one request, not five. The building name is left off the rows because the page is the
+ * building. Mobile-first: one column, nothing side by side.
  */
 import { useMemo, useState, type ReactNode } from 'react';
 import { AlertTriangle, CalendarDays, CheckCircle2, ClipboardCheck, ListChecks, Loader2 } from 'lucide-react';
@@ -14,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Hint } from '@/components/ui/hint';
 import { cn } from '@/lib/utils';
-import { useMyWork } from '@/hooks/useMyWork';
+import { useMyTasks } from '@/hooks/useMyTasks';
 import { useOfflineQueue } from '@/hooks/useOfflineQueue';
 import { failedTaskIds, queuedTaskIds } from '@/lib/offline/pendingOverlay';
 import type { MyTask } from '@/lib/myWork';
@@ -56,7 +58,7 @@ function Group({
 }
 
 export default function MyWorkHere({ buildingId }: MyWorkHereProps) {
-  const { today, buckets, isLoading, isError, error, refetch } = useMyWork();
+  const { today, buckets, isLoading, isError, error, refetch } = useMyTasks();
 
   // Completions waiting in the offline queue: the server still lists those tasks as due, so
   // the row must say "already done, waiting to sync" rather than offer Complete a second time.
@@ -74,7 +76,8 @@ export default function MyWorkHere({ buildingId }: MyWorkHereProps) {
     }),
     [buckets, buildingId],
   );
-  // Decided here, not from useMyWork().isEmpty: My Day can be busy while this building is clear.
+  // Decided here, not from useMyWork().isEmpty: My Day can be busy while this building is clear,
+  // and this card never reads the issue, sign-off or returned-report sources at all.
   const isEmpty = here.overdue.length + here.today.length + here.upcoming.length === 0;
 
   const taskRow = (task: MyTask) => (

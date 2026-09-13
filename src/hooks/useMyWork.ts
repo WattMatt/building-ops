@@ -3,14 +3,14 @@
  * issues assigned to me, sign-offs waiting for me, reports returned to me, and the unread
  * inbox count. One hook so the My Day page and the digest agree on what counts as mine.
  */
-import { useCallback, useMemo } from 'react';
+import { useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { fdb } from '@/integrations/supabase/fortress-db';
 import { useAuth } from '@/contexts/AuthContext';
 import { useMySignoffs } from '@/hooks/useMySignoffs';
+import { useMyTasks } from '@/hooks/useMyTasks';
 import { useNotifications } from '@/hooks/useNotifications';
-import { bucketTasks, todayInOperatingTz, type MyTask } from '@/lib/myWork';
 import { PERSIST_DEFAULTS } from '@/lib/persist';
 import type { IssuePriority, IssueStatus } from '@/lib/constants';
 
@@ -19,28 +19,17 @@ export interface ReturnedReport { id: string; title: string | null; building_id:
 
 /** A joined `buildings(name)` comes back as an object, or null when the row has no building. */
 type JoinedBuilding = { name: string | null } | null;
-/** The two selects below return the target row plus the join, which the mappers flatten away. */
-type RawTask = Omit<MyTask, 'building_name'> & { buildings: JoinedBuilding };
+/** The issues select returns the row plus the join, which the mapper flattens away. */
 type RawIssue = Omit<MyIssue, 'building_name'> & { buildings: JoinedBuilding };
 
 export function useMyWork() {
   const { user } = useAuth();
   const uid = user?.id;
-  const today = todayInOperatingTz();
 
-  const tasks = useQuery({
-    queryKey: ['my-work', 'tasks', uid],
-    ...PERSIST_DEFAULTS,
-    enabled: !!uid,
-    queryFn: async (): Promise<MyTask[]> => {
-      if (!uid) return [];
-      const { data, error } = await supabase.from('task_instances')
-        .select('id, task_name, task_description, due_date, building_id, requires_photo, requires_signature, status, buildings(name)')
-        .eq('assigned_to', uid).in('status', ['pending', 'overdue']).order('due_date');
-      if (error) throw new Error(error.message);
-      return ((data ?? []) as RawTask[]).map((r) => { const { buildings, ...rest } = r; return { ...rest, building_name: buildings?.name ?? 'Unknown' }; });
-    },
-  });
+  // Tasks live in their own hook so a tasks-only surface (the building page's "My work
+  // here") can read them without the other three sources; the key and buckets are shared.
+  const tasks = useMyTasks();
+  const { today, buckets } = tasks;
 
   const issues = useQuery({
     queryKey: ['my-work', 'issues', uid],
@@ -70,7 +59,6 @@ export function useMyWork() {
   const signoffs = useMySignoffs();
   const { unread } = useNotifications();
 
-  const buckets = useMemo(() => bucketTasks(tasks.data ?? [], today), [tasks.data, today]);
   const isLoading = tasks.isLoading || issues.isLoading || returned.isLoading || signoffs.loading;
   const isError = tasks.isError || issues.isError || returned.isError || !!signoffs.error;
   // useMySignoffs is not a TanStack query, so its failure arrives as a message string
@@ -81,7 +69,7 @@ export function useMyWork() {
   const isEmpty = !isLoading && !isError && buckets.overdue.length + buckets.today.length + buckets.upcoming.length === 0 && (issues.data?.length ?? 0) === 0 && signoffs.items.length === 0 && (returned.data?.length ?? 0) === 0;
 
   const refetch = useCallback(() => {
-    void tasks.refetch(); void issues.refetch(); void returned.refetch(); void signoffs.reload();
+    tasks.refetch(); void issues.refetch(); void returned.refetch(); void signoffs.reload();
   }, [tasks.refetch, issues.refetch, returned.refetch, signoffs.reload]);
 
   return { today, buckets, issues: issues.data ?? [], signoffs: signoffs.items, returnedReports: returned.data ?? [], unread, isLoading, isError, error, isEmpty, refetch };

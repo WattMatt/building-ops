@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import type { useMyWork } from '@/hooks/useMyWork';
+import type { useMyTasks } from '@/hooks/useMyTasks';
 import type { MyTask } from '@/lib/myWork';
 import type { QueuedOp } from '@/lib/offline/types';
 
-/** The card's whole data contract, so a field added to useMyWork fails here, not silently. */
-type MyWork = ReturnType<typeof useMyWork>;
+/** The card's whole data contract, so a field added to useMyTasks fails here, not silently. */
+type MyWork = ReturnType<typeof useMyTasks>;
 
 const state = vi.hoisted(() => ({
   work: {} as MyWork,
@@ -13,8 +13,19 @@ const state = vi.hoisted(() => ({
   queuedOps: [] as QueuedOp[],
 }));
 const track = vi.hoisted(() => vi.fn());
+// The composite hook, in the state My Day would show as "your day could not be loaded" because
+// the sign-off source failed. The card must never call it: its one list comes from useMyTasks.
+const useMyWork = vi.hoisted(() =>
+  vi.fn(() => ({
+    isLoading: false,
+    isError: true,
+    error: new Error('permission denied for table form_signoff_requests'),
+    buckets: { overdue: [], today: [], upcoming: [] },
+  })),
+);
 
-vi.mock('@/hooks/useMyWork', () => ({ useMyWork: () => state.work }));
+vi.mock('@/hooks/useMyTasks', () => ({ useMyTasks: () => state.work }));
+vi.mock('@/hooks/useMyWork', () => ({ useMyWork }));
 // The real hook reaches for the Supabase client at import time; the card only cares whether
 // hints are on, and toggling that is how we prove the coaching copy is a <Hint>.
 vi.mock('@/hooks/useHints', () => ({
@@ -85,14 +96,9 @@ function baseWork(overrides: Partial<MyWork> = {}): MyWork {
   return {
     today: '2026-09-10',
     buckets: { overdue: [overdueHere, overdueElsewhere], today: [todayHere, todayElsewhere], upcoming: [upcomingHere] },
-    issues: [],
-    signoffs: [],
-    returnedReports: [],
-    unread: 0,
     isLoading: false,
     isError: false,
     error: null,
-    isEmpty: false,
     refetch: vi.fn(),
     ...overrides,
   };
@@ -103,6 +109,7 @@ const renderCard = () => render(<MyWorkHere buildingId="b1" />);
 describe('MyWorkHere', () => {
   beforeEach(() => {
     track.mockClear();
+    useMyWork.mockClear();
     state.hintsEnabled = true;
     state.queuedOps = [];
     state.work = baseWork();
@@ -123,6 +130,16 @@ describe('MyWorkHere', () => {
     // The page is the building, so the row does not repeat it.
     expect(screen.queryByText(/ALPHA TOWER/)).toBeNull();
     expect(screen.getByText('Was due Wed 9 Sep')).toBeInTheDocument();
+  });
+
+  it('reads the tasks query alone: renders tasks even while the sign-offs source would have errored My Day', () => {
+    renderCard();
+    // The composite hook is in its errored state (see the mock) and is never consulted.
+    expect(useMyWork).not.toHaveBeenCalled();
+    expect(screen.getByText('Check fire extinguishers')).toBeInTheDocument();
+    expect(screen.getByText('Overdue (1)')).toBeInTheDocument();
+    expect(screen.queryByText('Your work here could not be loaded')).toBeNull();
+    expect(screen.queryByText(/form_signoff_requests/)).toBeNull();
   });
 
   it('opens the complete dialog for the clicked task', () => {
@@ -161,7 +178,7 @@ describe('MyWorkHere', () => {
   });
 
   it('shows the empty state when nothing in this building is mine, even if My Day is not empty', () => {
-    state.work = baseWork({ buckets: { overdue: [overdueElsewhere], today: [todayElsewhere], upcoming: [] }, isEmpty: false });
+    state.work = baseWork({ buckets: { overdue: [overdueElsewhere], today: [todayElsewhere], upcoming: [] } });
     renderCard();
     expect(screen.getByText('Nothing assigned to you here')).toBeInTheDocument();
     expect(screen.queryByText(/\(\d+\)/)).toBeNull();
