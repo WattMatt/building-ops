@@ -138,14 +138,17 @@ const App = () => (
                 <DashboardLayout><Reports /></DashboardLayout>
               </ProtectedRoute>
             } />
-            {/* Static path first so it is never captured by the :id route below. */}
+            {/* Static path first so it is never captured by the :id route below. Both are
+                management surfaces (spec pilot-field §4.3): reports are created only through
+                NewReportDialog, which ReportsTab shows to admins and managers, so no field-user
+                author exists for the gate to lock out. The sidebar item is gated to match. */}
             <Route path="/reports/fortress" element={
-              <ProtectedRoute>
+              <ProtectedRoute allowedRoles={['admin', 'manager']}>
                 <DashboardLayout><FortressReports /></DashboardLayout>
               </ProtectedRoute>
             } />
             <Route path="/reports/fortress/:id" element={
-              <ProtectedRoute>
+              <ProtectedRoute allowedRoles={['admin', 'manager']}>
                 <DashboardLayout><FortressReportEditor /></DashboardLayout>
               </ProtectedRoute>
             } />

@@ -88,6 +88,15 @@ export const ISSUE_CSV_COLUMNS: CsvColumn<Issue>[] = [
   { key: 'corrective_action', header: 'Corrective action', format: csvText },
 ];
 
+/**
+ * The same register for a field user. The SLA clock is manager vocabulary (spec pilot-field
+ * §4.3), so every column derived from it stays out of their export — target, due, state, the
+ * breach instant and the first-response instant. All five, not the three the chip spells out:
+ * leaving "SLA breached at" in would hand the clock straight back.
+ */
+const SLA_CLOCK_HEADERS = new Set(['SLA target (hours)', 'SLA due', 'SLA state', 'SLA breached at', 'First response']);
+export const ISSUE_CSV_COLUMNS_FIELD: CsvColumn<Issue>[] = ISSUE_CSV_COLUMNS.filter((c) => !SLA_CLOCK_HEADERS.has(c.header));
+
 export default function Issues() {
   const { isAdminOrManager, user } = useAuth();
   const { issues, stats, loading, error, refetch } = useIssues();
@@ -230,7 +239,7 @@ export default function Issues() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {/* Server rows only: a queued issue has no server row, so it carries no SLA clock. */}
-          <ExportCsvButton rows={filteredIssues} columns={ISSUE_CSV_COLUMNS} filename="issues" />
+          <ExportCsvButton rows={filteredIssues} columns={isAdminOrManager ? ISSUE_CSV_COLUMNS : ISSUE_CSV_COLUMNS_FIELD} filename="issues" />
           <Button asChild>
             <Link to="/issues/new">
               <Plus className="w-4 h-4 mr-2" />
@@ -462,7 +471,8 @@ export default function Issues() {
                     <Badge variant="secondary" className={statusColors[issue.status]}>
                       {statusLabels[issue.status]}
                     </Badge>
-                    <SlaChip issue={issue} now={now} />
+                    {/* The SLA clock is a manager's instrument (spec pilot-field §4.3). */}
+                    {isAdminOrManager && <SlaChip issue={issue} now={now} />}
                   </div>
                 </div>
               </CardContent>

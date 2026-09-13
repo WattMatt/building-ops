@@ -14,7 +14,7 @@ vi.mock('@/components/issues/IssueDetailDialog', () => ({ default: () => null })
 
 import { gridCellText, gridCsvColumns, TRISTATE_DEFAULTS, type GridColumn } from './EditableGrid';
 import { toCsv } from '@/lib/exportCsv';
-import { ISSUE_CSV_COLUMNS } from '@/pages/Issues';
+import { ISSUE_CSV_COLUMNS, ISSUE_CSV_COLUMNS_FIELD } from '@/pages/Issues';
 import type { Issue } from '@/hooks/useIssues';
 
 const col = (c: Partial<GridColumn> & { key: string }): GridColumn => ({ label: c.key, type: 'text', ...c });
@@ -148,5 +148,20 @@ describe('ISSUE_CSV_COLUMNS', () => {
     const cells = cellsOf(toCsv([issue({ building_name: undefined, deadline: null, category: null })], ISSUE_CSV_COLUMNS));
     expect(cells).not.toContain('null');
     expect(cells).not.toContain('undefined');
+  });
+
+  it('drops every SLA-clock column for a field user and keeps the rest in order (spec pilot-field §4.3)', () => {
+    const headers = headerOf(toCsv([issue()], ISSUE_CSV_COLUMNS_FIELD));
+    expect(headers).toEqual([
+      'Title',
+      'Building',
+      'Priority',
+      'Status',
+      'Category',
+      'Reported',
+      'Deadline',
+      'Resolved at',
+      'Corrective action',
+    ]);
   });
 });

@@ -128,10 +128,12 @@ const reportsNavItems: NavItem[] = [
   {
     // The monthly OPS/CM and annual reports themselves. Previously reachable only by
     // opening a building and finding its Reports tab, which meant no way to see a month
-    // across the portfolio at all.
+    // across the portfolio at all. Authored and reviewed by admins and managers only
+    // (spec pilot-field §4.3): the routes are gated to match in App.tsx.
     title: 'Building Reports',
     href: '/reports/fortress',
     icon: <FileText className="w-4 h-4" />,
+    roles: ['admin', 'manager'],
     badgeKinds: ['report_submitted', 'report_returned', 'report_approved'],
   },
   {
@@ -175,6 +177,17 @@ const adminNavItems: NavItem[] = [
     icon: <Settings className="w-4 h-4" />,
     roles: ['admin', 'manager'],
   },
+];
+
+interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+const navGroups: NavGroup[] = [
+  { label: 'Main', items: mainNavItems },
+  { label: 'Reports & Audit', items: reportsNavItems },
+  { label: 'Administration', items: adminNavItems },
 ];
 
 interface DashboardLayoutProps {
@@ -252,80 +265,38 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
           </SidebarHeader>
 
           <SidebarContent>
-            <SidebarGroup>
-              <SidebarGroupLabel>Main</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {mainNavItems.filter(canAccessItem).map((item) => {
-                    const n = item.badgeKinds ? unreadByKind(item.badgeKinds) : 0;
-                    return (
-                      <SidebarMenuItem key={item.href}>
-                        <SidebarMenuButton
-                          asChild
-                          isActive={location.pathname === item.href}
-                        >
-                          <Link to={item.href}>
-                            {item.icon}
-                            <span>{item.title}</span>
-                            {n > 0 && <NavBadge count={n} />}
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    );
-                  })}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-
-            <SidebarGroup>
-              <SidebarGroupLabel>Reports & Audit</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {reportsNavItems.filter(canAccessItem).map((item) => {
-                    const n = item.badgeKinds ? unreadByKind(item.badgeKinds) : 0;
-                    return (
-                      <SidebarMenuItem key={item.href}>
-                        <SidebarMenuButton
-                          asChild
-                          isActive={location.pathname === item.href}
-                        >
-                          <Link to={item.href}>
-                            {item.icon}
-                            <span>{item.title}</span>
-                            {n > 0 && <NavBadge count={n} />}
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    );
-                  })}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-
-            <SidebarGroup>
-              <SidebarGroupLabel>Administration</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {adminNavItems.filter(canAccessItem).map((item) => {
-                    const n = item.badgeKinds ? unreadByKind(item.badgeKinds) : 0;
-                    return (
-                      <SidebarMenuItem key={item.href}>
-                        <SidebarMenuButton
-                          asChild
-                          isActive={location.pathname === item.href}
-                        >
-                          <Link to={item.href}>
-                            {item.icon}
-                            <span>{item.title}</span>
-                            {n > 0 && <NavBadge count={n} />}
-                          </Link>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    );
-                  })}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
+            {navGroups.map((group) => {
+              const items = group.items.filter(canAccessItem);
+              // A heading over nothing (the field user's "Administration") is not drawn: a
+              // group appears only when it holds at least one item this reader can open.
+              if (items.length === 0) return null;
+              return (
+                <SidebarGroup key={group.label}>
+                  <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+                  <SidebarGroupContent>
+                    <SidebarMenu>
+                      {items.map((item) => {
+                        const n = item.badgeKinds ? unreadByKind(item.badgeKinds) : 0;
+                        return (
+                          <SidebarMenuItem key={item.href}>
+                            <SidebarMenuButton
+                              asChild
+                              isActive={location.pathname === item.href}
+                            >
+                              <Link to={item.href}>
+                                {item.icon}
+                                <span>{item.title}</span>
+                                {n > 0 && <NavBadge count={n} />}
+                              </Link>
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                        );
+                      })}
+                    </SidebarMenu>
+                  </SidebarGroupContent>
+                </SidebarGroup>
+              );
+            })}
           </SidebarContent>
 
           <SidebarFooter className="border-t border-sidebar-border p-4">

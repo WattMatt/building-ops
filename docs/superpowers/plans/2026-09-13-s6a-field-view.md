@@ -1058,7 +1058,7 @@ Independent of Tasks 1–3 (no shared files). Four sub-parts, each TDD, one comm
 
 #### 4a — Sidebar groups and the Building Reports item
 
-- [ ] **Step 1: Failing layout test** (there is none today; this is the minimal one)
+- [x] **Step 1: Failing layout test** (there is none today; this is the minimal one)
 
 ```tsx
 // src/components/layout/DashboardLayout.test.tsx
@@ -1161,7 +1161,7 @@ describe('DashboardLayout sidebar', () => {
 Run: `npx vitest run src/components/layout/DashboardLayout.test.tsx`
 Expected: tests 1 and 4 fail — `groupLabels()` is `['Main', 'Reports & Audit', 'Administration']` and `link('Building Reports')` is not null; tests 2 and 3 pass. `Tests  2 failed | 2 passed (4)`.
 
-- [ ] **Step 2: The layout** — in `src/components/layout/DashboardLayout.tsx`:
+- [x] **Step 2: The layout** — in `src/components/layout/DashboardLayout.tsx`:
 
 Replace lines 127–135 (the start of `reportsNavItems` through the `badgeKinds` line of "Building Reports"; the `},` on line 136 stays) with:
 
@@ -1238,7 +1238,7 @@ Expected: `✓ src/components/layout/DashboardLayout.test.tsx (4 tests)`.
 
 #### 4b — Route gates
 
-- [ ] **Step 3: The two routes** — in `src/App.tsx`, replace lines 141–151 with:
+- [x] **Step 3: The two routes** — in `src/App.tsx`, replace lines 141–151 with:
 
 ```tsx
             {/* Static path first so it is never captured by the :id route below. Both are
@@ -1274,7 +1274,7 @@ Expected: `✓ src/components/ProtectedRoute.test.tsx (12 tests)`.
 
 #### 4c — Issues register: chip and CSV columns
 
-- [ ] **Step 4: Failing register tests** — in `src/pages/Issues.test.tsx`:
+- [x] **Step 4: Failing register tests** — in `src/pages/Issues.test.tsx`:
 
 Replace lines 32–34 (the fixed `useAuth` mock) with a switchable one and a CSV-button probe:
 
@@ -1326,7 +1326,7 @@ Replace the test `'shows the SLA clock on an issue that has a target'` (original
 Run: `npx vitest run src/pages/Issues.test.tsx`
 Expected: the field-user test fails (`[data-sla]` present, headers include the SLA columns); `Tests  1 failed | 17 passed (18)`.
 
-- [ ] **Step 5: Failing column-set test** — in `src/components/reports/fortress/gridCsv.test.ts`, change line 17 to:
+- [x] **Step 5: Failing column-set test** — in `src/components/reports/fortress/gridCsv.test.ts`, change line 17 to:
 
 ```ts
 import { ISSUE_CSV_COLUMNS, ISSUE_CSV_COLUMNS_FIELD } from '@/pages/Issues';
@@ -1354,7 +1354,7 @@ and append inside `describe('ISSUE_CSV_COLUMNS', …)` after the `'leaves every 
 Run: `npx vitest run src/components/reports/fortress/gridCsv.test.ts`
 Expected: `SyntaxError: The requested module '/src/pages/Issues.tsx' does not provide an export named 'ISSUE_CSV_COLUMNS_FIELD'` — `Test Files  1 failed (1)`.
 
-- [ ] **Step 6: The register** — in `src/pages/Issues.tsx`:
+- [x] **Step 6: The register** — in `src/pages/Issues.tsx`:
 
 Add after line 89 (the closing `];` of `ISSUE_CSV_COLUMNS`):
 
@@ -1387,7 +1387,7 @@ Expected: `✓ src/pages/Issues.test.tsx (18 tests)`, `✓ src/components/report
 
 #### 4d — Issue detail: chip and SLA line on `canManage`
 
-- [ ] **Step 7: Failing dialog test** — in `src/components/issues/IssueDetailDialog.test.tsx`, append inside `describe('SLA', …)` after the `'shows no SLA line or chip without a target'` test (line 164):
+- [x] **Step 7: Failing dialog test** — in `src/components/issues/IssueDetailDialog.test.tsx`, append inside `describe('SLA', …)` after the `'shows no SLA line or chip without a target'` test (line 164):
 
 ```tsx
     it('keeps the chip and the line off for someone who cannot manage the issue (spec pilot-field §4.3)', async () => {
@@ -1407,7 +1407,7 @@ Expected: `✓ src/pages/Issues.test.tsx (18 tests)`, `✓ src/components/report
 Run: `npx vitest run src/components/issues/IssueDetailDialog.test.tsx`
 Expected: that test fails (`[data-sla]` present, `SLA target 24 h` present); `Tests  1 failed | 15 passed (16)`.
 
-- [ ] **Step 8: The dialog** — in `src/components/issues/IssueDetailDialog.tsx`:
+- [x] **Step 8: The dialog** — in `src/components/issues/IssueDetailDialog.tsx`:
 
 Replace line 298 (`<SlaChip issue={issue} now={now} />`) with:
 
@@ -1425,7 +1425,7 @@ Replace line 324 (`{issue.sla_target_hours != null && (`) with:
 Run: `npx vitest run src/components/issues/IssueDetailDialog.test.tsx`
 Expected: `✓ src/components/issues/IssueDetailDialog.test.tsx (16 tests)`.
 
-- [ ] **Step 9: gate, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'App.tsx|DashboardLayout|Issues|IssueDetailDialog|gridCsv'` prints nothing; global count ≤ 46; `git add src/App.tsx src/components/layout/DashboardLayout.tsx src/components/layout/DashboardLayout.test.tsx src/pages/Issues.tsx src/pages/Issues.test.tsx src/components/reports/fortress/gridCsv.test.ts src/components/issues/IssueDetailDialog.tsx src/components/issues/IssueDetailDialog.test.tsx && git commit -m "Field vocabulary: gate Building Reports, SLA clocks and empty sidebar groups to managers (spec pilot-field §4.3)"` (+ trailer).
+- [x] **Step 9: gate, commit** — `npx tsc --noEmit -p tsconfig.app.json 2>&1 | grep 'error TS' | grep -E 'App.tsx|DashboardLayout|Issues|IssueDetailDialog|gridCsv'` prints nothing; global count ≤ 46; `git add src/App.tsx src/components/layout/DashboardLayout.tsx src/components/layout/DashboardLayout.test.tsx src/pages/Issues.tsx src/pages/Issues.test.tsx src/components/reports/fortress/gridCsv.test.ts src/components/issues/IssueDetailDialog.tsx src/components/issues/IssueDetailDialog.test.tsx && git commit -m "Field vocabulary: gate Building Reports, SLA clocks and empty sidebar groups to managers (spec pilot-field §4.3)"` (+ trailer).
 
 ---
 

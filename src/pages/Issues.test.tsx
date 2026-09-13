@@ -29,8 +29,15 @@ vi.mock('@/hooks/useOfflineQueue', () => ({
     retryAll: vi.fn(),
   }),
 }));
+const auth = vi.hoisted(() => ({ isAdminOrManager: false }));
 vi.mock('@/contexts/AuthContext', () => ({
-  useAuth: () => ({ isAdminOrManager: false, user: { id: 'u1' } }),
+  useAuth: () => ({ isAdminOrManager: auth.isAdminOrManager, user: { id: 'u1' } }),
+}));
+// The real button drives a download; here it only has to say which columns it was handed.
+vi.mock('@/components/ui/export-csv-button', () => ({
+  ExportCsvButton: ({ columns }: { columns: readonly { header: string }[] }) => (
+    <div data-testid="csv-columns">{columns.map((c) => c.header).join('|')}</div>
+  ),
 }));
 vi.mock('@/components/issues/IssueDetailDialog', () => ({
   default: ({ open, issue }: { open: boolean; issue: { title: string } }) => (
@@ -117,6 +124,7 @@ const renderPage = () =>
 
 describe('Issues', () => {
   beforeEach(() => {
+    auth.isAdminOrManager = false;
     toast.mockClear();
     queueListeners.clear();
     queryClient.clear();
@@ -162,12 +170,30 @@ describe('Issues', () => {
     expect(screen.queryByTestId('tenant-chip')).toBeNull();
   });
 
-  it('shows the SLA clock on an issue that has a target', () => {
+  it('shows the SLA clock to a manager on an issue that has a target', () => {
+    auth.isAdminOrManager = true;
     // Reported half an hour ago with a 72 h target: 71.5 h left, floored to whole days.
     const created = new Date(Date.now() - 30 * 60_000).toISOString();
     state.data = baseData({ issues: [{ ...liveIssue, id: 'i2', title: 'Slow lift', sla_target_hours: 72, created_at: created }] });
     renderPage();
     expect(screen.getByText('Due in 2d')).toHaveAttribute('data-sla', 'ok');
+  });
+
+  it('keeps the SLA clock and the SLA CSV columns away from a field user (spec pilot-field §4.3)', () => {
+    const created = new Date(Date.now() - 30 * 60_000).toISOString();
+    state.data = baseData({ issues: [{ ...liveIssue, id: 'i2', title: 'Slow lift', sla_target_hours: 72, created_at: created }] });
+    renderPage();
+    expect(screen.getByText('Slow lift')).toBeInTheDocument();
+    expect(document.querySelector('[data-sla]')).toBeNull();
+    const headers = screen.getByTestId('csv-columns').textContent ?? '';
+    expect(headers).toBe('Title|Building|Priority|Status|Category|Reported|Deadline|Resolved at|Corrective action');
+  });
+
+  it('exports the SLA columns for a manager', () => {
+    auth.isAdminOrManager = true;
+    renderPage();
+    const headers = screen.getByTestId('csv-columns').textContent ?? '';
+    expect(headers).toContain('|SLA target (hours)|SLA due|SLA state|SLA breached at|First response|');
   });
 
   it('prepends a queued issue with a Queued chip before the live rows', () => {
