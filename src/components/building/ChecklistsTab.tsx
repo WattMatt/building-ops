@@ -368,7 +368,9 @@ export default function ChecklistsTab({ buildingId, buildingName }: ChecklistsTa
   ], [nameOf]);
 
   // Calculate progress. A can't-do (S6b) is closed but neither done nor outstanding, so it is out of
-  // the denominator — the same line snapshot_building_metrics and buildingScore.ts draw.
+  // the denominator — as it is out of every task count in snapshot_building_metrics. An issue_logged
+  // task STAYS in the denominator here (it is still not done); buildingScore.ts draws a narrower
+  // line and leaves issue_logged unscored too, so the two figures are not the same number.
   const pendingTasks = filteredTasks.filter(t => t.status === 'pending');
   const completedTasksList = filteredTasks.filter(t => t.status === 'completed');
   const issueTasks = filteredTasks.filter(t => t.status === 'issue_logged');

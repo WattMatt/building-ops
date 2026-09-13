@@ -13,12 +13,14 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { categoryMeta } from '@/lib/compliance';
+import { TASK_STATUS_LABELS, type TaskStatus } from '@/lib/constants';
 import { reasonLabel, type TaskOutcome } from '@/lib/wontDo';
 import { AssigneePicker } from '@/components/people/AssigneePicker';
 import { EvidencePackMenu } from '@/components/evidence/EvidencePackMenu';
 
 export type TaskFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'annually';
-export type TaskStatus = 'pending' | 'completed' | 'overdue' | 'issue_logged' | 'wont_do';
+/** The status union lives in constants.ts (it mirrors the check constraint); re-exported for the list's callers. */
+export type { TaskStatus };
 
 export interface TaskInstance {
   id: string;
@@ -159,7 +161,7 @@ export function TasksList({ tasks, onComplete, onReportIssue, emptyMessage, vari
                   {task.status === 'completed'
                     ? 'Done'
                     : task.status === 'wont_do'
-                    ? "Can't do"
+                    ? TASK_STATUS_LABELS.wont_do
                     : task.status === 'issue_logged'
                     ? 'Issue'
                     : 'Pending'}

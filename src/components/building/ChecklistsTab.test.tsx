@@ -1,7 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import { mockViewport } from '@/test/mobile';
 import { todayInOperatingTz } from '@/lib/myWork';
+import { exportCsv, toCsv } from '@/lib/exportCsv';
+
+// Keep the real CSV builder; only the download step is captured so the test can read what the
+// button would have written.
+vi.mock('@/lib/exportCsv', async (orig) => ({
+  ...(await orig<typeof import('@/lib/exportCsv')>()),
+  exportCsv: vi.fn(),
+}));
 
 type Row = Record<string, unknown>;
 const state = vi.hoisted(() => ({
@@ -50,6 +58,7 @@ describe('ChecklistsTab — can\'t do', () => {
   beforeEach(() => {
     // Phone layout: the strip opens on the Daily tab, where the lists and the progress card live.
     mockViewport(375);
+    vi.mocked(exportCsv).mockClear();
     state.selects = [];
     state.tasks = [task('t1', 'pending'), task('t2', 'wont_do'), task('t3', 'completed'), task('t4', 'issue_logged')];
     state.completions = [completion('t2', 'wont_do', 'load_shedding'), completion('t3', 'completed', null)];
@@ -74,6 +83,25 @@ describe('ChecklistsTab — can\'t do', () => {
     expect(screen.getByText('33%')).toBeInTheDocument();
     expect(screen.getByText("Can't do: 1")).toBeInTheDocument();
     expect(screen.getByText('Issues: 1')).toBeInTheDocument();
+  });
+
+  it('exports the reason in its own CSV column: the label for a can\'t-do row, empty otherwise', async () => {
+    render(<ChecklistsTab buildingId="b1" buildingName="Alpha Court" />);
+    await screen.findByText("Can't do (1)");
+    fireEvent.click(screen.getByRole('button', { name: /export csv/i }));
+
+    expect(exportCsv).toHaveBeenCalledTimes(1);
+    const [rows, columns] = vi.mocked(exportCsv).mock.calls[0];
+    expect(columns.map((c) => c.header)).toContain('Reason');
+    // Only the two columns under test go through the real builder: the "Completed at" instant
+    // carries a comma and is quoted, which a plain split on ',' cannot read.
+    const narrow = columns.filter((c) => c.header === 'Task' || c.header === 'Reason');
+    const lines = toCsv(rows, narrow).replace(/^﻿/, '').trim().split('\r\n').map((l) => l.split(','));
+    expect(lines[0]).toEqual(['Task', 'Reason']);
+    const reasonOf = (taskName: string) => lines.find((l) => l[0] === taskName)?.[1];
+    expect(reasonOf('Task t2')).toBe('Load shedding');
+    expect(reasonOf('Task t3')).toBe('');
+    expect(reasonOf('Task t1')).toBe('');
   });
 
   it('shows neither the card nor the legend entry when nothing is can\'t-do', async () => {
