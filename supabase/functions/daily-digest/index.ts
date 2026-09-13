@@ -172,16 +172,20 @@ serve(async (req: Request): Promise<Response> => {
         console.error("daily-digest: wont_do read failed; no can't-do lines this run", e);
       }
     }
+    // Same gate as the wont_do read: with no admin or manager to receive the section, the RPC
+    // is skipped (coverage stays null, which composeDigest already treats as "no section").
     let coverage: CoverageSummary | null = null;
-    try {
-      const { data: covRows, error: covErr } = await supabase.rpc("portfolio_coverage");
-      if (covErr) throw covErr;
-      coverage = coverageSummary((covRows ?? []) as CoverageRow[], wontDoYesterday);
-    } catch (e) {
-      // The digest still goes out without the coverage lines; the dashboard widget covers it.
-      // The can't-do lines came from a separate read, so they are not lost with the RPC.
-      console.error("daily-digest: portfolio_coverage failed", e);
-      coverage = coverageSummary([], wontDoYesterday);
+    if (adminIds.size > 0) {
+      try {
+        const { data: covRows, error: covErr } = await supabase.rpc("portfolio_coverage");
+        if (covErr) throw covErr;
+        coverage = coverageSummary((covRows ?? []) as CoverageRow[], wontDoYesterday);
+      } catch (e) {
+        // The digest still goes out without the coverage lines; the dashboard widget covers it.
+        // The can't-do lines came from a separate read, so they are not lost with the RPC.
+        console.error("daily-digest: portfolio_coverage failed", e);
+        coverage = coverageSummary([], wontDoYesterday);
+      }
     }
 
     // ---- Push pass: one task_due_today per person with a live device --------------------
