@@ -68,19 +68,24 @@ vi.mock('@/integrations/supabase/client', () => {
   return { supabase: { from } };
 });
 
+// My work here has its own tests and reaches useMyWork/useAuth; here only its position matters.
+vi.mock('@/components/building/MyWorkHere', () => ({
+  default: ({ buildingId }: { buildingId: string }) => <div>{`MyWorkHere ${buildingId}`}</div>,
+}));
+
 import OverviewWidgets from './OverviewWidgets';
 
 const has = (calls: RecordedCall[], method: string, col: string) =>
   calls.some((c) => c.method === method && c.args[0] === col);
 
-function renderWidgets(onTabChange = vi.fn()) {
+function renderWidgets(onTabChange = vi.fn(), isAdminOrManager = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrap = (node: ReactNode) => <QueryClientProvider client={client}>{node}</QueryClientProvider>;
   render(
     wrap(
       <MemoryRouter initialEntries={['/buildings/b1']}>
         <Routes>
-          <Route path="/buildings/:id" element={<OverviewWidgets buildingId="b1" onTabChange={onTabChange} />} />
+          <Route path="/buildings/:id" element={<OverviewWidgets buildingId="b1" onTabChange={onTabChange} isAdminOrManager={isAdminOrManager} />} />
           <Route path="/issues" element={<div>IssuesPage</div>} />
         </Routes>
       </MemoryRouter>,
@@ -203,5 +208,27 @@ describe('OverviewWidgets — order', () => {
     await waitFor(() =>
       expect(state.calls.some((c) => c.table === 'building_month_costs' && c.method === 'eq' && c.args[0] === 'month')).toBe(true),
     );
+  });
+});
+
+describe('OverviewWidgets — field user (spec pilot-field §4.3)', () => {
+  it('renders My work here, then Open issues, and none of the management widgets', async () => {
+    renderWidgets(vi.fn(), false);
+    const mine = await screen.findByText('MyWorkHere b1');
+    const issues = await screen.findByRole('button', { name: /open issues/i });
+    expect(mine.compareDocumentPosition(issues) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /today's tasks/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /this month's costs/i })).toBeNull();
+    expect(screen.queryByText('Document Expiry Alerts')).toBeNull();
+    expect(screen.queryByText('Maintenance Alerts')).toBeNull();
+    expect(screen.queryByText('Form Activity')).toBeNull();
+    // Nothing is fetched for the widgets that are not shown.
+    expect(state.calls.some((c) => c.table === 'building_documents' || c.table === 'building_assets' || c.table === 'form_submissions' || c.table === 'building_month_costs')).toBe(false);
+  });
+
+  it('keeps My work here off the manager overview', async () => {
+    renderWidgets();
+    await screen.findByRole('button', { name: /today's tasks/i });
+    expect(screen.queryByText(/MyWorkHere/)).toBeNull();
   });
 });

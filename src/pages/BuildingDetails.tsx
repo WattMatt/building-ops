@@ -40,6 +40,13 @@ interface Building {
   created_at: string | null;
 }
 
+/**
+ * The tabs a field user gets (spec: pilot-field §4.1). Everything else on this page is
+ * management vocabulary — costs, tenants, assets, PPM, compliance, documents, reports, team —
+ * and is not mounted for the `user` role at all, so a deep link cannot reach it either.
+ */
+const FIELD_TABS: readonly string[] = ['overview', 'checklists', 'forms', 'notes'];
+
 export default function BuildingDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -48,8 +55,10 @@ export default function BuildingDetails() {
   const [building, setBuilding] = useState<Building | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') ?? 'overview');
-  const { ohsPct, taskPct, asOf } = useBuildingScore(id);
-  const trend = useBuildingTrend(id, 90);
+  // The chips are hidden for a field user below; no id disables both snapshot queries, so the
+  // page does not read what it will not show.
+  const { ohsPct, taskPct, asOf } = useBuildingScore(isAdminOrManager ? id : undefined);
+  const trend = useBuildingTrend(isAdminOrManager ? id : undefined, 90);
   const [avatarDialogOpen, setAvatarDialogOpen] = useState(false);
 
   // keep the active tab in the URL so report links / the editor back-button can deep-link here
@@ -117,6 +126,9 @@ export default function BuildingDetails() {
   const contacts = building.emergency_contacts || {};
   const hasCustomLogo = building.logo_url && !building.logo_url.includes('dicebear');
   const logoPosition = building.logo_position || 'top-left';
+  // A field user following a management deep link (?tab=ppm, ?tab=team, …) lands on Overview:
+  // the trigger is not mounted, so the URL value cannot select anything else.
+  const tabValue = !isAdminOrManager && !FIELD_TABS.includes(activeTab) ? 'overview' : activeTab;
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -183,9 +195,12 @@ export default function BuildingDetails() {
                 <MapPin className="h-3 w-3 shrink-0" />
                 <span className="truncate">{building.address}, {building.city}</span>
               </p>
-              <div className="mt-2">
-                <BuildingScoreChips ohsPct={ohsPct} taskPct={taskPct} ohsTrend={trend.series.compliance} taskTrend={trend.series.tasks} asOf={asOf} />
-              </div>
+              {/* Compliance and completion scores are management vocabulary (spec pilot-field §4.3). */}
+              {isAdminOrManager && (
+                <div className="mt-2">
+                  <BuildingScoreChips ohsPct={ohsPct} taskPct={taskPct} ohsTrend={trend.series.compliance} taskTrend={trend.series.tasks} asOf={asOf} />
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -200,8 +215,8 @@ export default function BuildingDetails() {
       </div>
 
       {/* Tabs - Mobile optimized with icons */}
-      {/* `team` exists for admins and managers only; a field user following that deep link lands on Overview. */}
-      <Tabs value={activeTab === 'team' && !isAdminOrManager ? 'overview' : activeTab} onValueChange={handleTabChange} className="w-full">
+      {/* Management tabs exist for admins and managers only; see `tabValue` for the deep-link fallback. */}
+      <Tabs value={tabValue} onValueChange={handleTabChange} className="w-full">
         <TabsList ref={tabsRef} className="w-full flex-nowrap justify-start overflow-x-auto overflow-y-hidden whitespace-nowrap snap-x scroll-px-3 sm:flex-wrap sm:overflow-visible [&::-webkit-scrollbar]:hidden">
           <TabsTrigger value="overview" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
             <span className="hidden sm:inline">Overview</span>
@@ -215,23 +230,27 @@ export default function BuildingDetails() {
             <TabsTrigger value="team" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Team</TabsTrigger>
           )}
           <TabsTrigger value="forms" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Forms</TabsTrigger>
-          <TabsTrigger value="reports" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Reports</TabsTrigger>
-          <TabsTrigger value="tenants" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Tenants</TabsTrigger>
-          <TabsTrigger value="assets" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Assets</TabsTrigger>
-          <TabsTrigger value="ppm" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">PPM</TabsTrigger>
-          {/* Value stays `maintenance` so existing ?tab=maintenance deep links keep working. */}
-          <TabsTrigger value="maintenance" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
-            <span className="hidden sm:inline">Calendar</span>
-            <span className="sm:hidden">Cal.</span>
-          </TabsTrigger>
-          <TabsTrigger value="electrical" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
-            <span className="hidden sm:inline">Electrical &amp; Compliance</span>
-            <span className="sm:hidden">Elec.</span>
-          </TabsTrigger>
-          <TabsTrigger value="documents" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
-            <span className="hidden sm:inline">Documents</span>
-            <span className="sm:hidden">Docs</span>
-          </TabsTrigger>
+          {isAdminOrManager && (
+            <>
+              <TabsTrigger value="reports" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Reports</TabsTrigger>
+              <TabsTrigger value="tenants" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Tenants</TabsTrigger>
+              <TabsTrigger value="assets" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Assets</TabsTrigger>
+              <TabsTrigger value="ppm" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">PPM</TabsTrigger>
+              {/* Value stays `maintenance` so existing ?tab=maintenance deep links keep working. */}
+              <TabsTrigger value="maintenance" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
+                <span className="hidden sm:inline">Calendar</span>
+                <span className="sm:hidden">Cal.</span>
+              </TabsTrigger>
+              <TabsTrigger value="electrical" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
+                <span className="hidden sm:inline">Electrical &amp; Compliance</span>
+                <span className="sm:hidden">Elec.</span>
+              </TabsTrigger>
+              <TabsTrigger value="documents" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">
+                <span className="hidden sm:inline">Documents</span>
+                <span className="sm:hidden">Docs</span>
+              </TabsTrigger>
+            </>
+          )}
           <TabsTrigger value="notes" className="snap-start shrink-0 min-h-11 sm:min-h-0 sm:flex-none">Notes</TabsTrigger>
         </TabsList>
 
@@ -243,7 +262,7 @@ export default function BuildingDetails() {
           <div className="flex flex-col gap-6">
             {/* Overview Widgets */}
             <div>
-              <OverviewWidgets buildingId={building.id} onTabChange={handleTabChange} />
+              <OverviewWidgets buildingId={building.id} onTabChange={handleTabChange} isAdminOrManager={isAdminOrManager} />
             </div>
 
             {/* Contacts Grid */}
@@ -358,33 +377,37 @@ export default function BuildingDetails() {
           <FormsTab buildingId={building.id} buildingName={building.name} />
         </TabsContent>
 
-        <TabsContent value="reports" className="mt-6">
-          <ReportsTab buildingId={building.id} buildingName={building.name} />
-        </TabsContent>
+        {isAdminOrManager && (
+          <>
+            <TabsContent value="reports" className="mt-6">
+              <ReportsTab buildingId={building.id} buildingName={building.name} />
+            </TabsContent>
 
-        <TabsContent value="tenants" className="mt-6">
-          <TenantsTab buildingId={building.id} />
-        </TabsContent>
+            <TabsContent value="tenants" className="mt-6">
+              <TenantsTab buildingId={building.id} />
+            </TabsContent>
 
-        <TabsContent value="electrical" className="mt-6">
-          <InsightLinkerTab buildingId={building.id} active={activeTab === 'electrical'} />
-        </TabsContent>
+            <TabsContent value="electrical" className="mt-6">
+              <InsightLinkerTab buildingId={building.id} active={activeTab === 'electrical'} />
+            </TabsContent>
 
-        <TabsContent value="assets" className="mt-6">
-          <AssetsTab buildingId={building.id} buildingName={building.name} />
-        </TabsContent>
+            <TabsContent value="assets" className="mt-6">
+              <AssetsTab buildingId={building.id} buildingName={building.name} />
+            </TabsContent>
 
-        <TabsContent value="ppm" className="mt-6">
-          <PpmTab buildingId={building.id} />
-        </TabsContent>
+            <TabsContent value="ppm" className="mt-6">
+              <PpmTab buildingId={building.id} />
+            </TabsContent>
 
-        <TabsContent value="maintenance" className="mt-6">
-          <BuildingCalendarTab buildingId={building.id} buildingName={building.name} />
-        </TabsContent>
+            <TabsContent value="maintenance" className="mt-6">
+              <BuildingCalendarTab buildingId={building.id} buildingName={building.name} />
+            </TabsContent>
 
-        <TabsContent value="documents" className="mt-6">
-          <DocumentsTab buildingId={building.id} />
-        </TabsContent>
+            <TabsContent value="documents" className="mt-6">
+              <DocumentsTab buildingId={building.id} />
+            </TabsContent>
+          </>
+        )}
 
         <TabsContent value="notes" className="mt-6">
           <NotesTab buildingId={building.id} />

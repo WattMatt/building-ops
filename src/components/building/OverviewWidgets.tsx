@@ -10,10 +10,21 @@ import { format, differenceInDays, isPast, isSameDay, subDays } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { todayInOperatingTz } from '@/lib/myWork';
 import MonthCostsCard from './MonthCostsCard';
+import MyWorkHere from './MyWorkHere';
 
-interface OverviewWidgetsProps {
+/** What every widget below needs. */
+interface WidgetProps {
   buildingId: string;
   onTabChange?: (tab: string) => void;
+}
+
+interface OverviewWidgetsProps extends WidgetProps {
+  /**
+   * Passed down from BuildingDetails, the page's single role read, rather than read here from
+   * useAuth(): one decision drives the tabs, the chips and this layout, and the widget stays a
+   * pure function of its props. Required so no caller can reach the field layout by omission.
+   */
+  isAdminOrManager: boolean;
 }
 
 interface ExpiringDocument {
@@ -179,7 +190,7 @@ function CompactWidget({ icon, title, onActivate, isLoading, isError, attention,
   );
 }
 
-function TodayTasksWidget({ buildingId, onTabChange }: OverviewWidgetsProps) {
+function TodayTasksWidget({ buildingId, onTabChange }: WidgetProps) {
   const { data, isPending, isError } = useQuery({
     queryKey: ['building-overview', 'tasks', buildingId],
     queryFn: () => fetchTaskCounts(buildingId),
@@ -209,7 +220,7 @@ function TodayTasksWidget({ buildingId, onTabChange }: OverviewWidgetsProps) {
   );
 }
 
-function OpenIssuesWidget({ buildingId }: OverviewWidgetsProps) {
+function OpenIssuesWidget({ buildingId }: WidgetProps) {
   const navigate = useNavigate();
   const { data, isPending, isError } = useQuery({
     queryKey: ['building-overview', 'issues', buildingId],
@@ -242,7 +253,20 @@ function OpenIssuesWidget({ buildingId }: OverviewWidgetsProps) {
   );
 }
 
-export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWidgetsProps) {
+export default function OverviewWidgets({ buildingId, onTabChange, isAdminOrManager }: OverviewWidgetsProps) {
+  // Field user (spec pilot-field §4.2–4.3): "my work here", then open issues — one column, and
+  // none of the management widgets. Today's tasks is portfolio "today for the building", not
+  // "mine", so My work here replaces it rather than sitting beside it. Costs, expiring documents,
+  // asset service and form activity are manager vocabulary and are not fetched at all.
+  if (!isAdminOrManager) {
+    return (
+      <div className="space-y-4">
+        <MyWorkHere buildingId={buildingId} />
+        <OpenIssuesWidget buildingId={buildingId} onTabChange={onTabChange} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 sm:gap-4">
@@ -260,7 +284,7 @@ export default function OverviewWidgets({ buildingId, onTabChange }: OverviewWid
  * Document / maintenance / form alert widgets (the "rest" in spec §5.3).
  * ------------------------------------------------------------------------- */
 
-function AlertWidgets({ buildingId, onTabChange }: OverviewWidgetsProps) {
+function AlertWidgets({ buildingId, onTabChange }: WidgetProps) {
   const [expiringDocs, setExpiringDocs] = useState<ExpiringDocument[]>([]);
   const [expiredDocs, setExpiredDocs] = useState<ExpiringDocument[]>([]);
   const [overdueAssets, setOverdueAssets] = useState<OverdueAsset[]>([]);
