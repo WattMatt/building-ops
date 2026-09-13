@@ -25,7 +25,12 @@
 --      the meaning. Signature and photo are not required here for either outcome; the dialog decides. Still
 --      security INVOKER (tc_insert / ti_update apply unchanged), still idempotent on the completion id: a
 --      second call for a closed instance reports already_completed whatever outcome it carries, and changes
---      nothing. Change the code list here and in wontDo.ts together.
+--      nothing. One edge: the argument checks run before the idempotency lookup, so a replay of a wont_do
+--      call WITHOUT its reason on an already-closed task returns 22023 rather than already_completed; the
+--      offline queue always replays the payload it stored, reason included, so this is unreachable today.
+--      Change the code list here and in wontDo.ts together. tc_insert still lets a building user insert
+--      task_completions directly, so the reason-to-outcome rule is also a table CHECK
+--      (task_completions_reason_check: reason is present exactly when outcome is wont_do), not only RPC code.
 --   4) snapshot_building_metrics: a task recorded as can't-do by the snapshot day is out of every task count —
 --      neither numerator nor denominator of task_completion_30d_pct, never tasks_overdue, never tasks_due_7d.
 --      "By the snapshot day" reads completed_at in SAST like the completed test does, so a reconstructed day
@@ -37,7 +42,10 @@
 --      Restated whole (one-statement sql; same columns, same grants).
 --   6) ppm_monthly_status maps 'wont_do' to 'missed'. A can't-do has a completion row, so it would satisfy
 --      `tc.id is not null` and read as 'done' — the wont_do arm therefore comes FIRST in the case, tested on
---      both the instance status and the completion's outcome. Same column list, order and types as
+--      both the instance status and the completion's outcome; done_on is null for such a row (nothing was
+--      done on any day). This is deliberate asymmetry with (4), per spec §5.3: ppm_done_pct counts a can't-do
+--      PPM service as missed (the service was due this month and did not happen), while
+--      task_completion_30d_pct excludes a can't-do task altogether. Same column list, order and types as
 --      2026-09-13_05 -> create or replace keeps the grants; security_invoker and the revokes restated anyway.
 --      (2026-06-13_07's older definition was dropped by 2026-09-13_03; this is the one live view.)
 --
@@ -62,6 +70,12 @@ alter table public.task_completions add column if not exists reason text;
 alter table public.task_completions
   drop constraint if exists task_completions_outcome_check,
   add constraint task_completions_outcome_check check (outcome in ('completed','wont_do'));
+-- The reason belongs to a wont_do and only to a wont_do. Enforced on the table because tc_insert lets a
+-- building user write task_completions directly, bypassing complete_task's checks. Every existing row is
+-- (completed, null) and passes.
+alter table public.task_completions
+  drop constraint if exists task_completions_reason_check,
+  add constraint task_completions_reason_check check ((outcome = 'wont_do') = (reason is not null));
 comment on column public.task_completions.outcome is
   'completed, or wont_do when the task was closed with a reason instead of being done (S6b). The instance status matches.';
 comment on column public.task_completions.reason is
@@ -82,7 +96,8 @@ as $$
 declare
   v_id      uuid;
   v_outcome text := coalesce(p_outcome, 'completed');
-  v_reason  text := nullif(btrim(p_reason), '');
+  -- \s trims tabs and newlines too (btrim would not), so a whitespace-only reason is "missing", not "unknown".
+  v_reason  text := nullif(regexp_replace(p_reason, '^\s+|\s+$', '', 'g'), '');
 begin
   if auth.uid() is null then
     raise exception 'complete_task: sign in required' using errcode = '42501';
@@ -94,7 +109,9 @@ begin
     if v_reason is null then
       raise exception 'complete_task: a reason is required when the outcome is wont_do' using errcode = '22023';
     end if;
-    -- Mirrors WONT_DO_CODES in supabase/functions/_shared/wontDo.ts; "other" must carry text after the prefix.
+    -- Mirrors WONT_DO_CODES in supabase/functions/_shared/wontDo.ts. The free-text form is the exact string
+    -- `other: ` + text (the literal prefix "other", a colon, one space, then non-blank text), exactly as
+    -- formatReason in wontDo.ts writes it; the regex below is that contract.
     if v_reason not in ('area_locked', 'load_shedding', 'contractor_absent', 'no_materials')
        and v_reason !~ '^other: \S' then
       raise exception 'complete_task: unknown reason %', v_reason using errcode = '22023';
@@ -352,7 +369,9 @@ select ti.building_id,
             when ti.status = 'issue_logged' then 'missed'
             when ti.due_date < (now() at time zone 'Africa/Johannesburg')::date then 'missed'
             else 'due' end                          as status,
-       (coalesce(tc.created_at, ti.completed_at) at time zone 'Africa/Johannesburg')::date as done_on
+       -- S6b: a can't-do was not done on any day, so done_on is null even though a completion row exists.
+       case when tc.outcome = 'wont_do' then null
+            else (coalesce(tc.created_at, ti.completed_at) at time zone 'Africa/Johannesburg')::date end as done_on
 from public.task_instances ti
 join public.building_ppm_services s on s.id = ti.source_ppm_id
 left join public.task_completions tc on tc.task_instance_id = ti.id
@@ -366,6 +385,8 @@ commit;
 --   select pg_get_constraintdef(oid) from pg_constraint where conname = 'task_instances_status_check';  -- … 'wont_do'
 --   select column_name, data_type, column_default from information_schema.columns
 --    where table_name = 'task_completions' and column_name in ('outcome','reason');                -- outcome text 'completed', reason text
+--   select pg_get_constraintdef(oid) from pg_constraint where conname = 'task_completions_reason_check';    -- (outcome = 'wont_do') = (reason IS NOT NULL)
+--   select count(*) from public.task_completions where outcome is null or outcome not in ('completed','wont_do'); -- 0
 --   select count(*) from pg_proc where pronamespace = 'public'::regnamespace and proname = 'complete_task';  -- 1
 --   select pg_get_function_identity_arguments(oid) from pg_proc
 --    where pronamespace = 'public'::regnamespace and proname = 'complete_task';   -- … p_outcome text, p_reason text
